@@ -251,7 +251,8 @@ with st.expander("Data status: what this machine has installed"
         "probe the Pandeia env's engine version).")
     st.button("Refresh data status", on_click=_bump_data_nonce,
               key="data_refresh_btn",
-              help="The status above is cached for 5 minutes (scanning "
+              help="The status above is cached for an hour (st.cache_data "
+                   "ttl=3600 here + datacheck's 3600 s disk cache; scanning "
                    "every dataset is slow on remote volumes); refresh after "
                    "installing data.")
 
