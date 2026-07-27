@@ -65,6 +65,29 @@ remedy per item at any time.
 parameter set takes about 2 minutes; the app shows a runtime estimate
 before each run. Results are disk-cached and downloadable as PNG or CSV.
 
+## Backend configuration
+
+The Pandeia engine runs in its own conda environment and is deliberately
+not a package dependency.
+
+**Backend status: Pandeia 2026.2 / pandeia_data-2026.2-jwst (default) --
+the STScI JWST 5.1 release, validated mode by mode against PandExo in
+`tests/parity/`.** "current" is the backend *token*, not a currency claim:
+STScI's supported Cycle 6 release moved to 2026.7 on 2026-07-16, so
+forecasts here are one calibration release behind the live ETC until the
+full engine/refdata/PSF tuple is upgraded and parity is regenerated
+(`docs/audit_decisions_2026-07-21.md`). Set `JWST_TOOL_BACKEND=legacy` to
+select the pinned pandeia 3.0 + pandeia_data-3.0rc3 pair, retained only as
+an explicit reproducibility backend -- a legacy run always labels itself
+LEGACY and never presents as 2026-backend output. The worker refuses to
+run a mismatched engine/refdata pair, and every result and cache file
+records the exact engine, refdata, and worker versions in a
+`__provenance__` block hashed into the cache key, so switching backends
+invalidates caches automatically. The env vars
+`JWST_TOOL_PANDEIA_{PYTHON,REFDATA,PSF_DIR}` override the backend-default
+paths per machine (resolved in `src/jwst_tool/instruments.py` with loud
+failures).
+
 ## Physics choices and conventions
 
 Composition scaling (stated because any metallicity / C/O knob must pick a
