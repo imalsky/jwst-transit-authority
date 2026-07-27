@@ -391,20 +391,26 @@ def check_synphot_cdbs(cdbs: str | Path = None) -> list[Item]:
                f"and place its grp/redcat/trds/grid/phoenix tree at {phx} "
                "(a real directory is fine; the shipped symlink just points "
                "at an existing local copy)."))
-    for rel, label, remedy in (
+    # The local CALSPEC Vega pin is REQUIRED by the legacy 3.x engine only
+    # (worker v6: the 2026+ engine loads its OWN refdata Vega and never reads
+    # the pin -- pandeia_worker._preflight/main); under "current" it is set
+    # when present but a run works without it.
+    _vega_required = ins.JWST_TOOL_BACKEND == "legacy"
+    for rel, label, required, remedy in (
             (Path("comp") / "nonhst" / "2mass_ks_001_syn.fits",
-             "2MASS Ks bandpass (Ks normalization)",
+             "2MASS Ks bandpass (Ks normalization)", True,
              "Ships with the repo (data/cdbs/comp/); restore it from git or "
              "fetch https://ssb.stsci.edu/trds/comp/nonhst/"
              "2mass_ks_001_syn.fits (8.6 KB)."),
             (Path("calspec") / "alpha_lyr_stis_011.fits",
-             "Vega spectrum (vegamag normalization)",
+             "Vega spectrum (vegamag normalization; required by the legacy "
+             "3.x engine only)", _vega_required,
              "Fetch https://ssb.stsci.edu/trds/calspec/alpha_lyr_stis_011.fits"
              f" (288 KB) to {cdbs / 'calspec'}/")):
         p = cdbs / rel
         items.append(Item(
             key=f"cdbs:{rel.name}", label=label,
-            status=OK if p.is_file() else MISSING, required=True,
+            status=OK if p.is_file() else MISSING, required=required,
             detail=_found(p) if p.is_file() else f"absent: {p}",
             remedy="" if p.is_file() else remedy))
     return items
