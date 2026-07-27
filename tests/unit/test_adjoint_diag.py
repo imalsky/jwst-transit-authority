@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from jwst_tool import adjoint_diag, forward
+from jwst_tool import adjoint_diag
 
 
 def _p(**kw):

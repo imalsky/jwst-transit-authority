@@ -8,7 +8,6 @@ importable (they skip cleanly on the dependency-light CI).
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import pytest
 
