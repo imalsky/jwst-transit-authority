@@ -106,7 +106,7 @@ def _intro_gate() -> None:
     with mid:
         st.title("JWST instrument selector")
         st.markdown(
-            """
+            f"""
 **vulcan-jwst-tool** ranks JWST time-series instrument modes by how well
 each one can **detect a target molecule** or **constrain an atmospheric
 parameter** (metallicity, C/O, vertical mixing, temperature, clouds) for a
@@ -130,8 +130,9 @@ atmosphere you configure:
    instead of returning a wrong spectrum.
 2. **Spectrum**: ExoJAX radiative transfer, either the transit depth or the
    dayside eclipse depth against a PHOENIX stellar model.
-3. **Noise**: the real Pandeia 2026.2 ETC engine per instrument mode, with
-   a PandExo-style minimum noise floor.
+3. **Noise**: the real STScI Pandeia ETC engine
+   ({ins.BACKEND_STATUS.split(' /')[0]} on this instance) per instrument
+   mode, with a PandExo-style minimum noise floor.
 4. **Scores**: a conditional template S/N per molecule, Fisher (Cramer-Rao)
    parameter forecasts, and a floor-aware count of the transits or eclipses
    needed to reach your target.
