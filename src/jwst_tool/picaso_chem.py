@@ -56,7 +56,10 @@ Scientific contract (2026-07-20 review, rev 3):
   at 2000 K; at 800-1200 K silicate condensation sequesters O and the
   gas-phase C/O rises to ~0.55 -- real physics, not an interpolation error).
   The certificate records the per-layer realized gas C/O for exactly this
-  reason; hard gates compare against the label only where T >= CO_CHECK_T_K.
+  reason, plus a hot-layer summary (``realized_gas_co_hotT``: the median
+  over layers with T >= ``CO_CHECK_T_K``, where condensation cannot shift
+  it) that the GUI surfaces for comparison against the label. No code path
+  refuses on a label mismatch -- it is a reported diagnostic, not a gate.
 """
 from __future__ import annotations
 
