@@ -2642,7 +2642,7 @@ with st.expander("Which reactions and temperatures control a molecule?"):
         # diagnostic-only, never a trust gate (see adjoint_diag docstring).
         _pa_txt = (f", forward/reverse pair antisymmetry "
                    f"{float(adj['pair_antisym']):.3g} (diagnostic only, "
-                   "not a trust gate)" if "pair_antisym" in adj.files else "")
+                   "not a trust gate)" if "pair_antisym" in adj else "")
         st.caption(
             f"Loss: log10 VMR({adj_species}) = "
             f"{float(adj['loss_log10_vmr']):.2f} at "
