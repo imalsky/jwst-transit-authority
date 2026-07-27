@@ -257,6 +257,16 @@ with st.expander("Data status: what this machine has installed"
                    "every dataset is slow on remote volumes); refresh after "
                    "installing data.")
 
+# Measured FD/AD Fisher-row wall times (WASP-39b defaults; rationale in
+# forward.py's FD_STEPS block): an FD composition row re-solves the chemistry
+# 4x, an FD Kzz/T row is 4 cold solves, an AD row is one warm-started
+# derivative. Threaded through every GUI mention below so a re-measurement
+# updates one place (the slow-run estimator at the FD warning uses their
+# midpoints, 7 and 4).
+_FD_COMP_MIN, _FD_COMP_MAX = 6, 8      # minutes per FD composition row
+_FD_THETA_MIN, _FD_THETA_MAX = 3, 5    # minutes per FD Kzz/T row
+_AD_ROW_MIN, _AD_ROW_MAX = 1, 2        # minutes per AD row
+
 _PROG_RE = re.compile(r"\[fwd\] PROG ([0-9.]+) (.*)")
 _ADJ_PROG_RE = re.compile(r"\[adj\] PROG ([0-9.]+) (.*)")
 
@@ -685,12 +695,14 @@ with st.sidebar:
                    " using the **differentiation method selected at the "
                    "top** of the sidebar. With finite differences, a "
                    "composition row re-solves the chemistry four times "
-                   "from scratch and takes about 6 to 8 minutes, and a "
+                   f"from scratch and takes about {_FD_COMP_MIN} to "
+                   f"{_FD_COMP_MAX} minutes, and a "
                    "Kzz or temperature row adds four cold solves at about "
-                   "1 minute each (3 to 5 minutes per row). With AD, each "
-                   "row is one warm-started derivative and takes about 1 "
-                   "to 2 minutes. There is no MCMC and there are no "
-                   "priors."))
+                   f"1 minute each ({_FD_THETA_MIN} to {_FD_THETA_MAX} "
+                   "minutes per row). With AD, each "
+                   "row is one warm-started derivative and takes about "
+                   f"{_AD_ROW_MIN} to {_AD_ROW_MAX} minutes. There is no "
+                   "MCMC and there are no priors."))
             if goal == "constrain" and marginalize:
                 # defaults FILTERED by the live menu and the key carries the
                 # provider (v18.1): under picaso lnKzz is not an option, and
@@ -727,9 +739,12 @@ with st.sidebar:
                           "the exception: it re-runs the climate a few "
                           "times, several minutes)." if _pic else
                           "Adds Jacobian rows by the method selected at "
-                          "the top: FD ~6-8 min per composition parameter "
-                          "and ~3-5 min per Kzz/T parameter "
-                          "(photochemistry on or off); AD ~1-2 min per "
+                          f"the top: FD ~{_FD_COMP_MIN}-{_FD_COMP_MAX} min "
+                          "per composition parameter "
+                          f"and ~{_FD_THETA_MIN}-{_FD_THETA_MAX} min per "
+                          "Kzz/T parameter "
+                          f"(photochemistry on or off); AD ~{_AD_ROW_MIN}-"
+                          f"{_AD_ROW_MAX} min per "
                           "row (photochemistry on)."))
                 fisher_params = st.multiselect(
                     "Free parameters", avail_free,
@@ -753,9 +768,12 @@ with st.sidebar:
                         f"Finite differences with {len(fisher_params)} free "
                         f"parameters is slow: roughly {_est_min}-"
                         f"{int(_est_min * 1.4)} min (each composition row "
-                        "re-solves the chemistry 4x, ~6-8 min; each Kzz/T row "
-                        "~3-5 min). Switch the differentiation method to AD at "
-                        "the top (~1-2 min/row, photochemistry forced on) or "
+                        f"re-solves the chemistry 4x, ~{_FD_COMP_MIN}-"
+                        f"{_FD_COMP_MAX} min; each Kzz/T row "
+                        f"~{_FD_THETA_MIN}-{_FD_THETA_MAX} min). Switch the "
+                        "differentiation method to AD at "
+                        f"the top (~{_AD_ROW_MIN}-{_AD_ROW_MAX} min/row, "
+                        "photochemistry forced on) or "
                         "free fewer parameters.")
 
     st.markdown("### PICASO chemistry" if _pic else "### VULCAN chemistry")
