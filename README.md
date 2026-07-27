@@ -209,9 +209,12 @@ docs/picaso_roadmap.md PICASO scope, measured limits, deferred features
 
 ## Science goals
 
-Detection scores how strongly one molecule imprints on the spectrum: the
-chi-square distance between the model and the same model without that
-molecule's opacity, with calibration nuisances profiled out. It
-upper-bounds any real retrieval detection. Constraint builds a
-Fisher-information forecast from the spectrum's parameter derivatives and
-reports local Cramer-Rao lower bounds, not posterior widths.
+Detection scores how strongly one molecule imprints on the spectrum with a
+**conditional matched-template signal-to-noise ratio** (`sigma_detect`):
+the chi-square distance between the model and the same model without that
+molecule's opacity, with calibration nuisances profiled out. It is
+conditional on the assumed atmosphere being exactly right -- never a
+retrieval detection -- and upper-bounds any real retrieval result.
+Constraint builds a Fisher-information forecast from the spectrum's
+parameter derivatives and reports local Cramer-Rao lower bounds, not
+posterior widths.
