@@ -879,6 +879,15 @@ def canonical_params(params: dict) -> dict:
             "engine, the default; 'picaso' = PICASO equilibrium chemistry, "
             "FD-only, no photochemistry/SO2, C/O <= 1.10).")
     needs_picaso = provider == "picaso" or tp_mode == "picaso_climate"
+    if provider == "picaso" and tp_mode == "file":
+        raise ValueError(
+            "tp_mode='file' is not implemented under chem_provider='picaso': "
+            "file mode rides the kinetics engine's default-temperature path "
+            "(tp_eval=None), which the equilibrium provider does not have -- "
+            "its T(P) comes from the Guillot profile or the climate solve. "
+            "Use tp_mode='guillot' or 'picaso_climate', or "
+            "chem_provider='vulcan' for tabulated profiles "
+            "(docs/picaso_roadmap.md).")
     # tp_mode="file": resolve + validate the table NOW (light: a numpy parse
     # and a content hash, no engine imports) so a bad upload fails at the API
     # and the cache key is CONTENT-addressed (tp_file_sha1), never

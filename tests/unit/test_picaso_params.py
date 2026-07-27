@@ -101,6 +101,7 @@ def test_picaso_accepts_and_normalizes():
 
 @pytest.mark.parametrize("bad,match", [
     (dict(jac_method="ad"), "not differentiable"),
+    (dict(tp_mode="file"), "tabulated profiles"),
     (dict(use_photo=True), "photochemistry"),
     (dict(use_moldiff=True), "molecular diffusion"),
     (dict(use_vm_mol=True), "advection"),

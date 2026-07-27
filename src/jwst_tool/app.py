@@ -799,7 +799,11 @@ with st.sidebar:
              "layers -- the 91 is unrelated to this number.")
 
     with st.expander("Atmosphere structure, T-P profile (shared with RT)"):
-        _tp_opts = ["guillot", "file", "picaso_climate"]
+        # canonical_params refuses tp_mode='file' under the PICASO provider
+        # (no default-temperature path in equilibrium); hide it here too --
+        # GUI gating is convenience, canonical_params stays the hard guard.
+        _tp_opts = (["guillot", "picaso_climate"] if _pic
+                    else ["guillot", "file", "picaso_climate"])
         # Mirror canonical_params' default exactly, so "the defaults" mean the
         # same profile whether the run comes from the GUI or the API: the
         # measured WASP-39b table under the kinetics engine, Guillot otherwise.
