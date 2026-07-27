@@ -31,7 +31,9 @@ a constraint between finite and "unconstrained" (see _marg_sigmas).
 np.linalg.inv on an ill-conditioned Fisher matrix returns misleading finite
 numbers without raising, so it is never used. Forecast sigmas are local
 Cramer-Rao lower bounds under the quoted noise model -- best cases, not
-posterior widths.
+posterior widths (the standard Fisher-forecast caveats -- local Gaussian
+approximation, prior-free, degeneracy-blind beyond rank -- are Vallisneri
+2008, PRD 77, 042001, arXiv:gr-qc/0703086).
 """
 from __future__ import annotations
 
