@@ -33,6 +33,8 @@ from __future__ import annotations
 
 import math
 
+# IAU 2015 Resolution B3 nominal values (R_jup equatorial, R_sun) and
+# CODATA 2018 G -- identical to astropy.constants to the digits printed.
 R_JUP_CM = 7.1492e9
 R_SUN_CM = 6.957e10
 G_CGS = 6.67430e-8  # gravitational constant (cm^3 g^-1 s^-2); for gs_cgs -> Mp
