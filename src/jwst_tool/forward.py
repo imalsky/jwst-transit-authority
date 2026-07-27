@@ -474,8 +474,15 @@ def active_molecules(cp: dict) -> list[str]:
 #     MIRI LRS        0.74 -> 1.41      NIRCam F322W2   0.03 -> 0.02
 #
 # The near-IR modes are tier-insensitive (<= 6%); the weak mid-IR SO2 bands
-# are the one real casualty, nearly doubling. Raise nz / tighten yconv_cri
-# for final mid-IR numbers.
+# are the one real casualty, nearly doubling. ATTRIBUTION RE-MEASURED
+# 2026-07-27 with single-knob solves: the ENTIRE mid-IR movement is native
+# sampling (nu_pts 4000 -> 8000 alone: MIRI 0.736 -> 1.407; 6000 gives
+# 1.032, still rising at the 8000 range cap), while nz 100 -> 150 alone
+# moves it 0.5% and yconv 1e-3 -> 1e-4 moves it 0.000 (the accepted state
+# certifies via the loose branch at longdy ~ 0.099 regardless). Raise
+# nu_pts for final mid-IR numbers -- and treat MIRI-LRS weak-band sigmas
+# as SAMPLING-LIMITED lower bounds until a nu_pts ceiling above 8000 is
+# validated; nz/yconv are not the movers.
 #
 # (The block previously quoted 3.6 -> 3.8 for G395H and 0.9 -> 1.9 for MIRI
 # LRS, labelled "W39b defaults". Those were measured 2026-07-15 under the

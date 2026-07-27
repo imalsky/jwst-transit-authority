@@ -1229,9 +1229,10 @@ with st.sidebar:
                 1.0e-4, 1.0e-2, forward.YCONV_DEFAULT, 1.0e-4,
                 format="%.1e", key=K("yconv"),
                 help="Strict-branch steady-state criterion, any value in "
-                     "[1e-4, 1e-2]. 1e-2 is the VULCAN master default; 1e-3 "
-                     "(with more layers) is the strict tier for final mid-IR "
-                     "numbers. Note the solver also accepts via VULCAN's "
+                     "[1e-4, 1e-2]. 1e-2 is the VULCAN master default. "
+                     "Measured 2026-07-27: tightening this does NOT move the "
+                     "weak mid-IR sigmas (raise the native sampling nu_pts "
+                     "for those). Note the solver also accepts via VULCAN's "
                      "loose branch (residual < 0.1 with a near-zero slope and "
                      "settled photolysis flux), so this value is NOT a "
                      "guaranteed bound on the certified residual -- the "
@@ -1470,7 +1471,11 @@ with st.sidebar:
                  "[4000, 8000] (native R ≈ nu_pts/2.7: 4000 ≈ R 1500, "
                  "8000 ≈ R 3000), before binning to your "
                  "chosen display R below. Higher sampling sharpens narrow "
-                 "features (the weak mid-IR bands) at more runtime.")
+                 "features (the weak mid-IR bands) at more runtime. This is "
+                 "THE knob for final mid-IR numbers (measured 2026-07-27: "
+                 "MIRI LRS SO2 sigma is still rising at the 8000 cap, so "
+                 "quote weak-band MIRI sigmas as sampling-limited lower "
+                 "bounds; nz and yconv barely move them).")
 
     with st.expander("Advanced RT (top pressure, integration, line wings)"):
         st.caption("ExoJAX modeling choices that can move the spectrum. The "
