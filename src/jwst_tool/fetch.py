@@ -28,10 +28,20 @@ _PROGRESS_EVERY = 100                  # progress line every N chunks
 
 
 def _engine_cfg():
-    """The engine-config view (raises loudly if the engine's data root
-    is absent -- the CIA destinations live under it)."""
+    """The engine-config view, with the engine's data layout CREATED first.
+
+    This is a setup command, so it makes the directories it is about to download
+    into rather than reporting them as failures. The install instructions tell a
+    new user to export $VULCAN_FORWARD_DATA and then run this, and that directory
+    does not exist yet on a first run: without this the two CIA downloads
+    reported FAILED on a perfectly correct setup (fixed 2026-07-29). The root
+    itself is still never guessed -- an unset variable raises.
+    """
     import importlib
 
+    from vulcan_forward import paths as _fwd_paths
+
+    _fwd_paths.ensure_layout()
     return importlib.import_module("jwst_tool.engine_config")
 
 

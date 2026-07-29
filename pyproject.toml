@@ -41,8 +41,9 @@ dependencies = [
     # forward v24 labels, the emission tau_bottom diagnostic, the Mie
     # condensate deck, and the profile-overridable RT knobs -- all
     # echo-verified by run_model.
-    "vulcan-forward>=0.2.0",   # 0.2.0 adds the named ChemParams primitive
-                               # this module builds its parameter vector with
+    "vulcan-forward>=0.2.1",   # 0.2.0 added the named ChemParams primitive this
+                               # module builds its vector with; 0.2.1 added
+                               # paths.ensure_layout(), which `jwst-tool fetch` needs
     "vulcan-jax>=0.3.0",  # direct imports: load_config (CO_BASELINE check) + steady_state_grad (adjoint_diag)
 ]
 

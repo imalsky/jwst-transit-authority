@@ -2,7 +2,7 @@
 
 Everything here runs without the chemistry stack, pandeia, or streamlit --
 the path-based checks take explicit tmp paths, and the engine-config-backed
-checks are exercised only when the sibling vulcan-retrieval install is
+checks are exercised only when the shared engine's data root is
 importable (they skip cleanly on the dependency-light CI).
 """
 from __future__ import annotations
@@ -153,13 +153,13 @@ def test_cli_data_subcommand(capsys):
 
 
 # ---------------------------------------------------------------------------
-# Engine-config-backed checks (skip when vulcan-retrieval is not installed)
+# Engine-config-backed checks (skip when the engine data root is unset)
 # ---------------------------------------------------------------------------
 
 _engine = datacheck._engine_config()
 needs_engine = pytest.mark.skipif(
     isinstance(_engine, Exception),
-    reason="vulcan-retrieval engine config not importable here")
+    reason="engine data root not configured here (set VULCAN_FORWARD_DATA)")
 
 
 @needs_engine
