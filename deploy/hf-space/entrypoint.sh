@@ -15,7 +15,7 @@ if [ ! -d /data ] || ! touch /data/.rwtest 2>/dev/null; then
          "EPHEMERAL (lost on restart/rebuild)"
 fi
 rm -f /data/.rwtest 2>/dev/null || true
-mkdir -p "$STATE/output" "$STATE/retrieval-output" "$STATE/home" "$STATE/cwd"
+mkdir -p "$STATE/output" "$STATE/home" "$STATE/cwd"
 export JWST_TOOL_OUTPUT_DIR="$STATE/output"
 export HOME="$STATE/home"
 # Persist numba-compiled kernels across restarts/rebuilds: 67/75 of
@@ -24,14 +24,13 @@ export HOME="$STATE/home"
 # python upgrades) miss harmlessly via numba's own code hashing.
 mkdir -p "$STATE/numba_cache"
 export NUMBA_CACHE_DIR="$STATE/numba_cache"
-ln -sfn "$STATE/retrieval-output" /srv/vulcan/vulcan-retrieval/output
 
 if [ -d /srv/hub-data/jwst-data ]; then
     echo "[entrypoint] dataset volume found at /srv/hub-data (no download)"
     # jwst-data is a pure READ consumer (cdbs/refdata/PSFs/mie): serve it
     # straight from the read-only mount.
     export JWST_TOOL_DATA_DIR=/srv/hub-data/jwst-data
-    # retrieval-data must be WRITABLE: radis creates a tempdir + lock files
+    # the engine's data tree must be WRITABLE: radis creates a tempdir + lock files
     # inside exojax_linelists even for pure cache reads, and h2he line
     # lists download on first use. Sync the mount to the bucket (~360 MB
     # once); cp -au makes later boots a cheap stat pass that also picks up
@@ -43,7 +42,10 @@ if [ -d /srv/hub-data/jwst-data ]; then
     # cp -a preserves the mount's read-only modes -- restore owner-write
     # (radis mkdirs its tempdir inside exojax_linelists at import).
     chmod -R u+wX "$STATE/retrieval-data"
-    ln -sfn "$STATE/retrieval-data" /srv/vulcan/vulcan-retrieval/data
+    # The forward engine takes its data root from the environment now, so no
+    # symlink into a checkout is needed (the dataset folder keeps its name --
+    # renaming it would mean re-uploading gigabytes).
+    export VULCAN_FORWARD_DATA="$STATE/retrieval-data"
     # PICASO provider + climate reference tree (v18): a pure READ consumer
     # -- measured 2026-07-20: a full chemeq + climate solve runs against a
     # chmod a-w tree, picaso never writes into refdata -- so it serves
@@ -69,7 +71,7 @@ else
     mkdir -p /data/jwst-data /data/retrieval-data
     python /srv/app/bootstrap_data.py
     export JWST_TOOL_DATA_DIR=/data/jwst-data
-    ln -sfn /data/retrieval-data /srv/vulcan/vulcan-retrieval/data
+    export VULCAN_FORWARD_DATA=/data/retrieval-data
     # bootstrap snapshots the WHOLE dataset repo, so picaso-reference lands
     # too when it exists there (v18.1; OPTIONAL -- the provider refuses
     # loudly without it and everything else is unaffected)

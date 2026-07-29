@@ -13,7 +13,7 @@ Pandeia 2026.2 noise, conditional template S/N, and certified Fisher
 constraint forecasts.
 
 This Space is a deployment shim: the build clones the three source repos
-(jax-vulcan, vulcan-retrieval, vulcan-jwst-tool) from GitHub, and the ~8 GB
+(jax-vulcan, vulcan-forward, vulcan-jwst-tool) from GitHub, and the ~8 GB
 of reference data (Pandeia refdata + PSFs, synphot CDBS, exojax line lists,
 opacity caches) is seeded into persistent storage from a private dataset
 repo on first boot.

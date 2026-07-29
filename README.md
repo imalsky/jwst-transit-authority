@@ -140,6 +140,7 @@ codes.
 src/jwst_tool/
 ├── app.py             Streamlit GUI
 ├── forward.py         forward-model driver: chemistry, RT, Jacobians
+├── engine_config.py   this tool's view of the shared engine's config
 ├── adjoint_diag.py    reverse-mode adjoint diagnostics
 ├── fisher.py          Fisher forecasts
 ├── detect.py          detection statistics

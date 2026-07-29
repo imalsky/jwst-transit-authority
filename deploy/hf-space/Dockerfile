@@ -37,9 +37,9 @@ RUN conda create -y -n app python=3.12 \
 # here instead; a comment would be stripped by the parser and cache-hit).
 RUN echo "SRC_STAMP 6ea6f73" \
     && git clone --depth 1 https://github.com/imalsky/jax-vulcan.git /srv/vulcan/VULCAN-JAX \
-    && git clone --depth 1 https://github.com/imalsky/vulcan-retrieval.git /srv/vulcan/vulcan-retrieval \
+    && git clone --depth 1 https://github.com/imalsky/vulcan-forward.git /srv/vulcan/vulcan-forward \
     && git clone --depth 1 https://github.com/imalsky/vulcan-jwst-tool.git /srv/vulcan/vulcan-jwst-tool \
-    && for r in VULCAN-JAX vulcan-retrieval vulcan-jwst-tool; do \
+    && for r in VULCAN-JAX vulcan-forward vulcan-jwst-tool; do \
          echo "$r $(git -C /srv/vulcan/$r rev-parse HEAD)" >> /srv/vulcan/BUILD_INFO; done \
     && cat /srv/vulcan/BUILD_INFO
 
@@ -55,7 +55,7 @@ RUN /opt/conda/envs/app/bin/pip install --no-cache-dir --no-deps \
         -r /srv/vulcan/vulcan-jwst-tool/deploy/requirements-app-lock.txt
 RUN /opt/conda/envs/app/bin/pip install --no-cache-dir --no-deps \
         -e /srv/vulcan/VULCAN-JAX \
-        -e /srv/vulcan/vulcan-retrieval \
+        -e /srv/vulcan/vulcan-forward \
         -e /srv/vulcan/vulcan-jwst-tool
 
 # FastChem for THIS platform (any checked-in binary would be the wrong arch).
@@ -63,10 +63,11 @@ RUN rm -f /srv/vulcan/VULCAN-JAX/src/vulcan_jax/fastchem_vulcan/fastchem \
     && make -C /srv/vulcan/VULCAN-JAX/src/vulcan_jax/fastchem_vulcan \
     && test -x /srv/vulcan/VULCAN-JAX/src/vulcan_jax/fastchem_vulcan/fastchem
 
-# Only /data persists on a Space. The retrieval engine's data/output paths are
-# NOT env-overridable (REPO_DIR/data by contract), so the cloned stubs are
-# removed here and the entrypoint symlinks them onto /data at boot.
-RUN rm -rf /srv/vulcan/vulcan-retrieval/data /srv/vulcan/vulcan-retrieval/output
+# Only /data persists on a Space. Since the forward engine became its own
+# distribution its data root IS env-overridable ($VULCAN_FORWARD_DATA), so
+# there are no repo-relative data stubs to remove: the entrypoint just exports
+# the variable. The retrieval application is no longer installed at all -- the
+# planner depends on the shared engine, not on that app.
 
 COPY entrypoint.sh bootstrap_data.py /srv/app/
 # Spaces run the container as uid 1000; the base image may already ship a
@@ -79,6 +80,7 @@ RUN chmod +x /srv/app/entrypoint.sh \
 USER 1000
 
 ENV VULCAN_PROJECT_ROOT=/srv/vulcan \
+    VULCAN_FORWARD_DATA=/data/retrieval-data \
     JWST_TOOL_DATA_DIR=/data/jwst-data \
     JWST_TOOL_OUTPUT_DIR=/data/output \
     JWST_TOOL_PANDEIA_PYTHON=/opt/conda/envs/pandeia/bin/python \

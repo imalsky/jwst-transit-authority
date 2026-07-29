@@ -37,6 +37,10 @@ if [ ! -e "$STAGE/jwst-data/cdbs/grid/phoenix/catalog.fits" ]; then
 fi
 if [ ! -d "$STAGE/retrieval-data/cm24_wasp39b" ]; then
     echo "Staging retrieval-data ..."
+    # The engine's line lists + opacity cache still live in the retrieval
+    # checkout on the maintainer's machine; the dataset folder keeps the
+    # name "retrieval-data" deliberately, because renaming it would mean
+    # re-uploading gigabytes. $VULCAN_FORWARD_DATA points at it at boot.
     cp -RL "$ROOT/vulcan-retrieval/data" "$STAGE/retrieval-data"
 fi
 
