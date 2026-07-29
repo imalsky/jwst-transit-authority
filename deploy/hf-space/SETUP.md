@@ -96,9 +96,10 @@ Wakes from sleep skip the download (markers present).
 
 Space Settings -> add collaborators by HF username (they need free HF
 accounts; only the Space needs sharing, not the dataset repo -- data access
-uses your HF_TOKEN). PUBLIC-ACCESS POLICY (updated 2026-07-21): the Space
-was made deliberately public on 2026-07-20 (the intro gate addresses
-visitors). The entrypoint still disables Streamlit's XSRF/CORS protection
+uses your HF_TOKEN). PUBLIC-ACCESS POLICY (updated 2026-07-29): the Space
+was made deliberately public on 2026-07-20 (since 0.18.0 the visitor
+orientation is the main-page header + the collapsed "How the model works"
+section; the former mandatory intro gate was removed in the UX pass). The entrypoint still disables Streamlit's XSRF/CORS protection
 (required for the T-P / noise-floor table uploads behind the Spaces
 proxy), so two mitigations apply: uploaded tables are parsed by the tool's
 own strict validators and stored content-addressed (never executed or
