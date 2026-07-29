@@ -116,6 +116,38 @@ Space files. Caches on /data survive rebuilds and self-invalidate by
 version keys. The exact SHAs baked into the running image are recorded at
 /srv/vulcan/BUILD_INFO (shown in the build logs).
 
+## Restarting after a platform failure
+
+A Space can build correctly and still fail to start, with a runtime error
+naming a platform init step rather than anything in this repo. The one seen
+2026-07-29 was:
+
+    Initialization step 'hf-mount' failed with exit code: 0. Reason:
+    Container logs: ... No logs available
+
+Empty reason, no application logs, and `get_space_runtime().hardware` is
+None, meaning hardware was never allocated: the volume mount failed before
+the app ran. Diagnose before acting, because two very different things
+produce this:
+
+- A MISSING mount source is real and a restart cannot fix it. Check both:
+  `api.dataset_info("imalsky/vulcan-jwst-tool-data")` (the read-only tree)
+  and `api.bucket_info("imalsky/jwst-tool-cache")` (the read-write cache).
+  If one is gone or renamed, repair the volume configuration with
+  `set_space_volumes` instead of restarting.
+- Both sources present means the failure is platform-side and transient, so
+  a restart is the remedy.
+
+An `hf auth login` token cannot call the lifecycle endpoints: `restart_space`
+answers 401 (surfaced confusingly as `RepositoryNotFoundError`, "Repository
+Not Found for .../restart"), the same restriction the hardware and
+factory-reboot endpoints have. Either click "Restart this Space" in the UI,
+or bump the RESTART NONCE comment at the top of the Dockerfile and commit:
+any Space commit re-runs the init steps, and because a comment does not bust
+the Docker layer cache, every layer hits and the container simply starts
+again (leave SRC_STAMP alone -- bumping it would force a pointless re-clone
+of unchanged code).
+
 ## Operational lessons (2026-07-20 deployment, learned the hard way)
 
 - The repository-commit rate limiter (256/hr) is PER-REPO, far stickier

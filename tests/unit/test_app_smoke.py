@@ -247,6 +247,46 @@ def test_picaso_constrain_goal_renders():
     assert not at2.exception, at2.exception
 
 
+def test_display_smoothing_is_nondestructive_and_actually_smooths():
+    """The spectrum figure plots the model convolved to a display resolution
+    (2026-07-29): at native sampling the unresolved line forest renders as
+    one-sample spikes. Two properties the app relies on: the operator must
+    not touch the caller's array (the "Native model (CSV)" download exports
+    that same un-smoothed array), and at the app's display resolution it
+    must measurably reduce the point-to-point spikiness -- otherwise the
+    plot change is cosmetically inert and the caption would be wrong.
+    """
+    import numpy as np
+
+    from jwst_tool import binning
+
+    wl = np.geomspace(1.0, 12.0, 4000)          # the real native grid shape
+    rng = np.random.default_rng(0)
+    # smooth continuum plus an unresolved "line forest": isolated samples
+    # spiking upward, which is what a saturated line core looks like once
+    # its strength is conserved onto a grid ~200x coarser than the line
+    native = (21000.0 + 200.0 * np.sin(8.0 * np.log(wl))
+              + rng.choice([0.0, 0.0, 0.0, 600.0], size=wl.size))
+    untouched = native.copy()
+
+    r_disp = float(max(300, 3 * 100))           # the app's rule at R_bin=100
+    smoothed = binning.smooth_to_native_r(
+        wl, native, np.array([wl[0], wl[-1]]), np.array([r_disp, r_disp]),
+        float(wl[0]), float(wl[-1]))
+
+    assert np.array_equal(native, untouched), \
+        "display smoothing mutated the caller's native model"
+    # RMS of the point-to-point differences, NOT the median: three quarters
+    # of the native samples share the same offset, so 62% of consecutive
+    # pairs are exactly equal and the median jump is ~0 -- a baseline no
+    # smoothed curve can beat. The RMS measures the spikiness that matters.
+    rms_native = float(np.diff(untouched).std())
+    rms_disp = float(np.diff(smoothed).std())
+    assert rms_disp < 0.2 * rms_native, (rms_native, rms_disp)
+    # and the convolution conserves the continuum level it is drawn on top of
+    assert abs(smoothed.mean() / untouched.mean() - 1.0) < 1e-4
+
+
 def test_ad_selection_locks_photochemistry_on():
     """Kzz/photochemistry moved into the Atmosphere step (2026-07-29), which
     renders BEFORE the differentiation method: the AD photo-lock now reads
