@@ -247,6 +247,27 @@ def test_picaso_constrain_goal_renders():
     assert not at2.exception, at2.exception
 
 
+def test_ad_selection_locks_photochemistry_on():
+    """Kzz/photochemistry moved into the Atmosphere step (2026-07-29), which
+    renders BEFORE the differentiation method: the AD photo-lock now reads
+    the effective method from session state. Selecting AD under a constrain
+    goal must still force the photochemistry checkbox ON and disable it, and
+    switching back to detect (no constraints requested) must release it."""
+    at = _run_app()
+    at.radio(key="n0_goal").set_value("constrain")
+    at.run()
+    at.selectbox(key="n0_jacm").set_value("ad")
+    at.run()
+    assert not at.exception, at.exception
+    photo = at.checkbox(key="n0_photo")
+    assert photo.value is True
+    assert photo.disabled
+    at.radio(key="n0_goal").set_value("detect")
+    at.run()
+    assert not at.exception, at.exception
+    assert not at.checkbox(key="n0_photo").disabled
+
+
 def test_picaso_detect_fisher_checkbox_renders():
     # same defect on the detect goal's "Compute parameter constraints too"
     at = _run_app()

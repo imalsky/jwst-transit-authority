@@ -13,7 +13,7 @@ uncertainty). Planets beyond WASP-39b come from the registry in planets.py (or
 a fully custom system).
 
 Layout (2026-07-29 UX pass): the sidebar is four numbered steps (Target,
-Atmosphere, Science goal, Observation) plus one "Expert settings" group holding
+Atmosphere, Science goal, Observation) plus one "More settings" group holding
 every solver/opacity/diagnostic control; the result page leads with the verdict
 and collapses certificates/provenance into "Model quality and provenance".
 Widget KEYS are unchanged from the pre-redesign layout (tests and cached
@@ -40,7 +40,8 @@ import streamlit as st
 
 TOOL_DIR = Path(__file__).resolve().parent   # forward.py subprocess lives here
 
-from jwst_tool import adjoint_diag, datacheck, detect, fisher as fisher_mod, forward
+from jwst_tool import adjoint_diag, binning, datacheck, detect, \
+    fisher as fisher_mod, forward
 from jwst_tool import noise as noise_mod
 from jwst_tool import instruments as ins
 from jwst_tool import planets
@@ -635,7 +636,7 @@ with st.sidebar:
                      "initial guess for the deepest convective layer, as an "
                      f"index on the solve's own internal "
                      f"{forward.CLIMATE_N_LEVELS}-level grid (unrelated to "
-                     "the 'Vertical layers' setting in Expert settings). "
+                     "the 'Vertical layers' setting in More settings). "
                      "PICASO grows convective zones upward but cannot "
                      "shrink one seeded too shallow, so leave it at the "
                      "deep default unless you are probing seed "
@@ -698,7 +699,7 @@ with st.sidebar:
                         "monotonic (bottom of the atmosphere first, as "
                         "here, or top first). Column 2: temperature in K. "
                         "Column 3 (optional): Kzz in cm^2 s^-1, used when "
-                        "the vertical-mixing profile in Expert settings is "
+                        "the vertical-mixing profile (below in this step) is "
                         "set to 'Tabulated'. Any number of rows; the array "
                         "is re-gridded onto the layer count. The two "
                         "header lines are required.")
@@ -831,6 +832,134 @@ with st.sidebar:
                      "solves slow down and derivatives are ill-conditioned: "
                      "constrain C/O per side, not across it.")
 
+    # Kzz and photochemistry are first-class VULCAN physics choices, so they
+    # live here in the Atmosphere step (moved out of More settings,
+    # 2026-07-29). They render BEFORE the science-goal step, so the AD
+    # photo-lock reads the EFFECTIVE differentiation method from session
+    # state: the widget value counts only when a Jacobian is actually
+    # requested (constrain goal, or detect + the constraints checkbox),
+    # matching canonical_params' normalization to "fd" otherwise.
+    if _pic:
+        kzz_mode, kzz_x = "const", 1.0
+        kzz_const, kzz_kmax, kzz_plev, kzz_kdeep = 1.0e9, 0.0, 0.0, 0.0
+        use_photo, sl_angle_deg, f_diurnal = False, 83.0, 1.0
+        use_moldiff = use_vm_mol = False
+        st.caption("Vertical mixing and photochemistry apply to the VULCAN "
+                   "kinetics engine only, so they are not shown for PICASO "
+                   "equilibrium.")
+    else:
+        _goal_ss = st.session_state.get(K("goal"), "detect")
+        _dofish_ss = bool(st.session_state.get(K("dofish"), False))
+        _jac_hint = (st.session_state.get(K("jacm"), "fd")
+                     if (_goal_ss == "constrain" or _dofish_ss)
+                     and not bool(st.session_state.get(K("conden"), False))
+                     else "fd")
+
+        with st.expander("Vertical mixing (Kzz)"):
+            _kzz_opts = ["const", "Pfunc", "JM16"]
+            # tabulated Kzz needs the tabulated T-P table (its Kzz column)
+            _kzz_file_ok = tp_mode == "file"
+            if _kzz_file_ok:
+                _kzz_opts.append("file")
+                # Same rule as canonical_params: a table that carries Kzz
+                # supplies the mixing profile, so it is the default rather
+                # than a flat stand-in. Seed session_state on first render
+                # (Streamlit ignores index= once the key exists).
+                if _k("kzzmode") not in st.session_state:
+                    st.session_state[_k("kzzmode")] = "file"
+            elif st.session_state.get(_k("kzzmode")) == "file":
+                st.session_state[_k("kzzmode")] = "const"
+            kzz_mode = st.selectbox(
+                "Vertical-mixing profile, Kzz", _kzz_opts,
+                index=_kzz_opts.index("file") if _kzz_file_ok else 0,
+                key=_k("kzzmode"),
+                format_func={"const": "Constant",
+                             "Pfunc": "Power law in P (Pfunc)",
+                             "JM16": "Moses-type P^-0.5 (JM16)",
+                             "file": "Tabulated (Kzz column of the T-P table)"}.get,
+                help="Eddy-diffusion profile. Constant is the validated "
+                     "baseline; Pfunc rises as P^-0.4 above a chosen level; "
+                     "JM16 rises as P^-0.5 above 300 mbar with a deep "
+                     "floor; 'Tabulated' uses the Kzz column of the T-P "
+                     "table (offered in file mode only). The constraint "
+                     "forecast's lnKzz row scales the WHOLE profile in "
+                     "every mode.")
+            kzz_const = kzz_kmax = kzz_plev = kzz_kdeep = 0.0
+            kzz_x = 1.0
+            if kzz_mode == "const":
+                log_kzz = st.number_input(
+                    "log10 Kzz (cm^2 s^-1)", 6.0, 12.0, 9.0, 0.25,
+                    key=_k("kzz"),
+                    help="Constant eddy-diffusion coefficient: stronger "
+                         "mixing quenches photochemical gradients.")
+                kzz_const = 10.0 ** log_kzz
+            elif kzz_mode == "Pfunc":
+                kzz_kmax = 10.0 ** st.number_input(
+                    "log10 deep Kzz (cm^2 s^-1)", 4.0, 11.0, 5.0, 0.25,
+                    key=_k("kzkmax"),
+                    help="Deep-atmosphere Kzz; above the transition level "
+                         "the profile rises as (P_lev/P)^0.4.")
+                kzz_plev = 10.0 ** st.number_input(
+                    "log10 transition level (bar)", -5.0, 2.0, -1.0, 0.25,
+                    key=_k("kzplev"),
+                    help="Pressure above which Kzz starts rising (VULCAN "
+                         "Pfunc K_p_lev).")
+            elif kzz_mode == "JM16":
+                kzz_kdeep = 10.0 ** st.number_input(
+                    "log10 deep-floor Kzz (cm^2 s^-1)", 4.0, 11.0, 5.0, 0.25,
+                    key=_k("kzkdeep"),
+                    help="Deep floor of the Moses-type profile "
+                         "Kzz = max(K_deep, 1e5 (300 mbar/P)^0.5).")
+            else:
+                st.caption("Kzz is read from the Kzz column of the uploaded "
+                           "array / selected table (a table without a Kzz "
+                           "column is rejected with an error).")
+            if kzz_mode != "const":
+                kzz_x = 10.0 ** st.number_input(
+                    "Kzz profile multiplier, log10(f)", -1.0, 1.0, 0.0, 0.05,
+                    key=_k("kzzx"),
+                    help="Multiplies the whole profile (the same direction "
+                         "the constraint forecast's lnKzz row uses); 0 = "
+                         "the profile as specified.")
+
+        with st.expander("Photochemistry & transport"):
+            if _jac_hint == "ad":
+                st.session_state[K("photo")] = True   # AD needs photolysis ON
+            use_photo = st.checkbox(
+                "Photochemistry (UV photolysis)", value=True, key=K("photo"),
+                disabled=(_jac_hint == "ad"),
+                help="Off = thermochemistry + transport only (no photolysis "
+                     "products such as SO2). Detection and finite-difference "
+                     "constraints work either way; the AD differentiation "
+                     "method requires photolysis ON, so this is locked "
+                     "while AD is selected.")
+            sl_angle_deg = st.number_input(
+                "Photolysis zenith angle (degrees)", 0.0, 89.0, 83.0, 1.0,
+                key=K("sza"), disabled=not use_photo,
+                help="Slant path of the stellar UV. 83 = terminator slant "
+                     "(Tsai et al. 2023 WASP-39 b); smaller angles = more "
+                     "direct illumination.")
+            f_diurnal = st.number_input(
+                "Diurnal photolysis factor", 0.1, 1.0, 1.0, 0.05,
+                key=K("fdiur"), disabled=not use_photo,
+                help="Multiplies every photolysis rate. 1.0 = permanent "
+                     "dayside (tidally locked); 0.5 mimics day-night "
+                     "averaging.")
+            use_moldiff = st.checkbox(
+                "Molecular diffusion", value=True, key=K("moldiff"),
+                help="Species-dependent molecular diffusion competing with "
+                     "Kzz (sets the homopause; matters high up).")
+            use_vm_mol = st.checkbox(
+                "Upwind molecular-diffusion advection (vm_mol)", value=False,
+                key=K("vmmol"), disabled=not use_moldiff,
+                help="Adds the advective settling flux with upwind "
+                     "differencing (the hybrid vm_mol scheme; VULCAN-JAX's "
+                     "own default since 2026-07-14). OFF reproduces this "
+                     "tool's validated baseline; ON is the newer scheme, "
+                     "not yet re-baselined for these forecasts, and mainly "
+                     "moves heavy species in the upper atmosphere. Requires "
+                     "molecular diffusion.")
+
     with st.expander("Clouds & scattering"):
         if science_mode == "emission":
             # canonical_params forces Rayleigh OFF in emission (the pure-
@@ -907,7 +1036,7 @@ with st.sidebar:
     # -----------------------------------------------------------------------
     st.divider()
     st.markdown("### 3 · Science goal")
-    # Controls that render LATER in the script (Expert settings) are read
+    # Controls that render LATER in the script (More settings) are read
     # from session_state: Streamlit updates widget state before the rerun,
     # so these match the widgets below except on the very first render.
     _conden_ss = bool(st.session_state.get(K("conden"), False))
@@ -946,7 +1075,7 @@ with st.sidebar:
     if _conden_ss:
         goal = "detect"
         st.caption(
-            "Condensation is on (Expert settings), which locks the goal to "
+            "Condensation is on (More settings), which locks the goal to "
             "detection: no differentiation method is valid through the "
             "condensation pin, so parameter constraints are unavailable.")
     goal_param, target_prec, marginalize = None, None, True
@@ -1062,8 +1191,8 @@ with st.sidebar:
                      "method compatible with condensation. AD "
                      "differentiates the implemented numerical model "
                      "without a finite-difference step; it is about 1.7-4x "
-                     "faster per row, requires photochemistry ON (locked "
-                     "in Expert settings while AD is selected), and "
+                     "faster per row, requires photochemistry ON (the step-2 "
+                     "switch locks while AD is selected), and "
                      "refuses the C/O row on carbon-rich compositions. In "
                      "a previous WASP-39 b benchmark the two methods "
                      "agreed within 0.07-1.6% per row; that test used an "
@@ -1221,15 +1350,17 @@ with st.sidebar:
                    "profiles per-segment slopes.")
 
     # -----------------------------------------------------------------------
-    # Expert settings: solver, transport, opacity, and diagnostic controls.
-    # The full capability of the old flat sidebar lives here, behind one
-    # entry point (2026-07-29 UX review, item 2.2).
+    # More settings: solver grid, condensation, boundary conditions,
+    # opacity, and display controls. The rest of the old flat sidebar lives
+    # here, behind one entry point (2026-07-29 UX review, item 2.2; Kzz and
+    # photochemistry graduated to the Atmosphere step the same day).
     # -----------------------------------------------------------------------
     st.divider()
-    st.markdown("### Expert settings")
-    st.caption("Solver, transport, opacity, and display controls. The "
-               "defaults are the validated baseline; every setting is "
-               "cache-keyed and recorded in the run's provenance.")
+    st.markdown("### More settings")
+    st.caption("Solver grid, condensation, boundary conditions, opacity, "
+               "and display controls. The defaults are the validated "
+               "baseline; every setting is cache-keyed and recorded in the "
+               "run's provenance.")
 
     with st.expander("Solver & vertical grid"):
         # Vertical layers: the chemistry AND the ExoJAX RT share this one
@@ -1265,125 +1396,17 @@ with st.sidebar:
                      "and an uncertified run stops with an error.")
 
     if _pic:
-        # Equilibrium provider: the kinetics sections (mixing,
-        # photochemistry, condensation, boundary conditions) do not
+        # Equilibrium provider: condensation and boundary conditions do not
         # exist -- canonical_params refuses explicit requests, the GUI
-        # simply never offers them. Quench/lnKzz is a deferred feature
-        # (docs/picaso_roadmap.md in the repo).
-        kzz_mode, kzz_x = "const", 1.0
-        kzz_const, kzz_kmax, kzz_plev, kzz_kdeep = 1.0e9, 0.0, 0.0, 0.0
-        use_photo, sl_angle_deg, f_diurnal = False, 83.0, 1.0
-        use_moldiff = use_vm_mol = use_condense = use_settling = False
+        # simply never offers them (mixing/photochemistry are gated the
+        # same way in the Atmosphere step). Quench/lnKzz is a deferred
+        # feature (docs/picaso_roadmap.md in the repo).
+        use_condense = use_settling = False
         diff_esc, top_flux, bot_flux = [], [], []
-        st.caption("Vertical mixing, photochemistry, condensation, and "
-                   "boundary conditions apply to the VULCAN kinetics engine "
-                   "only, so they are not shown for PICASO equilibrium.")
+        st.caption("Condensation and boundary conditions apply to the "
+                   "VULCAN kinetics engine only, so they are not shown for "
+                   "PICASO equilibrium.")
     else:
-        with st.expander("Vertical mixing (Kzz)"):
-            _kzz_opts = ["const", "Pfunc", "JM16"]
-            # tabulated Kzz needs the tabulated T-P table (its Kzz column)
-            _kzz_file_ok = tp_mode == "file"
-            if _kzz_file_ok:
-                _kzz_opts.append("file")
-                # Same rule as canonical_params: a table that carries Kzz
-                # supplies the mixing profile, so it is the default rather
-                # than a flat stand-in. Seed session_state on first render
-                # (Streamlit ignores index= once the key exists).
-                if _k("kzzmode") not in st.session_state:
-                    st.session_state[_k("kzzmode")] = "file"
-            elif st.session_state.get(_k("kzzmode")) == "file":
-                st.session_state[_k("kzzmode")] = "const"
-            kzz_mode = st.selectbox(
-                "Vertical-mixing profile, Kzz", _kzz_opts,
-                index=_kzz_opts.index("file") if _kzz_file_ok else 0,
-                key=_k("kzzmode"),
-                format_func={"const": "Constant",
-                             "Pfunc": "Power law in P (Pfunc)",
-                             "JM16": "Moses-type P^-0.5 (JM16)",
-                             "file": "Tabulated (Kzz column of the T-P table)"}.get,
-                help="Eddy-diffusion profile. Constant is the validated "
-                     "baseline; Pfunc rises as P^-0.4 above a chosen level; "
-                     "JM16 rises as P^-0.5 above 300 mbar with a deep "
-                     "floor; 'Tabulated' uses the Kzz column of the T-P "
-                     "table (offered in file mode only). The constraint "
-                     "forecast's lnKzz row scales the WHOLE profile in "
-                     "every mode.")
-            kzz_const = kzz_kmax = kzz_plev = kzz_kdeep = 0.0
-            kzz_x = 1.0
-            if kzz_mode == "const":
-                log_kzz = st.number_input(
-                    "log10 Kzz (cm^2 s^-1)", 6.0, 12.0, 9.0, 0.25,
-                    key=_k("kzz"),
-                    help="Constant eddy-diffusion coefficient: stronger "
-                         "mixing quenches photochemical gradients.")
-                kzz_const = 10.0 ** log_kzz
-            elif kzz_mode == "Pfunc":
-                kzz_kmax = 10.0 ** st.number_input(
-                    "log10 deep Kzz (cm^2 s^-1)", 4.0, 11.0, 5.0, 0.25,
-                    key=_k("kzkmax"),
-                    help="Deep-atmosphere Kzz; above the transition level "
-                         "the profile rises as (P_lev/P)^0.4.")
-                kzz_plev = 10.0 ** st.number_input(
-                    "log10 transition level (bar)", -5.0, 2.0, -1.0, 0.25,
-                    key=_k("kzplev"),
-                    help="Pressure above which Kzz starts rising (VULCAN "
-                         "Pfunc K_p_lev).")
-            elif kzz_mode == "JM16":
-                kzz_kdeep = 10.0 ** st.number_input(
-                    "log10 deep-floor Kzz (cm^2 s^-1)", 4.0, 11.0, 5.0, 0.25,
-                    key=_k("kzkdeep"),
-                    help="Deep floor of the Moses-type profile "
-                         "Kzz = max(K_deep, 1e5 (300 mbar/P)^0.5).")
-            else:
-                st.caption("Kzz is read from the Kzz column of the uploaded "
-                           "array / selected table (a table without a Kzz "
-                           "column is rejected with an error).")
-            if kzz_mode != "const":
-                kzz_x = 10.0 ** st.number_input(
-                    "Kzz profile multiplier, log10(f)", -1.0, 1.0, 0.0, 0.05,
-                    key=_k("kzzx"),
-                    help="Multiplies the whole profile (the same direction "
-                         "the constraint forecast's lnKzz row uses); 0 = "
-                         "the profile as specified.")
-
-        with st.expander("Photochemistry & transport"):
-            if jac_method == "ad":
-                st.session_state[K("photo")] = True   # AD needs photolysis ON
-            use_photo = st.checkbox(
-                "Photochemistry (UV photolysis)", value=True, key=K("photo"),
-                disabled=(jac_method == "ad"),
-                help="Off = thermochemistry + transport only (no photolysis "
-                     "products such as SO2). Detection and finite-difference "
-                     "constraints work either way; the AD differentiation "
-                     "method requires photolysis ON, so this is locked "
-                     "while AD is selected.")
-            sl_angle_deg = st.number_input(
-                "Photolysis zenith angle (degrees)", 0.0, 89.0, 83.0, 1.0,
-                key=K("sza"), disabled=not use_photo,
-                help="Slant path of the stellar UV. 83 = terminator slant "
-                     "(Tsai et al. 2023 WASP-39 b); smaller angles = more "
-                     "direct illumination.")
-            f_diurnal = st.number_input(
-                "Diurnal photolysis factor", 0.1, 1.0, 1.0, 0.05,
-                key=K("fdiur"), disabled=not use_photo,
-                help="Multiplies every photolysis rate. 1.0 = permanent "
-                     "dayside (tidally locked); 0.5 mimics day-night "
-                     "averaging.")
-            use_moldiff = st.checkbox(
-                "Molecular diffusion", value=True, key=K("moldiff"),
-                help="Species-dependent molecular diffusion competing with "
-                     "Kzz (sets the homopause; matters high up).")
-            use_vm_mol = st.checkbox(
-                "Upwind molecular-diffusion advection (vm_mol)", value=False,
-                key=K("vmmol"), disabled=not use_moldiff,
-                help="Adds the advective settling flux with upwind "
-                     "differencing (the hybrid vm_mol scheme; VULCAN-JAX's "
-                     "own default since 2026-07-14). OFF reproduces this "
-                     "tool's validated baseline; ON is the newer scheme, "
-                     "not yet re-baselined for these forecasts, and mainly "
-                     "moves heavy species in the upper atmosphere. Requires "
-                     "molecular diffusion.")
-
         with st.expander("Condensation (detection goals only)"):
             _conden_allowed = use_photo and use_moldiff and jac_method == "fd"
             if not _conden_allowed:
@@ -2083,15 +2106,35 @@ order = np.argsort(wl)
 wl_s, d_s = wl[order], model["depth"][order] * 1e6
 _fname_base = f"jwst_tool_{_slug(meta.get('planet', 'planet'))}"
 
-fig, ax = plt.subplots(figsize=(11, 5.4), dpi=200)
-ax.plot(wl_s, d_s, color="#444444", lw=1.1, alpha=0.85, zorder=2,
-        label="model (native)")
+# DISPLAY smoothing (2026-07-29): the native model is an undersampled line
+# forest -- at native R ~ 1500 the individual lines (R_line ~ 3e5 at the
+# transmission photosphere) are far narrower than the grid, so each strong
+# line renders as a one-sample spike and the raw curve reads as noise. For
+# the PLOT the model is convolved to a constant display resolution (>= 3x
+# the analysis binning R, floor 300) with the SAME tested LSF operator the
+# science path uses for MIRI/PRISM (flat weight = plain blur; auto-no-op if
+# the kernel is unresolved by the grid). No score touches this curve, and
+# the un-smoothed native model stays in the "Native model (CSV)" download.
+_disp_R = float(max(300, 3 * int(meta["r_bin"])))
+_disp_wl_r = np.array([float(wl_s[0]), float(wl_s[-1])])
+_disp_curve = np.array([_disp_R, _disp_R])
+
+
+def _display_smooth(y_ppm):
+    return binning.smooth_to_native_r(wl_s, y_ppm, _disp_wl_r, _disp_curve,
+                                      float(wl_s[0]), float(wl_s[-1]))
+
+
+d_plot = _display_smooth(d_s)
+fig, ax = plt.subplots(figsize=(10.5, 5.2), dpi=200)
+ax.plot(wl_s, d_plot, color="#444444", lw=1.2, alpha=0.9, zorder=2,
+        label="model (smoothed for display)")
 d_wo_s = None
 if goal_r == "detect":
     mols = [str(x) for x in model["mols"]]
     d_wo_s = model["depth_wo"][mols.index(meta["target"])][order] * 1e6
-    ax.plot(wl_s, d_wo_s, color="#888888", lw=1.0, ls="--", zorder=1,
-            label=f"model without {meta['target']}")
+    ax.plot(wl_s, _display_smooth(d_wo_s), color="#888888", lw=1.1, ls="--",
+            zorder=1, label=f"model without {meta['target']}")
 rng = np.random.default_rng(int(meta["seed"]))
 pt_lo, pt_hi = [], []            # plotted point extents (keep error bars in view)
 for r in results:
@@ -2122,8 +2165,8 @@ ax.set_xlim(lo * 0.97, hi * 1.03)
 # y-limits: the model in-window AND every plotted error bar (large-sigma
 # points used to clip out of view)
 sel = (wl_s >= lo * 0.97) & (wl_s <= hi * 1.03)
-y_lo = min(float(d_s[sel].min()), min(pt_lo))
-y_hi = max(float(d_s[sel].max()), max(pt_hi))
+y_lo = min(float(d_plot[sel].min()), min(pt_lo))
+y_hi = max(float(d_plot[sel].max()), max(pt_hi))
 pad = 0.06 * (y_hi - y_lo)
 ax.set_ylim(y_lo - pad, y_hi + pad)
 ax.set_xlabel("wavelength (µm)")
@@ -2136,18 +2179,22 @@ ax.grid(alpha=0.25)
 # (UX review 4.4); marker + color pairs identify each mode
 _handles, _labels = ax.get_legend_handles_labels()
 _lg_rows = int(np.ceil(len(_labels) / 3))
-fig.subplots_adjust(bottom=0.16 + 0.062 * _lg_rows)
+fig.subplots_adjust(bottom=0.11 + 0.058 * _lg_rows)
 fig.legend(_handles, _labels, loc="lower center", ncol=3, frameon=False,
-           fontsize=10)
+           fontsize=10, bbox_to_anchor=(0.5, 0.01))
 st.pyplot(fig, width="stretch")
 _spec_png = _fig_png(fig)
 plt.close(fig)
 st.caption(
-    f"Model {_cpj.get('science_mode', 'transmission')} spectrum (gray line, "
-    "native resolution) with the binned depths and predicted uncertainties "
-    f"of each selected mode at R={meta['r_bin']}, for {meta['n_transits']} "
+    f"Model {_cpj.get('science_mode', 'transmission')} spectrum with the "
+    "binned depths and predicted uncertainties of each selected mode at "
+    f"R={meta['r_bin']}, for {meta['n_transits']} "
     f"{_ev}{'s' if meta['n_transits'] > 1 else ''}. Each mode has a fixed "
-    "color and marker shape.")
+    f"color and marker shape. The model lines are smoothed to R = "
+    f"{_disp_R:.0f} for display only (at native sampling the unresolved "
+    "line forest reads as spikes); every score uses the exactly binned "
+    "model, and the un-smoothed native-resolution model is in the Native "
+    "model (CSV) download.")
 
 # downloads: the figure + the plotted numbers (binned points, native model)
 _bin_df = pd.concat([
@@ -2205,7 +2252,7 @@ with col1:
                              "lower is better)")
         fmt_v = lambda v: f"{v:.3g}"
         vline_target = target
-    fig2, ax2 = plt.subplots(figsize=(6.8, 0.6 * len(names) + 1.4), dpi=200)
+    fig2, ax2 = plt.subplots(figsize=(7.4, 0.52 * len(names) + 1.5), dpi=200)
     bars = ax2.barh(names, vals, color=cols, height=0.62)
     for b, v in zip(bars, vals):
         ax2.text(b.get_width() + max(vals) * 0.02,
