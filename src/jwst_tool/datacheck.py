@@ -16,7 +16,7 @@ state visible up front, with the exact remedy, before a 2-minute run dies on
 a missing file.
 
 Import discipline: stdlib only (no numpy/jax/streamlit); the one non-stdlib
-touch is an optional ``import retrieval_framework.forward.config``, which is
+touch is an optional ``import jwst_tool.engine_config``, which is
 documented import-light and raises a clear RuntimeError when its data tree is
 missing -- that exception text IS the status detail.
 """
@@ -66,9 +66,9 @@ _STACK = (
     ("vulcan_jax", True,
      "pip install -e <PROJECT_ROOT>/VULCAN-JAX --no-deps   (or from TestPyPI: "
      "pip install -i https://test.pypi.org/simple/ vulcan-jax)"),
-    ("retrieval_framework", True,
-     "pip install -e <PROJECT_ROOT>/vulcan-retrieval --no-deps   (dist name "
-     "vulcan-retrieval; provides the forward-model engine)"),
+    ("vulcan_forward", True,
+     "pip install -e <PROJECT_ROOT>/vulcan-forward --no-deps   (dist name "
+     "vulcan-forward; the shared chemistry + radiative-transfer engine)"),
     ("exojax", True, "pip install exojax"),
     ("jax", True, "pip install jax"),
     ("streamlit", False, "pip install streamlit pandas   (GUI only)"),
@@ -93,19 +93,23 @@ def check_python_stack() -> list[Item]:
 
 
 # ---------------------------------------------------------------------------
-# Chemistry / RT engine data (the sibling vulcan-retrieval data tree)
+# Chemistry / RT engine data (the shared vulcan-forward engine's data trees)
 # ---------------------------------------------------------------------------
 
 def _engine_config():
-    """The retrieval engine's config module, or an exception instance.
+    """The engine-config view, or an exception instance.
 
-    ``retrieval_framework.forward.config`` is documented import-light (stdlib
-    only) and raises a RuntimeError naming the missing data tree -- that
+    ``jwst_tool.engine_config`` is import-light (stdlib + the engine's
+    stdlib-only constants/paths modules) and resolves data locations lazily, so
+    the data root is probed explicitly here: an unset or wrong
+    $VULCAN_FORWARD_DATA raises a RuntimeError naming the remedy, and that
     message is exactly what the report should show.
     """
     try:
-        return importlib.import_module("retrieval_framework.forward.config")
-    except Exception as e:                      # ImportError or its RuntimeError
+        mod = importlib.import_module("jwst_tool.engine_config")
+        _ = mod.DATA_DIR        # probe the engine's data-root contract
+        return mod
+    except Exception as e:      # ImportError, or the data-root RuntimeError
         return e
 
 
@@ -113,8 +117,8 @@ def linelist_path(mol: str, broadening: str = "air") -> Path | None:
     """Cache file ExoJAX/radis writes for ``mol``'s HITRAN list (None = not a
     HITRAN-sourced molecule, or engine config unavailable).
 
-    Layouts mirror exojax_rt._build_opa: air lists live directly under
-    DEMO_DATABASE, h2he lists in the h2he/ subdir (the path stem must stay a
+    Layouts mirror exojax_rt._build_opa: air lists live directly under the
+    engine's line-list tree, h2he lists in its h2he/ subdir (the path stem must stay a
     radis-parseable molecule token -- pinned in the engine repo's
     test_opacity_cache_paths).
     """
@@ -150,7 +154,15 @@ def molecule_linelist_status(mols: list[str],
             p = linelist_path(m, broadening)
             out[m] = OK if (p is not None and p.exists()) else AUTO
         else:                                   # exomol_cached CO
-            out[m] = OK if Path(spec["db"]).is_dir() else AUTO
+            # spec["db"] is a suffix RELATIVE to the engine's opacity cache
+            # (the table is location-independent), so resolve it -- never
+            # is_dir() the bare suffix, which would test the CWD.
+            try:
+                co_dir = Path(cfg.CO_CACHED_DIR)
+            except RuntimeError:                # data root not configured
+                out[m] = MISSING
+                continue
+            out[m] = OK if co_dir.is_dir() else AUTO
     return out
 
 
@@ -176,9 +188,10 @@ def check_engine_data(base_mols: list[str], extra_mols: list[str]) -> list[Item]
         return [Item(
             key="engine:config", label="forward-model engine data root",
             status=MISSING, required=True, detail=str(cfg),
-            remedy="Install vulcan-retrieval as an editable sibling checkout, "
-                   "or set VULCAN_PROJECT_ROOT to the directory containing "
-                   "the vulcan-retrieval/ checkout.")]
+            remedy="Set VULCAN_FORWARD_DATA to the directory holding the "
+                   "engine's exojax_linelists/ and opacity_cache/ trees "
+                   "(vulcan-forward never bundles them; `jwst-tool fetch` "
+                   "downloads what it can).")]
 
     items = [Item(
         key="engine:config", label="forward-model engine data root",

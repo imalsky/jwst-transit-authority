@@ -235,7 +235,7 @@ def run_adjoint(params: dict, species: str, log=print) -> Path:
         raise RuntimeError(
             "the sibling forward engine does not export conv_normal_at_exit: "
             "the adjoint fixed point cannot be canonically certified. "
-            "Upgrade vulcan-retrieval.")
+            "Upgrade vulcan-forward.")
     if not (bool(_cn(final)) and longdy < chem.yconv_min):
         raise RuntimeError(
             f"chemistry did NOT converge (longdy={longdy:.3g}, gate "

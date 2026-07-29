@@ -1,8 +1,9 @@
 # vulcan-jwst-tool
 
 vulcan-jwst-tool plans JWST exoplanet spectroscopy observations with a live
-forward model. VULCAN-JAX photochemistry feeds ExoJAX radiative transfer, and
-instrument noise comes from the STScI Pandeia engine. Given a planet and a science
+forward model. VULCAN-JAX photochemistry feeds ExoJAX radiative transfer through
+the shared [vulcan-forward](https://github.com/imalsky/vulcan-forward) engine,
+and instrument noise comes from the STScI Pandeia engine. Given a planet and a science
 goal, it ranks JWST time-series modes and estimates how many transits are needed.
 
 Two geometries are supported: transmission, using transit depth, and thermal
@@ -18,7 +19,8 @@ limits.
 
 ## Install
 
-1. Install the package. The sibling packages resolve automatically:
+1. Install the package. The engine (`vulcan-forward`) and the chemistry core
+   (`vulcan-jax`) resolve automatically:
 
 ```bash
 pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple 'vulcan-jwst-tool[gui]'
@@ -45,7 +47,13 @@ export VULCAN_PROJECT_ROOT="$HOME/vulcan"
 export JWST_TOOL_DATA_DIR="$HOME/vulcan/jwst_data"
 export JWST_TOOL_OUTPUT_DIR="$HOME/vulcan/jwst_output"
 export JWST_TOOL_PANDEIA_PYTHON="$(conda run -n pandeia_2026 which python)"
+export VULCAN_FORWARD_DATA="$HOME/vulcan/forward_data"
 ```
+
+`VULCAN_FORWARD_DATA` is where the forward engine keeps its line lists and
+opacity caches (`exojax_linelists/` and `opacity_cache/` beneath it). They are
+tens of gigabytes, so they are never bundled; `jwst-tool fetch` downloads what
+it can and `jwst-tool data` reports the rest.
 
 4. Fetch the reference data:
 

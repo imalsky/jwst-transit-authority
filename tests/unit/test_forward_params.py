@@ -215,8 +215,11 @@ def test_resolution_out_of_range_raises():
 
 
 def test_unknown_rt_molecule_points_to_engine():
-    # an out-of-set RT molecule is refused loudly with how to add it
-    with pytest.raises(ValueError, match="config.MOLECULES"):
+    # An out-of-set RT molecule is refused loudly, with how to add it. Since the
+    # engine became a shared distribution its molecule table is INJECTABLE, so
+    # the remedy names that route rather than telling the user to go edit a
+    # constant inside another package.
+    with pytest.raises(ValueError, match="molecule_table"):
         forward.canonical_params(_p(extra_mols=["PH3"]))
 
 

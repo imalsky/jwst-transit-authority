@@ -33,21 +33,15 @@ dependencies = [
     "numpy>=1.26",
     "matplotlib",
     "jax>=0.6.2",
-    "vulcan-retrieval>=0.12.1",  # 0.12.1 carries the inverse-square g(r) in the
-                                 # shared transmission dtau (_gravity_profile_invsq)
-                                 # that forward v24 labels. NOT 0.12.0: that release
-                                 # used exojax's own gravity_profile, which is
-                                 # 1/r-LINEAR and removes only about half the
-                                 # constant-g bias. Nothing here version-gates the
-                                 # profile, so a lower floor would resolve an engine
-                                 # whose spectra do not match their v24 cache labels;
-                                 # 0.11.0 added the emission tau_bottom diagnostic
-                                 # (+ art_pbtm_bar) and the Mie condensate deck
-                                 # with a mie_condensate echo that forward v16
-                                 # emission + Mie modes require and echo-verify;
-                                 # 0.10.1 added the profile-overridable RT knobs
-                                 # (art_ptop_bar / rt_integration /
-                                 # dit_grid_resolution) echo-verified by v15
+    # The forward-model engine is a shared distribution since 2026-07-29,
+    # so this tool no longer depends on the retrieval application at all
+    # (they are siblings over one engine). 0.1.0 is the extraction
+    # release, carrying the same physics as vulcan-retrieval 0.12.1:
+    # the inverse-square g(r) in the shared transmission dtau that
+    # forward v24 labels, the emission tau_bottom diagnostic, the Mie
+    # condensate deck, and the profile-overridable RT knobs -- all
+    # echo-verified by run_model.
+    "vulcan-forward>=0.1.0",
     "vulcan-jax>=0.3.0",  # direct imports: load_config (CO_BASELINE check) + steady_state_grad (adjoint_diag)
 ]
 

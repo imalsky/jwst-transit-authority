@@ -196,7 +196,7 @@ _VERSION = 24  # model_cache buster: bump whenever the physics or the
                # normalization in vulcan-jax (3.4265x; the UV file is keyed
                # by NAME in canonical_params, so a content fix must bump
                # here -- see docs/audit_decisions_2026-07-21.md). v24 =
-               # inverse-square g(r) in retrieval_framework.forward.exojax_rt
+               # inverse-square g(r) in vulcan_forward.exojax_rt
                # transmission dtau (was 1/r-linear via exojax gravity_profile;
                # ~-50 ppm absolute / ~-32 ppm differential at W39b -- audit
                # 2026-07-28, _gravity_profile_invsq docstring there).
@@ -464,7 +464,8 @@ def active_molecules(cp: dict) -> list[str]:
             m for m in _pc.PICASO_EXTRA_MOLECULES if m in cp["extra_mols"]]
     return MOLECULES + [m for m in EXTRA_MOLECULES if m in cp["extra_mols"]]
 
-# Numerical-resolution knobs layered on config.WIDE (1-15 um band unchanged) --
+# Numerical-resolution knobs layered on the base RT profile in
+# engine_config.WIDE (1-15 um band unchanged) --
 # these replaced the old "fast"/"high" fidelity switch. Defaults reproduce the
 # old "fast" tier; the validated ceiling is the old "high" tier. The ExoJax RT
 # layer count (art_nlayer) is LOCKED equal to nz in run_model (chemistry and RT
@@ -1124,8 +1125,10 @@ def canonical_params(params: dict) -> dict:
             f"unknown RT molecule(s) {sorted(bad_mols)}. This tool ships opacity "
             f"for the always-on base set {MOLECULES} plus the opt-in extras "
             f"{EXTRA_MOLECULES}. To add another molecule you must extend the "
-            "forward engine (a cross-repo change in the sibling vulcan-retrieval): "
-            "add an entry to retrieval_framework.forward.config.MOLECULES "
+            "forward engine (a cross-repo change in the shared vulcan-forward engine): "
+            "add an entry to the engine's molecule table (pass your own via "
+            "profile['molecule_table'], or extend "
+            "vulcan_forward.constants.MOLECULES) "
             "(HITRAN db id, molmass, VULCAN species name), make sure the SNCHO "
             "network actually solves that species, then list it here in "
             "forward.EXTRA_MOLECULES.")
@@ -1740,8 +1743,8 @@ def _assemble_chem(cp: dict, log, clim=None):
     # import order is load-bearing: vulcan_chem (env + x64) before jax/exojax
     from types import SimpleNamespace
 
-    from retrieval_framework.forward import config
-    from retrieval_framework.forward import vulcan_chem
+    from jwst_tool import engine_config as config
+    from vulcan_forward import vulcan_chem
     import jax
 
     # Persistent XLA compile cache (shared with the jax_paper adjoint
@@ -1961,8 +1964,8 @@ def _assemble_chem_picaso(cp: dict, log, clim=None):
     # import order is load-bearing: vulcan_chem (env + x64) before jax/exojax
     from types import SimpleNamespace
 
-    from retrieval_framework.forward import config
-    from retrieval_framework.forward import vulcan_chem  # noqa: F401  (env+x64)
+    from jwst_tool import engine_config as config
+    from vulcan_forward import vulcan_chem  # noqa: F401  (env+x64)
     import jax.numpy as jnp
 
     from jwst_tool import picaso_chem as pc
@@ -2092,8 +2095,8 @@ def run_model(params: dict, log=print) -> Path:
     # heavy imports AFTER the assembler: vulcan_chem must init env/x64 first
     import jax
     import jax.numpy as jnp
-    from retrieval_framework.forward import exojax_rt
-    from retrieval_framework.forward import interp_map
+    from vulcan_forward import exojax_rt
+    from vulcan_forward import interp_map
 
     config = A.config
     profile, theta, theta_names = A.profile, A.theta, A.theta_names
@@ -2142,7 +2145,7 @@ def run_model(params: dict, log=print) -> Path:
         if got != want:
             raise RuntimeError(
                 f"RT engine did not honor {k}={want!r} (echoed {got!r}). "
-                "The installed vulcan-retrieval predates the "
+                "The installed vulcan-forward engine predates the "
                 "profile-overridable RT knobs -- upgrade to >= 0.10.1.")
     # Mie deck echo (v16): the engine echoes mie_condensate ("" when no deck).
     # A mismatch means the engine ignored the profile key (too old to know it),
@@ -2152,7 +2155,7 @@ def run_model(params: dict, log=print) -> Path:
         raise RuntimeError(
             f"RT engine did not honor mie_condensate="
             f"{cp['mie_condensate']!r} (echoed {_mie_echo!r}). The installed "
-            "vulcan-retrieval predates the Mie cloud deck -- upgrade to "
+            "vulcan-forward predates the Mie cloud deck -- upgrade to "
             ">= 0.11.0.")
 
     # --- emission mode (v16): day-side model + stellar SED ------------------
@@ -2164,16 +2167,16 @@ def run_model(params: dict, log=print) -> Path:
         log("[fwd] building emission model + stellar SED ...")
         if not hasattr(exojax_rt, "build_emis_model"):
             raise RuntimeError(
-                "the installed vulcan-retrieval engine has no "
+                "the installed vulcan-forward engine has no "
                 "build_emis_model: emission mode needs the >= 0.11 sibling. "
-                "Upgrade vulcan-retrieval.")
+                "Upgrade vulcan-forward.")
         emis = exojax_rt.build_emis_model(rt, profile)
         if not hasattr(emis, "tau_bottom"):
             raise RuntimeError(
                 "the installed vulcan-retrieval engine predates the emission "
                 "tau_bottom diagnostic (>= 0.11): without it an optically-"
                 "thin RT bottom silently underestimates the day-side flux. "
-                "Upgrade vulcan-retrieval.")
+                "Upgrade vulcan-forward.")
         from jwst_tool import stellar as stellar_mod
         fs_j = jnp.asarray(stellar_mod.phoenix_surface_flux(
             rt.nu_grid, cp["star_teff"], cp["star_logg"], cp["star_feh"],

@@ -28,11 +28,11 @@ _PROGRESS_EVERY = 100                  # progress line every N chunks
 
 
 def _engine_cfg():
-    """The retrieval engine's config module (raises loudly if its data root
+    """The engine-config view (raises loudly if the engine's data root
     is absent -- the CIA destinations live under it)."""
     import importlib
 
-    return importlib.import_module("retrieval_framework.forward.config")
+    return importlib.import_module("jwst_tool.engine_config")
 
 
 @dataclass(frozen=True)

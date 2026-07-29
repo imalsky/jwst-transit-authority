@@ -14,8 +14,8 @@ reverse-mode adjoint diagnostics (per-reaction dL/dlnk, per-layer dL/dT)
 with a scope audit and full numerical certification.
 
 Lives in src/jwst_tool/ (dist: vulcan-jwst-tool); the shared
-forward-model modules come from the sibling vulcan-retrieval package
-(retrieval_framework.forward.*).
+forward-model modules come from the shared vulcan-forward package
+(vulcan_forward.*).
 
 Entry point: the console script ``jwst-tool``, or
 ``streamlit run src/jwst_tool/app.py`` from the repo root.
