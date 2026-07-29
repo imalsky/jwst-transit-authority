@@ -398,7 +398,7 @@ def test_wasp39b_default_cache_key_is_stable():
     # single tightest guard: if ANY default feeding the reference run changes,
     # this trips even when the individual pins above are still satisfied.
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "4c09f1902f90a0a2"
+        dict(planet="wasp39b"))) == "5fdebcb194294a39"
 
 
 def test_wasp39b_shipped_table_bytes_are_unchanged():

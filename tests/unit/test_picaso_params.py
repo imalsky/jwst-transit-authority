@@ -44,7 +44,7 @@ def _fp(monkeypatch):
 
 def test_vulcan_defaults_carry_inert_picaso_keys():
     cp = forward.canonical_params(_p())
-    assert cp["version"] == 23  # v23 = measured W39b T-P/Kzz table as default
+    assert cp["version"] == 24  # v24 = inverse-square g(r) in the shared RT dtau
     assert cp["chem_provider"] == "vulcan"
     assert cp["picaso_version"] == ""
     assert cp["picaso_chemgrid_sha1"] == ""

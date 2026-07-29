@@ -133,6 +133,29 @@ per-node with no interpolation: there the one-sided secants are compared and a
 row whose left and right derivatives disagree materially is refused outright
 rather than reported.
 
+## Height-dependent gravity in the transmission optical depth
+
+The forward engine converts pressure to column mass with an inverse-square
+gravity profile, `g(r) = g_btm (R_btm/r)^2`, evaluated at layer midpoints, so the
+chord heights and the opacity columns share one geometry. Emission is
+plane-parallel and keeps the constant bottom gravity. The profile and its
+measured accuracy live in the sibling engine, `vulcan-retrieval`
+(`docs/forward_model.md`, "Height-dependent gravity"); this tool only selects it
+by importing that engine.
+
+It is recorded here because it is cache-visible. The change moves every
+transmission spectrum at the tens-of-ppm level, so `forward._VERSION` was bumped
+to **24** and all spectra cached under earlier versions are stale.
+
+The pairing is guarded by the dependency floor plus the cache label. The
+`vulcan-retrieval` floor in `pyproject.toml` is `>=0.12.1`, the release that
+carries `_gravity_profile_invsq`; 0.12.0 is deliberately excluded, because it
+used ExoJax's own `gravity_profile`, which is linear in `1/r` and removes only
+about half the constant-g bias. Note what the floor does not cover: nothing in
+this tool version-gates the profile at run time, so an editable or
+manually-pinned install below that floor would still produce spectra that do not
+match this version's cache labels.
+
 ## Backend configuration
 
 The Pandeia engine runs in its own conda environment and is deliberately not a

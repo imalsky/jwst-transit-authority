@@ -186,7 +186,7 @@ MOLECULES = ["H2O", "CO2", "CO", "CH4", "SO2"]   # always-on WIDE-profile set
 # feature, NH3 the cool (<~900 K) nitrogen chemistry, OCS the second
 # equilibrium sulfur carrier (nu3 ~4.85 um; the SNCHO network token is COS).
 EXTRA_MOLECULES = ["C2H2", "H2S", "HCN", "NH3", "OCS"]
-_VERSION = 23  # model_cache buster: bump whenever the physics or the
+_VERSION = 24  # model_cache buster: bump whenever the physics or the
                # canonical key set changes (invalidates all cached spectra).
                # Per-version history lives in notes.md. v18 = the PICASO
                # equilibrium provider + picaso_climate T-P mode; v19 = the
@@ -195,7 +195,11 @@ _VERSION = 23  # model_cache buster: bump whenever the physics or the
                # gas-masked npz ymix). v22 = corrected sflux-epseri.txt
                # normalization in vulcan-jax (3.4265x; the UV file is keyed
                # by NAME in canonical_params, so a content fix must bump
-               # here -- see docs/audit_decisions_2026-07-21.md).
+               # here -- see docs/audit_decisions_2026-07-21.md). v24 =
+               # inverse-square g(r) in retrieval_framework.forward.exojax_rt
+               # transmission dtau (was 1/r-linear via exojax gravity_profile;
+               # ~-50 ppm absolute / ~-32 ppm differential at W39b -- audit
+               # 2026-07-28, _gravity_profile_invsq docstring there).
 
 # Baseline (unperturbed) carbon-to-oxygen ratio of the shipped network, defined
 # the standard way for exoplanet atmospheres: the total-carbon / total-oxygen
