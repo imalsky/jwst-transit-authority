@@ -83,9 +83,9 @@ def main():
     ymix = ymix / ymix.sum(axis=1, keepdims=True)
 
     # --- (a) tool ExoJax RT -------------------------------------------------
-    from retrieval_framework.forward import config as rf_config
-    from retrieval_framework.forward import vulcan_chem  # noqa: F401 (x64 init)
-    from retrieval_framework.forward import exojax_rt, interp_map
+    from jwst_tool import engine_config as rf_config
+    from vulcan_forward import vulcan_chem  # noqa: F401 (x64 init)
+    from vulcan_forward import exojax_rt, interp_map
     import jax.numpy as jnp
 
     profile = forward._rt_profile_common(cp, rf_config)
