@@ -27,8 +27,20 @@ data/pandeia_psfs-2026.2-jwst/
 # PandExo-side scratch from the 2026-07-12 parity run (cdbs symlink shim +
 # noise cache + a pickled single run) -- machine-local, never tracked
 pandeia_2026_refdata/
+
+# Internal working documents. docs/ carries the published reference set
+# (physics_and_conventions, picaso_roadmap, audit_decisions). data/notes.md is
+# deliberately still tracked: it is data provenance, which consumers need.
 CLAUDE.md
-notes.md
+/notes.md
+
+# Machine-local live-validation transcript (regenerate with
+# JWST_TOOL_RUN_PICASO_LIVE=1 python -m pytest tests/live -q)
+tests/live/RESULTS_v18_1.md
+
+# Machine-local absolute-path symlink into a sibling PICASO checkout. Consumers
+# obtain the PHOENIX grid via `jwst-tool fetch`; `jwst-tool data` reports status.
+data/cdbs/grid/phoenix
 
 # Generated Mie lookup grids + virga refractive-index archive (regenerate with tools/generate_miegrid.py)
 data/exojax_mie/
