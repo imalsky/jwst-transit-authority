@@ -1760,13 +1760,17 @@ def _assemble_chem(cp: dict, log, clim=None):
         clim = picaso_climate.get_or_run(cp, log)
 
     tp_eval, n_tp, tp_vals, theta_names = _build_tp(cp, cp["gs_cgs"])
-    # theta layout [lnZ, dlnCO, lnKzz, tp...] is the vulcan_chem contract; the
-    # two composition entries are ALWAYS 0 since v13 -- composition is set
-    # STRUCTURALLY in the cfg elemental abundances (below), never as a theta
-    # perturbation. Only lnKzz (on-graph multiplier) and the T-P parameters
-    # remain live theta directions.
-    theta = np.array([0.0, 0.0, np.log(cp["kzz_x"])] + tp_vals,
-                     dtype=np.float64)
+    # Built through the engine's NAMED primitive, so the layout is not two magic
+    # leading zeros: composition is set STRUCTURALLY in the cfg elemental
+    # abundances (below), never as a parameter perturbation, so lnZ and c_o are
+    # exactly 0 and only lnKzz (an on-graph multiplier) plus the T-P parameters
+    # are live directions. The engine is then called with the equivalent VECTOR,
+    # which is what forward-mode AD needs: jax.jvp differentiates with respect
+    # to this array and its tangent has to match it.
+    theta = np.asarray(
+        vulcan_chem.ChemParams(lnZ=0.0, c_o=0.0, lnKzz=np.log(cp["kzz_x"]),
+                               tp=tuple(tp_vals)).to_vector(),
+        dtype=np.float64)
     log(f"[fwd] params {cp}")
     log(f"[fwd] theta {dict(zip(theta_names, np.round(theta, 4)))}")
 
@@ -1965,7 +1969,7 @@ def _assemble_chem_picaso(cp: dict, log, clim=None):
     from types import SimpleNamespace
 
     from jwst_tool import engine_config as config
-    from vulcan_forward import vulcan_chem  # noqa: F401  (env+x64)
+    from vulcan_forward import vulcan_chem   # env + jax x64, and ChemParams
     import jax.numpy as jnp
 
     from jwst_tool import picaso_chem as pc
@@ -1975,10 +1979,12 @@ def _assemble_chem_picaso(cp: dict, log, clim=None):
         clim = picaso_climate.get_or_run(cp, log)
 
     tp_eval, n_tp, tp_vals, theta_names = _build_tp(cp, cp["gs_cgs"])
-    # same theta layout as vulcan ([lnZ, dlnCO, lnKzz, tp...], composition
-    # slots always 0); the lnKzz slot is inert (kzz_x normalized to 1).
-    theta = np.array([0.0, 0.0, np.log(cp["kzz_x"])] + tp_vals,
-                     dtype=np.float64)
+    # Same named primitive as the VULCAN path; here the lnKzz slot is inert too
+    # (kzz_x is normalized to 1 under the equilibrium provider).
+    theta = np.asarray(
+        vulcan_chem.ChemParams(lnZ=0.0, c_o=0.0, lnKzz=np.log(cp["kzz_x"]),
+                               tp=tuple(tp_vals)).to_vector(),
+        dtype=np.float64)
     log(f"[fwd] params {cp}")
     log(f"[fwd] theta {dict(zip(theta_names, np.round(theta, 4)))}")
     profile = _rt_profile_common(cp, config)
