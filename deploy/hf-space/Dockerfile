@@ -20,6 +20,17 @@ RUN conda create -y -n app python=3.12 \
 
 # Clone name VULCAN-JAX is load-bearing for the engine's path contract.
 # BUILD_INFO records the exact SHAs baked into this image.
+# RESTART NONCE: 1 (2026-07-29). Any commit to the Space repo re-runs the
+# platform init steps, which is the only restart path an `hf auth login`
+# token has -- the /restart and hardware endpoints answer 401. Bump this
+# comment (leaving SRC_STAMP alone) to retry a transient platform failure:
+# comments do NOT bust the Docker cache, so every layer hits and the
+# container simply starts again. Used once for an `hf-mount` failure
+# ("Initialization step 'hf-mount' failed with exit code: 0", empty reason,
+# no app logs, hardware never allocated) whose two volume sources were both
+# verified intact -- if a mount source is ever genuinely missing, fix the
+# volume instead, since a restart cannot help.
+#
 # The SRC_STAMP echo busts the Docker layer cache so a rebuild re-clones:
 # bump it to the new jwst-tool commit SHA on EVERY code update (the API
 # factory-reboot endpoint refuses OAuth tokens, so cache-busting happens
