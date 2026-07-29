@@ -168,10 +168,20 @@ def engine_mode(instrument: str, mode: str) -> str:
 # that error into saturation/ngroup selection. The minimal CDBS now carries
 # comp/nonhst/2mass_ks_001_syn.fits + calspec/alpha_lyr_stis_011.fits for it.
 
-# Fixed categorical color order (validated dataviz palette) -- one color per mode,
-# never re-assigned when the user's selection changes.
-_COLORS = ["#2a78d6", "#1baf7a", "#eda100", "#008300",
-           "#4a3aa7", "#e34948", "#e87ba4", "#eb6834"]
+# Fixed categorical color order -- one color per mode, never re-assigned when
+# the user's selection changes. Every color holds >= 3:1 contrast against the
+# white figure surface (WCAG 2.2 non-text target; the 2026-07-29 UX review
+# measured the previous aqua/yellow/pink at 2.2-2.8:1), and the set passes the
+# dataviz palette validator in the spectrum's wavelength-adjacency order
+# (soss, prism, g235h, f322w2, g395h, f444w, miri) with marker shapes
+# (MODE_MARKER below) as the secondary, color-independent encoding.
+_COLORS = ["#2a78d6", "#199e70", "#a35a00", "#007a00",
+           "#4a3aa7", "#d43f3e", "#a83a9e", "#c2571f"]
+
+# Fixed marker shape per mode (same assignment rule as the colors): data
+# series must never rely on color alone (grayscale print, color-vision
+# deficiency), so every plotted point carries a mode-specific marker too.
+_MARKERS = ["o", "s", "D", "^", "v", "P", "X", "*"]
 
 # PandExo-compatible hard maximum group counts per instrument. Current PandExo
 # caps NIRCam grism at 100 groups; a request above that falls outside the
@@ -338,6 +348,7 @@ for _key, _m in MODES.items():
             "targets (2026-07-12 audit item 5).")
 
 MODE_COLOR = {key: _COLORS[i % len(_COLORS)] for i, key in enumerate(MODES)}
+MODE_MARKER = {key: _MARKERS[i % len(_MARKERS)] for i, key in enumerate(MODES)}
 
 # GUI default selection: the modes WASP-39b was actually observed in, which is
 # also blue-to-red coverage. NIRISS SOSS (Feinstein et al. 2023), NIRSpec PRISM

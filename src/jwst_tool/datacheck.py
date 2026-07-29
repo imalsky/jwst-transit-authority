@@ -640,8 +640,9 @@ def format_report(report: dict) -> str:
               f"{c['noise_cache']['mb']} MB"]
     miss = missing_required(report)
     lines += ["", ("All required data present." if not miss else
-                   f"{len(miss)} required item(s) MISSING -- runs that need "
-                   "them will refuse loudly. Remedies above.")]
+                   f"{len(miss)} required item(s) MISSING -- calculations "
+                   "that need them will stop and show an error. Remedies "
+                   "above.")]
     return "\n".join(lines)
 
 

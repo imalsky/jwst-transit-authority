@@ -32,6 +32,11 @@ conda create -n pandeia_2026 python=3.11
 conda run -n pandeia_2026 pip install pandeia.engine==2026.2
 ```
 
+This release uses Pandeia 2026.2, the release PandExo pins and the one the
+parity suite validates against. STScI's current JWST Cycle 6 release is 2026.7,
+so this tool is one calibration release behind the live ETC. The full policy is
+in [`docs/physics_and_conventions.md`](docs/physics_and_conventions.md).
+
 3. Tell the tool where to keep data and caches. Add these to your shell profile so
    they persist, then open a new terminal:
 
@@ -63,6 +68,21 @@ jwst-tool
 This preflights the stack and launches the Streamlit GUI. A new parameter set
 takes about two minutes, and the app shows a runtime estimate before each run.
 Results are cached on disk and downloadable as PNG or CSV.
+
+### First run, step by step
+
+1. Keep the defaults in step 1 (WASP-39 b, transmission).
+2. Keep the default VULCAN chemistry in step 2.
+3. In step 3, keep the goal "Detect a molecule" with SO2 at 3 sigma.
+4. In step 4, keep the default instrument modes and one transit.
+5. Press Run. The first run solves the chemistry and takes a few minutes;
+   the noise forecast per star is cached, so later runs on the same star are
+   much faster.
+
+The result page leads with a verdict of the form "Best mode for detecting SO2
+on WASP-39 b: <mode>, <score> in 1 transit", followed by the spectrum, the
+mode ranking, and per-mode details. Quality certificates and backend
+provenance are in the collapsed "Model quality and provenance" section.
 
 ## Science goals
 

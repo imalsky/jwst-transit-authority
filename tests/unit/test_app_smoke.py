@@ -2,8 +2,9 @@
 
 Runs only where the GUI extras (streamlit + pandas) are installed -- the
 dependency-light CI skips it. Uses Streamlit's AppTest; the pre-run render
-path exercises the intro gate, the data-status panel (datacheck.full_report),
-and every sidebar widget, without launching a forward-model run.
+path exercises the data-status panel (datacheck.full_report) and every
+sidebar widget, without launching a forward-model run. (The mandatory intro
+gate was removed in the 2026-07-29 UX pass: the first render IS the tool.)
 """
 from __future__ import annotations
 
@@ -20,9 +21,55 @@ APP = Path(__file__).resolve().parents[2] / "src" / "jwst_tool" / "app.py"
 
 def _run_app():
     at = AppTest.from_file(str(APP), default_timeout=60)
-    at.session_state["intro_ack"] = True     # skip the how-it-works gate
     at.run()
     return at
+
+
+def _synthetic_out(science_mode="transmission", saturated=False,
+                   sigma_detect=0.0, n_transits=1):
+    """A minimal cached-result pair (out, out_meta) for post-run rendering.
+
+    sigma_detect stays either 0 (no-signal branch) or above the 3-sigma
+    target (success branch) so the render never calls
+    detect.transits_to_target, which needs the full evaluate_mode payload.
+    """
+    import json
+    import numpy as np
+
+    n = 40
+    wl = np.linspace(1.0, 5.0, n)
+    model = {
+        "wl_um": wl,
+        "depth": np.full(n, 0.021) + 1e-4 * np.sin(wl),
+        "mols": np.array(["H2O", "CO2", "CO", "CH4", "SO2"], dtype="U8"),
+        "depth_wo": np.tile(np.full(n, 0.0208), (5, 1)),
+        "T": np.full(30, 1100.0),
+        "p_bar": np.logspace(-7, 0.8, 30),
+        "science_mode": science_mode,
+        "params_json": json.dumps({"co_ratio": 0.549348,
+                                   "tp_mode": "guillot",
+                                   "science_mode": science_mode}),
+    }
+    nb = 12
+    result = {
+        "mode_key": "nirspec_g395h", "label": "NIRSpec G395H",
+        "saturated": saturated, "sat_frac": 0.97,
+        "sigma_detect": sigma_detect,
+        "sigma_detect_proj": float("nan"),
+        "wl": np.linspace(2.9, 5.1, nb), "wl_eff": np.linspace(2.9, 5.1, nb),
+        "depth": np.full(nb, 0.021), "sigma": np.full(nb, 1.5e-4),
+        "floor": np.zeros(nb),
+        "median_sigma_ppm": 150.0, "n_bins": nb, "ngroup": 12,
+        "t_cycle_s": 11.0, "warnings": (), "jac_bins": None,
+    }
+    out = dict(model=model, results=[result], failed=[], unusable=[],
+               fisher_names=[], provenance=None)
+    out_meta = dict(
+        goal="detect", target="SO2", goal_param=None, target_prec=None,
+        target_sig=3.0, n_transits=n_transits, show_noise=False, seed=0,
+        r_bin=100, planet="WASP-39 b", scenario="random",
+        floor_mode="constant")
+    return out, out_meta
 
 
 def test_app_renders_without_exception():
@@ -80,7 +127,7 @@ def test_data_status_panel_present():
 
 def test_sidebar_molecule_annotations_present():
     at = _run_app()
-    ms = [w for w in at.multiselect if w.label == "Extra RT molecules"]
+    ms = [w for w in at.multiselect if w.label == "Extra opacity molecules"]
     assert ms, "extra-molecule multiselect missing"
     # format_func must annotate availability, one of the three states
     from jwst_tool import datacheck, forward
@@ -91,46 +138,75 @@ def test_sidebar_molecule_annotations_present():
 def test_results_render_with_synthetic_run():
     """Drive the full post-Run render path (spectrum + ranking + T-P figures,
     download buttons, mode table) on a synthetic result -- no forward model."""
-    import json
-    import numpy as np
-
-    n = 40
-    wl = np.linspace(1.0, 5.0, n)
-    model = {
-        "wl_um": wl,
-        "depth": np.full(n, 0.021) + 1e-4 * np.sin(wl),
-        "mols": np.array(["H2O", "CO2", "CO", "CH4", "SO2"], dtype="U8"),
-        "depth_wo": np.tile(np.full(n, 0.0208), (5, 1)),
-        "T": np.full(30, 1100.0),
-        "p_bar": np.logspace(-7, 0.8, 30),
-        "params_json": json.dumps({"co_ratio": 0.549348,
-                                   "tp_mode": "guillot"}),
-    }
-    nb = 12
-    result = {
-        "mode_key": "nirspec_g395h", "label": "NIRSpec G395H",
-        "saturated": False, "sigma_detect": 0.0,
-        "sigma_detect_proj": float("nan"),
-        "wl": np.linspace(2.9, 5.1, nb), "wl_eff": np.linspace(2.9, 5.1, nb),
-        "depth": np.full(nb, 0.021), "sigma": np.full(nb, 1.5e-4),
-        "median_sigma_ppm": 150.0, "n_bins": nb, "ngroup": 12,
-        "t_cycle_s": 11.0, "warnings": (), "jac_bins": None,
-    }
+    out, out_meta = _synthetic_out()
     at = AppTest.from_file(str(APP), default_timeout=60)
-    at.session_state["intro_ack"] = True
-    at.session_state["out"] = dict(model=model, results=[result], failed=[],
-                                   unusable=[], fisher_names=[],
-                                   provenance=None)
-    at.session_state["out_meta"] = dict(
-        goal="detect", target="SO2", goal_param=None, target_prec=None,
-        target_sig=3.0, n_transits=1, show_noise=False, seed=0, r_bin=100,
-        planet="WASP-39 b", scenario="random", floor_mode="constant")
+    at.session_state["out"] = out
+    at.session_state["out_meta"] = out_meta
     at.run()
     assert not at.exception, at.exception
     # every figure and table must offer a download
     dl_labels = {b.label for b in at.get("download_button")}
     assert {"Figure (PNG)", "Binned points (CSV)", "Native model (CSV)",
             "Values (CSV)", "Mode details (CSV)"} <= dl_labels
+
+
+def test_no_intro_gate():
+    """The first render is the tool itself: sidebar widgets exist immediately,
+    with no acknowledgment button blocking them (2026-07-29 UX pass)."""
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.run()
+    assert not at.exception, at.exception
+    assert at.selectbox(key="n0_planet").value is not None
+    assert not [b for b in at.button if "I understand" in (b.label or "")]
+
+
+def test_emission_results_use_eclipse_terms():
+    """An emission run's verdict and spectrum header say "eclipse", never
+    "transit" (2026-07-29 UX review, item 1.5), and a valid result that
+    MEETS the target renders as success."""
+    out, out_meta = _synthetic_out(science_mode="emission",
+                                   sigma_detect=8.0, n_transits=3)
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["out"] = out
+    at.session_state["out_meta"] = out_meta
+    at.run()
+    assert not at.exception, at.exception
+    succ = [s.value for s in at.success]
+    assert succ, "expected a success verdict for an above-target score"
+    assert any("3 eclipses" in s for s in succ), succ
+    assert not any("transit" in s for s in succ), succ
+    subs = [s.value for s in at.subheader]
+    assert any("eclipse emission spectrum" in s for s in subs), subs
+
+
+def test_all_saturated_state_has_no_best_mode():
+    """When every selected mode saturates, the verdict is a warning that says
+    so; no mode is presented as "best", and no error alert fires for what is
+    a valid calculation (2026-07-29 UX review, items 1.7 and 1.10)."""
+    out, out_meta = _synthetic_out(saturated=True, sigma_detect=5.0)
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["out"] = out
+    at.session_state["out_meta"] = out_meta
+    at.run()
+    assert not at.exception, at.exception
+    warns = [w.value for w in at.warning]
+    assert any("all selected modes saturate" in w for w in warns), warns
+    assert not at.success
+    assert not any("Best mode" in w for w in warns)
+    assert not any("Best mode" in e.value for e in at.error)
+
+
+def test_valid_below_target_result_is_warning_not_error():
+    """A run that works but finds no signal is a scientific outcome, not a
+    software failure: it must render as a warning, never an error."""
+    out, out_meta = _synthetic_out(sigma_detect=0.0)
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["out"] = out
+    at.session_state["out_meta"] = out_meta
+    at.run()
+    assert not at.exception, at.exception
+    assert any("No signal" in w.value for w in at.warning)
+    assert not any("Best mode" in e.value for e in at.error)
 
 
 def test_picaso_provider_renders(monkeypatch):

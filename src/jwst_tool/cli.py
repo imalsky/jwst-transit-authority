@@ -70,14 +70,16 @@ def main() -> int:
               f"(backend '{ins.JWST_TOOL_BACKEND}': {ins.BACKEND_STATUS}).\n"
               "Point JWST_TOOL_PANDEIA_PYTHON at a python with the matching "
               "pandeia.engine (and JWST_TOOL_PANDEIA_REFDATA at the matching refdata). "
-              "The GUI still starts, but every noise calculation will refuse to run. "
+              "The interface will start, but noise calculations cannot run "
+              "until this environment is available. "
               "Run `jwst-tool data` for the full data-availability report.",
               file=sys.stderr)
 
     if not os.environ.get("JWST_TOOL_PICASO_REFDATA", "").strip():
         print("jwst-tool: JWST_TOOL_PICASO_REFDATA is not set -- the opt-in "
               "PICASO forward-model provider and the PICASO climate T-P mode "
-              "will refuse to run (the VULCAN-JAX provider is unaffected). "
+              "will stop with an error (the VULCAN-JAX provider is "
+              "unaffected). "
               "Point it at a PICASO v4.0 reference tree to enable them; "
               "`jwst-tool data` reports each required piece.",
               file=sys.stderr)
