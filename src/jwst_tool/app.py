@@ -34,6 +34,7 @@ from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.transforms as mtransforms
 import pandas as pd
 import streamlit as st
 
@@ -46,18 +47,21 @@ from jwst_tool import planets
 from jwst_tool import runlimit
 from jwst_tool import picaso_chem
 
-# House figure style: recessive axes/grid, consistent typography, white face
-# (figures must download clean on any Streamlit theme). Data colors stay the
-# fixed per-mode palette in instruments.MODE_COLOR (every color >= 3:1 on
-# white), and every series also carries a fixed marker (MODE_MARKER) so no
-# data series relies on color alone. Labels >= 10 pt in downloaded figures.
+# House figure style: the maintainer's science.mplstyle, vendored next to
+# this file (journal look: full box, inward major+minor ticks, frameless
+# legend, 12 pt base), with the font family flipped to serif (Palatino,
+# DejaVu Serif fallback on machines without it) and matching STIX math. The
+# white faces are pinned explicitly because downloaded figures must stay
+# white on any Streamlit theme. Data colors stay the fixed per-mode palette
+# in instruments.MODE_COLOR (every color >= 3:1 on white), and every series
+# also carries a fixed marker (MODE_MARKER) so no series relies on color
+# alone.
+plt.style.use(str(TOOL_DIR / "science.mplstyle"))
 plt.rcParams.update({
+    "font.family": "serif",
+    "mathtext.fontset": "stix",
     "figure.facecolor": "white", "axes.facecolor": "white",
     "savefig.facecolor": "white",
-    "axes.edgecolor": "#9aa0a6", "axes.linewidth": 0.8,
-    "axes.labelcolor": "#333333", "xtick.color": "#555555",
-    "ytick.color": "#555555", "xtick.labelsize": 10, "ytick.labelsize": 10,
-    "axes.labelsize": 11, "legend.fontsize": 9,
 })
 
 
@@ -2102,7 +2106,7 @@ for r in results:
     # Marker shape + color together identify the mode: no series relies on
     # color alone (UX review 4.2).
     x = r.get("wl_eff", r["wl"])
-    ax.errorbar(x, y, yerr=r["sigma"] * 1e6, fmt=mk, ms=3.6, lw=1.0,
+    ax.errorbar(x, y, yerr=r["sigma"] * 1e6, fmt=mk, ms=4.2, lw=1.0,
                 color=c, ecolor=c, elinewidth=0.8, capsize=0, zorder=3,
                 label=label)
     pt_lo.append(float(np.min(y - r["sigma"] * 1e6)))
@@ -2127,15 +2131,14 @@ _depth_lbl = ("eclipse depth (ppm)"
               if str(model.get("science_mode", "transmission")) == "emission"
               else "transit depth (ppm)")
 ax.set_ylabel(_depth_lbl)
-ax.grid(alpha=0.25, lw=0.5)
-ax.spines[["top", "right"]].set_visible(False)
+ax.grid(alpha=0.25)
 # legend below the axes: up to nine entries no longer crowd the data
 # (UX review 4.4); marker + color pairs identify each mode
 _handles, _labels = ax.get_legend_handles_labels()
 _lg_rows = int(np.ceil(len(_labels) / 3))
-fig.subplots_adjust(bottom=0.14 + 0.055 * _lg_rows)
+fig.subplots_adjust(bottom=0.16 + 0.062 * _lg_rows)
 fig.legend(_handles, _labels, loc="lower center", ncol=3, frameon=False,
-           fontsize=9)
+           fontsize=10)
 st.pyplot(fig, width="stretch")
 _spec_png = _fig_png(fig)
 plt.close(fig)
@@ -2202,25 +2205,30 @@ with col1:
                              "lower is better)")
         fmt_v = lambda v: f"{v:.3g}"
         vline_target = target
-    fig2, ax2 = plt.subplots(figsize=(6.4, 0.55 * len(names) + 1.2), dpi=200)
+    fig2, ax2 = plt.subplots(figsize=(6.8, 0.6 * len(names) + 1.4), dpi=200)
     bars = ax2.barh(names, vals, color=cols, height=0.62)
     for b, v in zip(bars, vals):
         ax2.text(b.get_width() + max(vals) * 0.02,
                  b.get_y() + b.get_height() / 2, fmt_v(v),
-                 va="center", fontsize=9, color="#333333")
+                 va="center", fontsize=10, color="#333333")
+    # reference/target labels sit just ABOVE the axes box (x in data
+    # coordinates, y in axes fraction) so they never collide with the bars
+    # or each other; a reference line equal to the target is skipped (at the
+    # default 3σ target the two coincided and the labels overprinted)
+    _blend2 = mtransforms.blended_transform_factory(ax2.transData,
+                                                    ax2.transAxes)
     for ref in xrefs:
-        if ref < max(vals) * 1.15:
+        if ref < max(vals) * 1.15 and ref != vline_target:
             ax2.axvline(ref, color="#bbbbbb", lw=0.8, ls=":")
-            ax2.text(ref, len(names) - 0.3, f"{ref:.0f}σ", fontsize=7,
-                     color="#888888", ha="center", va="bottom")
+            ax2.text(ref, 1.02, f"{ref:.0f}σ", transform=_blend2,
+                     fontsize=9, color="#888888", ha="center", va="bottom")
     if vline_target is not None:
         ax2.axvline(vline_target, color="#333333", lw=1.0, ls="--")
-        ax2.text(vline_target, len(names) - 0.28, " target", fontsize=8,
-                 color="#333333", ha="left", va="bottom")
+        ax2.text(vline_target, 1.02, "target", transform=_blend2,
+                 fontsize=10, color="#333333", ha="center", va="bottom")
     ax2.set_xlim(0, max(max(vals), vline_target or 0) * 1.18 + 1e-12)
     ax2.set_xlabel(xlabel)
-    ax2.spines[["top", "right"]].set_visible(False)
-    ax2.grid(axis="x", alpha=0.25, lw=0.5)
+    ax2.grid(axis="x", alpha=0.25)
     fig2.tight_layout()
     st.pyplot(fig2, width="stretch")
     _rank_png = _fig_png(fig2)
@@ -2243,7 +2251,7 @@ with col1:
 with col2:
     st.subheader("T-P profile")
     cpj = _cpj
-    fig3, ax3 = plt.subplots(figsize=(3.4, 3.6), dpi=200)
+    fig3, ax3 = plt.subplots(figsize=(3.8, 4.2), dpi=200)
     ax3.plot(model["T"], model["p_bar"], color="#2a78d6", lw=1.6)
     for tlim in (320.0, 2980.0):
         ax3.axvline(tlim, color="#cccccc", lw=0.8, ls=":")
@@ -2251,8 +2259,7 @@ with col2:
     ax3.invert_yaxis()
     ax3.set_xlabel("temperature (K)")
     ax3.set_ylabel("pressure (bar)")
-    ax3.grid(alpha=0.25, lw=0.5)
-    ax3.spines[["top", "right"]].set_visible(False)
+    ax3.grid(alpha=0.25)
     fig3.tight_layout()
     st.pyplot(fig3, width="stretch")
     _tp_png = _fig_png(fig3)
