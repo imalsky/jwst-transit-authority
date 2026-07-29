@@ -17,10 +17,15 @@ per-planet validation -- the committed parity/live evidence is W39b-centered
     noise     : star dict -> pandeia phoenix SED + Ks normalization
     timing    : t14_hr -> in/out-of-transit integration split
 
-Every planet (including WASP-39b) uses an isothermal structural baseline at a
-representative temperature and a user-chosen isothermal / Guillot T-P
-evaluated on-graph, with a constant Kzz. The WASP-39b GCM T-P/Kzz baseline
-modes were removed 2026-07-13 (no GCM profile is ever silently substituted).
+T-P and Kzz are explicit modes, never silently substituted (the WASP-39b GCM
+baseline modes were removed 2026-07-13; the globally isothermal T-P mode was
+removed 2026-07-21 -- it held the CO/CH4/NH3 quench region at one temperature).
+Under Guillot the structural baseline is isothermal at a representative
+temperature (it sets only the hydrostatic grid + EQ init; the on-graph tp_eval
+supplies T(P) for chemistry and RT), while ``file`` / ``picaso_climate`` make
+the tabulated profile itself the structure. Kzz is const / Pfunc / JM16 / the
+table's own column. Per-planet defaults live in ``tp_table_default`` below and
+are tabulated in docs/physics_and_conventions.md.
 
 Values are literature defaults for PLANNING (all editable in the GUI):
 WASP-39b Mancini+2018/Tsai+2023; HD 189733b Torres+2008 (a: Bouchy+2005);
@@ -28,6 +33,17 @@ HD 209458b Torres+2008 (a, gs from Southworth+2010); WASP-107b Piaulet+2021.
 (Provenance audited against the NASA Exoplanet Archive 2026-07-15: every
 numeric field within the literature spread.) Stellar UV: shipped VULCAN spectra,
 nearest available spectral type (shown in the GUI, never silently swapped).
+
+``star["metallicity"]`` is DELIBERATELY 0.0 for every host, and is not a
+literature value (WASP-39 is published near -0.12). It selects the PHOENIX
+node for the noise SED and the emission-mode stellar surface flux, and both
+consumers renormalize the SED to the star's observed 2MASS Ks magnitude, so a
+0.1-0.2 dex node shift changes only the SED SHAPE across the JWST bands -- a
+sub-percent effect on forecast sigmas, far below the ~2-56% pandeia-vs-PandExo
+noise-model envelope (tests/parity/outputs/REPORT.md). Keeping every host on
+the solar node keeps the four registry entries on one interpolation cell of
+the minimal shipped CDBS grid. The GUI exposes [Fe/H] as an editable field
+(-2.0 to 0.5), so a run that cares sets it explicitly.
 """
 from __future__ import annotations
 
@@ -96,9 +112,10 @@ PLANETS = {
             "converged), whereas the analytic default converges in ~36 s. "
             "Tightening yconv_cri to 1e-3 does NOT help: same longdy, same "
             "1445 accepted steps, so the blocker is the stall exit and not the "
-            "tolerance. Its tabulated Kzz is 15-17x the constant default in "
-            "the photochemically active layers, so it is the better structure "
-            "on paper; certify a run before trusting one."),
+            "tolerance. Its tabulated Kzz is 10-17x the constant 1e9 default "
+            "over the chemistry grid at p < 1 mbar (measured 2026-07-28; the "
+            "earlier 15-17x did not reproduce at any pressure cut), so it is "
+            "the better structure on paper; certify a run before trusting one."),
         note="Very bright host (Ks = 5.5) with a high-gravity planet: expect "
              "most modes to saturate and small spectral features.",
     ),

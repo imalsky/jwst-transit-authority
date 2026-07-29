@@ -5,21 +5,38 @@ out of the README in 2026-07.
 
 ## Composition scaling
 
-Any metallicity or C/O knob must pick a convention. Papers that leave it implicit
-are the literature's main complaint on this point (Drummond et al. 2019, MNRAS 486,
-1123), so this tool states it.
+Any metallicity or C/O knob must pick a convention, because C/O and metallicity
+alone do not determine the composition: the same (Z, C/O) with different C/H and
+O/H gives a different equilibrium composition and a different spectrum
+(Drummond et al. 2019, MNRAS 486, 1123). So this tool states which direction it
+moves.
 
 **Metallicity scales the network's O, C, N, and S abundances together, with He/H
-held fixed.** That is the universal practice. **C/O moves carbon at fixed,
-metallicity-scaled oxygen.** This is VULCAN's own published convention (Tsai et al.
-2017, ApJS 228, 20).
+held fixed.** That is the common choice for kinetics codes (e.g. Moses et al.
+2011); codes that anchor metallicity on carbon instead hold oxygen out of the
+scaling (Goyal et al. 2018; Drummond et al. 2019 does it both ways). **C/O moves
+carbon at fixed, metallicity-scaled oxygen** — the fixed-oxygen C/O direction of
+Tsai et al. 2017 (ApJS 228, 20: "we keep f_O fixed and vary the value of f_C"),
+applied at the metallicity-scaled oxygen abundance, since VULCAN's own paper has
+no metallicity axis to scale it with.
 
-This matters when comparing across codes. petitRADTRANS, the ATMO and Goyal grids,
-and GGchem instead anchor metallicity on carbon and vary oxygen. The Sonora and
-PICASO family preserves C+O. So at non-solar C/O, **the same physical atmosphere
-maps to different (Z, C/O) coordinates in different codes**, and different molecules
-carry the C/O signature: C-bearing species here, H2O and CO2 in oxygen-varied
-codes. Near solar C/O the conventions agree.
+This matters when comparing across codes. petitRADTRANS (see its
+`pre_calculated_chemistry` documentation, and Mollière et al. 2017 for easyCHEM;
+the 2019 code paper does not state the convention) and the ATMO and Goyal grids
+anchor metallicity on carbon and vary oxygen — for the Goyal grid, use the 2019
+erratum (MNRAS 486, 783), which corrected an oxygen-abundance rainout bug. The
+Sonora and PICASO family preserves C+O (Marley et al. 2021). GGchem takes
+complete elemental abundance sets as input — it has no metallicity or C/O
+parameter, so the convention is the user's, and Woitke et al. 2018's own C/O
+sweep varies carbon at fixed oxygen, the same direction as this tool.
+
+So at non-solar C/O, **the same physical atmosphere maps to different (Z, C/O)
+coordinates in different codes**, and at C/O below unity different molecules
+carry the C/O signature: C-bearing species here (CO tracks C/O directly), H2O and
+CO2 in the oxygen-varied codes (where CO carries no signal at all). The
+conventions agree exactly at solar C/O and diverge first-order in ln(C/O) — by
+C/O = 0.7, only 27% above solar, the two differ by ~28% in both C and O, a
+~0.1 dex metallicity offset.
 
 ## Temperature-pressure profiles
 
@@ -41,9 +58,14 @@ Switch to Guillot when you need a temperature row.
 
 ## Eddy diffusion profiles
 
-Four options: constant, two parametric forms (Pfunc and JM16), or the table's own
-`Kzz` column. In every mode the Fisher `lnKzz` row is a multiplicative scale of the
-whole profile.
+Four options: constant, two parametric forms, or the table's own `Kzz` column. In
+every mode the Fisher `lnKzz` row is a multiplicative scale of the whole profile.
+
+The two parametric names are upstream VULCAN's, kept for config compatibility
+rather than coined here — `build_atm.py` documents `JM16` as the profile form
+assumed in Moses et al. (2016) and `Pfunc` as the one in Tsai (2020). `JM16` is
+`Kzz = max(K_deep, 1e5 (300 mbar/P)^0.5)`; `Pfunc` is
+`max(K_max, K_max (K_p_lev/P)^0.4)`.
 
 ## Defaults are the measured structure where one exists
 
@@ -68,8 +90,12 @@ equilibrium provider keeps the analytic default in every case.
 **This matters because the analytic defaults are biased in a systematic
 direction.** A constant `Kzz` cannot follow a profile that climbs orders of
 magnitude with altitude, and it is the photochemically active upper atmosphere
-that pays. The constant 1e9 cm²/s default runs 4-33x low for WASP-39 b and 15-17x
-low for HD 189733 b, always suppressing photochemical products.
+that pays. Measured against the bundled tables over the chemistry grid at
+p < 1 mbar, the constant 1e9 cm²/s default runs 3.8-48x low for WASP-39 b
+(`atm_W39b_evening_TP_Kzz.txt`) and 10-17x low for HD 189733 b
+(`atm_HD189_Kzz.txt`), always suppressing photochemical products. The factor is
+pressure-cut dependent — deeper than ~10 mbar the table falls *below* 1e9 for
+WASP-39 b — so quote it with the cut.
 
 ## Boundary conditions
 
@@ -81,17 +107,31 @@ He, and constant top and bottom per-species fluxes with deposition velocities.
 Two independent decks, which can be combined:
 
 - **An analytic power-law deck**, a gray-to-sloped opacity per gram.
-- **A Mie condensate deck**, using real refractive-index optics from the ExoJAX
-  virga database with a column-uniform lognormal size distribution.
+- **A Mie condensate deck**, using real refractive-index optics from the **virga**
+  condensate database (Batalha, Lodge & Moran, Zenodo; accessed through ExoJAX's
+  `PdbCloud`), with a column-uniform lognormal size distribution. virga asks that
+  the upstream literature source for each condensate's optical constants be cited
+  individually.
 
 Either deck's parameters can be freed and marginalized in the Fisher forecast when
 that deck is on: the power-law amplitude and slope, and the Mie particle radius,
 size dispersion, and abundance.
 
 The Mie radius and dispersion ride a piecewise-linear lookup grid, so their
-finite-difference rows carry a step-size consistency check that **refuses** a step
-straddling a grid node. The Mie abundance is exactly linear. Each Mie condensate
-needs a one-time lookup grid built with `tools/generate_miegrid.py`.
+finite-difference steps are sized to stay **inside one grid cell** (`FD_STEPS`:
+0.03 dex in log r_g against a ~0.1 dex cell, 0.05 in sigma_g against ~0.33) —
+the row is then the local piecewise-linear slope rather than a knot average. The
+allowed parameter ranges are inset from the grid edges by more than the full
+±2h stencil, so a legal value can never produce an edge-clamped (silently zero)
+derivative; an out-of-range value is refused. The Mie abundance is exactly
+linear in the optical depth and rides no grid. Each Mie condensate needs a
+one-time lookup grid built with `tools/generate_miegrid.py`.
+
+The **node-kink gate** (`picaso_chem.FD_KINK_TOL`) is a separate mechanism and
+applies to the PICASO equilibrium provider's composition rows, whose tables are
+per-node with no interpolation: there the one-sided secants are compared and a
+row whose left and right derivatives disagree materially is refused outright
+rather than reported.
 
 ## Backend configuration
 

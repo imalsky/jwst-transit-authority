@@ -67,22 +67,34 @@ def _csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode()
 
 
-def _never_reason(scenario: str, val: str) -> str:
+def _never_reason(scenario: str, val: str, floored: bool = True) -> str:
     """Honest 'unreachable' phrasing. Under the default random scenario
     sig_inf is an exact ceiling (score monotone in N: 'floor caps at').
     Under a correlated scenario sig_inf is only the N-to-infinity limit --
     scores can peak at finite N -- so unreachability comes from the full
-    1..N_TRANSITS_CAP scan and is phrased that way."""
+    1..N_TRANSITS_CAP scan and is phrased that way. With NO floor
+    (``floored=False``) nothing caps the score at all, so neither phrasing
+    applies: the only true statement is that the scan ran out of transits
+    (printing the limit there gave a ~1e26 sigma, 2026-07-28 audit)."""
+    if not floored:
+        return f"no count up to {detect.N_TRANSITS_CAP} works with no noise floor set"
     if scenario == "random":
         return f"floor caps at {val}"
     return (f"no count up to {detect.N_TRANSITS_CAP} works; "
             f"N→∞ limit {val}")
 
 
-def _transits_cell(tt: dict, scenario: str, val_never: str) -> str:
+def _has_floor(r: dict) -> bool:
+    """Does this evaluated mode carry a noise floor anywhere? (floor_spec=None
+    gives an all-zero array, and then no N-to-infinity limit exists.)"""
+    return bool(np.any(np.asarray(r["floor"]) > 0.0))
+
+
+def _transits_cell(tt: dict, scenario: str, val_never: str,
+                   floored: bool = True) -> str:
     """'transits → target' table cell, window-aware for correlated scenarios."""
     if not tt["reachable"]:
-        return f"never ({_never_reason(scenario, val_never)})"
+        return f"never ({_never_reason(scenario, val_never, floored)})"
     cell = str(tt["n"])
     if (tt.get("n_last") is not None
             and tt["n_last"] < detect.N_TRANSITS_CAP):
@@ -2029,11 +2041,13 @@ if goal_r == "detect":
                      f"{best['label']} would reach it (floor-aware estimate)."
                      + _win)
         else:
-            _lim = f"{tt['sig_inf']:.1f}σ"
+            _fl = _has_floor(best)
+            _lim = f"{tt['sig_inf']:.1f}σ" if _fl else ""
             st.error(verdict + "  Missing the target, and NO number of "
-                     f"{_ev}s reaches it ({_never_reason(_scen, _lim)}). "
-                     "Lower the floor, choose other modes, or relax the "
-                     "target.")
+                     f"{_ev}s reaches it ({_never_reason(_scen, _lim, _fl)}). "
+                     + ("Lower the floor, choose other modes, or relax the "
+                        "target." if _fl else
+                        "Choose other modes or relax the target."))
     else:
         st.error(verdict + "  No signal in the selected bands, try other "
                  "modes or a different goal.")
@@ -2091,10 +2105,13 @@ else:
                      f"{ins.MODES[bk]['label']} would reach it (floor-aware "
                      "estimate)." + _win)
         else:
-            _lim = f"±{tsig * tt['sig_inf']:.3g}{usp} at {tsig:g}σ"
+            _fl = _has_floor(best_r)
+            _lim = (f"±{tsig * tt['sig_inf']:.3g}{usp} at {tsig:g}σ" if _fl
+                    else "")
             st.error(verdict + "  Missing the target, and NO number of "
-                     f"{_ev}s reaches it ({_never_reason(_scen, _lim)}). "
-                     "Lower the floor, combine modes, or relax the target.")
+                     f"{_ev}s reaches it ({_never_reason(_scen, _lim, _fl)}). "
+                     + ("Lower the floor, combine modes, or relax the target."
+                        if _fl else "Combine modes or relax the target."))
 
 # --- spectrum figure -------------------------------------------------------
 st.subheader("Simulated eclipse emission spectrum"
@@ -2340,8 +2357,10 @@ for r in sorted(results, key=key_order):
         _t = float(meta.get("target_sig") or 3.0)
         if r["sigma_detect"] > 0:
             _tt = detect.transits_to_target(r, _t)
+            _fl = _has_floor(r)
             row[_tt_col] = _transits_cell(
-                _tt, meta.get("scenario", "random"), f"{_tt['sig_inf']:.1f}σ")
+                _tt, meta.get("scenario", "random"),
+                f"{_tt['sig_inf']:.1f}σ" if _fl else "", _fl)
         else:
             row[_tt_col] = ""
     else:
@@ -2354,9 +2373,10 @@ for r in sorted(results, key=key_order):
                                                 target / tsig,
                                                 detect.sigma_at_transits,
                                                 co_eval=co_eval)
+            _fl = _has_floor(r)
             row[_tt_col] = _transits_cell(
                 _tt, meta.get("scenario", "random"),
-                f"±{tsig * _tt['sig_inf']:.3g}")
+                f"±{tsig * _tt['sig_inf']:.3g}" if _fl else "", _fl)
         else:
             row[_tt_col] = ""
     row.update({"median σ (ppm)": round(r["median_sigma_ppm"]),

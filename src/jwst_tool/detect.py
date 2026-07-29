@@ -197,15 +197,12 @@ def detection_significance(signal: np.ndarray, sigma: np.ndarray,
     return float(np.sqrt(max(chi2, 0.0)))
 
 
-def _n_transits(n_transits) -> int:
-    """A positive-integer transit count, or a loud error. Replaces the old
-    max(1, int(n_transits)) that silently turned 0 / negative / fractional
-    inputs into a 1-transit result (2026-07-13 recheck 5.1)."""
-    n = int(n_transits)
-    if n < 1 or n != n_transits:
-        raise ValueError(f"n_transits must be a positive integer, got "
-                         f"{n_transits!r}")
-    return n
+# ONE transit-count validator for the stack, defined next to the variance it
+# divides (2026-07-28: pixel_depth_variance floored fractional counts while
+# these scalers refused them). Replaces the old max(1, int(n_transits)) that
+# silently turned 0 / negative / fractional inputs into a 1-transit result
+# (2026-07-13 recheck 5.1).
+_n_transits = noise_mod.n_transits_int
 
 
 def sigma_at_transits(result: dict, n_transits: int) -> np.ndarray:
@@ -266,6 +263,11 @@ def transits_to_target(result: dict, target_sig: float) -> dict:
     reachability comes from the full n = 1..N_TRANSITS_CAP scan (2026-07-15
     audit: a smooth-bump signal beat its target only for n = 5..13 while
     sig_inf sat below it -- the old sig_inf gate returned a false "never").
+    With NO floor set anywhere, sigma averages down without bound and
+    ``sig_inf`` is ``inf`` (the scan is monotone -- no floor means no floor
+    excess, so no correlated term exists at any finite N); unreachability then
+    means the target needs more than N_TRANSITS_CAP transits, not that a
+    systematic caps it.
     ``n`` is the smallest count meeting the target; ``n_last`` (correlated
     scenarios only, else None) is the largest scanned count still meeting it
     -- a finite window means over-observing past ``n_last`` loses the
@@ -277,10 +279,20 @@ def transits_to_target(result: dict, target_sig: float) -> dict:
     signal = np.asarray(result["depth"]) - np.asarray(result["depth_wo"])
     nuis = _result_nuisance(result)
     floor = np.asarray(result["floor"])
-    cov_inf = cov_at_transits(result, 1, floor_only=True)
-    sig_inf = detection_significance(signal, np.maximum(floor, 1e-30),
-                                     nuisance=nuis, cov=cov_inf)
-    diagonal = cov_inf is None        # random scenario: monotone in N
+    if not np.any(floor > 0.0):
+        # No floor anywhere: sigma -> 0 as N -> infinity, so the limit is
+        # genuinely INFINITE and there is nothing to cap the score. Report inf
+        # rather than the ~1e26 that the 1e-30 clip below produces, and treat
+        # the scan as monotone: with no floor there is no floor EXCESS, so
+        # build_cov returns None at every finite N (verified) and the score
+        # rises monotonically -- taking the correlated branch here reported a
+        # meaningless "window: lost again past N_TRANSITS_CAP" (2026-07-28).
+        sig_inf, cov_inf, diagonal = float("inf"), None, True
+    else:
+        cov_inf = cov_at_transits(result, 1, floor_only=True)
+        sig_inf = detection_significance(signal, np.maximum(floor, 1e-30),
+                                         nuisance=nuis, cov=cov_inf)
+        diagonal = cov_inf is None    # random scenario: monotone in N
     if diagonal and target_sig > sig_inf:
         return dict(n=None, n_last=None, reachable=False, sig_inf=sig_inf)
     n_first = n_last = None

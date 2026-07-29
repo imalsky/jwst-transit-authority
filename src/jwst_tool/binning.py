@@ -192,6 +192,20 @@ def smooth_to_native_r(wl_model: np.ndarray, y: np.ndarray,
     so one-sided kernels never touch the returned region.
     """
     wl, yv = _validate_model(wl_model, y, "smooth_to_native_r")
+    # Validate the weight BEFORE any early return: the no-op paths (band with
+    # no model points, kernel unresolved by the model grid) used to skip this,
+    # so a NaN/negative stellar flux raised on MIRI LRS / PRISM and passed
+    # silently on the high-R gratings -- the same bad input diagnosed or not
+    # depending on the mode (2026-07-28 audit). A check that cannot change the
+    # result still has to say the input is invalid.
+    if weight is not None:
+        wv = np.asarray(weight, float)
+        if wv.shape != wl.shape or not np.all(np.isfinite(wv)) \
+                or np.any(wv < 0.0):
+            raise ValueError(
+                "smooth_to_native_r: weight (stellar flux on the model grid) "
+                "must match wl_model's shape and be finite and >= 0 -- a NaN "
+                "weight silently corrupts the count-ratio blur")
     lnw = np.log(wl)
     x_lo, x_hi = np.log(band_lo), np.log(band_hi)
     in_band = (wl_r >= band_lo) & (wl_r <= band_hi)
@@ -252,13 +266,7 @@ def smooth_to_native_r(wl_model: np.ndarray, y: np.ndarray,
     if weight is None:
         Fg = np.ones_like(yg)
     else:
-        wv = np.asarray(weight, float)
-        if wv.shape != wl.shape or not np.all(np.isfinite(wv)) \
-                or np.any(wv < 0.0):
-            raise ValueError(
-                "smooth_to_native_r: weight (stellar flux on the model grid) "
-                "must match wl_model's shape and be finite and >= 0 -- a NaN "
-                "weight silently corrupts the count-ratio blur")
+        wv = np.asarray(weight, float)   # already validated above
         icf = _pl_antideriv(edges, lnw, wv, _pl_cumint(lnw, wv))
         Fg = np.maximum(np.diff(icf) / widths, 0.0)
         # zero-width end cells: constant-extend the flux weight exactly like

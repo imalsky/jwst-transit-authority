@@ -361,6 +361,23 @@ def build_cov(wl_center: np.ndarray, var_phot: np.ndarray, floor: np.ndarray,
     return K + np.diag(var + sc["f_white"] * a ** 2)
 
 
+def n_transits_int(n_transits) -> int:
+    """A positive-INTEGER transit count, or a loud error.
+
+    ONE definition for the whole stack (``detect._n_transits`` is this
+    function): a fractional count has no meaning -- you cannot observe 2.7
+    transits -- and silently flooring it reported a 2-transit sigma under a
+    2.7-transit label. ``pixel_depth_variance`` used to do exactly that via
+    ``int(n_transits)`` while its sibling scalers already refused, so the same
+    input raised or was accepted depending on which entry point saw it.
+    """
+    n = int(n_transits)
+    if n < 1 or n != n_transits:
+        raise ValueError(f"n_transits must be a positive integer, got "
+                         f"{n_transits!r}")
+    return n
+
+
 def pixel_depth_variance(mode_result: dict, t_in_s: float, t_out_s: float,
                          n_transits: int) -> np.ndarray:
     """Per-native-pixel transit-depth variance (box-depth approximation).
@@ -418,9 +435,8 @@ def pixel_depth_variance(mode_result: dict, t_in_s: float, t_out_s: float,
             f"(t_cycle={t_cycle:.1f} s, in-transit {t_in_s:.1f} s -> {n_in} "
             f"integrations, out-of-transit {t_out_s:.1f} s -> {n_out}): "
             "this mode cannot produce a usable depth measurement as configured")
-    if int(n_transits) < 1:
-        raise ValueError(f"n_transits must be >= 1, got {n_transits!r}")
-    return (noise / flux) ** 2 * (1.0 / n_in + 1.0 / n_out) / int(n_transits)
+    n_tr = n_transits_int(n_transits)
+    return (noise / flux) ** 2 * (1.0 / n_in + 1.0 / n_out) / n_tr
 
 
 def depth_error_bins(mode_result: dict, edges: np.ndarray,
@@ -470,4 +486,4 @@ def depth_error_bins(mode_result: dict, edges: np.ndarray,
     sigma = np.maximum(np.sqrt(var_phot), floor)
     return dict(wl_center=op["wl_center"], sigma=sigma, n_pix=op["n_pix"],
                 var_phot=var_phot, floor=floor,
-                n_transits=int(n_transits))
+                n_transits=n_transits_int(n_transits))

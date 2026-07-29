@@ -272,6 +272,10 @@ def transits_to_target(result: dict, free_names: list[str], gp: str,
     can be BEST at a finite N, and reachability comes from the full scan
     (2026-07-15 audit -- the old sig_inf gate returned false "never"s there);
     ``n_last`` is then the largest scanned count still meeting the target.
+    With NO floor set anywhere the precision improves without bound, so
+    ``sig_inf`` is 0.0 and the scan is monotone (no floor -> no floor excess ->
+    no correlated term at any finite N); unreachability then means the target
+    needs more than N_TRANSITS_CAP transits, not that a systematic caps it.
     """
     from . import detect as _detect  # local import: fisher stays numpy-only otherwise
 
@@ -281,11 +285,21 @@ def transits_to_target(result: dict, free_names: list[str], gp: str,
         r2["cov"] = cov
         return display_sigma(gp, mode_forecast(r2, free_names)[gp], co_eval=co_eval)
 
-    cov_inf = _detect.cov_at_transits(result, 1, floor_only=True)
-    sig_inf = _sig_with(np.maximum(np.asarray(result["floor"]), 1e-30), cov_inf)
-    if not np.isfinite(sig_inf):
-        return dict(n=None, n_last=None, reachable=False, sig_inf=sig_inf)
-    diagonal = cov_inf is None         # random scenario: monotone in N
+    _floor = np.asarray(result["floor"])
+    if not np.any(_floor > 0.0):
+        # No floor anywhere: the forecast half-width -> 0 as N -> infinity, so
+        # the limit is 0 in display units (nothing caps the precision) and the
+        # scan is monotone -- no floor means no floor EXCESS, hence no
+        # correlated term at any finite N. Reporting the 1e-30-clipped value
+        # here produced a ~1e-26 "best case" and a spurious reachability
+        # window (2026-07-28 audit).
+        sig_inf, cov_inf, diagonal = 0.0, None, True
+    else:
+        cov_inf = _detect.cov_at_transits(result, 1, floor_only=True)
+        sig_inf = _sig_with(np.maximum(_floor, 1e-30), cov_inf)
+        if not np.isfinite(sig_inf):
+            return dict(n=None, n_last=None, reachable=False, sig_inf=sig_inf)
+        diagonal = cov_inf is None     # random scenario: monotone in N
     if diagonal and target_display < sig_inf:
         return dict(n=None, n_last=None, reachable=False, sig_inf=sig_inf)
     n_first = n_last = None
