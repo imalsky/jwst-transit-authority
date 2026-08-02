@@ -414,8 +414,10 @@ def test_wasp39b_default_cache_key_is_stable():
     # The key is the content hash of every canonical parameter, so it is the
     # single tightest guard: if ANY default feeding the reference run changes,
     # this trips even when the individual pins above are still satisfied.
+    # v25 (2026-08-02): _VERSION 24 -> 25 (CS2/C2H4/C2H6 extras + the
+    # VULCAN-JAX config-parity sync) rehashed the key from 5fdebcb194294a39.
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "5fdebcb194294a39"
+        dict(planet="wasp39b"))) == "f14f4d10512552ea"
 
 
 def test_wasp39b_shipped_table_bytes_are_unchanged():
