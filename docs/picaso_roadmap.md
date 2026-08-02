@@ -62,9 +62,9 @@ findings behind its design decisions, and the features deliberately deferred
   equilibrium sulfur carriers ARE modeled: H2S is in the picaso BASE RT
   set (it is the dominant equilibrium S reservoir at 700-1500 K and part
   of picaso's own default species set; measured max removed-molecule
-  signal 1259 ppm on the W39b 10x-solar default) and OCS is an opt-in
-  extra under BOTH engines (nu3 ~4.85 um inside G395H/PRISM; 69 ppm max
-  on the same default -- real but marginal, hence opt-in). The SNCHO
+  signal 1259 ppm on the W39b 10x-solar default) and OCS is an extra
+  under BOTH engines (nu3 ~4.85 um inside G395H/PRISM; 69 ppm max on
+  the same default; the GUI selects every extra by default). The SNCHO
   network names the species COS; the registry token maps to the table's
   OCS column via `picaso_chem.VULCAN_TO_TABLE`. The v25 hydrocarbon
   extras C2H4 / C2H6 ARE available under both engines: the Visscher

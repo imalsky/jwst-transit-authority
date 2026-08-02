@@ -1516,7 +1516,8 @@ with st.sidebar:
         st.caption(
             "The spectrum's opacity always includes the base set "
             f"**{' · '.join(_base_set)}** (solved on every run). The "
-            f"opt-in extras are **{' · '.join(_extra_set)}**. "
+            f"extras are **{' · '.join(_extra_set)}**, all on by default; "
+            "deselect any to save about 7 s each per new run. "
             + ("No SO2 here: in chemical equilibrium sulfur sits in H2S "
                "and OCS instead; SO2 only exists where starlight keeps "
                "making it, which needs the VULCAN engine. " if _pic else "")
@@ -1529,8 +1530,14 @@ with st.sidebar:
         _MOL_NOTE = {datacheck.OK: "opacity cached",
                      datacheck.AUTO: "downloads on first use",
                      datacheck.MISSING: "engine data missing"}
+        # All extras default ON (2026-08-02): the measured cost on the
+        # default WASP-39b run is ~59 s wall for all eight (~7 s each:
+        # opacity build + one removed spectrum) on a 190 s baseline --
+        # a complete detection report is worth more than a faster first
+        # run. Deselecting molecules still works and still saves time.
         extra_mols = st.multiselect(
-            "Extra opacity molecules", list(_extra_set), default=[],
+            "Extra opacity molecules", list(_extra_set),
+            default=list(_extra_set),
             key=K(f"xmols_{chem_provider}"),
             format_func=lambda m: f"{m}  ({_MOL_NOTE[_mol_status[m]]})",
             help="Added to the base opacity set (the chemistry always "

@@ -89,10 +89,12 @@ retrieval framework uses):
         bot_flux      constant bottom-boundary rows [species, flux, vdep]
                       (flux in molecules cm^-2 s^-1, deposition velocity
                       vdep in cm s^-1)
-      extra_mols    opt-in RT molecules beyond the base set (C2H2/C2H4/
+      extra_mols    RT molecules beyond the base set (C2H2/C2H4/
                     C2H6/CS2/H2S/HCN/NH3/OCS; under picaso H2S is base and
                     the extras are C2H2/C2H4/C2H6/HCN/NH3/OCS -- no CS2:
-                    photochemical sulfur, like SO2)
+                    photochemical sulfur, like SO2). The API default is
+                    the empty list (an explicit request keeps cache keys
+                    stable); the GUI selects the full set by default.
       rt_ptop_bar / rt_integration / rt_dit_res  (v15)
                     ExoJAX RT top pressure (band-saturation "wall" knob),
                     ArtTransPure chord-integration scheme (simpson/trapezoid),
@@ -181,9 +183,10 @@ MODEL_CACHE = _ins.MODEL_CACHE
 from jwst_tool import planets   # installed package: works as module AND as a script
 
 MOLECULES = ["H2O", "CO2", "CO", "CH4", "SO2"]   # always-on WIDE-profile set
-# Opt-in RT additions: the SNCHO network already solves these; adding one costs a
-# premodit build (~10-15 s, HITRAN lines downloaded on first use) + one removed
-# spectrum. C2H2/HCN carry the high-C/O signal, H2S the 3.8-4.6 um reduced-sulfur
+# RT additions beyond the always-on base set (GUI default: all on; measured
+# cost ~7 s each on the default W39b run -- opacity build + one removed
+# spectrum; HITRAN lines download on first use). The SNCHO network already
+# solves these; extra_mols only exposes them to the RT and the detection scores. C2H2/HCN carry the high-C/O signal, H2S the 3.8-4.6 um reduced-sulfur
 # feature, NH3 the cool (<~900 K) nitrogen chemistry, OCS the second
 # equilibrium sulfur carrier (nu3 ~4.85 um; the SNCHO network token is COS).
 # v25 additions (requested by the upstream VULCAN author): CS2 is a

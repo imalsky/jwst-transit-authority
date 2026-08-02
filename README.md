@@ -74,8 +74,9 @@ jwst-tool
 ```
 
 This preflights the stack and launches the Streamlit GUI. A new parameter set
-takes about two minutes, and the app shows a runtime estimate before each run.
-Results are cached on disk and downloadable as PNG or CSV.
+takes a few minutes with the default molecule set, and the app shows a runtime
+estimate before each run. Results are cached on disk and downloadable as PNG
+or CSV. Deselecting extra molecules makes a new run faster.
 
 ### First run, step by step
 
