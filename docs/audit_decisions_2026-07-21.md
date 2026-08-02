@@ -35,7 +35,7 @@ WASP-107 b registry default consumes the file.
 `vulcan_jax/atm/stellar_flux/sflux-epseri.txt` is rebuilt from the raw HST
 file with R_star in the denominator; construction otherwise identical
 (positive-only filter, DQ ignored, 115-283 nm span, duplicates retained).
-Full record: VULCAN-JAX `docs/corrections_to_original_code.md` entry C4;
+Full record: VULCAN-JAX `docs/validation.md` entry C4;
 parity-audit allowlist `KNOWN_SFLUX_RESCALES`. `forward._VERSION` bumped to
 22 because the UV file is cache-keyed by NAME, not content. WASP-107 b
 chemistry/spectra/scores regenerate on next run.
