@@ -35,7 +35,7 @@ RUN conda create -y -n app python=3.12 \
 # bump it to the new jwst-tool commit SHA on EVERY code update (the API
 # factory-reboot endpoint refuses OAuth tokens, so cache-busting happens
 # here instead; a comment would be stripped by the parser and cache-hit).
-RUN echo "SRC_STAMP 3ec7a52" \
+RUN echo "SRC_STAMP 2c6132f" \
     && git clone --depth 1 https://github.com/imalsky/jax-vulcan.git /srv/vulcan/VULCAN-JAX \
     && git clone --depth 1 https://github.com/imalsky/vulcan-forward.git /srv/vulcan/vulcan-forward \
     && git clone --depth 1 https://github.com/imalsky/vulcan-jwst-tool.git /srv/vulcan/vulcan-jwst-tool \
