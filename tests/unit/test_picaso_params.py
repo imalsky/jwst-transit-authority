@@ -135,6 +135,16 @@ def test_picaso_extras_accepted():
     cp = forward.canonical_params(_pp(extra_mols=["HCN", "NH3"]))
     assert forward.active_molecules(cp) == ["H2O", "CO2", "CO", "CH4", "H2S",
                                             "HCN", "NH3"]
+    # v25: the hydrocarbon extras ride the Visscher gas columns under picaso
+    cp = forward.canonical_params(_pp(extra_mols=["C2H4", "C2H6"]))
+    assert forward.active_molecules(cp) == ["H2O", "CO2", "CO", "CH4", "H2S",
+                                            "C2H4", "C2H6"]
+
+
+def test_picaso_refuses_cs2():
+    # CS2 is photochemical sulfur, VULCAN-only -- same refusal as SO2/S2/S8
+    with pytest.raises(ValueError, match="SO2/S2/S8/CS2"):
+        forward.canonical_params(_pp(extra_mols=["CS2"]))
 
 
 # --- climate T-P mode matrix ------------------------------------------------

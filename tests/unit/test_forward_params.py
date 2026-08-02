@@ -214,6 +214,20 @@ def test_resolution_out_of_range_raises():
             forward.canonical_params(_p(**bad))
 
 
+def test_v25_extras_present_and_resolve_in_engine_table():
+    # v25 (Shami Tsai request): CS2 photochemical sulfur + the CH4-photolysis
+    # hydrocarbons. Import-light: vulcan_forward.constants is pure constants.
+    from vulcan_forward import constants as _vfc
+    for mol in ("CS2", "C2H4", "C2H6"):
+        assert mol in forward.EXTRA_MOLECULES
+    # EVERY extra must resolve in the shared engine's molecule table -- a
+    # token listed here but absent there would only fail at run time.
+    for mol in forward.EXTRA_MOLECULES:
+        spec = _vfc.MOLECULES[mol]
+        assert spec["molmass"] > 0
+        assert spec["vulcan"]
+
+
 def test_unknown_rt_molecule_points_to_engine():
     # An out-of-set RT molecule is refused loudly, with how to add it. Since the
     # engine became a shared distribution its molecule table is INJECTABLE, so

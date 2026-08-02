@@ -41,10 +41,15 @@ dependencies = [
     # forward v24 labels, the emission tau_bottom diagnostic, the Mie
     # condensate deck, and the profile-overridable RT knobs -- all
     # echo-verified by run_model.
-    "vulcan-forward>=0.2.1",   # 0.2.0 added the named ChemParams primitive this
+    "vulcan-forward>=0.2.2",   # 0.2.0 added the named ChemParams primitive this
                                # module builds its vector with; 0.2.1 added
-                               # paths.ensure_layout(), which `jwst-tool fetch` needs
-    "vulcan-jax>=0.3.0",  # direct imports: load_config (CO_BASELINE check) + steady_state_grad (adjoint_diag)
+                               # paths.ensure_layout(), which `jwst-tool fetch`
+                               # needs; 0.2.2 adds CS2/C2H4/C2H6 to the
+                               # molecule table (the v25 extras resolve there)
+    "vulcan-jax>=0.3.1",  # direct imports: load_config (CO_BASELINE check) +
+                          # steady_state_grad (adjoint_diag). 0.3.1 carries the
+                          # sflux-epseri normalization fix the forward v22
+                          # cache bust describes -- the floor must include it.
 ]
 
 [project.urls]

@@ -121,8 +121,8 @@ Four limits to keep in view:
 - **Emission is pure-absorption thermal emission.** There is no scattering in the
   emergent flux and no reflected light. The run refuses atmospheres whose column
   is not optically thick at its bottom, because there is no interior flux term.
-- **The PICASO engine has no photochemistry**, and therefore no SO2. It is capped
-  at C/O of 1.10 by its tables and is finite-difference only.
+- **The PICASO engine has no photochemistry**, and therefore no SO2 and no CS2.
+  It is capped at C/O of 1.10 by its tables and is finite-difference only.
 
 ExoJAX capabilities that exist upstream but are not wired here: reflected-light
 spectra, scattering emission, correlated-k opacities, H-minus continuum, atomic and

@@ -1537,9 +1537,14 @@ with st.sidebar:
                  "solves them). C2H2/HCN matter at high C/O, H2S at "
                  "3.8-4.6 µm, NH3 on cool (below ~900 K) planets, and OCS "
                  "is the second equilibrium sulfur carrier (~4.85 µm). "
-                 "Each entry shows whether its line list is cached locally "
-                 "or downloads on first use (~10-15 s each, network "
-                 "required).")
+                 "C2H4 (~10.5 µm) and C2H6 (~12.2 µm) trace hydrocarbon "
+                 "photochemistry on cool planets. "
+                 + ("" if _pic else
+                    "CS2 is a photochemical sulfur carrier (bands near "
+                    "4.6 and 6.5 µm). ")
+                 + "Each entry shows whether its line list is cached "
+                 "locally or downloads on first use (~10-15 s each, "
+                 "network required).")
         # h2he uses separate per-molecule caches; count what is already local
         # for the molecule set in play (CO is cached ExoMol, ignores the knob)
         _h2he_mols = [m for m in forward.MOLECULES + extra_mols if m != "CO"]

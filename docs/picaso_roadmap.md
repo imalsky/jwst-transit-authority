@@ -54,18 +54,21 @@ findings behind its design decisions, and the features deliberately deferred
 
 ## Stated science limits (intrinsic, not bugs)
 
-- **No SO2 / S2 / S8** under the picaso provider: equilibrium sulfur sits in
-  H2S / OCS. The WASP-39b photochemical-sulfur headline science stays
-  VULCAN-only. The GUI removes SO2 from the menus; `canonical_params`
-  refuses it loudly. Since v20 both equilibrium sulfur carriers ARE
-  modeled: H2S is in the picaso BASE RT set (it is the dominant
-  equilibrium S reservoir at 700-1500 K and part of picaso's own default
-  species set; measured max removed-molecule signal 1259 ppm on the W39b
-  10x-solar default) and OCS is an opt-in extra under BOTH engines
-  (nu3 ~4.85 um inside G395H/PRISM; 69 ppm max on the same default --
-  real but marginal, hence opt-in). The SNCHO network names the species
-  COS; the registry token maps to the table's OCS column via
-  `picaso_chem.VULCAN_TO_TABLE`.
+- **No SO2 / S2 / S8 / CS2** under the picaso provider: equilibrium sulfur
+  sits in H2S / OCS. The WASP-39b photochemical-sulfur headline science
+  stays VULCAN-only, and so does CS2 (a v25 extra: it is a photochemical
+  sulfur carrier with no Visscher gas column). The GUI removes them from
+  the menus; `canonical_params` refuses them loudly. Since v20 both
+  equilibrium sulfur carriers ARE modeled: H2S is in the picaso BASE RT
+  set (it is the dominant equilibrium S reservoir at 700-1500 K and part
+  of picaso's own default species set; measured max removed-molecule
+  signal 1259 ppm on the W39b 10x-solar default) and OCS is an opt-in
+  extra under BOTH engines (nu3 ~4.85 um inside G395H/PRISM; 69 ppm max
+  on the same default -- real but marginal, hence opt-in). The SNCHO
+  network names the species COS; the registry token maps to the table's
+  OCS column via `picaso_chem.VULCAN_TO_TABLE`. The v25 hydrocarbon
+  extras C2H4 / C2H6 ARE available under both engines: the Visscher
+  tables carry both gas columns.
 - **Species tabulated but spectrally invisible**: the Visscher tables
   carry Na, K, TiO, VO, Fe, FeH, CrH, PH3, N2 (and more) -- all counted
   in the mean molecular weight, none in the opacity. Na/K are doubly out

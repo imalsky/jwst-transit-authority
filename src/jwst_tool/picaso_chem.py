@@ -85,14 +85,16 @@ CK_NODES_AVAILABLE = tuple(
     if not (f in _EXTREME_FEH and c not in _EXTREME_CO))
 assert len(CK_NODES_AVAILABLE) == 70
 
-#: RT molecules the provider supplies (NO SO2/S2/S8: equilibrium sulfur sits
-#: in H2S/OCS -- the W39b photochemical-sulfur science stays VULCAN-only).
-#: H2S is BASE here (v20): it is the dominant equilibrium sulfur reservoir at
-#: 700-1500 K (and in picaso's own default species set), and leaving it
-#: opt-in made the default eq-vs-kinetics comparison asymmetric on sulfur
-#: (the vulcan base carries SO2 while the picaso base carried no S at all).
+#: RT molecules the provider supplies (NO SO2/S2/S8/CS2: equilibrium sulfur
+#: sits in H2S/OCS -- photochemical sulfur science, CS2 included, stays
+#: VULCAN-only). H2S is BASE here (v20): it is the dominant equilibrium
+#: sulfur reservoir at 700-1500 K (and in picaso's own default species set),
+#: and leaving it opt-in made the default eq-vs-kinetics comparison
+#: asymmetric on sulfur (the vulcan base carries SO2 while the picaso base
+#: carried no S at all). C2H4/C2H6 joined the extras in v25: the Visscher
+#: tables carry both gas columns and SPECIES_ELEMENTS already counts them.
 PICASO_MOLECULES = ["H2O", "CO2", "CO", "CH4", "H2S"]
-PICASO_EXTRA_MOLECULES = ["C2H2", "HCN", "NH3", "OCS"]
+PICASO_EXTRA_MOLECULES = ["C2H2", "C2H4", "C2H6", "HCN", "NH3", "OCS"]
 
 #: registry vulcan-token -> table column, for species where the SNCHO
 #: network and the Visscher tables disagree on the name; the picaso chem

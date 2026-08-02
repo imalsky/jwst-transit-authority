@@ -89,9 +89,10 @@ retrieval framework uses):
         bot_flux      constant bottom-boundary rows [species, flux, vdep]
                       (flux in molecules cm^-2 s^-1, deposition velocity
                       vdep in cm s^-1)
-      extra_mols    opt-in RT molecules beyond the base set (C2H2/H2S/HCN/
-                    NH3/OCS; under picaso H2S is base and the extras are
-                    C2H2/HCN/NH3/OCS)
+      extra_mols    opt-in RT molecules beyond the base set (C2H2/C2H4/
+                    C2H6/CS2/H2S/HCN/NH3/OCS; under picaso H2S is base and
+                    the extras are C2H2/C2H4/C2H6/HCN/NH3/OCS -- no CS2:
+                    photochemical sulfur, like SO2)
       rt_ptop_bar / rt_integration / rt_dit_res  (v15)
                     ExoJAX RT top pressure (band-saturation "wall" knob),
                     ArtTransPure chord-integration scheme (simpson/trapezoid),
@@ -185,8 +186,12 @@ MOLECULES = ["H2O", "CO2", "CO", "CH4", "SO2"]   # always-on WIDE-profile set
 # spectrum. C2H2/HCN carry the high-C/O signal, H2S the 3.8-4.6 um reduced-sulfur
 # feature, NH3 the cool (<~900 K) nitrogen chemistry, OCS the second
 # equilibrium sulfur carrier (nu3 ~4.85 um; the SNCHO network token is COS).
-EXTRA_MOLECULES = ["C2H2", "H2S", "HCN", "NH3", "OCS"]
-_VERSION = 24  # model_cache buster: bump whenever the physics or the
+# v25 additions (requested by the upstream VULCAN author): CS2 is a
+# photochemical sulfur carrier (bands near 4.6 and 6.5 um); C2H4/C2H6 are
+# CH4-photolysis products, hydrocarbon-chemistry tracers on cool planets
+# (C2H4 ~10.5 um, C2H6 ~12.2 um).
+EXTRA_MOLECULES = ["C2H2", "C2H4", "C2H6", "CS2", "H2S", "HCN", "NH3", "OCS"]
+_VERSION = 25  # model_cache buster: bump whenever the physics or the
                # canonical key set changes (invalidates all cached spectra).
                # Per-version history lives in notes.md. v18 = the PICASO
                # equilibrium provider + picaso_climate T-P mode; v19 = the
@@ -199,7 +204,14 @@ _VERSION = 24  # model_cache buster: bump whenever the physics or the
                # inverse-square g(r) in vulcan_forward.exojax_rt
                # transmission dtau (was 1/r-linear via exojax gravity_profile;
                # ~-50 ppm absolute / ~-32 ppm differential at W39b -- audit
-               # 2026-07-28, _gravity_profile_invsq docstring there).
+               # 2026-07-28, _gravity_profile_invsq docstring there). v25 =
+               # CS2/C2H4/C2H6 extras + VULCAN-JAX config-parity sync: the
+               # extras alone would not invalidate old keys (extra_mols is in
+               # the key), but the sibling's post-0.3.1 W39b.yaml parity
+               # commits (conver_ignore 14-species list -> [], wall_clock_max
+               # 3600 -> null) change the convergence gate and termination
+               # for the default (non-condensing) path, which inherits both
+               # knobs from the cfg -- notes.md v25 has the commit trail.
 
 # Baseline (unperturbed) carbon-to-oxygen ratio of the shipped network, defined
 # the standard way for exoplanet atmospheres: the total-carbon / total-oxygen
@@ -385,8 +397,8 @@ def default_tirr(planet: str) -> float:
 # chem_provider selects the atmospheric-state engine; everything downstream of
 # the chemistry (ExoJax RT, one binning operator, Pandeia noise, detect/
 # fisher) is SHARED. The picaso provider is FD-only (numpy/numba, not
-# differentiable), equilibrium-only (no photochemistry -> no SO2/S2/S8: the
-# W39b sulfur science stays VULCAN-only), and its composition axes are the
+# differentiable), equilibrium-only (no photochemistry -> no SO2/S2/S8/CS2:
+# the W39b sulfur science stays VULCAN-only), and its composition axes are the
 # Visscher 2121 grid (C/O hard-capped at 1.10). Composition Jacobians under
 # picaso are SYMMETRIC TWO-CELL INTERPOLANT SECANTS with a one-sided-secant
 # kink gate (picaso_chem.FD_KINK_TOL) -- the defaults sit ON grid nodes where
@@ -1117,9 +1129,9 @@ def canonical_params(params: dict) -> dict:
         raise ValueError(
             f"extra_mols {sorted(bad_mols)} are not available under "
             f"chem_provider='picaso': it supplies {_pc0.PICASO_MOLECULES} + "
-            f"optional {_pc0.PICASO_EXTRA_MOLECULES}. There is NO SO2/S2/S8 "
-            "-- equilibrium sulfur sits in H2S/OCS; photochemical sulfur "
-            "science needs chem_provider='vulcan'.")
+            f"optional {_pc0.PICASO_EXTRA_MOLECULES}. There is NO "
+            "SO2/S2/S8/CS2 -- equilibrium sulfur sits in H2S/OCS; "
+            "photochemical sulfur science needs chem_provider='vulcan'.")
     if bad_mols:
         raise ValueError(
             f"unknown RT molecule(s) {sorted(bad_mols)}. This tool ships opacity "
@@ -1210,9 +1222,9 @@ def canonical_params(params: dict) -> dict:
                 f"extra_mols {sorted(_bad_extra)} are not available under "
                 "the PICASO provider: it supplies "
                 f"{_pc.PICASO_MOLECULES} + optional "
-                f"{_pc.PICASO_EXTRA_MOLECULES}. There is NO SO2/S2/S8 -- "
-                "equilibrium sulfur sits in H2S/OCS; photochemical sulfur "
-                "science needs chem_provider='vulcan'.")
+                f"{_pc.PICASO_EXTRA_MOLECULES}. There is NO SO2/S2/S8/CS2 "
+                "-- equilibrium sulfur sits in H2S/OCS; photochemical "
+                "sulfur science needs chem_provider='vulcan'.")
     # --- climate T-P mode matrix (v18; both providers) ----------------------
     if tp_mode == "picaso_climate":
         from jwst_tool import picaso_chem as _pc
