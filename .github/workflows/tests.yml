@@ -2,7 +2,8 @@ name: tests
 
 # Fast, dependency-light CI: the whole unit suite is numpy-only (the pandeia and
 # JAX/VULCAN-JAX/ExoJax imports are function-local, so every jwst_tool module
-# imports with numpy alone). It exercises the count-space binning operator, the
+# imports with numpy alone), plus two LIGHT touchpoints on the sibling packages
+# that the install step below supplies. It exercises the count-space binning operator, the
 # noise/floor/covariance math, detection + Fisher nuisance projection, the
 # scenario covariances, and the forward-param gating. The env-gated slow test
 # (JWST_TOOL_RUN_SLOW=1: 3 real forward runs) and the pandeia/PandExo parity
@@ -22,16 +23,28 @@ jobs:
         # all three tested so the floor claim stays verified.
         python-version: ["3.10", "3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install minimal deps (no pandeia / VULCAN-JAX stack)
-        # --no-deps: vulcan-retrieval lives on TestPyPI, so a plain editable
-        # install would try (and fail) to resolve it from PyPI. The unit suite
-        # never reaches the function-local retrieval_framework imports.
+      - name: Install minimal deps (no pandeia / ExoJAX stack)
+        # --no-deps throughout: the siblings are not on PyPI, so a plain
+        # editable install would try (and fail) to resolve them there, and
+        # their own trees (exojax, the full JAX stack) are not needed here.
+        #
+        # The two siblings ARE needed, from GitHub, for two light touchpoints
+        # the unit suite reaches (they were the 6 failures 2026-07-22..08-02):
+        #   vulcan-jax     located with importlib.find_spec for its bundled
+        #                  atm/*.txt T-P tables; the package is never executed
+        #   vulcan-forward `from vulcan_forward import constants`, pure
+        #                  constants, no jax/exojax imports
+        # Tracking their main is deliberate: it matches how the HF Space
+        # deploys (fresh clones of main) and catches cross-repo breaks here
+        # rather than in a rebuild.
         run: |
           pip install "jax>=0.6" numpy scipy matplotlib pytest
+          pip install --no-deps "vulcan-jax @ git+https://github.com/imalsky/jax-vulcan.git"
+          pip install --no-deps "vulcan-forward @ git+https://github.com/imalsky/vulcan-forward.git"
           pip install --no-deps -e .
       - name: Run unit tests
         run: python -m pytest tests -q -ra
