@@ -1,9 +1,10 @@
 """One-command data bootstrap: ``jwst-tool fetch``.
 
 Downloads every missing dataset that has a public direct URL, skips whatever
-is already present, and ends with exact instructions for the few pieces that
-cannot be scripted: two STScI Box downloads (Box shared links refuse
-programmatic requests) and the Pandeia conda environment. Line lists and the
+is already present, and ends with exact instructions for the few pieces it
+does not fetch itself: two STScI Box downloads (Box shared links serve HTML,
+not the file, so they need either a browser or the markup-dependent recipe in
+MANUAL) and the Pandeia conda environment. Line lists and the
 ExoMol CO tables are left to their existing on-first-use fetchers, and the
 FastChem binary compiles itself on the first run. Stdlib only, like
 datacheck; every failure is loud and the command is idempotent.
@@ -79,16 +80,18 @@ FETCHES = (
           tar_subtree="grp/redcat/trds/grid/phoenix"),
 )
 
-# What fetch cannot script, printed verbatim after the downloads. Box shared
-# links serve HTML to programmatic clients, so these two stay browser steps.
+# What fetch does not download itself, printed verbatim after the downloads.
+# These two live on STScI Box, whose /v/ links serve HTML rather than the file.
+# That is scriptable (see the recipe below, verified 2026-08-04) but it depends
+# on Box's page markup, which is theirs to change without notice -- so it stays
+# out of the automatic path and is documented instead.
 MANUAL = """\
 The Pandeia backend is a MATCHED TRIPLE: the engine, the reference data, and
 the PSF library must all be release {release}. The worker refuses to run a
 mixed set, so do not upgrade one without the others.
 
-Two downloads need a browser (STScI Box refuses scripted requests). Both links
-are on STScI's installation page, which lists the trees for the supported
-release:
+Two trees are not downloaded automatically. Both links are on STScI's
+installation page, which lists the trees for the supported release:
   https://outerspace.stsci.edu/spaces/PEN/pages/77530136/Pandeia%2BEngine%2BInstallation
 
   1. Pandeia reference data, pandeia_data-{release}-jwst (~20 MB):
@@ -96,8 +99,19 @@ release:
   2. Pandeia PSF library, pandeia_psfs-{release}-jwst (~4 GB):
      extract to: {psf}
 
+A browser is the simple path. To script them instead: the Box /v/ link
+returns HTML that carries the file's "sharedName", its "typedID":"f_<id>",
+and its exact "size"; feeding the first two to
+
+  https://stsci.app.box.com/index.php?rm=box_download_shared_file\\
+      &shared_name=<sharedName>&file_id=f_<id>
+
+serves the tarball. The 4 GB transfer is cut short repeatedly, so loop with
+curl -C - until the byte count on disk equals that "size". CHECK THE BYTE
+COUNT: a truncated transfer still exits 0.
+
 The Pandeia engine runs in its own conda environment (once):
-  conda create -n pandeia_{env_suffix} python=3.11
+  conda create -n pandeia_{env_suffix} python=3.12
   conda run -n pandeia_{env_suffix} pip install pandeia.engine=={release}
 then point JWST_TOOL_PANDEIA_PYTHON at that environment's python.
 

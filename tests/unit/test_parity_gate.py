@@ -260,23 +260,44 @@ def test_bright_star_group_difference_of_two_fails(gate, passing):
     assert any("ngroup 20 vs 18" in p for p in problems), problems
 
 
-def test_committed_artifact_does_not_pass_the_gate(gate):
-    """Guard against the committed artifact being mistaken for a current pass.
+def test_committed_artifact_passes_the_gate_on_the_supported_release(gate):
+    """The committed artifact must BE a current pass, and stay one.
 
-    It must keep failing until it is regenerated on the supported release with
-    worker v7. If this ever starts passing without a regeneration, something
-    loosened the gate.
+    Until 2026-08-04 this asserted the opposite: the committed artifact was
+    the pre-gate 2026.2/worker-v5 one, which rendered NOT EVALUATED and had
+    certified nothing, so the guard pinned that it must keep failing "until it
+    is regenerated on the supported release with worker v7". That regeneration
+    has happened -- both sides on the Pandeia 2026.7 triple -- so the guard now
+    pins the end state instead: re-running validate() on what is committed
+    must come back clean, on the supported release, at the required worker
+    version. A backend bump that lands without a fresh parity run fails here.
     """
     import json
 
     path = (PARITY.parents[1] / "outputs" / "parity_summary.json")
     if not path.is_file():                              # pragma: no cover
         pytest.skip("committed parity_summary.json not present")
-    problems = gate["validate"](json.loads(path.read_text()))
-    assert problems, "the stale 2026.2/worker-v5 artifact must not pass"
-    joined = " ".join(problems)
-    assert "worker_version=5" in joined
-    assert "2026.2" in joined
+    summary = json.loads(path.read_text())
+
+    problems = gate["validate"](summary)
+    assert not problems, f"the committed artifact no longer passes: {problems}"
+
+    # ... and it is a pass on the SUPPORTED release, not just any release
+    assert summary["gate"]["passed"] is True
+    assert summary["gate"]["required_pandeia_release"] == \
+        gate["REQUIRED_PANDEIA_RELEASE"]
+    # the two sides name the engine field differently ("engine_version" ours,
+    # "pandeia_engine_version" PandExo's); both record all three releases
+    want = gate["REQUIRED_PANDEIA_RELEASE"]
+    for sname, star in summary["stars"].items():
+        for side, engine_key in (("provenance_ours", "engine_version"),
+                                 ("provenance_pandexo",
+                                  "pandeia_engine_version")):
+            prov = star[side]
+            for field in (engine_key, "refdata_version", "psf_version"):
+                assert str(prov.get(field)) == want, (
+                    f"{sname}/{side}: {field}={prov.get(field)!r} is not the "
+                    f"supported {want}")
 
 
 def test_plots_refuse_a_summary_without_a_passing_gate(plots):

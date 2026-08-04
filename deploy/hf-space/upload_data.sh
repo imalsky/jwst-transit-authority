@@ -29,20 +29,39 @@ if [ ! -e "$ROOT/vulcan-jwst-tool/data/cdbs/grid/phoenix/catalog.fits" ]; then
     exit 1
 fi
 
+# Stage per TOP-LEVEL ENTRY, not per tree. The old check was a single
+# sentinel file ("does the phoenix catalog exist in the stage?"), so a stage
+# left over from an earlier run made this skip wholesale -- and anything added
+# to data/ since then, e.g. a new pandeia release pair, was silently never
+# uploaded. The Space then boots without it and every noise step errors.
+# Known limit: this adds MISSING entries, it does not refresh changed files
+# inside an entry already present. Delete the entry (or the stage) to re-copy.
 # -RL: follow symlinks so the staged copy is self-contained.
-if [ ! -e "$STAGE/jwst-data/cdbs/grid/phoenix/catalog.fits" ]; then
-    echo "Staging jwst-data (~7 GB copy, needs the disk space) ..."
-    mkdir -p "$STAGE"
-    cp -RL "$ROOT/vulcan-jwst-tool/data" "$STAGE/jwst-data"
-fi
-if [ ! -d "$STAGE/retrieval-data/cm24_wasp39b" ]; then
-    echo "Staging retrieval-data ..."
-    # The engine's line lists + opacity cache still live in the retrieval
-    # checkout on the maintainer's machine; the dataset folder keeps the
-    # name "retrieval-data" deliberately, because renaming it would mean
-    # re-uploading gigabytes. $VULCAN_FORWARD_DATA points at it at boot.
-    cp -RL "$ROOT/vulcan-retrieval/data" "$STAGE/retrieval-data"
-fi
+stage_tree() {                  # stage_tree <src-dir> <dst-dir> <label>
+    local src="$1" dst="$2" label="$3" entry base added=0
+    mkdir -p "$dst"
+    for entry in "$src"/*; do
+        [ -e "$entry" ] || continue          # unmatched glob
+        base="$(basename "$entry")"
+        if [ ! -e "$dst/$base" ]; then
+            echo "Staging $label/$base ..."
+            cp -RL "$entry" "$dst/"
+            added=$((added + 1))
+        fi
+    done
+    if [ "$added" -eq 0 ]; then
+        echo "$label: already staged, nothing new."
+    fi
+    return 0
+}
+
+echo "Staging jwst-data (first run copies ~7 GB, needs the disk space) ..."
+stage_tree "$ROOT/vulcan-jwst-tool/data" "$STAGE/jwst-data" jwst-data
+# The engine's line lists + opacity cache still live in the retrieval
+# checkout on the maintainer's machine; the dataset folder keeps the
+# name "retrieval-data" deliberately, because renaming it would mean
+# re-uploading gigabytes. $VULCAN_FORWARD_DATA points at it at boot.
+stage_tree "$ROOT/vulcan-retrieval/data" "$STAGE/retrieval-data" retrieval-data
 
 # PICASO reference tree (v18.1): OPTIONAL science data for the PICASO
 # provider + climate mode -- staged from JWST_TOOL_PICASO_REFDATA when set

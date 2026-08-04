@@ -21,9 +21,12 @@ dist/
 # Large synphot reference data (fetch from ssb.stsci.edu/trds; worker preflight guides you)
 data/cdbs/calspec/
 
-# Large pandeia reference data (one-time ~4.3 GB download; see README "Backend configuration")
-data/pandeia_data-2026.2-jwst/
-data/pandeia_psfs-2026.2-jwst/
+# Large pandeia reference data (~4.3 GB per release; see README "Backend
+# configuration"). Globbed, not per-release: these were pinned to the 2026.2
+# names, so adding the 2026.7 triple made 4.3 GB show up as untracked and one
+# `git add -A` away from the history.
+data/pandeia_data-*/
+data/pandeia_psfs-*/
 # PandExo-side scratch from the 2026-07-12 parity run (cdbs symlink shim +
 # noise cache + a pickled single run) -- machine-local, never tracked
 pandeia_2026_refdata/

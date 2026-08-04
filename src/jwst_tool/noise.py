@@ -37,12 +37,14 @@ under the selected extraction/detector configuration -- an instrument-model
 planning forecast. PandExo parity status is per-backend and lives in
 tests/parity/outputs/REPORT.md, which the fail-closed gate
 (tests/parity/scripts/run_parity.py) keeps honest: a parity claim exists only
-for a backend triple whose committed artifact PASSES the gate. The archival
-2026.2 backend was matched on configuration, timing, wavelength grids, and
-extracted flux, with the sigma difference attributed to the noise model
-(Pandeia full extracted noise vs PandExo's analytic fml) and this tool
-conservative; the 2026.7 triple has NO committed parity artifact yet -- rerun
-the suite before treating its output as validated. Absolute sigmas are still
+for a backend triple whose committed artifact PASSES the gate. Since
+2026-08-04 the SUPPORTED 2026.7 triple has one: both sides on Pandeia 2026.7
+(engine, refdata and PSFs), matched on configuration, timing, wavelength
+grids, and extracted flux, with the sigma difference attributed to the noise
+model (Pandeia full extracted noise vs PandExo's analytic fml) and this tool
+conservative. It is the first artifact ANY backend has that the gate actually
+evaluated -- the older 2026.2 one predates the gate and renders NOT
+EVALUATED, so it never certified anything. Absolute sigmas are still
 pandeia-extracted-noise forecasts, NOT labeled PandExo-identical. Pandeia's
 extracted noise includes photon (with the HgCdTe quantum-yield/Fano excess
 variance below ~2 um), background, dark, and correlated read noise + IPC -- it

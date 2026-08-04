@@ -30,7 +30,7 @@ pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/
    deliberately not a package dependency:
 
 ```bash
-conda create -n pandeia_2026_7 python=3.11
+conda create -n pandeia_2026_7 python=3.12
 conda run -n pandeia_2026_7 pip install pandeia.engine==2026.7
 ```
 

@@ -2,34 +2,41 @@
  "stars": {
   "w39_like": {
    "provenance_ours": {
-    "engine_version": "2026.2",
-    "refdata_path": "/Users/imalsky/Desktop/Emulators/VULCAN_Project/pandeia_2026_refdata/pandeia_data-2026.2-jwst",
-    "refdata_name": "pandeia_data-2026.2-jwst",
-    "refdata_version": "2026.2",
+    "engine_version": "2026.7",
+    "refdata_path": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_data-2026.7-jwst",
+    "refdata_name": "pandeia_data-2026.7-jwst",
+    "psf_path": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_psfs-2026.7-jwst",
+    "psf_name": "pandeia_psfs-2026.7-jwst",
+    "refdata_version": "2026.7",
     "refdata_version_source": "VERSION_DATA",
+    "psf_version": "2026.7",
+    "psf_version_source": "VERSION_PSF",
     "python": "3.12.13",
     "numpy": "2.5.1",
-    "worker_version": 5
+    "worker_version": 7
    },
    "provenance_pandexo": {
-    "pandeia_engine_version": "2026.2",
-    "pandexo_version": "unknown",
-    "pandexo_path": "/opt/homebrew/Caskroom/miniforge/base/envs/pandeia_2026/lib/python3.12/site-packages/pandexo",
-    "refdata": "/Users/imalsky/Desktop/Emulators/VULCAN_Project/pandeia_2026_refdata/pandeia_data-2026.2-jwst",
-    "psf_dir": "/Users/imalsky/Desktop/Emulators/VULCAN_Project/pandeia_2026_refdata/pandeia_psfs-2026.2-jwst",
+    "pandeia_engine_version": "2026.7",
+    "pandexo_version": "2026.7",
+    "pandexo_commit": "34e42d81f782c8358bb30fc6e8cdf4b87e488263",
+    "pandexo_path": "/opt/homebrew/Caskroom/miniforge/base/envs/pandeia_2026_7/lib/python3.12/site-packages/pandexo",
+    "refdata": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_data-2026.7-jwst",
+    "refdata_version": "2026.7",
+    "psf_dir": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_psfs-2026.7-jwst",
+    "psf_version": "2026.7",
     "python": "3.12.13",
     "numpy": "2.5.1"
    },
    "modes": [
     {
      "key": "nirspec_prism",
-     "status": "OK",
+     "status": "SATURATED_ABOVE_LIMIT",
      "npix_ours": 403,
      "npix_pandexo": 403,
      "npix_matched": 403,
      "ngroup_ours": 2,
      "ngroup_pandexo": 1,
-     "sat_frac_ours": 0.8548803964038463,
+     "sat_frac_ours": 0.8342846140961538,
      "t_int_ours_s": 0.69896,
      "t_int_pandexo_s": 0.45232,
      "t_frame_pandexo_s": 0.22616,
@@ -51,33 +58,33 @@
      },
      "flux_ratio": {
       "n": 403,
-      "median": 0.997561324522317,
-      "p05": 0.9663245605986358,
-      "p95": 1.53172949520515,
-      "max_abs_dev": 1.0318725667167352
+      "median": 0.9975611725862965,
+      "p05": 0.9663245675438944,
+      "p95": 1.531731797460855,
+      "max_abs_dev": 1.031873218557826
      },
      "sigma_ratio_matched": {
       "n": 403,
-      "median": 1.2066434209820032,
-      "p05": 1.058733085709579,
-      "p95": 1.5139848841085461,
-      "max_abs_dev": 0.5687409416622324
+      "median": 1.2041222850584463,
+      "p05": 1.058701292610334,
+      "p95": 1.5089417399878844,
+      "max_abs_dev": 0.5633076096096321
      },
      "sigma_ratio_policy": {
       "n": 403,
-      "median": 1.5000271008756798,
-      "p05": 1.3161537978350186,
-      "p95": 1.8820956688519637,
-      "max_abs_dev": 0.950165132323445
+      "median": 1.4968929751310185,
+      "p05": 1.3161142745511232,
+      "p95": 1.8758263330042135,
+      "max_abs_dev": 0.9434107381211181
      },
-     "var_excess_ours": 1.9137953580340372,
-     "var_excess_pandexo": 1.22135915708185,
+     "var_excess_ours": 1.9111377202202957,
+     "var_excess_pandexo": 1.2220115580237085,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good. Ngroups=1 is a new mode since Cycle 4 and has not been rigorously tested. Proceed with caution.",
       "Group Number Too High?": "All good",
       "Non linear?": "All good",
       "Saturated?": "All good",
-      "% full well high?": "All good",
+      "% full well high?": "All good (42% < 80%)",
       "Num Groups Reset?": "All good",
       "Minimum Integrations?": "All good"
      }
@@ -88,13 +95,13 @@
      "npix_ours": 3330,
      "npix_pandexo": 3330,
      "npix_matched": 3330,
-     "ngroup_ours": 124,
+     "ngroup_ours": 125,
      "ngroup_pandexo": 125,
-     "sat_frac_ours": 0.7910317887920674,
-     "t_int_ours_s": 112.77048,
+     "sat_frac_ours": 0.7936544556837816,
+     "t_int_ours_s": 113.67248000000001,
      "t_int_pandexo_s": 113.652,
      "t_frame_pandexo_s": 0.902,
-     "n_int_ours": 89,
+     "n_int_ours": 88,
      "n_int_pandexo_in": 89.0,
      "n_int_pandexo_out": 89.0,
      "config_ours": {
@@ -112,33 +119,33 @@
      },
      "flux_ratio": {
       "n": 3330,
-      "median": 0.9973466127422339,
-      "p05": 0.9435818345329026,
-      "p95": 1.0392368197020059,
-      "max_abs_dev": 0.2532638701766179
+      "median": 0.997346672204852,
+      "p05": 0.9435819572453303,
+      "p95": 1.0392369887181092,
+      "max_abs_dev": 0.2532637447673558
      },
      "sigma_ratio_matched": {
       "n": 3330,
-      "median": 1.1078327314857965,
-      "p05": 1.0766757294367686,
-      "p95": 1.1329928172056516,
-      "max_abs_dev": 0.1780675027498102
+      "median": 1.1033786047227205,
+      "p05": 1.0722944045954914,
+      "p95": 1.1283945920772096,
+      "max_abs_dev": 0.1732891685301874
      },
      "sigma_ratio_policy": {
       "n": 3330,
-      "median": 1.1078327314857965,
-      "p05": 1.0766757294367686,
-      "p95": 1.1329928172056516,
-      "max_abs_dev": 0.1780675027498102
+      "median": 1.1096300916041764,
+      "p05": 1.0783697756192676,
+      "p95": 1.1347878137322995,
+      "max_abs_dev": 0.17993675242734253
      },
-     "var_excess_ours": 1.2203217334553422,
-     "var_excess_pandexo": 1.014136489019966,
+     "var_excess_ours": 1.2105283174576336,
+     "var_excess_pandexo": 1.0141711573445793,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
       "Group Number Too High?": "All good",
       "Non linear?": "All good",
       "Saturated?": "All good",
-      "% full well high?": "All good",
+      "% full well high?": "All good (79% < 80%)",
       "Num Groups Reset?": "All good",
       "Minimum Integrations?": "All good"
      }
@@ -149,15 +156,15 @@
      "npix_ours": 3424,
      "npix_pandexo": 3424,
      "npix_matched": 3424,
-     "ngroup_ours": 57,
-     "ngroup_pandexo": 57,
-     "sat_frac_ours": 0.7894782975754958,
-     "t_int_ours_s": 52.33648,
-     "t_int_pandexo_s": 52.316,
+     "ngroup_ours": 58,
+     "ngroup_pandexo": 58,
+     "sat_frac_ours": 0.7939367613731971,
+     "t_int_ours_s": 53.23848,
+     "t_int_pandexo_s": 53.218,
      "t_frame_pandexo_s": 0.902,
-     "n_int_ours": 192,
-     "n_int_pandexo_in": 193.0,
-     "n_int_pandexo_out": 193.0,
+     "n_int_ours": 189,
+     "n_int_pandexo_in": 190.0,
+     "n_int_pandexo_out": 190.0,
      "config_ours": {
       "subarray": "sub2048",
       "readout": "nrsrapid",
@@ -173,33 +180,33 @@
      },
      "flux_ratio": {
       "n": 3424,
-      "median": 1.0009061394130285,
-      "p05": 0.9654490886312591,
-      "p95": 1.0704792091290956,
-      "max_abs_dev": 0.15798654134546875
+      "median": 1.0009059801376474,
+      "p05": 0.9654490290445948,
+      "p95": 1.0704797771438677,
+      "max_abs_dev": 0.1579865863077229
      },
      "sigma_ratio_matched": {
       "n": 3424,
-      "median": 1.095207333053093,
-      "p05": 1.065485394439117,
-      "p95": 1.1306834760892022,
-      "max_abs_dev": 0.22389534450008886
+      "median": 1.095354762001075,
+      "p05": 1.065646142514738,
+      "p95": 1.1307695113379397,
+      "max_abs_dev": 0.2240432094113589
      },
      "sigma_ratio_policy": {
       "n": 3424,
-      "median": 1.0980557314475416,
-      "p05": 1.0682564924725537,
-      "p95": 1.133624140291061,
-      "max_abs_dev": 0.22707843269630223
+      "median": 1.098248703007512,
+      "p05": 1.0684615929762316,
+      "p95": 1.1337570185558854,
+      "max_abs_dev": 0.22727714690837142
      },
-     "var_excess_ours": 1.1994695299107163,
-     "var_excess_pandexo": 1.0134102937757121,
+     "var_excess_ours": 1.199398019371088,
+     "var_excess_pandexo": 1.0132276708557209,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
       "Group Number Too High?": "All good",
       "Non linear?": "All good",
       "Saturated?": "All good",
-      "% full well high?": "All good",
+      "% full well high?": "All good (80% < 80%)",
       "Num Groups Reset?": "All good",
       "Minimum Integrations?": "All good"
      }
@@ -210,15 +217,15 @@
      "npix_ours": 2040,
      "npix_pandexo": 2040,
      "npix_matched": 2040,
-     "ngroup_ours": 19,
-     "ngroup_pandexo": 19,
-     "sat_frac_ours": 0.7739569661476283,
-     "t_int_ours_s": 109.90048,
-     "t_int_pandexo_s": 109.88,
+     "ngroup_ours": 17,
+     "ngroup_pandexo": 17,
+     "sat_frac_ours": 0.7659544447818332,
+     "t_int_ours_s": 98.91248,
+     "t_int_pandexo_s": 98.892,
      "t_frame_pandexo_s": 5.494,
-     "n_int_ours": 91,
-     "n_int_pandexo_in": 92.0,
-     "n_int_pandexo_out": 92.0,
+     "n_int_ours": 102,
+     "n_int_pandexo_in": 103.0,
+     "n_int_pandexo_out": 103.0,
      "config_ours": {
       "subarray": "substrip256",
       "readout": "nisrapid",
@@ -234,33 +241,33 @@
      },
      "flux_ratio": {
       "n": 2040,
-      "median": 1.0203298873547217,
-      "p05": 0.9763009941009716,
-      "p95": 1.2933622087500443,
-      "max_abs_dev": 0.5258453901790843
+      "median": 1.020287990632509,
+      "p05": 0.9762130936932436,
+      "p95": 1.2937895295044481,
+      "max_abs_dev": 0.5245643578024006
      },
      "sigma_ratio_matched": {
       "n": 2040,
-      "median": 1.1157801957955988,
-      "p05": 1.0836751407786713,
-      "p95": 1.1509263439904027,
-      "max_abs_dev": 0.18945910418780443
+      "median": 1.1092858287654668,
+      "p05": 1.076664122837783,
+      "p95": 1.1422962796869998,
+      "max_abs_dev": 0.18327867195174186
      },
      "sigma_ratio_policy": {
       "n": 2040,
-      "median": 1.1218941056487157,
-      "p05": 1.0896131312052357,
-      "p95": 1.1572328369190723,
-      "max_abs_dev": 0.19597673710903418
+      "median": 1.1147102416942811,
+      "p05": 1.081929015470921,
+      "p95": 1.1478821138763418,
+      "max_abs_dev": 0.18906491023233785
      },
-     "var_excess_ours": 1.5274421814253591,
-     "var_excess_pandexo": 1.1194814885692637,
+     "var_excess_ours": 1.5963691381242118,
+     "var_excess_pandexo": 1.1796253781788435,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
       "Group Number Too High?": "All good",
       "Non linear?": "All good",
       "Saturated?": "All good",
-      "% full well high?": "All good",
+      "% full well high?": "All good (77% < 80%)",
       "Num Groups Reset?": "All good",
       "Minimum Integrations?": "All good"
      }
@@ -273,7 +280,7 @@
      "npix_matched": 1812,
      "ngroup_ours": 100,
      "ngroup_pandexo": 100,
-     "sat_frac_ours": 0.16355137755297136,
+     "sat_frac_ours": 0.16313101380024841,
      "t_int_ours_s": 34.40673,
      "t_int_pandexo_s": 34.401610000000005,
      "t_frame_pandexo_s": 0.34061,
@@ -295,35 +302,37 @@
      },
      "flux_ratio": {
       "n": 1812,
-      "median": 0.9962551684035874,
-      "p05": 0.959173440263703,
-      "p95": 1.0097844294145324,
-      "max_abs_dev": 0.14107590538758363
+      "median": 0.9962560794348634,
+      "p05": 0.9592651557669034,
+      "p95": 1.009788896707251,
+      "max_abs_dev": 0.14106668468973815
      },
      "sigma_ratio_matched": {
       "n": 1812,
-      "median": 1.0928383560194028,
-      "p05": 0.9172346884529375,
-      "p95": 1.1025611529055195,
-      "max_abs_dev": 0.15624403079154126
+      "median": 1.0929620620047689,
+      "p05": 0.9171565186467434,
+      "p95": 1.1026950143730867,
+      "max_abs_dev": 0.1562530029998892
      },
      "sigma_ratio_policy": {
       "n": 1812,
-      "median": 1.0947016793776276,
-      "p05": 0.9187986021008753,
-      "p95": 1.1044410539345824,
-      "max_abs_dev": 0.15480540064335124
+      "median": 1.0948255962855433,
+      "p05": 0.9187202990127322,
+      "p95": 1.104575143640112,
+      "max_abs_dev": 0.15481438814959336
      },
-     "var_excess_ours": 1.2215340272328452,
-     "var_excess_pandexo": 1.03952458698514,
+     "var_excess_ours": 1.2220562337366903,
+     "var_excess_pandexo": 1.0397045613361815,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
-      "Group Number Too High?": "Optimized NGROUPS above maximum (100). SET TO NGROUPS=100",
+      "Group Number Too High?": "Optimized NGROUPS (489) exceeds the maximum (100). SET TO NGROUPS=100",
       "Non linear?": "All good",
       "Saturated?": "All good",
-      "% full well high?": "All good",
+      "% full well high?": "All good (16% < 80%)",
       "Num Groups Reset?": "All good",
-      "Minimum Integrations?": "All good"
+      "Minimum Integrations?": "All good",
+      "NIRCam Readout Optimization": "User selected RAPID; readout pattern optimization was not performed. Estimate assumes no target acquisition and a standard 2,100-second initial slew.",
+      "NIRCam Data Excess?": "Estimated data excess is 27.8 GB, above the 15 GB recommended limit. Verify and revise the setup in APT."
      }
     },
     {
@@ -334,7 +343,7 @@
      "npix_matched": 1267,
      "ngroup_ours": 100,
      "ngroup_pandexo": 100,
-     "sat_frac_ours": 0.08626726187727332,
+     "sat_frac_ours": 0.08624691996431597,
      "t_int_ours_s": 34.40673,
      "t_int_pandexo_s": 34.401610000000005,
      "t_frame_pandexo_s": 0.34061,
@@ -356,35 +365,37 @@
      },
      "flux_ratio": {
       "n": 1267,
-      "median": 0.9895171027215699,
-      "p05": 0.943263444919885,
-      "p95": 1.0453887856639428,
-      "max_abs_dev": 0.22450847593691203
+      "median": 0.9895568105486322,
+      "p05": 0.9432545701063231,
+      "p95": 1.0454106155668286,
+      "max_abs_dev": 0.2245647755077651
      },
      "sigma_ratio_matched": {
       "n": 1267,
-      "median": 1.0871952504701643,
-      "p05": 0.9340587893117328,
-      "p95": 1.1106770867935771,
-      "max_abs_dev": 0.13076026808206342
+      "median": 1.0872940715463264,
+      "p05": 0.9340372669383576,
+      "p95": 1.110744226495677,
+      "max_abs_dev": 0.1308174587585138
      },
      "sigma_ratio_policy": {
       "n": 1267,
-      "median": 1.0890489521580617,
-      "p05": 0.9356513885744632,
-      "p95": 1.112570825742131,
-      "max_abs_dev": 0.1326882494788224
+      "median": 1.0891479417272298,
+      "p05": 0.9356298295047726,
+      "p95": 1.11263807991951,
+      "max_abs_dev": 0.13274553766715358
      },
-     "var_excess_ours": 1.2768993761376446,
-     "var_excess_pandexo": 1.1056730824989809,
+     "var_excess_ours": 1.2773532446531852,
+     "var_excess_pandexo": 1.1058928191550708,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
-      "Group Number Too High?": "Optimized NGROUPS above maximum (100). SET TO NGROUPS=100",
+      "Group Number Too High?": "Optimized NGROUPS (929) exceeds the maximum (100). SET TO NGROUPS=100",
       "Non linear?": "All good",
       "Saturated?": "All good",
-      "% full well high?": "All good",
+      "% full well high?": "All good (9% < 80%)",
       "Num Groups Reset?": "All good",
-      "Minimum Integrations?": "All good"
+      "Minimum Integrations?": "All good",
+      "NIRCam Readout Optimization": "User selected RAPID; readout pattern optimization was not performed. Estimate assumes no target acquisition and a standard 2,100-second initial slew.",
+      "NIRCam Data Excess?": "Estimated data excess is 27.8 GB, above the 15 GB recommended limit. Verify and revise the setup in APT."
      }
     },
     {
@@ -393,15 +404,15 @@
      "npix_ours": 372,
      "npix_pandexo": 372,
      "npix_matched": 372,
-     "ngroup_ours": 253,
-     "ngroup_pandexo": 252,
-     "sat_frac_ours": 0.7967275718812127,
-     "t_int_ours_s": 40.23712,
-     "t_int_pandexo_s": 40.23712,
+     "ngroup_ours": 254,
+     "ngroup_pandexo": 253,
+     "sat_frac_ours": 0.7986303466982198,
+     "t_int_ours_s": 40.5552,
+     "t_int_pandexo_s": 40.396159999999995,
      "t_frame_pandexo_s": 0.15904,
-     "n_int_ours": 250,
-     "n_int_pandexo_in": 251.0,
-     "n_int_pandexo_out": 251.0,
+     "n_int_ours": 248,
+     "n_int_pandexo_in": 250.0,
+     "n_int_pandexo_out": 250.0,
      "config_ours": {
       "subarray": "slitlessprism",
       "readout": "fastr1",
@@ -417,33 +428,33 @@
      },
      "flux_ratio": {
       "n": 372,
-      "median": 0.997405530671909,
-      "p05": 0.9950861238648661,
-      "p95": 0.9984312808704147,
-      "max_abs_dev": 0.012053253521418172
+      "median": 0.9974054440290312,
+      "p05": 0.9950853503424085,
+      "p95": 0.998431152858764,
+      "max_abs_dev": 0.012052074221470477
      },
      "sigma_ratio_matched": {
       "n": 372,
-      "median": 1.4848176872130687,
-      "p05": 1.477466302537503,
-      "p95": 1.5945111489774075,
-      "max_abs_dev": 0.6854057589973488
+      "median": 1.4849885757335675,
+      "p05": 1.4776306761734077,
+      "p95": 1.5946187815507162,
+      "max_abs_dev": 0.6854559203457249
      },
      "sigma_ratio_policy": {
       "n": 372,
-      "median": 1.4877843588765844,
-      "p05": 1.4804182861051047,
-      "p95": 1.5976969886152084,
-      "max_abs_dev": 0.6887732064286414
+      "median": 1.4909644090357421,
+      "p05": 1.4835769001021877,
+      "p95": 1.6010357844656085,
+      "max_abs_dev": 0.6922384665435459
      },
-     "var_excess_ours": 30.475606039911675,
-     "var_excess_pandexo": 14.103166330208236,
+     "var_excess_ours": 30.480954000520082,
+     "var_excess_pandexo": 14.102476224616337,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
       "Group Number Too High?": "All good",
       "Non linear?": "All good",
       "Saturated?": "All good",
-      "% full well high?": "All good",
+      "% full well high?": "All good (80% < 80%)",
       "Num Groups Reset?": "All good",
       "Minimum Integrations?": "All good"
      }
@@ -452,34 +463,41 @@
   },
   "bright_hot": {
    "provenance_ours": {
-    "engine_version": "2026.2",
-    "refdata_path": "/Users/imalsky/Desktop/Emulators/VULCAN_Project/pandeia_2026_refdata/pandeia_data-2026.2-jwst",
-    "refdata_name": "pandeia_data-2026.2-jwst",
-    "refdata_version": "2026.2",
+    "engine_version": "2026.7",
+    "refdata_path": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_data-2026.7-jwst",
+    "refdata_name": "pandeia_data-2026.7-jwst",
+    "psf_path": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_psfs-2026.7-jwst",
+    "psf_name": "pandeia_psfs-2026.7-jwst",
+    "refdata_version": "2026.7",
     "refdata_version_source": "VERSION_DATA",
+    "psf_version": "2026.7",
+    "psf_version_source": "VERSION_PSF",
     "python": "3.12.13",
     "numpy": "2.5.1",
-    "worker_version": 5
+    "worker_version": 7
    },
    "provenance_pandexo": {
-    "pandeia_engine_version": "2026.2",
-    "pandexo_version": "unknown",
-    "pandexo_path": "/opt/homebrew/Caskroom/miniforge/base/envs/pandeia_2026/lib/python3.12/site-packages/pandexo",
-    "refdata": "/Users/imalsky/Desktop/Emulators/VULCAN_Project/pandeia_2026_refdata/pandeia_data-2026.2-jwst",
-    "psf_dir": "/Users/imalsky/Desktop/Emulators/VULCAN_Project/pandeia_2026_refdata/pandeia_psfs-2026.2-jwst",
+    "pandeia_engine_version": "2026.7",
+    "pandexo_version": "2026.7",
+    "pandexo_commit": "34e42d81f782c8358bb30fc6e8cdf4b87e488263",
+    "pandexo_path": "/opt/homebrew/Caskroom/miniforge/base/envs/pandeia_2026_7/lib/python3.12/site-packages/pandexo",
+    "refdata": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_data-2026.7-jwst",
+    "refdata_version": "2026.7",
+    "psf_dir": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_psfs-2026.7-jwst",
+    "psf_version": "2026.7",
     "python": "3.12.13",
     "numpy": "2.5.1"
    },
    "modes": [
     {
      "key": "nirspec_prism",
-     "status": "OK",
+     "status": "SATURATED_ABOVE_LIMIT",
      "npix_ours": 265,
-     "npix_pandexo": 403,
+     "npix_pandexo": 402,
      "npix_matched": 265,
      "ngroup_ours": 2,
      "ngroup_pandexo": 1,
-     "sat_frac_ours": 7.3110978058461535,
+     "sat_frac_ours": 7.125190806461538,
      "t_int_ours_s": 0.69896,
      "t_int_pandexo_s": 0.45232,
      "t_frame_pandexo_s": 0.22616,
@@ -501,33 +519,33 @@
      },
      "flux_ratio": {
       "n": 265,
-      "median": 1.000201151106945,
-      "p05": 0.9857872644609941,
-      "p95": 1.0198054333411173,
-      "max_abs_dev": 0.051174640287456
+      "median": 1.0002017458278338,
+      "p05": 0.9857873911944572,
+      "p95": 1.0198054371245333,
+      "max_abs_dev": 0.05117465339948235
      },
      "sigma_ratio_matched": {
       "n": 265,
-      "median": 1.0750681685248777,
-      "p05": 1.0335488411640326,
-      "p95": 1.165516677359134,
-      "max_abs_dev": 0.1754684797476449
+      "median": 1.075331815092542,
+      "p05": 1.0339785494454286,
+      "p95": 1.1655845685128978,
+      "max_abs_dev": 0.17552139169261038
      },
      "sigma_ratio_policy": {
       "n": 265,
-      "median": 1.3364605980809898,
-      "p05": 1.2848462477531097,
-      "p95": 1.448900787225485,
-      "max_abs_dev": 0.461272274133504
+      "median": 1.33678834776219,
+      "p05": 1.2853804354479632,
+      "p95": 1.4489851854567974,
+      "max_abs_dev": 0.46133805110624393
      },
-     "var_excess_ours": 1.2207536711484208,
-     "var_excess_pandexo": 1.06844433663582,
+     "var_excess_ours": 1.221520439890035,
+     "var_excess_pandexo": 1.0686069868513912,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good. Ngroups=1 is a new mode since Cycle 4 and has not been rigorously tested. Proceed with caution.",
       "Group Number Too High?": "All good",
       "Non linear?": "All good",
-      "Saturated?": "Full saturation:\n There are 98 pixels saturated at the end of the first group. These pixels cannot be recovered.",
-      "% full well high?": "All good",
+      "Saturated?": "Full saturation:\n There are 96 pixels saturated at the end of the first group. These pixels cannot be recovered.",
+      "% full well high?": "% full well>80% (360% > 80%)",
       "Num Groups Reset?": "Optimized NGROUPS below minimum (1). SET TO NGROUPS=1",
       "Minimum Integrations?": "All good"
      }
@@ -540,7 +558,7 @@
      "npix_matched": 3330,
      "ngroup_ours": 16,
      "ngroup_pandexo": 17,
-     "sat_frac_ours": 0.7380682216346155,
+     "sat_frac_ours": 0.7346011049278847,
      "t_int_ours_s": 15.354479999999999,
      "t_int_pandexo_s": 16.236,
      "t_frame_pandexo_s": 0.902,
@@ -562,33 +580,33 @@
      },
      "flux_ratio": {
       "n": 3330,
-      "median": 1.0013014538869254,
-      "p05": 0.9802785022566817,
-      "p95": 1.0254361188669054,
-      "max_abs_dev": 0.12377273859064386
+      "median": 1.00130138572712,
+      "p05": 0.9802786632183395,
+      "p95": 1.0254360570224932,
+      "max_abs_dev": 0.12377256108603918
      },
      "sigma_ratio_matched": {
       "n": 3330,
-      "median": 1.1098745870438882,
-      "p05": 1.096424179950069,
-      "p95": 1.1221942119784303,
-      "max_abs_dev": 0.18759092396178612
+      "median": 1.1098265272854695,
+      "p05": 1.0963653994386786,
+      "p95": 1.1221410034720947,
+      "max_abs_dev": 0.18753061013923178
      },
      "sigma_ratio_policy": {
       "n": 3330,
-      "median": 1.0799071459018093,
-      "p05": 1.0668199098253521,
-      "p95": 1.091894131780166,
-      "max_abs_dev": 0.15552508379377028
+      "median": 1.0798603837926912,
+      "p05": 1.0667627164315838,
+      "p95": 1.0918423599431626,
+      "max_abs_dev": 0.15546639848938226
      },
-     "var_excess_ours": 1.233632555763482,
-     "var_excess_pandexo": 1.0151094767602409,
+     "var_excess_ours": 1.2335408821857037,
+     "var_excess_pandexo": 1.0151465325272762,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
       "Group Number Too High?": "All good",
       "Non linear?": "All good",
       "Saturated?": "All good",
-      "% full well high?": "All good",
+      "% full well high?": "All good (78% < 80%)",
       "Num Groups Reset?": "All good",
       "Minimum Integrations?": "All good"
      }
@@ -601,7 +619,7 @@
      "npix_matched": 3424,
      "ngroup_ours": 7,
      "ngroup_pandexo": 7,
-     "sat_frac_ours": 0.7147100331580528,
+     "sat_frac_ours": 0.7057582591045672,
      "t_int_ours_s": 7.23648,
      "t_int_pandexo_s": 7.216,
      "t_frame_pandexo_s": 0.902,
@@ -623,33 +641,33 @@
      },
      "flux_ratio": {
       "n": 3424,
-      "median": 1.00365903166918,
-      "p05": 0.9777389510183543,
-      "p95": 1.060216767877191,
-      "max_abs_dev": 0.24323390060268524
+      "median": 1.003659150215647,
+      "p05": 0.9777389818493676,
+      "p95": 1.0602166390253542,
+      "max_abs_dev": 0.24323364591909946
      },
      "sigma_ratio_matched": {
       "n": 3424,
-      "median": 1.0566927051048274,
-      "p05": 1.04445020740166,
-      "p95": 1.0801559625069295,
-      "max_abs_dev": 0.24117264980384712
+      "median": 1.0565762601497304,
+      "p05": 1.0443217261605775,
+      "p95": 1.080002068391813,
+      "max_abs_dev": 0.2411076142366051
      },
      "sigma_ratio_policy": {
       "n": 3424,
-      "median": 1.0585860818338748,
-      "p05": 1.0463216480842632,
-      "p95": 1.0820913805837957,
-      "max_abs_dev": 0.24339657677950988
+      "median": 1.0584694282332872,
+      "p05": 1.0461929366311324,
+      "p95": 1.0819372107219698,
+      "max_abs_dev": 0.24333142468186253
      },
-     "var_excess_ours": 1.1296524408689703,
-     "var_excess_pandexo": 1.0166895266326073,
+     "var_excess_ours": 1.1294255964019557,
+     "var_excess_pandexo": 1.0167550193890413,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
       "Group Number Too High?": "All good",
       "Non linear?": "All good",
       "Saturated?": "All good",
-      "% full well high?": "All good",
+      "% full well high?": "All good (71% < 80%)",
       "Num Groups Reset?": "All good",
       "Minimum Integrations?": "All good"
      }
@@ -662,7 +680,7 @@
      "npix_matched": 2040,
      "ngroup_ours": 2,
      "ngroup_pandexo": 2,
-     "sat_frac_ours": 0.711969266569181,
+     "sat_frac_ours": 0.7840312374131944,
      "t_int_ours_s": 16.50248,
      "t_int_pandexo_s": 16.482,
      "t_frame_pandexo_s": 5.494,
@@ -684,33 +702,33 @@
      },
      "flux_ratio": {
       "n": 2040,
-      "median": 1.014758104434378,
-      "p05": 0.9881312070887509,
-      "p95": 1.3051460591543569,
-      "max_abs_dev": 0.721976258964935
+      "median": 1.0147487015829992,
+      "p05": 0.9881457495021304,
+      "p95": 1.3050622256264854,
+      "max_abs_dev": 0.7195441504093156
      },
      "sigma_ratio_matched": {
       "n": 2040,
-      "median": 1.064810593841952,
-      "p05": 1.0281071800315955,
-      "p95": 1.118624863232275,
-      "max_abs_dev": 0.19730546039402652
+      "median": 1.0642831819219674,
+      "p05": 1.0278215104760196,
+      "p95": 1.1158867116992204,
+      "max_abs_dev": 0.19542554578418203
      },
      "sigma_ratio_policy": {
       "n": 2040,
-      "median": 1.0665519042346945,
-      "p05": 1.0297884684483296,
-      "p95": 1.1204541773949925,
-      "max_abs_dev": 0.19926344283102426
+      "median": 1.0660236298253032,
+      "p05": 1.0295023317304537,
+      "p95": 1.1177115480968318,
+      "max_abs_dev": 0.1973804539515711
      },
-     "var_excess_ours": 1.2989045480165309,
-     "var_excess_pandexo": 1.0665050608284115,
+     "var_excess_ours": 1.3093611116137633,
+     "var_excess_pandexo": 1.0746478295725284,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
       "Group Number Too High?": "All good",
       "Non linear?": "All good",
       "Saturated?": "All good",
-      "% full well high?": "All good",
+      "% full well high?": "All good (78% < 80%)",
       "Num Groups Reset?": "All good",
       "Minimum Integrations?": "All good"
      }
@@ -723,7 +741,7 @@
      "npix_matched": 1812,
      "ngroup_ours": 67,
      "ngroup_pandexo": 67,
-     "sat_frac_ours": 0.7938634414011025,
+     "sat_frac_ours": 0.7918199661779514,
      "t_int_ours_s": 23.166600000000003,
      "t_int_pandexo_s": 23.16148,
      "t_frame_pandexo_s": 0.34061,
@@ -745,35 +763,37 @@
      },
      "flux_ratio": {
       "n": 1812,
-      "median": 1.0007629417556085,
-      "p05": 0.9635905370088594,
-      "p95": 1.0161497001995832,
-      "max_abs_dev": 0.14787919142330264
+      "median": 1.0007586762487621,
+      "p05": 0.9635810890981271,
+      "p95": 1.016122513041095,
+      "max_abs_dev": 0.14787518819796563
      },
      "sigma_ratio_matched": {
       "n": 1812,
-      "median": 1.0943751066875804,
-      "p05": 0.9699177202108247,
-      "p95": 1.103116682354009,
-      "max_abs_dev": 0.16549231392460095
+      "median": 1.0945085296274293,
+      "p05": 0.9698293186758178,
+      "p95": 1.1032866292734274,
+      "max_abs_dev": 0.16567792718323893
      },
      "sigma_ratio_policy": {
       "n": 1812,
-      "median": 1.0956322870063988,
-      "p05": 0.9710319281832749,
-      "p95": 1.104383904692987,
-      "max_abs_dev": 0.16683119123444312
+      "median": 1.095765863217912,
+      "p05": 0.9709434250956384,
+      "p95": 1.1045540468415556,
+      "max_abs_dev": 0.16701701771918076
      },
-     "var_excess_ours": 1.1913806259010509,
-     "var_excess_pandexo": 1.0074014466092276,
+     "var_excess_ours": 1.19172552875501,
+     "var_excess_pandexo": 1.007434256761241,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
       "Group Number Too High?": "All good",
       "Non linear?": "All good",
       "Saturated?": "All good",
-      "% full well high?": "All good",
+      "% full well high?": "All good (79% < 80%)",
       "Num Groups Reset?": "All good",
-      "Minimum Integrations?": "All good"
+      "Minimum Integrations?": "All good",
+      "NIRCam Readout Optimization": "User selected RAPID; readout pattern optimization was not performed. Estimate assumes no target acquisition and a standard 2,100-second initial slew.",
+      "NIRCam Data Excess?": "Estimated data excess is 27.5 GB, above the 15 GB recommended limit. Verify and revise the setup in APT."
      }
     },
     {
@@ -784,7 +804,7 @@
      "npix_matched": 1267,
      "ngroup_ours": 100,
      "ngroup_pandexo": 100,
-     "sat_frac_ours": 0.6163558834907151,
+     "sat_frac_ours": 0.6162107527977423,
      "t_int_ours_s": 34.40673,
      "t_int_pandexo_s": 34.401610000000005,
      "t_frame_pandexo_s": 0.34061,
@@ -806,35 +826,37 @@
      },
      "flux_ratio": {
       "n": 1267,
-      "median": 0.9979848050626635,
-      "p05": 0.9651615453704052,
-      "p95": 1.0242430154321183,
-      "max_abs_dev": 0.0767321879136652
+      "median": 0.9979837851665468,
+      "p05": 0.9651918350478429,
+      "p95": 1.0242651272159022,
+      "max_abs_dev": 0.07658808101573422
      },
      "sigma_ratio_matched": {
       "n": 1267,
-      "median": 1.0979965558553049,
-      "p05": 1.0092186000566057,
-      "p95": 1.1094118987122117,
-      "max_abs_dev": 0.13908155287376078
+      "median": 1.0981129991114875,
+      "p05": 1.0091815106039976,
+      "p95": 1.1095348412754682,
+      "max_abs_dev": 0.13916255375583453
      },
      "sigma_ratio_policy": {
       "n": 1267,
-      "median": 1.0998686741045471,
-      "p05": 1.0109393491323337,
-      "p95": 1.1113034804757698,
-      "max_abs_dev": 0.14102372231968308
+      "median": 1.0999853159001,
+      "p05": 1.0109021964410563,
+      "p95": 1.1114266326599171,
+      "max_abs_dev": 0.1411048613107777
      },
-     "var_excess_ours": 1.2057298001882462,
-     "var_excess_pandexo": 1.014523765088041,
+     "var_excess_ours": 1.206028650966689,
+     "var_excess_pandexo": 1.01455362085982,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
-      "Group Number Too High?": "Optimized NGROUPS above maximum (100). SET TO NGROUPS=100",
+      "Group Number Too High?": "Optimized NGROUPS (130) exceeds the maximum (100). SET TO NGROUPS=100",
       "Non linear?": "All good",
       "Saturated?": "All good",
-      "% full well high?": "All good",
+      "% full well high?": "All good (61% < 80%)",
       "Num Groups Reset?": "All good",
-      "Minimum Integrations?": "All good"
+      "Minimum Integrations?": "All good",
+      "NIRCam Readout Optimization": "User selected RAPID; readout pattern optimization was not performed. Estimate assumes no target acquisition and a standard 2,100-second initial slew.",
+      "NIRCam Data Excess?": "Estimated data excess is 27.8 GB, above the 15 GB recommended limit. Verify and revise the setup in APT."
      }
     },
     {
@@ -845,11 +867,11 @@
      "npix_matched": 372,
      "ngroup_ours": 39,
      "ngroup_pandexo": 39,
-     "sat_frac_ours": 0.7874679052729079,
-     "t_int_ours_s": 6.202559999999999,
+     "sat_frac_ours": 0.7860573192210374,
+     "t_int_ours_s": 6.3616,
      "t_int_pandexo_s": 6.361599999999999,
      "t_frame_pandexo_s": 0.15904,
-     "n_int_ours": 1627,
+     "n_int_ours": 1586,
      "n_int_pandexo_in": 1587.0,
      "n_int_pandexo_out": 1587.0,
      "config_ours": {
@@ -867,33 +889,33 @@
      },
      "flux_ratio": {
       "n": 372,
-      "median": 1.0010505628356732,
-      "p05": 1.0002619917372693,
-      "p95": 1.0017907163389663,
-      "max_abs_dev": 0.004885212372787606
+      "median": 1.0010504968450165,
+      "p05": 1.0002626339298688,
+      "p95": 1.0017911252149148,
+      "max_abs_dev": 0.00488437885561166
      },
      "sigma_ratio_matched": {
       "n": 372,
-      "median": 1.348384733876921,
-      "p05": 1.3411080572793326,
-      "p95": 1.6160472599170927,
-      "max_abs_dev": 0.7155727780833818
+      "median": 1.3483946570366463,
+      "p05": 1.3411112341230431,
+      "p95": 1.6160792676461637,
+      "max_abs_dev": 0.7156400350725574
      },
      "sigma_ratio_policy": {
       "n": 372,
-      "median": 1.331706482443495,
-      "p05": 1.3245198114940313,
-      "p95": 1.5960582746875573,
-      "max_abs_dev": 0.6943527557660512
+      "median": 1.3488196829438253,
+      "p05": 1.3415339642309803,
+      "p95": 1.6165886701072454,
+      "max_abs_dev": 0.7161808199670197
      },
-     "var_excess_ours": 5.92340202032576,
-     "var_excess_pandexo": 3.29262860639356,
+     "var_excess_ours": 5.923992096445379,
+     "var_excess_pandexo": 3.2929081302322807,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
       "Group Number Too High?": "All good",
       "Non linear?": "All good",
       "Saturated?": "All good",
-      "% full well high?": "All good",
+      "% full well high?": "All good (78% < 80%)",
       "Num Groups Reset?": "All good",
       "Minimum Integrations?": "All good"
      }
@@ -902,21 +924,28 @@
   },
   "faint_k": {
    "provenance_ours": {
-    "engine_version": "2026.2",
-    "refdata_path": "/Users/imalsky/Desktop/Emulators/VULCAN_Project/pandeia_2026_refdata/pandeia_data-2026.2-jwst",
-    "refdata_name": "pandeia_data-2026.2-jwst",
-    "refdata_version": "2026.2",
+    "engine_version": "2026.7",
+    "refdata_path": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_data-2026.7-jwst",
+    "refdata_name": "pandeia_data-2026.7-jwst",
+    "psf_path": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_psfs-2026.7-jwst",
+    "psf_name": "pandeia_psfs-2026.7-jwst",
+    "refdata_version": "2026.7",
     "refdata_version_source": "VERSION_DATA",
+    "psf_version": "2026.7",
+    "psf_version_source": "VERSION_PSF",
     "python": "3.12.13",
     "numpy": "2.5.1",
-    "worker_version": 5
+    "worker_version": 7
    },
    "provenance_pandexo": {
-    "pandeia_engine_version": "2026.2",
-    "pandexo_version": "2026.2",
-    "pandexo_path": "/opt/homebrew/Caskroom/miniforge/base/envs/pandeia_2026/lib/python3.12/site-packages/pandexo",
-    "refdata": "/Users/imalsky/Desktop/Emulators/VULCAN_Project/pandeia_2026_refdata/pandeia_data-2026.2-jwst",
-    "psf_dir": "/Users/imalsky/Desktop/Emulators/VULCAN_Project/pandeia_2026_refdata/pandeia_psfs-2026.2-jwst",
+    "pandeia_engine_version": "2026.7",
+    "pandexo_version": "2026.7",
+    "pandexo_commit": "34e42d81f782c8358bb30fc6e8cdf4b87e488263",
+    "pandexo_path": "/opt/homebrew/Caskroom/miniforge/base/envs/pandeia_2026_7/lib/python3.12/site-packages/pandexo",
+    "refdata": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_data-2026.7-jwst",
+    "refdata_version": "2026.7",
+    "psf_dir": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_psfs-2026.7-jwst",
+    "psf_version": "2026.7",
     "python": "3.12.13",
     "numpy": "2.5.1"
    },
@@ -929,7 +958,7 @@
      "npix_matched": 403,
      "ngroup_ours": 20,
      "ngroup_pandexo": 20,
-     "sat_frac_ours": 0.7975070294230769,
+     "sat_frac_ours": 0.7806420716346154,
      "t_int_ours_s": 4.76984,
      "t_int_pandexo_s": 4.74936,
      "t_frame_pandexo_s": 0.22616,
@@ -951,33 +980,33 @@
      },
      "flux_ratio": {
       "n": 403,
-      "median": 0.9945976688558318,
-      "p05": 0.9453075527396911,
-      "p95": 1.5037159258355273,
-      "max_abs_dev": 0.955962249864597
+      "median": 0.9945977393641953,
+      "p05": 0.9453075612129025,
+      "p95": 1.5037163503677737,
+      "max_abs_dev": 0.9559653392080927
      },
      "sigma_ratio_matched": {
       "n": 403,
-      "median": 1.0874053192168376,
-      "p05": 1.023282819642286,
-      "p95": 1.1523761286328154,
-      "max_abs_dev": 0.17060627928906813
+      "median": 1.0865586584041906,
+      "p05": 1.022680054603224,
+      "p95": 1.152022977468253,
+      "max_abs_dev": 0.1702670755395319
      },
      "sigma_ratio_policy": {
       "n": 403,
-      "median": 1.0902294199499336,
-      "p05": 1.0259403878094142,
-      "p95": 1.1553689650776637,
-      "max_abs_dev": 0.17364646126453254
+      "median": 1.0893805602741955,
+      "p05": 1.0253360573290593,
+      "p95": 1.1550148967440892,
+      "max_abs_dev": 0.1733063765688203
      },
-     "var_excess_ours": 1.3962283284186914,
-     "var_excess_pandexo": 1.1130894237315792,
+     "var_excess_ours": 1.3953457034658132,
+     "var_excess_pandexo": 1.1136644821973807,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
       "Group Number Too High?": "All good",
       "Non linear?": "All good",
       "Saturated?": "All good",
-      "% full well high?": "All good",
+      "% full well high?": "All good (78% < 80%)",
       "Num Groups Reset?": "All good",
       "Minimum Integrations?": "All good"
      }
@@ -988,11 +1017,11 @@
      "npix_ours": 3330,
      "npix_pandexo": 3330,
      "npix_matched": 3330,
-     "ngroup_ours": 1063,
-     "ngroup_pandexo": 1059,
-     "sat_frac_ours": 0.7993568932297926,
-     "t_int_ours_s": 959.7484800000001,
-     "t_int_pandexo_s": 956.12,
+     "ngroup_ours": 1068,
+     "ngroup_pandexo": 1064,
+     "sat_frac_ours": 0.7993371505455604,
+     "t_int_ours_s": 964.2584800000001,
+     "t_int_pandexo_s": 960.63,
      "t_frame_pandexo_s": 0.902,
      "n_int_ours": 10,
      "n_int_pandexo_in": 11.0,
@@ -1012,33 +1041,33 @@
      },
      "flux_ratio": {
       "n": 3330,
-      "median": 0.9924738990251409,
-      "p05": 0.9129769218245255,
-      "p95": 1.1100184468510237,
-      "max_abs_dev": 0.29665890302627074
+      "median": 0.9924739859782858,
+      "p05": 0.9129770770625353,
+      "p95": 1.1100186963116851,
+      "max_abs_dev": 0.2966595617593306
      },
      "sigma_ratio_matched": {
       "n": 3330,
-      "median": 1.169579741265531,
-      "p05": 1.1021679761856777,
-      "p95": 1.2182666976329455,
-      "max_abs_dev": 0.2957072494105486
+      "median": 1.169913194655714,
+      "p05": 1.102494994227754,
+      "p95": 1.21864455390531,
+      "max_abs_dev": 0.29610019086926886
      },
      "sigma_ratio_policy": {
       "n": 3330,
-      "median": 1.2266655812798455,
-      "p05": 1.1559635255933278,
-      "p95": 1.277728891908464,
-      "max_abs_dev": 0.3589492278199926
+      "median": 1.2270153101459216,
+      "p05": 1.1563065050093686,
+      "p95": 1.2781251909102562,
+      "max_abs_dev": 0.35936134829871147
      },
-     "var_excess_ours": 1.3559008661780494,
-     "var_excess_pandexo": 1.0151396209801775,
+     "var_excess_ours": 1.356639448677066,
+     "var_excess_pandexo": 1.0151123152551262,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
       "Group Number Too High?": "All good",
       "Non linear?": "All good",
       "Saturated?": "All good",
-      "% full well high?": "All good",
+      "% full well high?": "All good (80% < 80%)",
       "Num Groups Reset?": "All good",
       "Minimum Integrations?": "All good"
      }
@@ -1049,11 +1078,11 @@
      "npix_ours": 3424,
      "npix_pandexo": 3424,
      "npix_matched": 3424,
-     "ngroup_ours": 497,
-     "ngroup_pandexo": 492,
-     "sat_frac_ours": 0.7986224000741813,
-     "t_int_ours_s": 449.21648000000005,
-     "t_int_pandexo_s": 444.68600000000004,
+     "ngroup_ours": 503,
+     "ngroup_pandexo": 498,
+     "sat_frac_ours": 0.7988576973055327,
+     "t_int_ours_s": 454.62848,
+     "t_int_pandexo_s": 450.098,
      "t_frame_pandexo_s": 0.902,
      "n_int_ours": 22,
      "n_int_pandexo_in": 23.0,
@@ -1073,33 +1102,33 @@
      },
      "flux_ratio": {
       "n": 3424,
-      "median": 1.0014098938105356,
-      "p05": 0.9485137646803528,
-      "p95": 1.0896736960216453,
-      "max_abs_dev": 0.2797130092892456
+      "median": 1.0014100530600873,
+      "p05": 0.9485138395737464,
+      "p95": 1.089673448992476,
+      "max_abs_dev": 0.2797129326956471
      },
      "sigma_ratio_matched": {
       "n": 3424,
-      "median": 1.1238724089868446,
-      "p05": 1.083430629063488,
-      "p95": 1.1668119656845497,
-      "max_abs_dev": 0.35174936519424094
+      "median": 1.1243109209080855,
+      "p05": 1.083860360613762,
+      "p95": 1.1672144449614128,
+      "max_abs_dev": 0.35216670247549153
      },
      "sigma_ratio_policy": {
       "n": 3424,
-      "median": 1.149131122526208,
-      "p05": 1.1077804250727676,
-      "p95": 1.1930357335783592,
-      "max_abs_dev": 0.3821295486736429
+      "median": 1.149579489878469,
+      "p05": 1.1082198147177154,
+      "p95": 1.1934472584627829,
+      "max_abs_dev": 0.38255626549188704
      },
-     "var_excess_ours": 1.2606072315973174,
-     "var_excess_pandexo": 1.0136316605548563,
+     "var_excess_ours": 1.2613748770659985,
+     "var_excess_pandexo": 1.0135268314670072,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
       "Group Number Too High?": "All good",
       "Non linear?": "All good",
       "Saturated?": "All good",
-      "% full well high?": "All good",
+      "% full well high?": "All good (80% < 80%)",
       "Num Groups Reset?": "All good",
       "Minimum Integrations?": "All good"
      }
@@ -1110,15 +1139,15 @@
      "npix_ours": 2040,
      "npix_pandexo": 2040,
      "npix_matched": 2040,
-     "ngroup_ours": 195,
-     "ngroup_pandexo": 193,
-     "sat_frac_ours": 0.7990588242131615,
-     "t_int_ours_s": 1076.84448,
-     "t_int_pandexo_s": 1065.836,
+     "ngroup_ours": 30,
+     "ngroup_pandexo": 30,
+     "sat_frac_ours": 0.14069781368573506,
+     "t_int_ours_s": 170.33447999999999,
+     "t_int_pandexo_s": 170.314,
      "t_frame_pandexo_s": 5.494,
-     "n_int_ours": 9,
-     "n_int_pandexo_in": 10.0,
-     "n_int_pandexo_out": 10.0,
+     "n_int_ours": 59,
+     "n_int_pandexo_in": 60.0,
+     "n_int_pandexo_out": 60.0,
      "config_ours": {
       "subarray": "substrip256",
       "readout": "nisrapid",
@@ -1134,33 +1163,33 @@
      },
      "flux_ratio": {
       "n": 2040,
-      "median": 1.0295672972725998,
-      "p05": 0.963978341775478,
-      "p95": 1.2896728617378974,
-      "max_abs_dev": 0.3773893682935321
+      "median": 1.0296657613904698,
+      "p05": 0.9641460193026365,
+      "p95": 1.2896332823823282,
+      "max_abs_dev": 0.37614129073051217
      },
      "sigma_ratio_matched": {
       "n": 2040,
-      "median": 1.2411972918997203,
-      "p05": 1.149701076691484,
-      "p95": 1.3197057947397457,
-      "max_abs_dev": 0.4145428498267387
+      "median": 1.1245508663983896,
+      "p05": 1.0248810573465188,
+      "p95": 1.186187658394676,
+      "max_abs_dev": 0.3034075524148836
      },
      "sigma_ratio_policy": {
       "n": 2040,
-      "median": 1.3083368226786587,
-      "p05": 1.2118913435643375,
-      "p95": 1.3910920509000848,
-      "max_abs_dev": 0.4910590844526701
+      "median": 1.1340409153758415,
+      "p05": 1.033529995976953,
+      "p95": 1.196197858298454,
+      "max_abs_dev": 0.31440696727426976
      },
-     "var_excess_ours": 3.082560158151364,
-     "var_excess_pandexo": 1.9373690433378297,
+     "var_excess_ours": 3.350784700307136,
+     "var_excess_pandexo": 2.578968772720224,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
-      "Group Number Too High?": "All good",
+      "Group Number Too High?": "Optimized NGROUPS (169) exceeds the maximum (30). SET TO NGROUPS=30",
       "Non linear?": "All good",
       "Saturated?": "All good",
-      "% full well high?": "All good",
+      "% full well high?": "All good (14% < 80%)",
       "Num Groups Reset?": "All good",
       "Minimum Integrations?": "All good"
      }
@@ -1173,7 +1202,7 @@
      "npix_matched": 1812,
      "ngroup_ours": 100,
      "ngroup_pandexo": 100,
-     "sat_frac_ours": 0.01958510255193136,
+     "sat_frac_ours": 0.019543273710687478,
      "t_int_ours_s": 34.40673,
      "t_int_pandexo_s": 34.401610000000005,
      "t_frame_pandexo_s": 0.34061,
@@ -1195,35 +1224,37 @@
      },
      "flux_ratio": {
       "n": 1812,
-      "median": 0.9913368666754121,
-      "p05": 0.9519589605432991,
-      "p95": 1.0520135016175005,
-      "max_abs_dev": 0.1937124188064765
+      "median": 0.9913308652771611,
+      "p05": 0.9519728042600918,
+      "p95": 1.0518697263645458,
+      "max_abs_dev": 0.1937035821700639
      },
      "sigma_ratio_matched": {
       "n": 1812,
-      "median": 1.0436538348780335,
-      "p05": 0.8910780068842853,
-      "p95": 1.0589397789114656,
-      "max_abs_dev": 0.18413283110331535
+      "median": 1.0436425692885645,
+      "p05": 0.8910728040129984,
+      "p95": 1.0589067482399575,
+      "max_abs_dev": 0.18417284626778474
      },
      "sigma_ratio_policy": {
       "n": 1812,
-      "median": 1.0454332970992466,
-      "p05": 0.8925973225772994,
-      "p95": 1.0607453041422843,
-      "max_abs_dev": 0.1827417522263336
+      "median": 1.0454220123015974,
+      "p05": 0.8925921108349553,
+      "p95": 1.0607122171524546,
+      "max_abs_dev": 0.18278183561790196
      },
-     "var_excess_ours": 1.4338368361910139,
-     "var_excess_pandexo": 1.3440479283863869,
+     "var_excess_ours": 1.4347467319942169,
+     "var_excess_pandexo": 1.3452359669913405,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
-      "Group Number Too High?": "Optimized NGROUPS above maximum (100). SET TO NGROUPS=100",
+      "Group Number Too High?": "Optimized NGROUPS (4077) exceeds the maximum (100). SET TO NGROUPS=100",
       "Non linear?": "All good",
       "Saturated?": "All good",
-      "% full well high?": "All good",
+      "% full well high?": "All good (2% < 80%)",
       "Num Groups Reset?": "All good",
-      "Minimum Integrations?": "All good"
+      "Minimum Integrations?": "All good",
+      "NIRCam Readout Optimization": "User selected RAPID; readout pattern optimization was not performed. Estimate assumes no target acquisition and a standard 2,100-second initial slew.",
+      "NIRCam Data Excess?": "Estimated data excess is 27.8 GB, above the 15 GB recommended limit. Verify and revise the setup in APT."
      }
     },
     {
@@ -1234,7 +1265,7 @@
      "npix_matched": 1267,
      "ngroup_ours": 100,
      "ngroup_pandexo": 100,
-     "sat_frac_ours": 0.010929983114941805,
+     "sat_frac_ours": 0.010927485102983431,
      "t_int_ours_s": 34.40673,
      "t_int_pandexo_s": 34.401610000000005,
      "t_frame_pandexo_s": 0.34061,
@@ -1256,35 +1287,37 @@
      },
      "flux_ratio": {
       "n": 1267,
-      "median": 0.9866515532186457,
-      "p05": 0.9229274294929202,
-      "p95": 1.1057513775814138,
-      "max_abs_dev": 0.2261464793035497
+      "median": 0.9866313963399819,
+      "p05": 0.9229400150797382,
+      "p95": 1.1057664087079024,
+      "max_abs_dev": 0.22618559742863265
      },
      "sigma_ratio_matched": {
       "n": 1267,
-      "median": 1.0177203510599013,
-      "p05": 0.896729797238801,
-      "p95": 1.054269612250181,
-      "max_abs_dev": 0.18852524411473115
+      "median": 1.0176965102742472,
+      "p05": 0.8967365225248646,
+      "p95": 1.0542443329948277,
+      "max_abs_dev": 0.18864496215025361
      },
      "sigma_ratio_policy": {
       "n": 1267,
-      "median": 1.0194555958852918,
-      "p05": 0.8982587494100054,
-      "p95": 1.0560671747017112,
-      "max_abs_dev": 0.18714165443843322
+      "median": 1.0194317144503573,
+      "p05": 0.8982654861628909,
+      "p95": 1.056041852344442,
+      "max_abs_dev": 0.18726157659692655
      },
-     "var_excess_ours": 1.946606738826085,
-     "var_excess_pandexo": 1.9631809884136762,
+     "var_excess_ours": 1.9482789751819427,
+     "var_excess_pandexo": 1.9651534029857607,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
-      "Group Number Too High?": "Optimized NGROUPS above maximum (100). SET TO NGROUPS=100",
+      "Group Number Too High?": "Optimized NGROUPS (7286) exceeds the maximum (100). SET TO NGROUPS=100",
       "Non linear?": "All good",
       "Saturated?": "All good",
-      "% full well high?": "All good",
+      "% full well high?": "All good (1% < 80%)",
       "Num Groups Reset?": "All good",
-      "Minimum Integrations?": "All good"
+      "Minimum Integrations?": "All good",
+      "NIRCam Readout Optimization": "User selected RAPID; readout pattern optimization was not performed. Estimate assumes no target acquisition and a standard 2,100-second initial slew.",
+      "NIRCam Data Excess?": "Estimated data excess is 27.8 GB, above the 15 GB recommended limit. Verify and revise the setup in APT."
      }
     },
     {
@@ -1293,11 +1326,11 @@
      "npix_ours": 372,
      "npix_pandexo": 372,
      "npix_matched": 372,
-     "ngroup_ours": 1021,
-     "ngroup_pandexo": 1017,
-     "sat_frac_ours": 0.7990753400082459,
-     "t_int_ours_s": 162.37983999999997,
-     "t_int_pandexo_s": 161.90272,
+     "ngroup_ours": 1022,
+     "ngroup_pandexo": 1018,
+     "sat_frac_ours": 0.7994484621390971,
+     "t_int_ours_s": 162.69791999999998,
+     "t_int_pandexo_s": 162.06176,
      "t_frame_pandexo_s": 0.15904,
      "n_int_ours": 62,
      "n_int_pandexo_in": 63.0,
@@ -1317,33 +1350,33 @@
      },
      "flux_ratio": {
       "n": 372,
-      "median": 0.992319536899058,
-      "p05": 0.9864047574805783,
-      "p95": 0.994596187671132,
-      "max_abs_dev": 0.028005766800278664
+      "median": 0.9923199381052314,
+      "p05": 0.9864053018697344,
+      "p95": 0.9945977111146759,
+      "max_abs_dev": 0.027990616053185313
      },
      "sigma_ratio_matched": {
       "n": 372,
-      "median": 1.5430066074418087,
-      "p05": 1.539843403950812,
-      "p95": 1.5612047548994568,
-      "max_abs_dev": 0.6181763879019586
+      "median": 1.5430477599748242,
+      "p05": 1.539884951931563,
+      "p95": 1.561243435781827,
+      "max_abs_dev": 0.6181842086325431
      },
      "sigma_ratio_policy": {
       "n": 372,
-      "median": 1.555400433911619,
-      "p05": 1.5522118227555044,
-      "p95": 1.57374475357655,
-      "max_abs_dev": 0.6311739974082793
+      "median": 1.5554419169923785,
+      "p05": 1.5522537044603377,
+      "p95": 1.5737837451537298,
+      "max_abs_dev": 0.631181880956986
      },
-     "var_excess_ours": 249.21474887744836,
-     "var_excess_pandexo": 106.3152152079076,
+     "var_excess_ours": 249.25618866781778,
+     "var_excess_pandexo": 106.32698982282457,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
       "Group Number Too High?": "All good",
       "Non linear?": "All good",
       "Saturated?": "All good",
-      "% full well high?": "All good",
+      "% full well high?": "All good (80% < 80%)",
       "Num Groups Reset?": "All good",
       "Minimum Integrations?": "All good"
      }
@@ -1374,6 +1407,20 @@
     "metallicity": 0.0,
     "ks_mag": 13.0
    }
+  }
+ },
+ "gate": {
+  "passed": true,
+  "problems": [],
+  "required_worker_version": 7,
+  "required_pandeia_release": "2026.7",
+  "thresholds": {
+   "min_matched_pixel_frac": 0.99,
+   "max_ngroup_abs_diff": 1,
+   "max_ngroup_rel_diff": 0.01,
+   "max_flux_ratio_dev": 0.03,
+   "sat_limit": 0.8,
+   "wl_match_rtol": 1e-09
   }
  }
 }

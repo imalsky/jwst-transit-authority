@@ -16,7 +16,7 @@ built yet -- there is no Docker on the Mac -- so the first
 | Piece | Where | Notes |
 |---|---|---|
 | GUI + JAX forward model | `app` container, conda env `app` | python 3.12, jax 0.9.2, exojax 2.2.3 |
-| Pandeia noise worker | same container, conda env `pandeia` | pandeia.engine 2026.2 ("current" backend only; "legacy" 3.0 is not deployed) |
+| Pandeia noise worker | same container, conda env `pandeia` | pandeia.engine 2026.7 ("current" backend only; "legacy" 3.0 is not deployed). The engine, `pandeia_data-2026.7-jwst` and `pandeia_psfs-2026.7-jwst` must all be the same release: both trees must be in the uploaded dataset before this image is rebuilt, or every noise step errors (fail-closed by design) |
 | Datasets (~8 GB) | `/srv/vulcan-data/{jwst-data,retrieval-data}` | uploaded once from the Mac |
 | model/noise/adjoint caches | `/srv/vulcan-data/output` | persistent across rebuilds |
 | TLS + auth | `caddy` container | config in `Caddyfile` + `.env` |

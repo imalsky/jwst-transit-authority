@@ -1,8 +1,17 @@
-# Pandeia noise-worker env, captured from the validated Mac env `pandeia_2026`
-# (python 3.12) on 2026-07-19. This env is only entered by
-# jwst_tool/pandeia_worker.py via JWST_TOOL_PANDEIA_PYTHON; the engine/refdata
-# release-match gate (noise worker v5) refuses a mismatched pair loudly.
-pandeia.engine==2026.2
+# Pandeia noise-worker env. The companion pins were captured from the
+# validated Mac env `pandeia_2026` (python 3.12) on 2026-07-19; the ENGINE was
+# moved 2026.2 -> 2026.7 on 2026-08-04 to reach the STScI-supported release.
+# 2026.7 declares only lower bounds on these packages (astropy>=5.3,
+# numpy>=1.21, scipy>=1.9.2, synphot, stsynphot, photutils), so every pin below
+# still satisfies it. This env is only entered by jwst_tool/pandeia_worker.py
+# via JWST_TOOL_PANDEIA_PYTHON; the engine/refdata/PSF release-match gate
+# refuses a mismatched triple loudly.
+#
+# THE ENGINE VERSION HERE AND THE TWO DATA TREES MUST MOVE TOGETHER. Bumping
+# this line alone leaves the deployment mismatched and every noise step stops
+# with an error -- see the BACKEND PIN block in deploy/hf-space/Dockerfile for
+# the full upgrade order.
+pandeia.engine==2026.7
 synphot==1.7.0
 stsynphot==1.5.1
 astropy==8.0.1

@@ -79,33 +79,40 @@ RUN chmod +x /srv/app/entrypoint.sh \
     && chown -R 1000:1000 /srv/vulcan /srv/app
 USER 1000
 
-# BACKEND PIN (2026-08-04). This Space is a consistent 2026.2 deployment:
-# requirements-pandeia.txt installs pandeia.engine==2026.2, and the mounted
-# dataset carries pandeia_data-2026.2-jwst + pandeia_psfs-2026.2-jwst. On
-# 2026-08-03 the `current` token was repointed to the STScI-supported 2026.7
-# release, so leaving this at `current` made the app demand 2026.7 trees that
-# are not in the dataset -- the data panel reported both as missing and every
-# noise step would have stopped with an error (correctly: the worker refuses a
-# mismatched engine/refdata/PSF set rather than running one).
+# BACKEND (2026-08-04). `current` is the STScI-supported 2026.7 triple:
+# pandeia.engine==2026.7 (requirements-pandeia.txt) + pandeia_data-2026.7-jwst
+# + pandeia_psfs-2026.7-jwst. The engine, the reference data and the PSF
+# library must all be the SAME release; the worker refuses a mismatched set
+# rather than running one.
 #
-# `archival_2026_2` selects the matched 2026.2 triple this Space actually has.
-# The app labels it ARCHIVAL and says it is not suitable for planning new
-# proposals, which is accurate.
+# *** DO NOT REBUILD THIS IMAGE UNTIL BOTH 2026.7 TREES ARE IN THE DATASET ***
+# The Space seeds /data/jwst-data from the dataset repo. Until
+# pandeia_data-2026.7-jwst and pandeia_psfs-2026.7-jwst are uploaded there,
+# this pin makes the app demand trees the volume does not have: the data panel
+# reports both missing and every noise step stops with an error. That is the
+# intended fail-closed behaviour, not a silent fallback, and it is exactly what
+# happened on 2026-08-03 when the token was repointed ahead of the data.
 #
-# TO UPGRADE to 2026.7, all three must move together:
-#   1. deploy/requirements-pandeia.txt -> pandeia.engine==2026.7
-#   2. download pandeia_data-2026.7-jwst (~20 MiB) and
-#      pandeia_psfs-2026.7-jwst (~4 GiB) -- browser only, STScI Box refuses
-#      scripted requests -- and upload both to the dataset repo under
-#      jwst-data/
-#   3. drop this pin back to JWST_TOOL_BACKEND=current
-# Doing any one alone leaves a mismatched set, which the worker refuses.
+# Upgrade order (all three, in this order):
+#   1. download pandeia_data-2026.7-jwst (~20 MiB) and
+#      pandeia_psfs-2026.7-jwst (~4 GiB) into vulcan-jwst-tool/data/
+#      (STScI Box; browser, or the scripted recipe in fetch.py's MANUAL --
+#      the PSF transfer truncates and still exits 0, so check byte counts)
+#   2. upload both to the dataset repo under jwst-data/ (upload_data.sh;
+#      DELETE the staging dir first, it skips staging when one already exists)
+#   3. rebuild the Space with this pin at `current`
+#
+# The previous 2026.2 deployment stays selectable as JWST_TOOL_BACKEND=
+# archival_2026_2 for reproducibility, as long as its two trees remain in the
+# dataset. Note it is still the only backend with a committed PandExo parity
+# artifact (tests/parity/outputs/REPORT.md); rerun the parity suite against
+# 2026.7 before treating its numbers as validated.
 ENV VULCAN_PROJECT_ROOT=/srv/vulcan \
     VULCAN_FORWARD_DATA=/data/retrieval-data \
     JWST_TOOL_DATA_DIR=/data/jwst-data \
     JWST_TOOL_OUTPUT_DIR=/data/output \
     JWST_TOOL_PANDEIA_PYTHON=/opt/conda/envs/pandeia/bin/python \
-    JWST_TOOL_BACKEND=archival_2026_2 \
+    JWST_TOOL_BACKEND=current \
     HOME=/data/home \
     PATH=/opt/conda/envs/app/bin:$PATH
 

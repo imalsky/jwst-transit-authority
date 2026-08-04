@@ -44,20 +44,61 @@ def _version_file_release(root, name):
 
 
 def _pandexo_commit(pandexo_dir):
-    """Exact PandExo git commit, or None when installed from a non-git source.
+    """Exact PandExo git commit, or None when it cannot be established.
 
     PandExo is consumed from MASTER, whose behavior moves between releases with
     no version bump (the NIRISS SOSS 30-group cap landed on master one day
     after the 2026-07-12 parity run without changing `pandexo.engine`'s
     version). A version string alone therefore does not identify what ran, so
     the gate requires this commit.
+
+    Two sources, in order of authority:
+
+    1. pip's own record of a `pip install git+...` -- ``direct_url.json`` in
+       the dist-info -- which names the commit pip actually resolved.
+    2. a real git checkout, but ONLY when the discovered work tree actually
+       contains this package.
+
+    That containment check is load-bearing. `git rev-parse` walks UP from its
+    -C directory, so for a pip-installed package under site-packages it finds
+    whatever repository happens to enclose the environment and reports ITS
+    head. Measured 2026-08-04: a conda env under /opt/homebrew returned
+    Homebrew's own HEAD as "the PandExo commit". This function is supposed to
+    fail closed by returning None; instead it silently attributed an unrelated
+    repository's commit, and on a machine where that commit happened to match
+    the gate would have PASSED having verified nothing.
     """
+    import json
+    import subprocess
+
+    # 1. pip's record of the resolved commit (authoritative, no git needed)
     try:
-        import subprocess
+        from importlib.metadata import distribution
+        dist = distribution("pandexo.engine")
+        raw = dist.read_text("direct_url.json")
+        if raw:
+            commit = (json.loads(raw).get("vcs_info") or {}).get("commit_id")
+            if commit:
+                return str(commit)
+    except Exception:
+        pass
+
+    # 2. a genuine checkout of THIS package
+    try:
         top = subprocess.run(
             ["git", "-C", pandexo_dir, "rev-parse", "--show-toplevel"],
             capture_output=True, text=True, timeout=10)
         if top.returncode != 0:
+            return None
+        root = os.path.realpath(top.stdout.strip())
+        pkg = os.path.realpath(pandexo_dir)
+        if not (pkg == root or pkg.startswith(root + os.sep)):
+            return None                     # unrelated enclosing repository
+        if not os.path.isdir(os.path.join(root, ".git")):
+            return None
+        # the work tree must really be PandExo, not a parent that contains it
+        if not any(os.path.exists(os.path.join(root, n))
+                   for n in ("pandexo", "setup.py", "pyproject.toml")):
             return None
         r = subprocess.run(["git", "-C", pandexo_dir, "rev-parse", "HEAD"],
                            capture_output=True, text=True, timeout=10)

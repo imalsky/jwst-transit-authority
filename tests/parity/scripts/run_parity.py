@@ -90,12 +90,36 @@ PANDEXO_MODES = {
                     {"detector": {"subarray": "substrip256",
                                   "readout_pattern": "nisrapid",
                                   "readmode": "nisrapid"}}),
+    # NIRCam and MIRI were pinned only PARTIALLY until 2026-08-04: NIRCam got
+    # a filter and no detector block, MIRI got a readout and no subarray. Both
+    # sides therefore submitted different hardware, so the comparison was not
+    # the matched-configuration one this harness claims to run. Same rule as
+    # the SOSS/MIRI overrides above -- pin to what is actually FLOWN, which is
+    # also what this tool's registry uses -- and the 2026.7 refdata backs both
+    # choices:
+    #   * NIRCam: 'rapid' and 'bright1' are BOTH valid for lw_tsgrism and the
+    #     engine declares NO default, so PandExo's bright1 is its template's
+    #     choice, not the engine's. Grism TSO flies SUBGRISM64 + RAPID.
+    #   * MIRI: 'slitlessprism' is 72 x 416 with tframe 0.15904 s -- the
+    #     subarray LRS slitless TSO actually flies. PandExo's 'slitlessprism_ip'
+    #     is a cropped 68 x 384 variant (and '_ips' 52 x 256), which is why its
+    #     ngroup optimizer landed elsewhere.
+    # Nothing about the 2026.7 upgrade caused this: both releases define all
+    # three slitless subarrays, and the earlier 2026.2 artifact predates the
+    # gate that checks submitted configuration, so it never surfaced.
     "nircam_f322w2": ("NIRCam F322W2",
-                      {"instrument": {"filter": "f322w2"}}),
+                      {"instrument": {"filter": "f322w2"},
+                       "detector": {"subarray": "subgrism64",
+                                    "readout_pattern": "rapid",
+                                    "readmode": "rapid"}}),
     "nircam_f444w": ("NIRCam F444W",
-                     {"instrument": {"filter": "f444w"}}),
+                     {"instrument": {"filter": "f444w"},
+                      "detector": {"subarray": "subgrism64",
+                                   "readout_pattern": "rapid",
+                                   "readmode": "rapid"}}),
     "miri_lrs": ("MIRI LRS",
-                 {"detector": {"readout_pattern": "fastr1",
+                 {"detector": {"subarray": "slitlessprism",
+                               "readout_pattern": "fastr1",
                                "readmode": "fastr1"}}),
 }
 
