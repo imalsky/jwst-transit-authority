@@ -161,13 +161,20 @@ match this version's cache labels.
 The Pandeia engine runs in its own conda environment and is deliberately not a
 package dependency.
 
-**The default backend is Pandeia 2026.2 with `pandeia_data-2026.2-jwst`**, the
-STScI JWST 5.1 release, validated mode by mode against PandExo in `tests/parity/`.
+**The default backend (`current`) is the Pandeia 2026.7 matched triple**
+(`pandeia.engine` 2026.7 + `pandeia_data-2026.7-jwst` +
+`pandeia_psfs-2026.7-jwst`), the STScI-supported release; the worker refuses a
+mismatched triple. **No PandExo parity artifact exists yet for 2026.7**: the
+fail-closed gate in `tests/parity/` marks the committed report NOT EVALUATED,
+so treat 2026.7 output as unvalidated against PandExo until the suite is rerun
+and its report passes the gate.
 
-The backend token `current` is a token, not a currency claim. STScI's supported
-Cycle 6 release moved to 2026.7 on 2026-07-16, so forecasts here are one
-calibration release behind the live ETC until the full engine, reference-data, and
-PSF tuple is upgraded and the parity results are regenerated. See
+`JWST_TOOL_BACKEND=archival_2026_2` selects the previous 2026.2 tuple under its
+honest archival name. That is the backend the per-mode PandExo parity was
+measured on (configuration, timing, wavelength grids, and extracted flux
+matched; the sigma difference is the noise model, with this tool conservative),
+and it is what the public Space pins for reproducibility. STScI labels 2026.2
+archival and unsuitable for planning new proposals. See
 [`audit_decisions_2026-07-21.md`](audit_decisions_2026-07-21.md).
 
 Set `JWST_TOOL_BACKEND=legacy` to select the pinned pandeia 3.0 and
