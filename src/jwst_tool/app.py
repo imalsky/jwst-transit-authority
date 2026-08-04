@@ -47,6 +47,7 @@ TOOL_DIR = Path(__file__).resolve().parent   # forward.py subprocess lives here
 from jwst_tool import adjoint_diag, binning, datacheck, detect, \
     fisher as fisher_mod, forward
 from jwst_tool import noise as noise_mod
+from jwst_tool import proc as proc_mod
 from jwst_tool import share_config
 from jwst_tool import instruments as ins
 from jwst_tool import planets
@@ -395,6 +396,54 @@ def _watch_proc(proc, on_line, on_tick, tick_s: float = 1.0) -> None:
         for raw in full:
             on_line(raw.decode(errors="replace").rstrip())
 
+
+def _managed_proc(cmd):
+    """``proc.terminating`` over a stdout-piped child: the worker must not
+    outlive the script run that started it (see jwst_tool.proc)."""
+    return proc_mod.terminating(subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT))
+
+
+# --- downloads that must not cancel a run ----------------------------------
+# A download button is a WIDGET: clicking one queues a rerun, and a queued
+# rerun CANCELS the script run in flight -- which on the Run pass is the
+# forward model itself, because compute() runs at the BOTTOM of this same
+# script. Every download rendered above that point is therefore a live cancel
+# control for the whole multi-minute wait, and users click them (that is the
+# 2026-08-04 bug report: the configuration download stopped runs on the
+# Space).
+#
+# Such a button reserves its position with `_deferred_download` and is filled
+# by `_render_deferred_downloads` once `run_clicked` is known -- which is only
+# after the whole sidebar has rendered, so a placeholder is the only way the
+# sidebar's own downloads can know. Dead for the duration of the run, live
+# again the moment compute() returns.
+_DEFERRED_DOWNLOADS: list = []
+
+
+def _deferred_download(label: str, data, file_name: str, mime=None, *,
+                       key: str, help: str | None = None) -> None:
+    """Reserve this position for a download button. Call it where the button
+    belongs; `_render_deferred_downloads` decides live or dead."""
+    _DEFERRED_DOWNLOADS.append(
+        (st.empty(), label, data, file_name, mime, key, help))
+
+
+def _render_deferred_downloads(busy: bool = False) -> None:
+    """Fill every reserved slot. ``busy`` renders dead stand-ins that say why,
+    for the duration of a run."""
+    for slot, label, data, file_name, mime, key, help_ in _DEFERRED_DOWNLOADS:
+        if busy:
+            slot.button(
+                label, disabled=True, key=f"{key}_busy",
+                help="Available again as soon as the run finishes. "
+                     "Downloading is a page interaction, and a page "
+                     "interaction during a run cancels the run.")
+        else:
+            slot.download_button(label, data, file_name, mime, key=key,
+                                 help=help_)
+
+
 # default target precision per parameter (DISPLAY units: dex / K / absolute C/O)
 _TARGET_DEFAULT = {"lnZ": 0.10, "dlnCO": 0.05, "lnKzz": 0.30,
                    "Tirr": 50.0, "Tint": 50.0,
@@ -715,9 +764,11 @@ with st.sidebar:
                         "Kzz in cm^2 s^-1, used when the vertical-mixing "
                         "profile is set to 'Tabulated'. Any number of "
                         "rows. The two header lines are required.")
-                    st.download_button(
+                    # deferred: the sidebar renders long before run_clicked
+                    # exists, and clicking a download cancels a run in flight
+                    _deferred_download(
                         "Download this example (edit and re-upload)",
-                        _tp_example, file_name="example_atm.txt",
+                        _tp_example, "example_atm.txt",
                         key=_k("tpex"))
                 up_tp = st.file_uploader(
                     "Upload an array: T-P (+ optional Kzz) as text",
@@ -1694,7 +1745,9 @@ with st.expander("Run summary & configuration"):
                            if tp_file_path else None),
             floor_table=(np.asarray(floor_table).tolist()
                          if floor_table is not None else None))
-        st.download_button(
+        # deferred: this button sits directly above the progress box, so it
+        # is the natural thing to click while waiting several minutes
+        _deferred_download(
             "Download configuration (JSON)",
             json.dumps(_share, indent=2, default=str).encode(),
             f"jwst_tool_{_slug(planet_label)}_config.json",
@@ -1710,6 +1763,10 @@ with st.expander("Run summary & configuration"):
                    "settings do not validate (see the message above).")
     st.caption("To load a downloaded configuration, use step 0 at the top "
                "of the sidebar.")
+
+
+# run_clicked is finally known: every reserved download slot can be filled
+_render_deferred_downloads(busy=run_clicked)
 
 
 # ---------------------------------------------------------------------------
@@ -1755,9 +1812,6 @@ def _compute_locked():
             pfile = forward.MODEL_CACHE / f"{forward.params_key(params)}.params.json"
             forward.MODEL_CACHE.mkdir(parents=True, exist_ok=True)
             pfile.write_text(json.dumps(forward.canonical_params(params)))
-            proc = subprocess.Popen(
-                [sys.executable, str(TOOL_DIR / "forward.py"), str(pfile)],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             box = st.empty()
             lines = []
 
@@ -1770,8 +1824,11 @@ def _compute_locked():
                     box.code("\n".join(lines[-10:]))
                     bar.tick()
 
-            _watch_proc(proc, _fwd_line, bar.tick)
-            proc.wait()
+            with _managed_proc(
+                    [sys.executable, str(TOOL_DIR / "forward.py"),
+                     str(pfile)]) as proc:
+                _watch_proc(proc, _fwd_line, bar.tick)
+                proc.wait()
             if proc.returncode != 0:
                 status.update(label="Forward model failed", state="error")
                 st.error("The forward model failed. Last output:\n\n```\n"
@@ -1843,6 +1900,9 @@ def _compute_locked():
 
 if run_clicked:
     out = compute()
+    # the run is over (finished, failed, or declined): give the buttons back
+    # without waiting for the next rerun
+    _render_deferred_downloads()
     if out is not None:
         st.session_state["out"] = out
         st.session_state["out_meta"] = dict(
@@ -2202,10 +2262,11 @@ with col1:
             names.append("ALL USABLE (combined)")
             vals.append(comb)
             cols.append("#555555")
-        xrefs, xlabel = (), (f"expected ±{forward.param_axis(gp)} at {tsig:g}σ "
-                             f"({meta['n_transits']} {_ev}"
-                             f"{'s' if meta['n_transits'] > 1 else ''}; "
-                             "lower is better)")
+        # no parenthetical: the transit count and "lower is better" pushed the
+        # label past the axes width and it was cut off. Both are already on
+        # the page -- the count in the run summary and the verdict line, the
+        # direction in the caption under this figure.
+        xrefs, xlabel = (), f"expected ±{forward.param_axis(gp)} at {tsig:g}σ"
         fmt_v = lambda v: f"{v:.3g}"
         vline_target = target
     fig2, ax2 = plt.subplots(figsize=(7.4, 0.52 * len(names) + 1.5), dpi=200)
@@ -2625,16 +2686,20 @@ with st.expander("Model quality and provenance"):
             else:
                 _parts.append(f"{_sym} FD {e:.3f}")
         st.caption(
-            "Jacobian provenance, per row: **FD** rows are central finite "
-            "differences of independently converged solves, Richardson-"
-            "combined, shown "
-            "with their h-vs-2h consistency (0 = perfect, gate "
-            f"{forward.FD_CONSISTENCY_TOL}); **AD** rows are warm-started "
-            "forward-mode derivatives through the solver (photo-on regime; "
-            "in a previous WASP-39 b benchmark AD agreed with FD to "
-            "0.07-1.6% per row, where the 1.6% is the metallicity row's "
-            "stated fixed-grid difference -- method validation, not an "
-            "error estimate for this run). "
+            "How each Jacobian row was computed. "
+            "**FD** rows are central finite differences. Every step "
+            "re-solves the model to convergence, and two step sizes are "
+            "combined (Richardson). The number after FD compares the "
+            "derivative at step h with the one at step 2h. 0 means they "
+            f"agree exactly; a row fails above {forward.FD_CONSISTENCY_TOL}. "
+            "**AD** rows differentiate the solver itself, in forward mode, "
+            "warm-started from the converged state. Photochemistry is on "
+            "for these rows. "
+            "The two methods were compared once on WASP-39 b. They agreed "
+            "to within 0.07-1.6% per row. The 1.6% row is metallicity, "
+            "where the gap is a known fixed-grid difference. That "
+            "comparison checks the method. It is not an error bar for this "
+            "run. "
             f"Rows: {', '.join(_parts)}.")
 
 # --- advanced diagnostics: adjoint sensitivities (reverse-mode AD) -----------
@@ -2715,10 +2780,6 @@ with st.expander("Adjoint sensitivities: which reactions and temperatures "
                                 f"{adjoint_diag.adjoint_key(_cpj, adj_species)}"
                                 ".params.json")
                         _apf.write_text(json.dumps(_cpj))
-                        proc = subprocess.Popen(
-                            [sys.executable, "-m", "jwst_tool.adjoint_diag",
-                             str(_apf), adj_species],
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
                         box = st.empty()
                         lines = []
 
@@ -2732,8 +2793,12 @@ with st.expander("Adjoint sensitivities: which reactions and temperatures "
                                 box.code("\n".join(lines[-10:]))
                                 bar.tick()
 
-                        _watch_proc(proc, _adj_line, bar.tick)
-                        proc.wait()
+                        with _managed_proc(
+                                [sys.executable, "-m",
+                                 "jwst_tool.adjoint_diag", str(_apf),
+                                 adj_species]) as proc:
+                            _watch_proc(proc, _adj_line, bar.tick)
+                            proc.wait()
                         if proc.returncode != 0:
                             status.update(label="Adjoint diagnostics failed",
                                           state="error")

@@ -150,6 +150,44 @@ def test_results_render_with_synthetic_run():
             "Values (CSV)", "Mode details (CSV)"} <= dl_labels
 
 
+def _deferred_labels(at):
+    """(live download buttons, dead busy stand-ins) among the deferred set."""
+    deferred = {"Download configuration (JSON)",
+                "Download this example (edit and re-upload)"}
+    live = {b.label for b in at.get("download_button")} & deferred
+    dead = {b.label for b in at.get("button")} & deferred
+    return live, dead
+
+
+def test_config_download_is_live_when_no_run_is_in_flight():
+    """Downloads rendered ABOVE compute() live in PLACEHOLDERS so they can go
+    dead for the duration of a run: a download button is a widget, clicking
+    one queues a rerun, and a queued rerun cancels the script run in flight --
+    i.e. the forward model itself. This pins the other half of that contract:
+    outside a run the placeholder holds the real, clickable download button,
+    not the dead stand-in.
+    """
+    at = _run_app()
+    assert not at.exception, at.exception
+    live, dead = _deferred_labels(at)
+    assert "Download configuration (JSON)" in live
+    assert not dead, "a busy stand-in must not render outside a run"
+
+
+def test_tp_example_download_is_deferred_too():
+    """The sidebar's T-P example download has the same exposure, and the
+    sidebar renders long before run_clicked exists -- which is exactly why the
+    slots are filled after the Run button rather than in place."""
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["n0_wasp39b_tp"] = "file"
+    at.session_state["n0_wasp39b_tpsrc"] = "upload"   # forward.TP_FILE_UPLOAD
+    at.run()
+    assert not at.exception, at.exception
+    live, dead = _deferred_labels(at)
+    assert "Download this example (edit and re-upload)" in live
+    assert not dead
+
+
 def test_no_intro_gate():
     """The first render is the tool itself: sidebar widgets exist immediately,
     with no acknowledgment button blocking them (2026-07-29 UX pass)."""

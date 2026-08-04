@@ -67,6 +67,7 @@ import numpy as np
 
 from . import binning
 from . import instruments as ins
+from . import proc as proc_mod
 
 _BACKEND_FINGERPRINT = None
 
@@ -220,10 +221,16 @@ def run_pandeia(job: dict, progress=None, force: bool = False) -> dict:
     t_err = threading.Thread(target=lambda: err_buf.write(proc.stderr.read()),
                              daemon=True)
     t_err.start()
-    for line in proc.stdout:
-        if progress:
-            progress(line.rstrip())
-    proc.wait()
+    # ``progress`` is the GUI's callback, so it can raise the exception
+    # Streamlit uses to cancel a script run mid-stream (a BaseException).
+    # The worker must not outlive the run that started it -- it would keep a
+    # CPU busy on shared hardware after the caller's concurrency slot was
+    # released.
+    with proc_mod.terminating(proc):
+        for line in proc.stdout:
+            if progress:
+                progress(line.rstrip())
+        proc.wait()
     t_err.join(timeout=30)
     if proc.returncode != 0 or not out_json.exists():
         err = err_buf.getvalue()
