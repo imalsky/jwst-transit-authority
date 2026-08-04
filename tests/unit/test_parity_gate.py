@@ -91,7 +91,11 @@ def passing(gate):
             "psf_version": rel, "pandexo_version": "2026.7",
             "pandexo_commit": gate["REQUIRED_PANDEXO_COMMIT"],
         },
-        "modes": [_ok_row(k) for k in gate["REQUIRED_UNSATURATED_MODES"]],
+        # sorted(): REQUIRED_UNSATURATED_MODES is a set, and set iteration
+        # order changes with the interpreter's hash seed -- unsorted, these
+        # tests pass or fail depending on which mode lands at index 0
+        # (CI run 30936654631 rolled miri_lrs first and failed 4 tests).
+        "modes": [_ok_row(k) for k in sorted(gate["REQUIRED_UNSATURATED_MODES"])],
     }
     return {"stars": {"w39_like": star}}
 
@@ -221,8 +225,10 @@ def test_config_mismatch_fails_but_miri_implicit_disperser_does_not(gate,
 def test_missing_config_value_fails_outside_exact_miri_exception(gate, passing,
                                                                  field):
     s = copy.deepcopy(passing)
-    row = s["stars"]["w39_like"]["modes"][0]
-    assert row["key"] != "miri_lrs"
+    # deterministically pick a NON-miri row: the exact-miri exception only
+    # covers miri_lrs's derived disperser, so any other mode must fail here
+    row = next(r for r in s["stars"]["w39_like"]["modes"]
+               if r["key"] != "miri_lrs")
     row["config_ours"][field] = None
     problems = gate["validate"](s)
     assert any(f"submitted {field} differs" in p for p in problems), problems
@@ -234,7 +240,8 @@ def test_faint_star_group_rounding_is_allowed(gate, passing):
     test would fail the real, matched artifact."""
     rel = gate["REQUIRED_PANDEIA_RELEASE"]
     star = copy.deepcopy(passing["stars"]["w39_like"])
-    star["modes"] = [_ok_row(k) for k in gate["REQUIRED_UNSATURATED_MODES"]]
+    star["modes"] = [_ok_row(k)
+                     for k in sorted(gate["REQUIRED_UNSATURATED_MODES"])]
     star["modes"][0].update(ngroup_ours=497, ngroup_pandexo=492)   # 1.006%
     star["modes"][1].update(ngroup_ours=195, ngroup_pandexo=193)   # 1.03%
     s = {"stars": {"faint_k": star}}

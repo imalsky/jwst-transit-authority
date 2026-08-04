@@ -143,6 +143,8 @@ st.set_page_config(page_title="JWST Exoplanet Observation Planner",
 st.title("JWST exoplanet observation planner")
 st.markdown(
     "Compare JWST time-series instrument modes for an exoplanet target.\n\n"
+    "0. **Configuration**: load a shared configuration file, or start "
+    "fresh.\n"
     "1. **Target**: select the system and the observation type.\n"
     "2. **Atmosphere**: select the chemistry engine and the atmosphere "
     "model.\n"
@@ -481,6 +483,28 @@ _apply_pending_config()
 _pic_hint = st.session_state.get(K("provider"), "vulcan") == "picaso"
 
 with st.sidebar:
+    # -----------------------------------------------------------------------
+    # Step 0: Load a configuration (optional). The uploaded file was already
+    # APPLIED by _apply_pending_config() above, before any widget existed;
+    # this section is the widget itself plus the outcome messages.
+    # -----------------------------------------------------------------------
+    st.markdown("### 0 · Configuration")
+    _cfg_up = st.file_uploader(
+        "Load a configuration (JSON)", type=["json"], key=K("cfg_upload"))
+    if st.session_state.get("_cfg_load_error"):
+        st.error("The configuration file could not be applied: "
+                 + st.session_state["_cfg_load_error"])
+    elif _cfg_up is not None:
+        st.success("Configuration loaded. Review the steps below and "
+                   "press Run.")
+        for _n in st.session_state.get("_cfg_load_notes") or []:
+            st.warning(f"Not restored: {_n}")
+    else:
+        st.caption("Optional: start from a configuration file downloaded "
+                   "from this tool (Run summary & configuration), or set "
+                   "everything below yourself.")
+    st.divider()
+
     # -----------------------------------------------------------------------
     # Step 1: Target
     # -----------------------------------------------------------------------
@@ -1717,17 +1741,8 @@ with st.expander("Run summary & configuration"):
     else:
         st.caption("Configuration download is unavailable while the "
                    "settings do not validate (see the message above).")
-    _cfg_up = st.file_uploader(
-        "Load a configuration (JSON)", type=["json"], key=K("cfg_upload"))
-    st.caption("Restores every setting a downloaded configuration file "
-               "carries; review the sidebar and press Run.")
-    if st.session_state.get("_cfg_load_error"):
-        st.error("The configuration file could not be applied: "
-                 + st.session_state["_cfg_load_error"])
-    elif _cfg_up is not None:
-        st.success("Configuration loaded into the sidebar.")
-        for _n in st.session_state.get("_cfg_load_notes") or []:
-            st.warning(f"Not restored: {_n}")
+    st.caption("To load a downloaded configuration, use step 0 at the top "
+               "of the sidebar.")
 
 
 # ---------------------------------------------------------------------------
