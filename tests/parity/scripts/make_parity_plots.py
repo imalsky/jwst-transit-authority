@@ -1,17 +1,18 @@
-"""Render the PandExo-parity figures from the committed parity_summary.json and
-(where available) the raw per-wavelength run outputs.
+"""Render PandExo-parity figures from a gate-PASS parity_summary.json and,
+where available, the raw per-wavelength run outputs.
 
 Usage:
     python tests/parity/scripts/make_parity_plots.py
 
 These figures show the quantities that are in PARITY between this tool and
-current PandExo on the same Pandeia 2026.2 engine -- the things that match
+current PandExo on the same Pandeia 2026.7 engine -- the things that match
 1:1: the selected groups, integration time, integration counts, and the
 extracted stellar flux. The depth-uncertainty difference (a noise-model
 difference, not a configuration one) is quantified in REPORT.md, not plotted.
 
-The config/timing figure reads only parity_summary.json (committed, always
-available). The extracted-flux figure additionally reads the raw
+The committed historical summary does not pass the current gate and therefore
+cannot be plotted with current-release labels. The extracted-flux figure also
+reads the raw
 {star}_{ours,pandexo}.json that run_parity.py writes into this same directory
 (git-ignored); it is skipped with a notice if those are absent (a fresh clone
 has the committed figures already, and re-running run_parity.py regenerates
@@ -80,6 +81,26 @@ def load_summary():
     return json.loads((OUTPUTS / "parity_summary.json").read_text())
 
 
+def require_passing_summary(summary):
+    """Return the validated Pandeia release or refuse a stale/failed input."""
+    gate = summary.get("gate")
+    if not gate or not gate.get("passed"):
+        detail = (
+            "has no gate block (regenerate with run_parity.py)"
+            if gate is None else
+            f"failed its gate ({len(gate.get('problems', []))} problems)"
+        )
+        raise RuntimeError(
+            "make_parity_plots: parity_summary.json " + detail
+            + "; refusing to put current-release labels on an unvalidated "
+              "artifact")
+    release = gate.get("required_pandeia_release")
+    if not release:
+        raise RuntimeError(
+            "make_parity_plots: passing gate lacks required_pandeia_release")
+    return str(release)
+
+
 def ok_rows(summary, star):
     return {m["key"]: m for m in summary["stars"][star]["modes"]
             if m.get("status") == "OK"}
@@ -88,7 +109,7 @@ def ok_rows(summary, star):
 # =============================================================================
 # Configuration & timing parity: ours vs PandExo on the 1:1 line
 # =============================================================================
-def fig_config_parity(summary):
+def fig_config_parity(summary, release):
     quantities = [
         ("ngroup_pandexo", "ngroup_ours", "groups / integration"),
         ("t_int_pandexo_s", "t_int_ours_s", "integration time"),
@@ -138,8 +159,9 @@ def fig_config_parity(summary):
     fig.legend(handles=mode_handles + star_handles + line_handle,
                loc="lower center", ncol=6, frameon=False, fontsize=8.5,
                bbox_to_anchor=(0.5, 0.01))
-    fig.suptitle("Configuration & timing parity: this tool vs current PandExo "
-                 "on the same Pandeia 2026.2 engine", fontsize=11.5, y=0.99)
+    fig.suptitle("Configuration & timing parity: this tool vs pinned PandExo "
+                 f"on the same Pandeia {release} engine", fontsize=11.5,
+                 y=0.99)
     fig.text(0.5, 0.91, "Valid configurations only (saturated/unusable configs "
              "are excluded). Config + wavelength grid are bit-identical "
              "(max |Δλ| = 0); groups are independently optimized and agree to "
@@ -157,7 +179,7 @@ def fig_config_parity(summary):
 # Extracted stellar flux parity (the engine product agreeing 1:1)
 # =============================================================================
 def fig_extracted_flux(summary, out_root, mode="nirspec_g395h",
-                       star="w39_like"):
+                       star="w39_like", release="unknown"):
     of = out_root / f"{star}_ours.json"
     pf = out_root / f"{star}_pandexo.json"
     if not (of.exists() and pf.exists()):
@@ -199,7 +221,7 @@ def fig_extracted_flux(summary, out_root, mode="nirspec_g395h",
     ax.set_ylabel("extracted stellar\ncount rate  (e$^-$/s)")
     ax.set_title(f"Extracted stellar flux parity, {LABEL[mode]} on a "
                  f"{STAR_LABEL[star]} star\n(the ETC engine product, "
-                 "Pandeia 2026.2 both sides; wavelength grid bit-identical)")
+                 f"Pandeia {release} both sides; wavelength grid bit-identical)")
     ax.legend(frameon=False, fontsize=9.5)
     ax.annotate("narrow dips = stellar absorption lines in this tool's\n"
                 "PHOENIX spectrum (e.g. Br-α 4.05, Pf-δ 3.30 μm); PandExo's\n"
@@ -228,9 +250,10 @@ def fig_extracted_flux(summary, out_root, mode="nirspec_g395h",
 
 def main():
     summary = load_summary()
+    release = require_passing_summary(summary)
     # raw per-run JSON lives in this dir (written by run_parity.py, git-ignored)
-    made = [fig_config_parity(summary),
-            fig_extracted_flux(summary, OUTPUTS)]
+    made = [fig_config_parity(summary, release),
+            fig_extracted_flux(summary, OUTPUTS, release=release)]
     for pth in made:
         if pth is not None:
             print(f"wrote {pth}")

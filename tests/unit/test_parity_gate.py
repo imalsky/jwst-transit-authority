@@ -25,6 +25,7 @@ import pytest
 
 PARITY = (Path(__file__).resolve().parents[1] / "parity" / "scripts"
           / "run_parity.py")
+PLOTS = PARITY.with_name("make_parity_plots.py")
 
 
 @pytest.fixture(scope="module")
@@ -49,6 +50,17 @@ def gate():
     ns = {"np": np, "__name__": "parity_gate_probe"}
     exec(compile("\n".join(keep), str(PARITY), "exec"), ns)
     return ns
+
+
+@pytest.fixture(scope="module")
+def plots():
+    """Load plotting guards without rendering a figure."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("parity_plots_probe", PLOTS)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _ok_row(key, ngroup=100, sat=0.5):
@@ -77,7 +89,7 @@ def passing(gate):
         "provenance_pandexo": {
             "pandeia_engine_version": rel, "refdata_version": rel,
             "psf_version": rel, "pandexo_version": "2026.7",
-            "pandexo_commit": "34e42d81f782c8358bb30fc6e8cdf4b87e488263",
+            "pandexo_commit": gate["REQUIRED_PANDEXO_COMMIT"],
         },
         "modes": [_ok_row(k) for k in gate["REQUIRED_UNSATURATED_MODES"]],
     }
@@ -124,6 +136,15 @@ def test_missing_pandexo_commit_fails(gate, passing):
     del s["stars"]["w39_like"]["provenance_pandexo"]["pandexo_commit"]
     problems = gate["validate"](s)
     assert any("PandExo git commit" in p for p in problems), problems
+
+
+@pytest.mark.parametrize("commit", ["0" * 40,
+                                     "34e42d81f782c8358bb30fc6e8cdf4b87e488263-dirty"])
+def test_unreviewed_or_dirty_pandexo_commit_fails(gate, passing, commit):
+    s = copy.deepcopy(passing)
+    s["stars"]["w39_like"]["provenance_pandexo"]["pandexo_commit"] = commit
+    problems = gate["validate"](s)
+    assert any("is not the reviewed" in p for p in problems), problems
 
 
 def test_unknown_pandexo_version_fails(gate, passing):
@@ -175,7 +196,8 @@ def test_flux_ratio_drift_fails(gate, passing):
     assert any("extracted-flux median ratio" in p for p in problems), problems
 
 
-def test_config_mismatch_fails_but_an_implicit_default_does_not(gate, passing):
+def test_config_mismatch_fails_but_miri_implicit_disperser_does_not(gate,
+                                                                    passing):
     """A real disagreement fails; an unset-because-derived key does not.
 
     Our registry omits `disperser` for MIRI LRS (the mode admits only the p750l
@@ -183,12 +205,27 @@ def test_config_mismatch_fails_but_an_implicit_default_does_not(gate, passing):
     representation difference, not a configuration difference.
     """
     s = copy.deepcopy(passing)
-    s["stars"]["w39_like"]["modes"][0]["config_ours"]["disperser"] = None
+    row = next(r for r in s["stars"]["w39_like"]["modes"]
+               if r["key"] == "miri_lrs")
+    row["config_ours"]["disperser"] = None
+    row["config_pandexo"]["disperser"] = "p750l"
     assert not [p for p in gate["validate"](s) if "disperser" in p]
 
-    s["stars"]["w39_like"]["modes"][0]["config_ours"]["readout"] = "FASTR1"
+    row["config_ours"]["readout"] = "FASTR1"
     problems = gate["validate"](s)
     assert any("submitted readout differs" in p for p in problems), problems
+
+
+@pytest.mark.parametrize("field", ["subarray", "readout", "filter",
+                                    "disperser"])
+def test_missing_config_value_fails_outside_exact_miri_exception(gate, passing,
+                                                                 field):
+    s = copy.deepcopy(passing)
+    row = s["stars"]["w39_like"]["modes"][0]
+    assert row["key"] != "miri_lrs"
+    row["config_ours"][field] = None
+    problems = gate["validate"](s)
+    assert any(f"submitted {field} differs" in p for p in problems), problems
 
 
 def test_faint_star_group_rounding_is_allowed(gate, passing):
@@ -233,3 +270,18 @@ def test_committed_artifact_does_not_pass_the_gate(gate):
     joined = " ".join(problems)
     assert "worker_version=5" in joined
     assert "2026.2" in joined
+
+
+def test_plots_refuse_a_summary_without_a_passing_gate(plots):
+    with pytest.raises(RuntimeError, match="refusing to put current-release"):
+        plots.require_passing_summary({"stars": {}})
+    with pytest.raises(RuntimeError, match="failed its gate"):
+        plots.require_passing_summary({
+            "gate": {"passed": False, "problems": ["stale"]},
+        })
+
+
+def test_plots_derive_release_label_from_validated_json(plots):
+    assert plots.require_passing_summary({
+        "gate": {"passed": True, "required_pandeia_release": "2026.7"},
+    }) == "2026.7"

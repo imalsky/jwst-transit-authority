@@ -177,6 +177,15 @@ def test_backend_without_separate_psf_tree_is_allowed(tmp_path):
         assert "inside refdata" in prov["psf_version_source"]
 
 
+@pytest.mark.parametrize("psf_dir", [None, ""])
+def test_current_backend_without_separate_psf_tree_is_refused(tmp_path,
+                                                               psf_dir):
+    """The split 2026+ layout must never masquerade as embedded-PSF data."""
+    ref, _ = _triple(tmp_path, "2026.7", "2026.7")
+    with pytest.raises(RuntimeError, match="requires a separate PSF library"):
+        pw._check_backend_match("2026.7", ref, psf_dir)
+
+
 # --- backend registry (item 3) ----------------------------------------------
 
 def test_current_backend_is_the_supported_release_triple():

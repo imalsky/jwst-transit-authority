@@ -15,7 +15,7 @@ Generated 2026-08-03 by `run_parity.py` + `make_report.py` in this directory.
 | faint_k | this tool | 2026.2 | 2026.2 | not recorded | worker v5 |
 | faint_k | PandExo | 2026.2 | not recorded | not recorded | 2026.2 @ commit not r |
 
-Both sides run on the SAME current Pandeia backend, so every difference below is an ESTIMATOR/policy difference, not an engine calibration difference. PandExo is current master (commit in the provenance block). Configuration: constant transit depth 0.01, transit duration 2.8036 h, equal out-of-transit baseline, saturation limit 80%, no noise floor, native (R=None) grids.
+Both sides in this historical artifact ran on the SAME archival Pandeia 2026.2 backend, so its internal differences isolate estimator/policy effects. It is not evidence for the supported 2026.7 backend or the reviewed PandExo commit and therefore cannot gate a release. Configuration: constant transit depth 0.01, transit duration 2.8036 h, equal out-of-transit baseline, saturation limit 80%, no noise floor, native (R=None) grids.
 
 ## Figures (regenerate with `make_parity_plots.py`)
 

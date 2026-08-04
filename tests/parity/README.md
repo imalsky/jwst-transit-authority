@@ -49,8 +49,9 @@ tool's own floor(T/t_int) counts (the shipped policy).
 
 ## Running it
 
-Requires a conda env with `pandeia.engine==2026.2` and PandExo master, the
-extracted `pandeia_data-2026.2-jwst` and `pandeia_psfs-2026.2-jwst` trees,
+Requires a conda env with `pandeia.engine==2026.7` and PandExo at the commit
+pinned by `run_parity.py`, the extracted `pandeia_data-2026.7-jwst` and
+`pandeia_psfs-2026.7-jwst` trees,
 and a synphot CDBS with the phoenix grid, CALSPEC Vega, and the Bessell
 J/H/K + 2MASS Ks bandpasses (fetch missing ones from
 `https://ssb.stsci.edu/trds/comp/nonhst/`). Then:
@@ -60,6 +61,9 @@ JWST_TOOL_PANDEIA_PYTHON=<env python> JWST_TOOL_PANDEIA_REFDATA=<data tree> JWST
 python tests/parity/scripts/make_report.py
 python tests/parity/scripts/make_parity_plots.py
 ```
+
+The plotting command refuses a summary without a passing gate, so an archival
+or failed run cannot be regenerated with current-release labels.
 
 All five environment variables are required and fail loudly; no machine
 paths are baked into the repository. `JWST_TOOL_OUTPUT_DIR` is only the

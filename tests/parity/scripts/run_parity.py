@@ -273,6 +273,10 @@ def compare_mode(key: str, ours: dict, px: dict) -> dict:
 PRODUCTION_WORKER_VERSION = 7
 # The supported Pandeia release; both sides must be on this exact triple.
 REQUIRED_PANDEIA_RELEASE = "2026.7"
+# PandExo is consumed from master, so the release artifact must be tied to the
+# exact reviewed tree rather than merely recording whichever commit happened
+# to be installed on the machine that ran the gate.
+REQUIRED_PANDEXO_COMMIT = "34e42d81f782c8358bb30fc6e8cdf4b87e488263"
 
 # Wavelength match tolerance already used by compare_mode.
 WL_MATCH_RTOL = 1e-9
@@ -359,11 +363,17 @@ def validate(summary: dict) -> list[str]:
                     f"{REQUIRED_PANDEIA_RELEASE}")
 
         # --- PandExo identity -----------------------------------------------
-        if not pp.get("pandexo_commit"):
+        pandexo_commit = pp.get("pandexo_commit")
+        if not pandexo_commit:
             problems.append(
                 f"{sname}: PandExo git commit not recorded. PandExo is used "
                 "from master, whose behavior moves without a version bump, so "
                 "the version string alone does not identify what ran")
+        elif pandexo_commit != REQUIRED_PANDEXO_COMMIT:
+            problems.append(
+                f"{sname}: PandExo commit {pandexo_commit!r} is not the "
+                f"reviewed {REQUIRED_PANDEXO_COMMIT}; a different or dirty "
+                "master tree cannot satisfy this release gate")
         if str(pp.get("pandexo_version", "unknown")).lower() in (
                 "unknown", "none", ""):
             problems.append(
@@ -406,17 +416,18 @@ def validate(summary: dict) -> list[str]:
                     f"rtol {WL_MATCH_RTOL:g} "
                     f"(< {MIN_MATCHED_PIXEL_FRAC:.0%})")
 
-            # Submitted instrument configuration must be identical WHERE BOTH
-            # SIDES NAME A VALUE. Our registry deliberately leaves a key unset
-            # when the mode admits exactly one choice and the engine derives it
-            # (MIRI LRS has only the p750l prism, so `disperser` is absent from
-            # the registry while PandExo reports "p750l"). Failing on
-            # None-vs-value would flag a matched configuration; a genuine
-            # subarray/readout/filter/disperser disagreement still fails.
+            # Submitted instrument configuration must be identical. The one
+            # reviewed representation exception is MIRI LRS: our registry
+            # leaves its sole p750l disperser implicit while PandExo reports it.
+            # A blanket "ignore whenever either side is None" rule would also
+            # hide a genuinely missing subarray/readout/filter on every mode.
             co, cp = row.get("config_ours") or {}, row.get("config_pandexo") or {}
             for field in ("subarray", "readout", "filter", "disperser"):
                 a, b = co.get(field), cp.get(field)
-                if a is not None and b is not None and a != b:
+                implicit_miri_disperser = (
+                    key == "miri_lrs" and field == "disperser"
+                    and a is None and b == "p750l")
+                if not implicit_miri_disperser and a != b:
                     problems.append(
                         f"{tag}: submitted {field} differs "
                         f"(ours={a!r}, pandexo={b!r})")

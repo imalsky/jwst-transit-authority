@@ -374,6 +374,16 @@ def _check_backend_match(engine_version, refdata, psf_dir=None):
 
     prov = {"refdata_version": ref_ver, "refdata_version_source": source}
     if not psf_dir:
+        # Only the legacy 3.x layout embeds its PSFs in the refdata tree.
+        # Current (year-numbered) Pandeia releases split them into a separate
+        # pandeia_psfs tree.  Treating a missing path as "embedded" for every
+        # engine silently bypasses one third of the matched-triple check.
+        if not eng_rel.startswith("3."):
+            raise RuntimeError(
+                f"pandeia.engine {engine_version} requires a separate PSF "
+                "library, but no PSF_DIR was supplied. Point "
+                "JWST_TOOL_PANDEIA_PSF_DIR at the matching pandeia_psfs tree "
+                f"for release {eng_rel}.")
         prov["psf_version"] = None
         prov["psf_version_source"] = "backend carries PSFs inside refdata"
         return prov
