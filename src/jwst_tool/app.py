@@ -12,12 +12,16 @@ parameter (Fisher forecast from consistency-checked Jacobians, vs a target
 uncertainty). Planets beyond WASP-39b come from the registry in planets.py (or
 a fully custom system).
 
-Layout (2026-07-29 UX pass): the sidebar is four numbered steps (Target,
-Atmosphere, Science goal, Observation) plus one "More settings" group holding
-every solver/opacity/diagnostic control; the result page leads with the verdict
-and collapses certificates/provenance into "Model quality and provenance".
-Widget KEYS are unchanged from the pre-redesign layout (tests and cached
-session state rely on them); only placement, labels, and help text moved.
+Layout (2026-07-29 UX pass; opacity & line lists moved into the Atmosphere
+step and the sidebar helps trimmed 2026-08-04): the sidebar is four numbered
+steps (Target, Atmosphere, Science goal, Observation) plus one "More settings"
+group holding the solver/diagnostic controls; the result page leads with the
+verdict and collapses certificates/provenance into "Model quality and
+provenance". Widget KEYS are unchanged from the pre-redesign layout (tests and
+cached session state rely on them); only placement, labels, and help text
+moved. A downloaded configuration JSON is a complete, shareable run setup;
+"Load a configuration" (share_config.py) restores it into the widget state
+before any widget instantiates.
 """
 from __future__ import annotations
 
@@ -43,6 +47,7 @@ TOOL_DIR = Path(__file__).resolve().parent   # forward.py subprocess lives here
 from jwst_tool import adjoint_diag, binning, datacheck, detect, \
     fisher as fisher_mod, forward
 from jwst_tool import noise as noise_mod
+from jwst_tool import share_config
 from jwst_tool import instruments as ins
 from jwst_tool import planets
 from jwst_tool import runlimit
@@ -143,7 +148,7 @@ st.markdown(
     "model.\n"
     "3. **Science goal**: detect a molecule, or constrain a parameter.\n"
     "4. **Observation**: select instrument modes and noise assumptions.\n\n"
-    "Work down the sidebar, then press **Run**. The tool computes a forward "
+    "The tool computes a forward "
     "spectrum and a Pandeia noise forecast, ranks the selected modes, and "
     "reports how many transits or eclipses reach your target. It is a "
     "planning tool, not an atmospheric retrieval.")
@@ -435,6 +440,39 @@ def K(name: str) -> str:
     return f"n{_NONCE}_{name}"
 
 
+def _apply_pending_config() -> None:
+    """Apply a loaded configuration file to the widget state.
+
+    Must run BEFORE any widget instantiates (Streamlit forbids writing a
+    widget's session-state key afterwards). The file's content hash is
+    remembered so it applies once, not on every rerun -- the user can keep
+    editing after loading. Either the whole mapping applies or nothing does
+    (widget_state validates before returning)."""
+    up = st.session_state.get(K("cfg_upload"))
+    if up is None:
+        return
+    raw = up.getvalue()
+    sha = hashlib.sha1(raw).hexdigest()
+    if st.session_state.get("_cfg_applied_sha") == sha:
+        return
+    st.session_state["_cfg_applied_sha"] = sha
+    st.session_state.pop("_cfg_load_error", None)
+    st.session_state.pop("_cfg_load_notes", None)
+    try:
+        cfg = json.loads(raw.decode())
+        state, notes = share_config.widget_state(cfg, K)
+    except (ValueError, RuntimeError, TypeError, UnicodeDecodeError) as e:
+        st.session_state["_cfg_load_error"] = str(e)
+        return
+    st.session_state.pop("restored_tp_path", None)
+    st.session_state.pop("restored_floor_table", None)
+    for k, v in state.items():
+        st.session_state[k] = v
+    st.session_state["_cfg_load_notes"] = notes
+
+
+_apply_pending_config()
+
 # The chemistry-engine choice, read EARLY from session state so widgets that
 # render before the engine selectbox (the stellar-UV selector in step 1) can
 # adapt. Streamlit updates widget state before the rerun executes, so this
@@ -474,44 +512,30 @@ with st.sidebar:
     with st.expander("System parameters", expanded=(planet_key == "custom")):
         teff = st.number_input(
             "Stellar effective temperature, Teff (K)", 3000.0, 7000.0,
-            pdef["star"]["teff"], 50.0, key=_k("teff"),
-            help="Selects the PHOENIX stellar model for the noise forecast "
-                 "(with log g and [Fe/H]).")
+            pdef["star"]["teff"], 50.0, key=_k("teff"))
         logg = st.number_input(
             "Stellar surface gravity, log10(g) (g in cm s^-2)", 3.5, 5.5,
-            pdef["star"]["log_g"], 0.1, key=_k("logg"),
-            help="Feeds the PHOENIX stellar model for the noise forecast.")
+            pdef["star"]["log_g"], 0.1, key=_k("logg"))
         feh = st.number_input("Stellar metallicity, [Fe/H] (dex)", -2.0, 0.5,
                               pdef["star"]["metallicity"], 0.1, key=_k("feh"))
         ks_mag = st.number_input(
             "2MASS Ks magnitude", 4.0, 16.0,
-            pdef["star"]["ks_mag"], 0.1, key=_k("ks"),
-            help="Sets the absolute count rates, and with them saturation "
-                 "and photon noise. Brighter stars saturate more modes.")
+            pdef["star"]["ks_mag"], 0.1, key=_k("ks"))
         rstar = st.number_input(
             "Stellar radius (solar radii)", 0.2, 3.0, pdef["rstar_rsun"],
-            0.01, key=_k("rstar"), format="%.3f",
-            help="Normalizes the transit depth and sets the UV flux at "
-                 "the planet.")
+            0.01, key=_k("rstar"), format="%.3f")
         rp = st.number_input("Planet radius (Jupiter radii)", 0.1, 2.5,
                              pdef["rp_rjup"], 0.01,
                              key=_k("rp"), format="%.3f")
         g_ms2 = st.number_input(
             "Planet surface gravity (m s^-2)", 1.0, 100.0,
-            pdef["gs_cgs"] / 100.0, 0.5, key=_k("g"),
-            help="Sets the scale height: lower gravity means larger "
-                 "spectral features.")
+            pdef["gs_cgs"] / 100.0, 0.5, key=_k("g"))
         orbit_au = st.number_input(
             "Semi-major axis (AU)", 0.005, 1.0,
-            pdef["orbit_au"], 0.001, key=_k("a"), format="%.4f",
-            help="Scales the stellar UV reaching the planet "
-                 "(photochemistry).")
+            pdef["orbit_au"], 0.001, key=_k("a"), format="%.4f")
         t14 = st.number_input(
             "Event duration, T14 (hours)", 0.5, 10.0,
-            pdef["t14_hr"], 0.1, key=_k("t14"),
-            help="Duration of the observed event: the transit in "
-                 "transmission, the secondary eclipse in emission. Sets the "
-                 "in-event integration time per visit.")
+            pdef["t14_hr"], 0.1, key=_k("t14"))
         _uv_ok = datacheck.uv_spectra_status()
         sflux = st.selectbox(
             "Stellar UV spectrum (photochemistry)",
@@ -520,11 +544,7 @@ with st.sidebar:
             format_func=lambda f: (
                 planets.SFLUX_CHOICES[f]
                 + ("" if _uv_ok.get(f) else "  [FILE MISSING]")),
-            key=_k("sflux"), disabled=_pic_hint,
-            help="Shipped VULCAN spectra; pick the nearest spectral type. "
-                 "Drives photolysis (SO2, CH4, ...). A [FILE MISSING] entry "
-                 "means a broken vulcan-jax install; the run would stop with "
-                 "an error.")
+            key=_k("sflux"), disabled=_pic_hint)
         if _pic_hint:
             st.caption("UV spectrum unused: the PICASO engine has no "
                        "photolysis, so this selection has no effect there.")
@@ -539,16 +559,7 @@ with st.sidebar:
     chem_provider = st.selectbox(
         "Chemistry engine", ["vulcan", "picaso"], index=0, key=K("provider"),
         format_func={"vulcan": "VULCAN (photochemical kinetics)",
-                     "picaso": "PICASO (chemical equilibrium)"}.get,
-        help="**VULCAN** solves photochemical kinetics and vertical "
-             "transport. Select it for molecules that photochemistry "
-             "produces, such as SO2. A new run takes several minutes.\n\n"
-             "**PICASO** reads chemical equilibrium from precomputed "
-             "tables and is faster. It has no photochemistry, so no SO2, "
-             "and its tables stop at C/O = 1.10.\n\n"
-             "Both engines use the same radiative-transfer, noise, and "
-             "scoring code, so switching engines shows what the "
-             "disequilibrium physics does.")
+                     "picaso": "PICASO (chemical equilibrium)"}.get)
     _pic = chem_provider == "picaso"
     if _pic:
         st.session_state[K("jacm")] = "fd"   # tables are not differentiable
@@ -573,13 +584,7 @@ with st.sidebar:
             format_func={"guillot": "Guillot (2010)",
                          "file": "Tabulated table (T-P, optional Kzz)",
                          "picaso_climate":
-                             "PICASO radiative-convective (climate solve)"}.get,
-            help="Sets the temperature the chemistry AND the radiative "
-                 "transfer see: a Guillot analytic profile, a table you "
-                 "provide (which also sets the hydrostatic grid), or a "
-                 "PICASO radiative-convective climate solve computed from "
-                 "the stellar irradiation. A profile is never silently "
-                 "substituted.")
+                             "PICASO radiative-convective (climate solve)"}.get)
         tp_kwargs = {}
         tp_file, tp_file_path, tp_file_ok = "", None, True
         if tp_mode == "guillot":
@@ -587,13 +592,9 @@ with st.sidebar:
             # default and the API default can never drift apart again
             tirr0 = planets.default_tirr(pdef)
             tp_kwargs["Tirr"] = st.number_input(
-                "T_irr (K)", 800.0, 2500.0, tirr0, 20.0, key=_k("tirr"),
-                help="About sqrt(2) times the equilibrium temperature.")
+                "T_irr (K)", 800.0, 2500.0, tirr0, 20.0, key=_k("tirr"))
             tp_kwargs["Tint"] = st.number_input(
-                "T_int (K)", 50.0, 500.0, 100.0, 25.0, key=_k("tint"),
-                help="Heat escaping the planet's own interior. (The PICASO "
-                     "climate mode's equivalent setting defaults to 200 K; "
-                     "the two are separate settings.)")
+                "T_int (K)", 50.0, 500.0, 100.0, 25.0, key=_k("tint"))
             tp_kwargs["log_kappa"] = st.number_input(
                 "log10 kappa_IR (cm^2/g)", -4.0, 0.0, -2.3, 0.1, key=_k("lk"))
             tp_kwargs["log_gamma"] = st.number_input(
@@ -602,48 +603,20 @@ with st.sidebar:
         elif tp_mode == "picaso_climate":
             tp_kwargs["tint_cl"] = st.number_input(
                 "Internal temperature T_int (K)", *forward.TINT_CL_RANGE,
-                forward.TINT_CL_DEFAULT, 10.0, key=_k("tintcl"),
-                help="Heat escaping the planet's own interior, expressed as "
-                     "a temperature. It is the one adjustable structure "
-                     "parameter of the climate solve; on strongly irradiated "
-                     "planets the star dominates and the upper atmosphere "
-                     "barely responds to it.")
+                forward.TINT_CL_DEFAULT, 10.0, key=_k("tintcl"))
             tp_kwargs["rfacv"] = st.selectbox(
                 "Day-night heat redistribution",
                 list(forward.RFACV_CHOICES), index=1, key=_k("rfacv"),
                 format_func={0.0: "0: no irradiation (isolated interior)",
                              0.5: "0.5: full redistribution (default)",
-                             1.0: "1: dayside-only"}.get,
-                help="How the star's heat is shared around the planet: 0.5 "
-                     "spreads it evenly over both hemispheres (the usual "
-                     "choice), 1 keeps it all on the day side, 0 is an "
-                     "isolated self-heated object. At extreme settings the "
-                     "profile can leave the modelable temperature range, "
-                     "and the run then stops with an error.")
+                             1.0: "1: dayside-only"}.get)
             tp_kwargs["tio_vo"] = st.checkbox(
                 "Include TiO/VO in climate opacity only", value=False,
-                key=_k("tiovo"),
-                help="TiO and VO absorb strongly only in very hot "
-                     "atmospheres. Off (default) is right for warm planets "
-                     "like WASP-39 b. This affects only the climate "
-                     "solver's heating; the spectrum's molecule list never "
-                     "includes TiO/VO either way.")
+                key=_k("tiovo"))
             tp_kwargs["climate_rcb"] = st.number_input(
                 "Convective-zone seed (deep layer index)",
                 *forward.CLIMATE_RCB_RANGE, forward.CLIMATE_RCB_DEFAULT, 1,
-                key=_k("rcb"),
-                help="Numerical seed for PICASO's climate solver: the "
-                     "initial guess for the deepest convective layer, as an "
-                     f"index on the solve's own internal "
-                     f"{forward.CLIMATE_N_LEVELS}-level grid (unrelated to "
-                     "the 'Vertical layers' setting in More settings). "
-                     "PICASO grows convective zones upward but cannot "
-                     "shrink one seeded too shallow, so leave it at the "
-                     "deep default unless you are probing seed "
-                     "sensitivity. A seed that drives the profile outside "
-                     f"the [{forward.T_WINDOW[0]:.0f}, "
-                     f"{forward.T_WINDOW[1]:.0f}] K opacity window is "
-                     "refused.")
+                key=_k("rcb"))
             if science_mode == "emission":
                 st.warning(
                     "Emission + climate mode: day-side light at some "
@@ -667,11 +640,7 @@ with st.sidebar:
                 horizontal=True, key=_k("tpsrc"),
                 format_func={forward.TP_FILE_SHIPPED:
                              f"Shipped measured profile ({_ship_name})",
-                             forward.TP_FILE_UPLOAD: "Upload an array"}.get,
-                help="The shipped table is the measured T-P + Kzz profile "
-                     "VULCAN bundles for THIS planet, and is the default "
-                     "structure wherever one exists. Uploads use the same "
-                     "VULCAN atm format.")
+                             forward.TP_FILE_UPLOAD: "Upload an array"}.get)
             if not _ship_name:
                 st.warning(
                     "No shipped profile for "
@@ -710,13 +679,29 @@ with st.sidebar:
                 up_tp = st.file_uploader(
                     "Upload an array: T-P (+ optional Kzz) as text",
                     type=["txt", "dat"],
-                    key=_k("tpup"),
-                    help="Same format as the example above (the VULCAN atm "
-                         "format): units comment line, column-name line "
-                         "'Pressure Temp' (+ optional 'Kzz'), then rows of "
-                         "pressure in dyne/cm^2 (monotonic), T in K, Kzz in "
-                         "cm^2 s^-1. Re-gridded onto the chosen layer count.")
-                if up_tp is not None:
+                    key=_k("tpup"))
+                # a loaded shared configuration can carry the table content;
+                # the uploader (whose state cannot be set programmatically)
+                # takes precedence when the user picks a new file
+                if up_tp is None and st.session_state.get("restored_tp_path"):
+                    try:
+                        _rp_tp = Path(st.session_state["restored_tp_path"])
+                        _tab_tp = forward._read_tp_table(_rp_tp)
+                        tp_file_path = str(_rp_tp)
+                        st.caption(
+                            "T-P table restored from the loaded "
+                            f"configuration: {_tab_tp['P_dyn'].size} rows, "
+                            f"T {_tab_tp['T'].min():.0f}-"
+                            f"{_tab_tp['T'].max():.0f} K"
+                            + (", Kzz column present"
+                               if _tab_tp["Kzz"] is not None else
+                               ", no Kzz column")
+                            + ". Upload a file to replace it.")
+                    except (OSError, ValueError) as e:
+                        st.error("The restored T-P table is not usable: "
+                                 f"{e} Upload the table again.")
+                        tp_file_ok = False
+                elif up_tp is not None:
                     _raw_tp = up_tp.getvalue()
                     _sha_tp = hashlib.sha1(_raw_tp).hexdigest()[:16]
                     _dst_tp = forward._uploads_dir() / f"{_sha_tp}.txt"
@@ -762,10 +747,7 @@ with st.sidebar:
                 "Metallicity", _feh_opts,
                 index=_feh_opts.index(1.0), key=K("metnode"),
                 format_func=lambda x: f"{10.0 ** x:.3g} × solar "
-                                      f"([M/H] = {x:+.1f})",
-                help="The climate solver's opacity tables exist only at "
-                     "these fixed metallicity values and cannot be blended, "
-                     "so climate mode offers exactly the shipped choices.")
+                                      f"([M/H] = {x:+.1f})")
             met = float(10.0 ** _feh)
             _co_opts = [c for c in pchem.CO_NODES
                         if (f"feh{_feh:.1f}_co{c:.2f}"
@@ -774,37 +756,15 @@ with st.sidebar:
                 "C/O", _co_opts,
                 index=_co_opts.index(0.55) if 0.55 in _co_opts else 0,
                 key=K(f"conode_{_feh:.1f}"),
-                format_func=lambda c: f"{c:.2f}",
-                help=("Only the shipped table values are available (the "
-                      "most extreme metallicities ship fewer C/O options)."
-                      + (" With the PICASO engine, C/O is not offered as a "
-                         "constraint parameter in climate mode: the "
-                         "chemistry tables kink exactly at these values, "
-                         "so no trustworthy C/O derivative exists here. "
-                         "Metallicity constraints work normally."
-                         if _pic else
-                         " The VULCAN engine computes its own chemistry, "
-                         "so all constraint parameters work normally at "
-                         "any of these values.")))
+                format_func=lambda c: f"{c:.2f}")
         elif _pic:
             met = st.number_input(
                 "Metallicity (× solar)", *forward.PICASO_MET_RANGE, 10.0, 0.5,
-                format="%.2f", key=K("met_pic"),
-                help="Enrichment in elements heavier than helium, 0.1x to "
-                     "100x solar. PICASO's tables are computed at fixed "
-                     "metallicity steps; values in between are smoothly "
-                     "interpolated.")
+                format="%.2f", key=K("met_pic"))
             co_ratio = st.number_input(
                 "C/O (carbon/oxygen number ratio)",
                 *forward.PICASO_CO_RANGE, 0.50, 0.01,
-                format="%.3f", key=K("co_pic"),
-                help="Carbon-to-oxygen number ratio, capped at 1.10 by "
-                     "PICASO's tables (the VULCAN engine goes to 2.0). The "
-                     "tables take a sharp turn exactly at the 0.55 table "
-                     "point, so a C/O constraint requested at 0.55 is "
-                     "refused (the tool never reports a derivative it "
-                     "cannot trust); the default 0.50 sits between table "
-                     "points, where the derivative check passes.")
+                format="%.3f", key=K("co_pic"))
         else:
             # Composition is fully STRUCTURAL (v13, one path for every
             # value): metallicity scales the cfg's O/C/N/S abundances
@@ -816,21 +776,11 @@ with st.sidebar:
             # can never return a wrong spectrum.
             met = st.number_input(
                 "Metallicity (× solar)", 0.1, 100.0, 10.0, 0.5,
-                format="%.2f", key=K("met"),
-                help="Any value in [0.1, 100] × solar; scales the network's "
-                     "O/C/N/S abundances together (He fixed), with a full "
-                     "chemistry re-initialization at every value. Far "
-                     "corners (0.1x, 100x on cold profiles) can fail the "
-                     "convergence gate, which stops the run with an error.")
+                format="%.2f", key=K("met"))
             co_ratio = st.number_input(
                 "C/O (carbon/oxygen number ratio)",
                 0.10, 2.00, float(forward.CO_BASELINE), 0.05,
-                format="%.3f", key=K("co"),
-                help="Any value in [0.1, 2.0]; the default 0.549 is the "
-                     "network's WASP-39 b elemental set (Tsai et al. 2023). "
-                     "Carbon-rich values (> 1) work too, but near C/O = 1 "
-                     "solves slow down and derivatives are ill-conditioned: "
-                     "constrain C/O per side, not across it.")
+                format="%.3f", key=K("co"))
 
     # Kzz and photochemistry are first-class VULCAN physics choices, so they
     # live here in the Atmosphere step (moved out of More settings,
@@ -876,40 +826,25 @@ with st.sidebar:
                 format_func={"const": "Constant",
                              "Pfunc": "Power law in P (Pfunc)",
                              "JM16": "Moses-type P^-0.5 (JM16)",
-                             "file": "Tabulated (Kzz column of the T-P table)"}.get,
-                help="Eddy-diffusion profile. Constant is the validated "
-                     "baseline; Pfunc rises as P^-0.4 above a chosen level; "
-                     "JM16 rises as P^-0.5 above 300 mbar with a deep "
-                     "floor; 'Tabulated' uses the Kzz column of the T-P "
-                     "table (offered in file mode only). The constraint "
-                     "forecast's lnKzz row scales the WHOLE profile in "
-                     "every mode.")
+                             "file": "Tabulated (Kzz column of the T-P table)"}.get)
             kzz_const = kzz_kmax = kzz_plev = kzz_kdeep = 0.0
             kzz_x = 1.0
             if kzz_mode == "const":
                 log_kzz = st.number_input(
                     "log10 Kzz (cm^2 s^-1)", 6.0, 12.0, 9.0, 0.25,
-                    key=_k("kzz"),
-                    help="Constant eddy-diffusion coefficient: stronger "
-                         "mixing quenches photochemical gradients.")
+                    key=_k("kzz"))
                 kzz_const = 10.0 ** log_kzz
             elif kzz_mode == "Pfunc":
                 kzz_kmax = 10.0 ** st.number_input(
                     "log10 deep Kzz (cm^2 s^-1)", 4.0, 11.0, 5.0, 0.25,
-                    key=_k("kzkmax"),
-                    help="Deep-atmosphere Kzz; above the transition level "
-                         "the profile rises as (P_lev/P)^0.4.")
+                    key=_k("kzkmax"))
                 kzz_plev = 10.0 ** st.number_input(
                     "log10 transition level (bar)", -5.0, 2.0, -1.0, 0.25,
-                    key=_k("kzplev"),
-                    help="Pressure above which Kzz starts rising (VULCAN "
-                         "Pfunc K_p_lev).")
+                    key=_k("kzplev"))
             elif kzz_mode == "JM16":
                 kzz_kdeep = 10.0 ** st.number_input(
                     "log10 deep-floor Kzz (cm^2 s^-1)", 4.0, 11.0, 5.0, 0.25,
-                    key=_k("kzkdeep"),
-                    help="Deep floor of the Moses-type profile "
-                         "Kzz = max(K_deep, 1e5 (300 mbar/P)^0.5).")
+                    key=_k("kzkdeep"))
             else:
                 st.caption("Kzz is read from the Kzz column of the uploaded "
                            "array / selected table (a table without a Kzz "
@@ -917,50 +852,88 @@ with st.sidebar:
             if kzz_mode != "const":
                 kzz_x = 10.0 ** st.number_input(
                     "Kzz profile multiplier, log10(f)", -1.0, 1.0, 0.0, 0.05,
-                    key=_k("kzzx"),
-                    help="Multiplies the whole profile (the same direction "
-                         "the constraint forecast's lnKzz row uses); 0 = "
-                         "the profile as specified.")
+                    key=_k("kzzx"))
 
         with st.expander("Photochemistry & transport"):
             if _jac_hint == "ad":
                 st.session_state[K("photo")] = True   # AD needs photolysis ON
             use_photo = st.checkbox(
                 "Photochemistry (UV photolysis)", value=True, key=K("photo"),
-                disabled=(_jac_hint == "ad"),
-                help="Off = thermochemistry + transport only (no photolysis "
-                     "products such as SO2). Detection and finite-difference "
-                     "constraints work either way; the AD differentiation "
-                     "method requires photolysis ON, so this is locked "
-                     "while AD is selected.")
+                disabled=(_jac_hint == "ad"))
             sl_angle_deg = st.number_input(
                 "Photolysis zenith angle (degrees)", 0.0, 89.0, 83.0, 1.0,
-                key=K("sza"), disabled=not use_photo,
-                help="Slant path of the stellar UV. 83 = terminator slant "
-                     "(Tsai et al. 2023 WASP-39 b); smaller angles = more "
-                     "direct illumination.")
+                key=K("sza"), disabled=not use_photo)
             f_diurnal = st.number_input(
                 "Diurnal photolysis factor", 0.1, 1.0, 1.0, 0.05,
-                key=K("fdiur"), disabled=not use_photo,
-                help="Multiplies every photolysis rate. 1.0 = permanent "
-                     "dayside (tidally locked); 0.5 mimics day-night "
-                     "averaging.")
+                key=K("fdiur"), disabled=not use_photo)
             use_moldiff = st.checkbox(
-                "Molecular diffusion", value=True, key=K("moldiff"),
-                help="Species-dependent molecular diffusion competing with "
-                     "Kzz (sets the homopause; matters high up).")
+                "Molecular diffusion", value=True, key=K("moldiff"))
             use_vm_mol = st.checkbox(
                 "Upwind molecular-diffusion advection (vm_mol)", value=False,
-                key=K("vmmol"), disabled=not use_moldiff,
-                help="Adds the advective settling flux with upwind "
-                     "differencing (the hybrid vm_mol scheme; VULCAN-JAX's "
-                     "own default since 2026-07-14). OFF reproduces this "
-                     "tool's validated baseline; ON is the newer scheme, "
-                     "not yet re-baselined for these forecasts, and mainly "
-                     "moves heavy species in the upper atmosphere. Requires "
-                     "molecular diffusion.")
+                key=K("vmmol"), disabled=not use_moldiff)
 
-    with st.expander("Clouds & scattering"):
+    # Opacity & line lists live HERE in the Atmosphere step (moved out of
+    # More settings 2026-08-04): which molecules shape the spectrum is a
+    # first-class science choice, and all extras default ON.
+    with st.expander("Opacity & line lists (ExoJAX)"):
+        _base_set, _extra_set = ((forward.MOLECULES, forward.EXTRA_MOLECULES)
+                                 if not _pic else
+                                 (picaso_chem.PICASO_MOLECULES,
+                                  picaso_chem.PICASO_EXTRA_MOLECULES))
+        st.caption(
+            "The spectrum's opacity always includes the base set "
+            f"**{' · '.join(_base_set)}** (solved on every run). The "
+            f"extras are **{' · '.join(_extra_set)}**, all on by default; "
+            "deselect any to save about 7 s each per new run. "
+            + ("No SO2 here: in chemical equilibrium sulfur sits in H2S "
+               "and OCS instead; SO2 only exists where starlight keeps "
+               "making it, which needs the VULCAN engine. " if _pic else "")
+            + "Adding more is in development.")
+        # live line-list availability for the CURRENT broadening choice (the
+        # widget below; previous-run value via session_state, default "air")
+        _mol_status = datacheck.molecule_linelist_status(
+            list(_extra_set),
+            broadening=st.session_state.get(K("broad"), "air"))
+        _MOL_NOTE = {datacheck.OK: "opacity cached",
+                     datacheck.AUTO: "downloads on first use",
+                     datacheck.MISSING: "engine data missing"}
+        # All extras default ON (2026-08-02): the measured cost on the
+        # default WASP-39b run is ~59 s wall for all eight (~7 s each:
+        # opacity build + one removed spectrum) on a 190 s baseline --
+        # a complete detection report is worth more than a faster first
+        # run. Deselecting molecules still works and still saves time.
+        extra_mols = st.multiselect(
+            "Extra opacity molecules", list(_extra_set),
+            default=list(_extra_set),
+            key=K(f"xmols_{chem_provider}"),
+            format_func=lambda m: f"{m}  ({_MOL_NOTE[_mol_status[m]]})")
+        # h2he uses separate per-molecule caches; count what is already local
+        # for the molecule set in play (CO is cached ExoMol, ignores the knob)
+        _h2he_mols = [m for m in forward.MOLECULES + extra_mols if m != "CO"]
+        _h2he_cached = sum(
+            1 for v in datacheck.molecule_linelist_status(
+                _h2he_mols, broadening="h2he").values() if v == datacheck.OK)
+        broadening = st.selectbox(
+            "Pressure-broadening gas", ["air", "h2he"], index=0,
+            key=K("broad"),
+            format_func=lambda b: (
+                "air (HITRAN terrestrial widths, default)"
+                if b == "air" else
+                f"H2/He blend (planetary; {_h2he_cached}/{len(_h2he_mols)} "
+                "line-list caches present)"))
+        nu_pts = st.number_input(
+            "Native spectral grid points", *forward.NU_PTS_RANGE,
+            forward.NU_PTS_DEFAULT, 500, key=K("nupts"),
+            help="Wavenumber grid points across 1-15 µm before binning "
+                 "(native R is about nu_pts/2.7: 4000 = R 1500, 8000 = "
+                 "R 3000). Increase this setting to test the convergence "
+                 "of weak mid-infrared features: MIRI LRS SO2 significance "
+                 "still rises at the 8000 cap (measured 2026-07-27), so "
+                 "quote weak-band MIRI results as sampling-limited lower "
+                 "bounds. Layer count and solver tolerance barely move "
+                 "them.")
+
+    with st.expander("Clouds & scattering (ExoJAX)"):
         if science_mode == "emission":
             # canonical_params forces Rayleigh OFF in emission (the pure-
             # absorption day-side solver has no scattering channel) -- show
@@ -969,29 +942,16 @@ with st.sidebar:
             st.session_state[K("rayl")] = False
         use_rayleigh = st.checkbox(
             "H2/He Rayleigh scattering", value=True, key=K("rayl"),
-            disabled=(science_mode == "emission"),
-            help="Known physics with no free parameter; matters shortward "
-                 "of ~1.5 µm. Leave ON except for comparisons. In emission "
-                 "this is off and locked: the day-side flux solver is pure "
-                 "absorption.")
+            disabled=(science_mode == "emission"))
         cloud_on = st.checkbox(
-            "Power-law cloud/haze opacity", value=False, key=K("cloud"),
-            help="Uniformly mixed retrieval cloud: kappa(nu) = kappa0 * "
-                 "(nu/nu0)^alpha per gram of atmosphere. With the deck on, "
-                 "its two parameters can be freed in the constraint "
-                 "forecast (cheap rows); leave them out of the free list "
-                 "to hold the deck constant.")
+            "Power-law cloud/haze opacity", value=False, key=K("cloud"))
         if cloud_on:
             log_kappa_cloud = st.number_input(
                 "log10 kappa_cloud (cm^2/g at 3.5 µm)", -4.0, 2.0, -1.0, 0.1,
-                key=K("ck"),
-                help="Gray amplitude. The tau = 1 pressure is about "
-                     "g/(kappa * 10^6) bar: at WASP-39 b gravity, -1 gives "
-                     "a ~4 mbar deck, -3 a ~0.4 bar deck.")
+                key=K("ck"))
             alpha_cloud = st.number_input(
                 "Cloud spectral slope alpha (kappa ∝ nu^alpha)",
-                0.0, 4.0, 0.0, 0.25, key=K("ca"),
-                help="0 = gray deck; 4 = Rayleigh-like small-particle haze.")
+                0.0, 4.0, 0.0, 0.25, key=K("ca"))
         else:
             log_kappa_cloud, alpha_cloud = -1.0, 0.0
         # Mie condensate deck (v16): physically-grounded condensate optics
@@ -1000,13 +960,7 @@ with st.sidebar:
         _mie_opts = [""] + list(forward.MIE_CONDENSATES)
         mie_condensate = st.selectbox(
             "Mie condensate cloud", _mie_opts, index=0, key=K("miec"),
-            format_func=lambda c: "off" if not c else c,
-            help="Condensate cloud with real refractive-index optics "
-                 "(ExoJAX Mie grid): a column-uniform lognormal size "
-                 "distribution. Each condensate needs a one-time Mie grid "
-                 "(python tools/generate_miegrid.py <species>); a missing "
-                 "grid stops the run with an error. Its three parameters "
-                 "can be freed in the constraint forecast.")
+            format_func=lambda c: "off" if not c else c)
         mie_log_rg, mie_sigmag, mie_log_mmr = -5.0, 2.0, -6.0
         if mie_condensate:
             if datacheck.miegrid_status([mie_condensate])[mie_condensate] \
@@ -1017,18 +971,14 @@ with st.sidebar:
                     "(~1 h), or the run will stop with an error.")
             mie_log_rg = st.number_input(
                 "log10 mean radius r_g (cm)", float(forward.MIE_LOG_RG_RANGE[0]),
-                float(forward.MIE_LOG_RG_RANGE[1]), -5.0, 0.1, key=K("mierg"),
-                help="Lognormal mean particle radius: -5 = 0.1 µm, -4 = 1 µm.")
+                float(forward.MIE_LOG_RG_RANGE[1]), -5.0, 0.1, key=K("mierg"))
             mie_sigmag = st.number_input(
                 "Size dispersion sigma_g", float(forward.MIE_SIGMAG_RANGE[0]),
-                float(forward.MIE_SIGMAG_RANGE[1]), 2.0, 0.05, key=K("miesg"),
-                help="Geometric standard deviation of the lognormal size "
-                     "distribution (1.05 is near-monodisperse, 2 typical).")
+                float(forward.MIE_SIGMAG_RANGE[1]), 2.0, 0.05, key=K("miesg"))
             mie_log_mmr = st.number_input(
                 "log10 condensate mass mixing ratio",
                 float(forward.MIE_LOG_MMR_RANGE[0]),
-                float(forward.MIE_LOG_MMR_RANGE[1]), -6.0, 0.25, key=K("miemmr"),
-                help="Mass mixing ratio of the condensate (column-uniform).")
+                float(forward.MIE_LOG_MMR_RANGE[1]), -6.0, 0.25, key=K("miemmr"))
 
     # -----------------------------------------------------------------------
     # Step 3: Science goal (the organizing decision: only the controls the
@@ -1036,11 +986,10 @@ with st.sidebar:
     # -----------------------------------------------------------------------
     st.divider()
     st.markdown("### 3 · Science goal")
-    # Controls that render LATER in the script (More settings) are read
+    # Condensation renders LATER in the script (More settings), so it is read
     # from session_state: Streamlit updates widget state before the rerun,
-    # so these match the widgets below except on the very first render.
+    # so this matches the widget below except on the very first render.
     _conden_ss = bool(st.session_state.get(K("conden"), False))
-    _extra_ss = list(st.session_state.get(K(f"xmols_{chem_provider}"), []) or [])
     # Freeable parameters per engine/mode. Under PICASO + climate, C/O
     # (dlnCO) is NOT offered: climate composition sits exactly on a
     # chemistry-table node where no trustworthy C/O derivative exists
@@ -1057,7 +1006,7 @@ with st.sidebar:
     if mie_condensate:                   # v16: Mie-deck marginalization
         avail_free = avail_free + list(forward.MIE_FISHER_PARAMS)
     mol_options = forward.active_molecules(
-        {"chem_provider": chem_provider, "extra_mols": _extra_ss})
+        {"chem_provider": chem_provider, "extra_mols": extra_mols})
 
     if _conden_ss:
         st.session_state[K("goal")] = "detect"
@@ -1087,7 +1036,7 @@ with st.sidebar:
         target_mol = st.selectbox(
             "Molecule to detect", mol_options,
             index=mol_options.index(_mol_default),
-            key=K(f"mol_{chem_provider}_" + "_".join(sorted(_extra_ss))))
+            key=K(f"mol_{chem_provider}_" + "_".join(sorted(extra_mols))))
         target_sig = st.number_input(
             "Target significance (σ)", 1.0, 10.0, 3.0, 0.5, key=K("tsig"))
     else:
@@ -1252,7 +1201,7 @@ with st.sidebar:
     n_transits = st.number_input(f"Number of {_evw}s", 1, 10, 1, 1,
                                  key=K("ntr"))
 
-    with st.expander("Timing, saturation & binning"):
+    with st.expander("Timing, saturation & binning (Pandeia)"):
         t_base = st.number_input(
             f"Out-of-{_evw} baseline (hours)", 0.5, 10.0,
             float(t14), 0.1, key=_k("tbase"),
@@ -1269,7 +1218,7 @@ with st.sidebar:
                  "the noise, the scores, the forecasts, and the plotted "
                  "spectrum. 50-200 is the usual range.")
 
-    with st.expander("Noise model"):
+    with st.expander("Noise model (Pandeia)"):
         st.markdown("**Minimum noise floor** (PandExo convention)")
         st.caption("Applied as σ_final = max(σ_random, floor) on the final "
                    "binned uncertainties: a hard minimum, never added in "
@@ -1283,13 +1232,7 @@ with st.sidebar:
             "Floor type", ["constant", "none", "file"], horizontal=True,
             index=None, key=K("floormode"),
             format_func={"constant": "Constant (ppm)", "none": "No floor",
-                         "file": "Wavelength table"}.get,
-            help="Required: there is no default. 'No floor' reports the Pandeia "
-                 "random sigma alone (optimistic -- it averages down with "
-                 "events and ignores 1/f and visit-long systematics). "
-                 "'Constant' applies a hard minimum; the prefilled values are "
-                 "pre-flight planning conventions, not calibrations for your "
-                 "program.")
+                         "file": "Wavelength table"}.get)
         floor_table = None
         if floor_mode is None:
             st.info(
@@ -1332,6 +1275,22 @@ with st.sidebar:
                     st.error(
                         "The floor table is not valid: "
                         f"{e} Edit the file and upload it again.")
+                    floor_table = None
+            elif st.session_state.get("restored_floor_table") is not None:
+                # carried by a loaded shared configuration; the uploader
+                # (whose state cannot be set programmatically) wins when
+                # the user picks a new file
+                try:
+                    floor_table = np.asarray(
+                        st.session_state["restored_floor_table"], float)
+                    noise_mod.resolve_floor(np.array([1.0]), floor_table)
+                    st.caption(
+                        "Floor table restored from the loaded configuration "
+                        f"({floor_table.shape[0]} rows). Upload a file to "
+                        "replace it.")
+                except Exception as e:
+                    st.error("The restored floor table is not usable: "
+                             f"{e} Upload the table again.")
                     floor_table = None
             if floor_table is None:
                 st.warning("No valid floor table is loaded. Upload one, or "
@@ -1383,10 +1342,10 @@ with st.sidebar:
     # -----------------------------------------------------------------------
     st.divider()
     st.markdown("### More settings")
-    st.caption("Solver grid, condensation, boundary conditions, opacity, "
-               "and display controls. The defaults are the validated "
-               "baseline; every setting is cache-keyed and recorded in the "
-               "run's provenance.")
+    st.caption("Solver grid, condensation, boundary conditions, advanced "
+               "radiative transfer, and display controls. The defaults are "
+               "the validated baseline; every setting is cache-keyed and "
+               "recorded in the run's provenance.")
 
     with st.expander("Solver & vertical grid"):
         # Vertical layers: the chemistry AND the ExoJAX RT share this one
@@ -1534,83 +1493,7 @@ with st.sidebar:
                     "The boundary-condition entry is not valid: "
                     f"{e} Edit the line and try again.")
 
-    with st.expander("Opacity & line lists"):
-        _base_set, _extra_set = ((forward.MOLECULES, forward.EXTRA_MOLECULES)
-                                 if not _pic else
-                                 (picaso_chem.PICASO_MOLECULES,
-                                  picaso_chem.PICASO_EXTRA_MOLECULES))
-        st.caption(
-            "The spectrum's opacity always includes the base set "
-            f"**{' · '.join(_base_set)}** (solved on every run). The "
-            f"extras are **{' · '.join(_extra_set)}**, all on by default; "
-            "deselect any to save about 7 s each per new run. "
-            + ("No SO2 here: in chemical equilibrium sulfur sits in H2S "
-               "and OCS instead; SO2 only exists where starlight keeps "
-               "making it, which needs the VULCAN engine. " if _pic else "")
-            + "Adding more is in development.")
-        # live line-list availability for the CURRENT broadening choice (the
-        # widget below; previous-run value via session_state, default "air")
-        _mol_status = datacheck.molecule_linelist_status(
-            list(_extra_set),
-            broadening=st.session_state.get(K("broad"), "air"))
-        _MOL_NOTE = {datacheck.OK: "opacity cached",
-                     datacheck.AUTO: "downloads on first use",
-                     datacheck.MISSING: "engine data missing"}
-        # All extras default ON (2026-08-02): the measured cost on the
-        # default WASP-39b run is ~59 s wall for all eight (~7 s each:
-        # opacity build + one removed spectrum) on a 190 s baseline --
-        # a complete detection report is worth more than a faster first
-        # run. Deselecting molecules still works and still saves time.
-        extra_mols = st.multiselect(
-            "Extra opacity molecules", list(_extra_set),
-            default=list(_extra_set),
-            key=K(f"xmols_{chem_provider}"),
-            format_func=lambda m: f"{m}  ({_MOL_NOTE[_mol_status[m]]})",
-            help="Added to the base opacity set (the chemistry always "
-                 "solves them). C2H2/HCN matter at high C/O, H2S at "
-                 "3.8-4.6 µm, NH3 on cool (below ~900 K) planets, and OCS "
-                 "is the second equilibrium sulfur carrier (~4.85 µm). "
-                 "C2H4 (~10.5 µm) and C2H6 (~12.2 µm) trace hydrocarbon "
-                 "photochemistry on cool planets. "
-                 + ("" if _pic else
-                    "CS2 is a photochemical sulfur carrier (bands near "
-                    "4.6 and 6.5 µm). ")
-                 + "Each entry shows whether its line list is cached "
-                 "locally or downloads on first use (~10-15 s each, "
-                 "network required).")
-        # h2he uses separate per-molecule caches; count what is already local
-        # for the molecule set in play (CO is cached ExoMol, ignores the knob)
-        _h2he_mols = [m for m in forward.MOLECULES + extra_mols if m != "CO"]
-        _h2he_cached = sum(
-            1 for v in datacheck.molecule_linelist_status(
-                _h2he_mols, broadening="h2he").values() if v == datacheck.OK)
-        broadening = st.selectbox(
-            "Pressure-broadening gas", ["air", "h2he"], index=0,
-            key=K("broad"),
-            format_func=lambda b: (
-                "air (HITRAN terrestrial widths, default)"
-                if b == "air" else
-                f"H2/He blend (planetary; {_h2he_cached}/{len(_h2he_mols)} "
-                "line-list caches present)"),
-            help="'air' = HITRAN terrestrial widths (the default every "
-                 "committed result used; a documented approximation for an "
-                 "H2/He envelope). 'h2he' = planetary H2/He blend: first "
-                 "use downloads separate line-list caches, and a molecule "
-                 "with no H2/He coverage stops the run with an error "
-                 "instead of falling back.")
-        nu_pts = st.number_input(
-            "Native spectral grid points", *forward.NU_PTS_RANGE,
-            forward.NU_PTS_DEFAULT, 500, key=K("nupts"),
-            help="Wavenumber grid points across 1-15 µm before binning "
-                 "(native R is about nu_pts/2.7: 4000 = R 1500, 8000 = "
-                 "R 3000). Increase this setting to test the convergence "
-                 "of weak mid-infrared features: MIRI LRS SO2 significance "
-                 "still rises at the 8000 cap (measured 2026-07-27), so "
-                 "quote weak-band MIRI results as sampling-limited lower "
-                 "bounds. Layer count and solver tolerance barely move "
-                 "them.")
-
-    with st.expander("Advanced radiative transfer"):
+    with st.expander("Advanced radiative transfer (ExoJAX)"):
         st.caption("ExoJAX modeling choices that can move the spectrum. The "
                    "defaults are the validated baseline; every choice is "
                    "cache-keyed, so changing one re-runs the model.")
@@ -1760,14 +1643,14 @@ est = "instant (cached)" if cached else (
 # --- Run row: validation messages, run button, review summary --------------
 if params_error:
     st.error(f"Cannot run with the current settings: {params_error}")
+_still_needs = []
 if not mode_keys:
-    st.error("Select at least one instrument mode (step 4).")
+    _still_needs.append("an instrument mode (step 4 · Observation)")
 if not floor_choice_made:
-    st.error("Choose a minimum noise floor type (step 4, Noise model). There "
-             "is no default: a 15-40 ppm floor sets the reported precision for "
-             "a well-observed target, and no floor reports the Pandeia random "
-             "sigma alone, which averages down with events and excludes 1/f "
-             "and visit-long systematics.")
+    _still_needs.append("a minimum noise floor type "
+                        "(step 4 · Observation, Noise model)")
+if _still_needs:
+    st.error("This run still needs: " + "; ".join(_still_needs) + ".")
 col_btn, col_note = st.columns([1, 3])
 run_clicked = col_btn.button("Run", type="primary", width="stretch",
                              disabled=(bool(params_error) or not mode_keys
@@ -1793,17 +1676,58 @@ with st.expander("Run summary & configuration"):
         f"{'s' if n_transits > 1 else ''}, R={r_bin}, floor: {floor_mode}\n"
         f"- **Estimated runtime**: {est}")
     if _canon is not None:
+        _share = share_config.build_share(
+            canon=_canon,
+            goal=dict(goal=goal, target_mol=target_mol,
+                      target_sig=float(target_sig),
+                      goal_param=goal_param,
+                      target_prec=(None if target_prec is None
+                                   else float(target_prec)),
+                      marginalize=bool(marginalize),
+                      do_fisher=bool(do_fisher),
+                      fisher_params=list(fisher_params),
+                      jac_method=jac_method),
+            observation=dict(
+                ks_mag=float(ks_mag), t14=float(t14), t_base=float(t_base),
+                sat_limit=float(sat_limit), modes=list(mode_keys),
+                n_transits=int(n_transits), r_bin=int(r_bin),
+                floor_mode=floor_mode,
+                floors={k: (None if floors[k] is None
+                            else (float(floors[k]) if np.isscalar(floors[k])
+                                  else "wavelength table"))
+                        for k in mode_keys},
+                noise_infl={k: float(infl[k]) for k in mode_keys},
+                scenario=scenario, show_noise=bool(show_noise),
+                seed=int(seed)),
+            tp_table_text=(Path(tp_file_path).read_text()
+                           if tp_file_path else None),
+            floor_table=(np.asarray(floor_table).tolist()
+                         if floor_table is not None else None))
         st.download_button(
             "Download configuration (JSON)",
-            json.dumps(_canon, indent=2, default=str).encode(),
+            json.dumps(_share, indent=2, default=str).encode(),
             f"jwst_tool_{_slug(planet_label)}_config.json",
             "application/json", key=K("dl_config"),
-            help="The exact canonical parameter set of this run (the same "
-                 "dictionary the result stores as provenance). Keep it "
-                 "with your results to document and reproduce the setup.")
+            help="The full setup of this run: the canonical model "
+                 "parameters (the same dictionary the result stores as "
+                 "provenance) plus the science goal and observation "
+                 "settings, with any uploaded tables embedded. Load it "
+                 "below -- here or on another machine -- to reproduce "
+                 "the run.")
     else:
         st.caption("Configuration download is unavailable while the "
                    "settings do not validate (see the message above).")
+    _cfg_up = st.file_uploader(
+        "Load a configuration (JSON)", type=["json"], key=K("cfg_upload"))
+    st.caption("Restores every setting a downloaded configuration file "
+               "carries; review the sidebar and press Run.")
+    if st.session_state.get("_cfg_load_error"):
+        st.error("The configuration file could not be applied: "
+                 + st.session_state["_cfg_load_error"])
+    elif _cfg_up is not None:
+        st.success("Configuration loaded into the sidebar.")
+        for _n in st.session_state.get("_cfg_load_notes") or []:
+            st.warning(f"Not restored: {_n}")
 
 
 # ---------------------------------------------------------------------------
@@ -1960,8 +1884,6 @@ if run_clicked:
 # then the advanced adjoint diagnostics.
 # ---------------------------------------------------------------------------
 if "out" not in st.session_state:
-    st.info("Work down the sidebar (target, atmosphere, science goal, "
-            "observation), then press **Run**.")
     st.stop()
 
 out = st.session_state["out"]
