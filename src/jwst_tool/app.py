@@ -249,8 +249,8 @@ if _missing_req:
         "silently):\n\n"
         + "\n".join(f"- **{it.label}** -- {it.detail}. How to get it: "
                     f"{it.remedy}" for it in _missing_req)
-        + "\n\nInstall commands are in the README's *Install* section; "
-          "console commands: `jwst-tool data` (status report) and "
+        + "\n\nInstall commands are in the README's *Install* section. "
+          "Console commands: `jwst-tool data` (status report) and "
           "`jwst-tool fetch` (download).")
 with st.expander("Data status: what this machine has installed"
                  + (f"  ({len(_missing_req)} required item(s) missing)"
@@ -269,7 +269,7 @@ with st.expander("Data status: what this machine has installed"
         "first time a run needs them (network required at that moment). "
         f"Generated caches: {_c['model_cache']['n']} model spectra "
         f"({_c['model_cache']['mb']} MB), {_c['noise_cache']['n']} noise "
-        f"results ({_c['noise_cache']['mb']} MB); safe to delete, rebuilt "
+        f"results ({_c['noise_cache']['mb']} MB). Safe to delete, rebuilt "
         "on demand. Console equivalent: `jwst-tool data` (add `--deep` to "
         "probe the Pandeia env's engine version).")
     st.button("Refresh data status", on_click=_bump_data_nonce,
@@ -514,12 +514,11 @@ with st.sidebar:
         format_func=lambda k: planets.PLANETS[k]["label"] if k in planets.PLANETS
         else "Custom planet …",
         help="Every planet runs the same chemistry and radiative-transfer "
-             "code (validated on WASP-39 b; other planets share the code "
-             "path, not per-planet validation). The system identity "
-             "(gravity, radii, star, orbit, UV spectrum) is swapped in.")
+             "code, validated on WASP-39 b. Other planets swap in their "
+             "own system values, not their own validation.")
     pdef = planets.PLANETS.get(planet_key, planets.CUSTOM_DEFAULTS)
     st.caption(pdef["note"] if planet_key in planets.PLANETS
-               else "Starts from WASP-39 b values; edit everything below.")
+               else "Starts from WASP-39 b values. Edit everything below.")
     science_mode = st.radio(
         "Observation type", ["transmission", "emission"], horizontal=True,
         key=K("scimode"),
@@ -668,13 +667,10 @@ with st.sidebar:
                 key=_k("rcb"))
             if science_mode == "emission":
                 st.warning(
-                    "Emission + climate mode: day-side light at some "
-                    "wavelengths comes from the deep layers the "
-                    "convective-zone seed sets. With the deep default the "
-                    "profile should be seed-independent, but that is not "
-                    "yet certified per case, so read deep-probing emission "
-                    "features as conditional on the seed. Transmission is "
-                    "far less affected.")
+                    "Emission with the climate solve: some wavelengths "
+                    "probe the deep layers set by the convective-zone "
+                    "seed. Read deep emission features as conditional on "
+                    "that setting.")
         elif tp_mode == "file":
             # the shipped table is PER-PLANET; a planet without one may only
             # upload (and is told why its table is missing/refused)
@@ -714,13 +710,11 @@ with st.sidebar:
                     st.code(_tp_example)
                     st.caption(
                         "Column 1: pressure in dyne/cm^2 (1 bar = 10^6), "
-                        "monotonic (bottom of the atmosphere first, as "
-                        "here, or top first). Column 2: temperature in K. "
-                        "Column 3 (optional): Kzz in cm^2 s^-1, used when "
-                        "the vertical-mixing profile (below in this step) is "
-                        "set to 'Tabulated'. Any number of rows; the array "
-                        "is re-gridded onto the layer count. The two "
-                        "header lines are required.")
+                        "bottom of the atmosphere first or top first. "
+                        "Column 2: temperature in K. Column 3 (optional): "
+                        "Kzz in cm^2 s^-1, used when the vertical-mixing "
+                        "profile is set to 'Tabulated'. Any number of "
+                        "rows. The two header lines are required.")
                     st.download_button(
                         "Download this example (edit and re-upload)",
                         _tp_example, file_name="example_atm.txt",
@@ -778,10 +772,10 @@ with st.sidebar:
                     st.warning("Upload a table to run in file mode.")
                     tp_file_ok = False
             st.caption(
-                "Note: file mode has NO temperature constraint row (a fixed "
-                "table has no temperature parameter). Constraint forecasts "
-                "are conditional on this profile being exactly right, so "
-                "the reported bounds are optimistic.")
+                "Note: file mode has no temperature constraint row (a "
+                "fixed table has no temperature parameter). Constraint "
+                "forecasts assume this profile is exactly right, so the "
+                "bounds are optimistic.")
 
     with st.expander("Composition"):
         if tp_mode == "picaso_climate":
@@ -895,9 +889,9 @@ with st.sidebar:
                     "log10 deep-floor Kzz (cm^2 s^-1)", 4.0, 11.0, 5.0, 0.25,
                     key=_k("kzkdeep"))
             else:
-                st.caption("Kzz is read from the Kzz column of the uploaded "
-                           "array / selected table (a table without a Kzz "
-                           "column is rejected with an error).")
+                st.caption("Kzz comes from the Kzz column of the T-P "
+                           "table. A table without that column stops with "
+                           "an error.")
             if kzz_mode != "const":
                 kzz_x = 10.0 ** st.number_input(
                     "Kzz profile multiplier, log10(f)", -1.0, 1.0, 0.0, 0.05,
@@ -930,14 +924,12 @@ with st.sidebar:
                                  (picaso_chem.PICASO_MOLECULES,
                                   picaso_chem.PICASO_EXTRA_MOLECULES))
         st.caption(
-            "The spectrum's opacity always includes the base set "
-            f"**{' · '.join(_base_set)}** (solved on every run). The "
-            f"extras are **{' · '.join(_extra_set)}**, all on by default; "
-            "deselect any to save about 7 s each per new run. "
-            + ("No SO2 here: in chemical equilibrium sulfur sits in H2S "
-               "and OCS instead; SO2 only exists where starlight keeps "
-               "making it, which needs the VULCAN engine. " if _pic else "")
-            + "Adding more is in development.")
+            "The opacity always includes the base set "
+            f"**{' · '.join(_base_set)}**. The extras are "
+            f"**{' · '.join(_extra_set)}**, all on by default. Deselect "
+            "any to save about 7 s each on a new run."
+            + (" No SO2 here: in equilibrium, sulfur sits in H2S and "
+               "OCS. Making SO2 needs the VULCAN engine." if _pic else ""))
         # live line-list availability for the CURRENT broadening choice (the
         # widget below; previous-run value via session_state, default "air")
         _mol_status = datacheck.molecule_linelist_status(
@@ -968,19 +960,15 @@ with st.sidebar:
             format_func=lambda b: (
                 "air (HITRAN terrestrial widths, default)"
                 if b == "air" else
-                f"H2/He blend (planetary; {_h2he_cached}/{len(_h2he_mols)} "
+                f"H2/He blend (planetary, {_h2he_cached}/{len(_h2he_mols)} "
                 "line-list caches present)"))
         nu_pts = st.number_input(
             "Native spectral grid points", *forward.NU_PTS_RANGE,
             forward.NU_PTS_DEFAULT, 500, key=K("nupts"),
-            help="Wavenumber grid points across 1-15 µm before binning "
-                 "(native R is about nu_pts/2.7: 4000 = R 1500, 8000 = "
-                 "R 3000). Increase this setting to test the convergence "
-                 "of weak mid-infrared features: MIRI LRS SO2 significance "
-                 "still rises at the 8000 cap (measured 2026-07-27), so "
-                 "quote weak-band MIRI results as sampling-limited lower "
-                 "bounds. Layer count and solver tolerance barely move "
-                 "them.")
+            help="Wavenumber grid points across 1-15 µm before binning. "
+                 "Native R is about nu_pts/2.7 (4000 = R 1500). Weak "
+                 "mid-infrared features still gain at the 8000 cap, so "
+                 "quote weak-band MIRI results as lower bounds.")
 
     with st.expander("Clouds & scattering (ExoJAX)"):
         if science_mode == "emission":
@@ -1064,18 +1052,18 @@ with st.sidebar:
         disabled=_conden_ss,
         format_func={"detect": "Detect a molecule",
                      "constrain": "Constrain a parameter"}.get,
-        help="Detect: compare the full spectrum with a spectrum that omits "
-             "the selected molecule's opacity; the score is a conditional "
-             "template signal-to-noise ratio, not a retrieval detection. "
-             "Constrain: calculate a local Fisher (Cramer-Rao) bound from "
-             "the spectrum derivatives; the result is not a posterior "
-             "uncertainty. Constraints cost minutes per free parameter.")
+        help="Detect: compare the full spectrum with one that omits the "
+             "selected molecule. The score is a conditional template "
+             "signal-to-noise ratio, not a retrieval detection. "
+             "Constrain: a local Fisher (Cramer-Rao) bound from the "
+             "spectrum derivatives, not a posterior uncertainty. "
+             "Constraints cost minutes per free parameter.")
     if _conden_ss:
         goal = "detect"
         st.caption(
-            "Condensation is on (More settings), which locks the goal to "
-            "detection: no differentiation method is valid through the "
-            "condensation pin, so parameter constraints are unavailable.")
+            "Condensation is on (More settings). It locks the goal to "
+            "detection: no derivative through the condensation pin is "
+            "valid, so constraints are unavailable.")
     goal_param, target_prec, marginalize = None, None, True
     do_fisher = False
     if goal == "detect":
@@ -1101,17 +1089,15 @@ with st.sidebar:
         marginalize = st.checkbox(
             "Marginalize over the other parameters", value=True,
             key=K("marg"),
-            help="On (default): the marginalized Fisher bound; the other "
-                 "selected parameters and calibration terms are free. "
-                 "Off: hold the other parameters fixed, which gives a "
-                 "narrower and more optimistic conditional bound. Neither "
+            help="On (default): the other selected parameters and "
+                 "calibration terms are free. Off: they are held fixed, "
+                 "which gives a narrower, more optimistic bound. Neither "
                  "option is a posterior uncertainty.")
         if not marginalize:
             st.warning(
-                "Marginalization is off: the forecast holds every other "
-                "parameter fixed and reports a conditional (others-known) "
-                "bound. Read it as a best-case sensitivity, not a joint-fit "
-                "forecast.")
+                "Marginalization is off: every other parameter is held "
+                "fixed. Read the bound as a best-case sensitivity, not a "
+                "joint-fit forecast.")
         unit = forward.PARAM_UNITS[goal_param]
         # label uses the unit when there is one (dex / K), else the bare
         # symbol -- C/O is a dimensionless number ratio
@@ -1160,14 +1146,14 @@ with st.sidebar:
                           f"{int(bool(mie_condensate))}"),
                     format_func=lambda n: forward.PARAM_LABELS[n],
                     help="The goal parameter is always included. More free "
-                         "parameters give a wider, more honest forecast; "
-                         "each adds minutes of solves.")
+                         "parameters give a wider, more honest forecast. "
+                         "Each adds minutes.")
                 fisher_params = sorted(set(fisher_extra) | {goal_param})
             elif goal == "constrain":
                 st.caption(
                     "Marginalization is off (above): only the goal "
-                    "parameter is free; every other parameter is held "
-                    "fixed, so this is the optimistic conditional bound.")
+                    "parameter is free. This is the optimistic "
+                    "conditional bound.")
                 fisher_params = [goal_param]
             else:
                 fisher_params = st.multiselect(
@@ -1182,38 +1168,28 @@ with st.sidebar:
                 key=K("jacm"), disabled=_pic,
                 format_func={"fd": "Finite differences (default)",
                              "ad": "Automatic differentiation (forward-mode)"}.get,
-                help="How the spectrum derivatives are calculated. Finite "
-                     "differences re-run the converged model at shifted "
+                help="Finite differences re-run the model at shifted "
                      "parameter values and check two step sizes against "
-                     "each other; they work everywhere and are the only "
-                     "method compatible with condensation. AD "
-                     "differentiates the implemented numerical model "
-                     "without a finite-difference step; it is about 1.7-4x "
-                     "faster per row, requires photochemistry ON (the step-2 "
-                     "switch locks while AD is selected), and "
-                     "refuses the C/O row on carbon-rich compositions. In "
-                     "a previous WASP-39 b benchmark the two methods "
-                     "agreed within 0.07-1.6% per row; that test used an "
-                     "earlier default atmosphere, so treat it as "
-                     "validation of the method, not as an error estimate "
-                     "for the current run. Every result row is labeled "
-                     "with the method that produced it.")
+                     "each other. They work everywhere. AD differentiates "
+                     "the numerical model directly. It is about 1.7-4x "
+                     "faster per row, needs photochemistry on, and stops "
+                     "with an error on the C/O row for carbon-rich "
+                     "compositions. Every result row is labeled with the "
+                     "method that produced it.")
             if _pic:
                 st.caption("Locked to finite differences: PICASO's "
                            "chemistry is table interpolation, with no "
                            "solver for AD to differentiate.")
             st.caption(
-                ("Cost per row under PICASO: a few table lookups plus the "
-                 "radiative transfer, well under a minute; a climate T_int "
-                 "row re-runs the climate and takes several minutes. There "
-                 "is no MCMC and there are no priors.") if _pic else
+                ("Cost per row under PICASO: well under a minute. A "
+                 "climate T_int row re-runs the climate and takes "
+                 "several minutes.") if _pic else
                 (f"Cost per row: finite differences take about "
                  f"{_FD_COMP_MIN}-{_FD_COMP_MAX} min for a composition "
-                 f"parameter and {_FD_THETA_MIN}-{_FD_THETA_MAX} min for a "
-                 f"Kzz or temperature parameter; AD takes about "
-                 f"{_AD_ROW_MIN}-{_AD_ROW_MAX} min per row. Cloud and Mie "
-                 "rows are seconds. There is no MCMC and there are no "
-                 "priors."))
+                 f"parameter and {_FD_THETA_MIN}-{_FD_THETA_MAX} min for "
+                 f"Kzz or temperature. AD takes about "
+                 f"{_AD_ROW_MIN}-{_AD_ROW_MAX} min per row. Cloud and "
+                 "Mie rows take seconds."))
             # Loud slow-path flag: finite differences re-solve the chemistry
             # per row, so freeing many parameters can take a long time --
             # point the user at AD before they launch a multi-hour run (AD
@@ -1254,7 +1230,7 @@ with st.sidebar:
         t_base = st.number_input(
             f"Out-of-{_evw} baseline (hours)", 0.5, 10.0,
             float(t14), 0.1, key=_k("tbase"),
-            help="Sets how well the stellar flux is anchored; the PandExo "
+            help="Sets how well the stellar flux is anchored. The PandExo "
                  "convention is a baseline equal to T14.")
         sat_limit = st.number_input(
             "Saturation limit (full-well fraction)",
@@ -1269,10 +1245,9 @@ with st.sidebar:
 
     with st.expander("Noise model (Pandeia)"):
         st.markdown("**Minimum noise floor** (PandExo convention)")
-        st.caption("Applied as σ_final = max(σ_random, floor) on the final "
-                   "binned uncertainties: a hard minimum, never added in "
-                   "quadrature, never rescaled by the binning R, and never "
-                   f"averaged down by adding {_evw}s.")
+        st.caption("A hard minimum: σ_final = max(σ_random, floor) on the "
+                   "final bins. It is never added in quadrature and never "
+                   f"averages down with more {_evw}s.")
         # NO PRESELECTION (index=None). A 15-40 ppm hard minimum dominates the
         # reported precision for any well-observed target, and a zero floor
         # claims a precision nobody has demonstrated -- neither is a neutral
@@ -1294,19 +1269,18 @@ with st.sidebar:
                 ins.MODES[k]["floor_ppm_suggested"], 5.0, key=K(f"floor_{k}"))
                 for k in mode_keys}
             st.caption(
-                "Prefilled from the pre-flight planning convention (Greene+2016 "
-                "20/30/50 ppm for NIRISS/NIRCam/MIRI). These are ILLUSTRATIVE, "
-                "not in-flight calibrations: the achievable floor depends on "
-                "brightness, readout, extraction, wavelength, visit strategy, "
-                "and pipeline. Edit them for your program.")
+                "Prefilled from the Greene+2016 planning convention "
+                "(20/30/50 ppm for NIRISS/NIRCam/MIRI). These are "
+                "illustrative, not in-flight calibrations. Edit them for "
+                "your program.")
         elif floor_mode == "file":
             up = st.file_uploader(
                 "Two columns: wavelength (µm), floor (ppm)",
                 type=["txt", "csv", "dat"], key=K("floorfile"),
-                help="Whitespace- or comma-separated. Linearly interpolated "
-                     "to the final bin wavelengths; endpoint values extend "
-                     "beyond the supplied range (PandExo behavior). Applied "
-                     "to every selected mode.")
+                help="Whitespace- or comma-separated. Linearly "
+                     "interpolated to the final bin wavelengths. Endpoint "
+                     "values extend beyond the supplied range. Applied to "
+                     "every selected mode.")
             if up is not None:
                 try:
                     raw = up.getvalue().decode()
@@ -1343,8 +1317,8 @@ with st.sidebar:
                     floor_table = None
             if floor_table is None:
                 st.warning("No valid floor table is loaded. Upload one, or "
-                           "select 'No floor' if that is what you intend -- "
-                           "the run is blocked until the choice is explicit.")
+                           "select 'No floor'. The run is blocked until "
+                           "the choice is explicit.")
         if floor_mode == "file" and floor_table is not None:
             floors = {k: floor_table for k in mode_keys}
         # An unmade floor choice blocks the run: it is the one setting where
@@ -1355,13 +1329,11 @@ with st.sidebar:
                              or (floor_mode == "file" and floor_table is not None))
 
         st.markdown("**Random-noise multiplier** (× Pandeia σ, optional)")
-        st.caption("Default **1.0**: the Pandeia prediction as-is. Published "
-                   "achieved-vs-predicted ratios (COMPASS/Gordon+2025 G395H "
-                   "≈1.05-1.12×; Radica+2023 1.2× NIRISS SOSS; Bouwman+2023 "
-                   "≈1.15× MIRI LRS) are program-specific reference points "
-                   "for sensitivity studies, not a calibration. Proportional "
-                   f"noise averages down with {_evw}s, unlike the floor. "
-                   "Recorded in the result metadata.")
+        st.caption("Default **1.0** uses the Pandeia prediction as-is. "
+                   "Published achieved-vs-predicted ratios run about "
+                   "1.05-1.2x and are reference points, not a calibration. "
+                   "Unlike the floor, this noise averages down with more "
+                   f"{_evw}s.")
         infl = {k: st.number_input(
             f"{ins.MODES[k]['label']} random-noise multiplier", 1.0, 3.0,
             float(ins.MODES[k].get("noise_infl", 1.0)),
@@ -1373,15 +1345,12 @@ with st.sidebar:
             "Systematics scenario", list(noise_mod.SCENARIOS),
             format_func=lambda s: noise_mod.SCENARIOS[s]["label"],
             key=K("scenario"), label_visibility="collapsed")
-        st.caption("The default (**random**) is the exact diagonal, "
-                   "PandExo-style noise model and is what the reference "
-                   "numbers use. The correlated presets re-allocate the part "
-                   "of the variance the floor adds (the floor *excess*) into "
-                   "a spectrally smooth kernel at identical per-bin totals. "
-                   "They are stated assumptions, **not calibrated JWST "
-                   "systematics models**, for stress-testing how rankings "
-                   "move with correlation structure; conservative also "
-                   "profiles per-segment slopes.")
+        st.caption("The default (**random**) is the exact diagonal noise "
+                   "model. The correlated presets move the floor excess "
+                   "into a spectrally smooth kernel with the same per-bin "
+                   "totals. They are stated assumptions, **not calibrated "
+                   "JWST systematics models**. Use them to stress-test "
+                   "how rankings move.")
 
     # -----------------------------------------------------------------------
     # More settings: solver grid, condensation, boundary conditions,
@@ -1392,9 +1361,9 @@ with st.sidebar:
     st.divider()
     st.markdown("### More settings")
     st.caption("Solver grid, condensation, boundary conditions, advanced "
-               "radiative transfer, and display controls. The defaults are "
-               "the validated baseline; every setting is cache-keyed and "
-               "recorded in the run's provenance.")
+               "radiative transfer, and display controls. The defaults "
+               "are the validated baseline. Every setting is recorded in "
+               "the run's provenance.")
 
     with st.expander("Solver & vertical grid"):
         # Vertical layers: the chemistry AND the ExoJAX RT share this one
@@ -1404,12 +1373,11 @@ with st.sidebar:
         nz = st.number_input(
             "Vertical layers (chemistry + RT)", *forward.NZ_RANGE,
             forward.NZ_DEFAULT, 10, key=K("nz_pic" if _pic else "nz"),
-            help="Pressure levels shared by the chemistry and the radiative "
-                 "transfer (the only vertical-layer setting). More layers "
-                 "resolve steep gradients at a slower run (~2 min at 100, "
-                 "~2.5 at 150). The PICASO climate solve runs on its own "
-                 f"fixed {forward.CLIMATE_N_LEVELS}-level internal grid and "
-                 "is re-gridded onto these layers.")
+            help="Pressure levels shared by the chemistry and the "
+                 "radiative transfer. More layers resolve steeper "
+                 "gradients but run slower. The PICASO climate solve uses "
+                 "its own internal grid and is re-gridded onto these "
+                 "layers.")
         if _pic:
             yconv_cri = forward.YCONV_DEFAULT   # equilibrium: no iterative solver
             st.caption("The solver convergence tolerance applies to the "
@@ -1420,14 +1388,12 @@ with st.sidebar:
                 "Solver convergence tolerance", 1.0e-4, 1.0e-2,
                 forward.YCONV_DEFAULT, 1.0e-4,
                 format="%.1e", key=K("yconv"),
-                help="Steady-state criterion (yconv); 1e-2 is the VULCAN "
-                     "default. Tightening it does not improve the weak "
-                     "mid-IR results (raise the native spectral grid points "
-                     "instead; measured 2026-07-27). The solver can also "
-                     "accept via VULCAN's loose branch, so this is not a "
-                     "guaranteed residual bound: the results page reports "
-                     "the actual residual and the gate that certified it, "
-                     "and an uncertified run stops with an error.")
+                help="Steady-state criterion (yconv). 1e-2 is the VULCAN "
+                     "default. Tightening it does not improve weak mid-IR "
+                     "results: raise the native spectral grid points "
+                     "instead. The results page reports the actual "
+                     "residual, and an uncertified run stops with an "
+                     "error.")
 
     if _pic:
         # Equilibrium provider: condensation and boundary conditions do not
@@ -1448,25 +1414,18 @@ with st.sidebar:
             use_condense = st.checkbox(
                 "S8 condensation (sulfur rainout)", value=False,
                 key=K("conden"), disabled=not _conden_allowed,
-                help="Sulfur rainout with the standard VULCAN treatment: a "
-                     "condensation window, a whole-column S8 pin, then the "
-                     "usual certification gate on the remaining chemistry. "
-                     "Detection goals only: the pinned reservoir depends on "
-                     "the solver's step history, so no derivative through "
-                     "it is trustworthy and parameter constraints are "
-                     "locked while this is on. One warning applies: on a "
+                help="Sulfur rainout with the standard VULCAN treatment. "
+                     "Detection goals only: the pinned sulfur reservoir "
+                     "depends on the solver's step history, so no "
+                     "derivative through it is trustworthy. Warning: on a "
                      "column too hot to condense, the pin still freezes "
-                     "sulfur at an arbitrary early value, so conden-on "
-                     "does NOT reduce to conden-off. Use it only for "
-                     "planets cool enough aloft for sulfur to condense.")
+                     "sulfur at an arbitrary early value. Use it only for "
+                     "planets cool enough for sulfur to condense.")
             if not _conden_allowed:
                 st.caption(
-                    "Condensation needs photochemistry and molecular "
-                    "diffusion ON, and the finite-difference method in the "
-                    "science-goal step. A cold column without "
-                    "photochemistry never reaches a certifiable steady "
-                    "state, and the condensation growth rate comes from "
-                    "the molecular-diffusion coefficient.")
+                    "Condensation needs photochemistry ON, molecular "
+                    "diffusion ON, and the finite-difference method in "
+                    "the science-goal step.")
             use_condense = bool(use_condense and _conden_allowed)
             st.caption(
                 "For aerosol opacity in a constraint forecast, use the "
@@ -1474,21 +1433,17 @@ with st.sidebar:
 
         with st.expander("Boundary conditions & escape"):
             st.caption(
-                "Upstream VULCAN boundary-condition options, all OFF by "
-                "default (the validated baseline: closed column, no escape, "
-                "no settling). Negligible for a typical hot Jupiter; these "
-                "exist for escape, surface-flux, and settling studies. "
-                "Every entry is cache-keyed.")
+                "Upstream VULCAN boundary-condition options, all off by "
+                "default. Negligible for a typical hot Jupiter.")
             _settle_ok = use_moldiff and not use_condense
             if not _settle_ok:
                 st.session_state[K("settle")] = False
             use_settling = st.checkbox(
                 "Gravitational settling", value=False, key=K("settle"),
                 disabled=not _settle_ok,
-                help="Adds the particle settling velocity to the transport "
-                     "operator. Needs molecular diffusion; refused together "
-                     "with condensation (the certified S8 recipe pins "
-                     "settling off).")
+                help="Adds the particle settling velocity to the "
+                     "transport operator. Needs molecular diffusion ON. "
+                     "Not available with condensation.")
             if not _settle_ok:
                 st.caption("Settling needs molecular diffusion ON and "
                            "condensation OFF.")
@@ -1498,11 +1453,9 @@ with st.sidebar:
                 "Diffusion-limited escape at the top of atmosphere",
                 list(forward.DIFF_ESC_CHOICES), default=[], key=K("descape"),
                 disabled=not use_moldiff,
-                help="Applies the classic diffusion-limited escape flux at "
-                     "the top of the atmosphere for the selected light "
-                     "species (H, H2, He). Needs molecular diffusion (the "
-                     "escape flux is proportional to the top-of-atmosphere "
-                     "diffusion coefficient).")
+                help="Applies the diffusion-limited escape flux at the "
+                     "top of the atmosphere for the selected species. "
+                     "Needs molecular diffusion ON.")
             if not use_moldiff:
                 st.caption("Escape needs molecular diffusion ON.")
             top_lines = st.text_area(
@@ -1510,9 +1463,7 @@ with st.sidebar:
                 placeholder="H2O 1.0e8",
                 help="One species per line: 'SPECIES FLUX', flux in "
                      "molecules cm^-2 s^-1 (negative = outflux to space). "
-                     "Species must exist in the SNCHO network; an unknown "
-                     "name stops the run with an error, it is never "
-                     "ignored.")
+                     "An unknown species stops the run with an error.")
             bot_lines = st.text_area(
                 "Bottom-boundary fluxes + deposition", value="",
                 key=K("botflux"), placeholder="SO2 1.0e9 0.1",
@@ -1543,21 +1494,17 @@ with st.sidebar:
                     f"{e} Edit the line and try again.")
 
     with st.expander("Advanced radiative transfer (ExoJAX)"):
-        st.caption("ExoJAX modeling choices that can move the spectrum. The "
-                   "defaults are the validated baseline; every choice is "
-                   "cache-keyed, so changing one re-runs the model.")
+        st.caption("ExoJAX modeling choices that can move the spectrum. "
+                   "The defaults are the validated baseline. Changing one "
+                   "re-runs the model.")
         rt_ptop_bar = st.number_input(
             "RT top pressure (bar)",
             1.0e-9, 1.0e-6, 1.0e-8, 1.0e-9,
             format="%.1e", key=K("rtptop"),
-            help="Where the RT column ends (default 1e-8 bar; the chemistry "
-                 "grid tops out at 1e-7 bar under VULCAN and 1e-6 bar under "
-                 "PICASO; above it the topmost abundances and temperature "
-                 "are held constant, a standard transmission-modeling "
-                 "convention). Too low a top saturates strong bands (CO2 "
-                 "4.3, CO 4.7 µm) into a flat wall: on WASP-39 b, 4.8% of "
-                 "the 4.2-5.2 µm band saturates at 1e-6 bar vs 0.1% at the "
-                 "default.")
+            help="Where the RT column ends. Above the chemistry grid, the "
+                 "topmost abundances and temperature are held constant, a "
+                 "standard convention. Too low a top saturates strong "
+                 "bands (CO2 4.3, CO 4.7 µm).")
         if science_mode == "emission":
             # canonical_params pins simpson in emission (no transit chord
             # exists there) -- show the pinned state, not a live-looking
@@ -1568,18 +1515,15 @@ with st.sidebar:
             key=K("rtint"), disabled=(science_mode == "emission"),
             format_func={"simpson": "Simpson (ExoJAX default)",
                          "trapezoid": "Trapezoid"}.get,
-            help="Numerical scheme for the transit chord integral. Simpson "
-                 "is higher order; trapezoid is the conservative comparison "
-                 "choice. The difference is a grid-convergence diagnostic: "
-                 "if it moves your answer, raise the layer count. Locked "
-                 "in emission (the day-side flux has no transit chord).")
+            help="Numerical scheme for the transit chord integral. If "
+                 "switching it moves your answer, raise the layer count. "
+                 "Locked in emission (no transit chord there).")
         rt_dit_res = st.number_input(
             "Line-wing (broadening) grid resolution",
             0.1, 1.0, 1.0, 0.1, format="%.1f", key=K("rtdit"),
-            help="PreMODIT broadening-parameter grid spacing. Smaller "
-                 "resolves pressure-broadened line wings finer at a slower "
-                 "opacity build; 1.0 is the value every validated result "
-                 "here used, 0.2 is ExoJAX's own default.")
+            help="PreMODIT broadening-grid spacing. Smaller resolves line "
+                 "wings finer but builds opacity slower. 1.0 is the "
+                 "validated value here. 0.2 is ExoJAX's own default.")
 
     with st.expander("Display & reproducibility"):
         show_noise = st.checkbox("Show simulated noise realization",
