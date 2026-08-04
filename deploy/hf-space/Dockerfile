@@ -20,7 +20,7 @@ RUN conda create -y -n app python=3.12 \
 
 # Clone name VULCAN-JAX is load-bearing for the engine's path contract.
 # BUILD_INFO records the exact SHAs baked into this image.
-# RESTART NONCE: 1 (2026-07-29). Any commit to the Space repo re-runs the
+# RESTART NONCE: 2 (2026-08-04). Any commit to the Space repo re-runs the
 # platform init steps, which is the only restart path an `hf auth login`
 # token has -- the /restart and hardware endpoints answer 401. Bump this
 # comment (leaving SRC_STAMP alone) to retry a transient platform failure:
@@ -79,12 +79,33 @@ RUN chmod +x /srv/app/entrypoint.sh \
     && chown -R 1000:1000 /srv/vulcan /srv/app
 USER 1000
 
+# BACKEND PIN (2026-08-04). This Space is a consistent 2026.2 deployment:
+# requirements-pandeia.txt installs pandeia.engine==2026.2, and the mounted
+# dataset carries pandeia_data-2026.2-jwst + pandeia_psfs-2026.2-jwst. On
+# 2026-08-03 the `current` token was repointed to the STScI-supported 2026.7
+# release, so leaving this at `current` made the app demand 2026.7 trees that
+# are not in the dataset -- the data panel reported both as missing and every
+# noise step would have stopped with an error (correctly: the worker refuses a
+# mismatched engine/refdata/PSF set rather than running one).
+#
+# `archival_2026_2` selects the matched 2026.2 triple this Space actually has.
+# The app labels it ARCHIVAL and says it is not suitable for planning new
+# proposals, which is accurate.
+#
+# TO UPGRADE to 2026.7, all three must move together:
+#   1. deploy/requirements-pandeia.txt -> pandeia.engine==2026.7
+#   2. download pandeia_data-2026.7-jwst (~20 MiB) and
+#      pandeia_psfs-2026.7-jwst (~4 GiB) -- browser only, STScI Box refuses
+#      scripted requests -- and upload both to the dataset repo under
+#      jwst-data/
+#   3. drop this pin back to JWST_TOOL_BACKEND=current
+# Doing any one alone leaves a mismatched set, which the worker refuses.
 ENV VULCAN_PROJECT_ROOT=/srv/vulcan \
     VULCAN_FORWARD_DATA=/data/retrieval-data \
     JWST_TOOL_DATA_DIR=/data/jwst-data \
     JWST_TOOL_OUTPUT_DIR=/data/output \
     JWST_TOOL_PANDEIA_PYTHON=/opt/conda/envs/pandeia/bin/python \
-    JWST_TOOL_BACKEND=current \
+    JWST_TOOL_BACKEND=archival_2026_2 \
     HOME=/data/home \
     PATH=/opt/conda/envs/app/bin:$PATH
 
