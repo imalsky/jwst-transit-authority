@@ -199,10 +199,10 @@ absolute ppm numbers.
 
 Condensation (S8 rainout) is offered for detection goals only and never
 combines with a derivative-based forecast.
-        """)
 
-st.caption(f"**{ins.BACKEND_STATUS}**. Every result records the exact "
-           "engine + refdata versions in its provenance block.")
+**Noise backend on this instance**: {ins.BACKEND_STATUS}. Every result
+records the exact engine + refdata versions in its provenance block.
+        """)
 
 # ---------------------------------------------------------------------------
 # Data availability -- detected live; the display adapts to what is installed
@@ -1704,8 +1704,6 @@ col_btn, col_note = st.columns([1, 3])
 run_clicked = col_btn.button("Run", type="primary", width="stretch",
                              disabled=(bool(params_error) or not mode_keys
                                        or not floor_choice_made))
-col_note.caption(f"**{planet_label}**, {grid_lbl}, model spectrum: "
-                 f"**{est}**. Instrument noise is cached per star.")
 
 with st.expander("Run summary & configuration"):
     _goal_txt = (f"detect {target_mol} at {target_sig:g}σ" if goal == "detect"
