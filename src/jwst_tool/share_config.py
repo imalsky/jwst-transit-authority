@@ -138,6 +138,9 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
     state[pk("tp")] = tp_mode
     if tp_mode == "guillot":
         state[pk("tirr")] = float(cp["Tirr"])
+        # a restored T_irr is user-owned: clear the follow-until-overridden
+        # tracker so the custom planet's derived default does not reclaim it
+        state[pk("tirr_auto")] = None
         state[pk("tint")] = float(cp["Tint"])
         state[pk("lk")] = float(cp["log_kappa"])
         state[pk("lg")] = float(cp["log_gamma"])

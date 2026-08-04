@@ -159,14 +159,34 @@ def system_fields(planet: dict) -> dict:
                 sflux=planet["sflux"])
 
 
-def default_tirr(planet: dict) -> float:
-    """Guillot T_irr default for a registry entry: sqrt(2) * T_eq, on the GUI's
-    20 K step grid and clipped to the widget range.
+AU_CM = 1.496e13
+
+
+def system_teq(star_teff: float, rstar_rsun: float, orbit_au: float) -> float:
+    """Zero-albedo full-redistribution equilibrium temperature:
+    T_eq = T_eff * sqrt(R_star / (2 a)). The sqrt(2) * T_eq irradiation
+    temperature this implies equals T_eff * sqrt(R_star / a), the same
+    expression the PICASO climate solve uses for its guess (picaso_climate)."""
+    return float(star_teff) * math.sqrt(
+        float(rstar_rsun) * R_SUN_CM / (2.0 * float(orbit_au) * AU_CM))
+
+
+def default_tirr(planet: dict, system: dict | None = None) -> float:
+    """Guillot T_irr default: sqrt(2) * T_eq, on the GUI's 20 K step grid and
+    clipped to the widget range.
+
+    Registry entries use their literature ``teq_k``. For the CUSTOM planet the
+    caller passes ``system`` (star_teff, rstar_rsun, orbit_au) and T_eq is
+    DERIVED from the entered star and orbit -- without this, an untouched
+    custom T_irr silently kept WASP-39 b's temperature no matter what system
+    the user typed in (fixed 2026-08-04).
 
     ONE definition, used by BOTH canonical_params and the sidebar widget. It
     used to be a hard-coded constant on the API side and a T_eq expression in
     the GUI, so a "default" API run and a "default" GUI run built different
     profiles for every planet whose T_eq was not WASP-39 b's (HD 209458 b
     disagreed by 470 K)."""
-    return min(max(round(planet["teq_k"] * math.sqrt(2.0) / 10.0) * 10.0,
-                   800.0), 2500.0)
+    teq = (system_teq(system["star_teff"], system["rstar_rsun"],
+                      system["orbit_au"])
+           if system is not None else planet["teq_k"])
+    return min(max(round(teq * math.sqrt(2.0) / 10.0) * 10.0, 800.0), 2500.0)

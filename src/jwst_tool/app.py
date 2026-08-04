@@ -573,7 +573,17 @@ with st.sidebar:
             st.caption("UV spectrum unused: the PICASO engine has no "
                        "photolysis, so this selection has no effect there.")
 
-    teq = float(pdef["teq_k"])
+    # Registry planets carry a literature T_eq; the CUSTOM planet derives it
+    # from the entered star and orbit (zero albedo, full redistribution) --
+    # otherwise every custom system inherited WASP-39 b's temperature scale
+    # through the Guillot T_irr default and the runtime estimate.
+    if planet_key == "custom":
+        teq = planets.system_teq(teff, rstar, orbit_au)
+        st.caption(f"T_eq derived from the star and orbit above: "
+                   f"{teq:.0f} K (zero albedo, full redistribution). It "
+                   "sets the default Guillot T_irr in step 2.")
+    else:
+        teq = float(pdef["teq_k"])
 
     # -----------------------------------------------------------------------
     # Step 2: Atmosphere
@@ -614,7 +624,22 @@ with st.sidebar:
         if tp_mode == "guillot":
             # one definition shared with canonical_params, so the widget
             # default and the API default can never drift apart again
-            tirr0 = planets.default_tirr(pdef)
+            tirr0 = planets.default_tirr(
+                pdef, system=(dict(star_teff=teff, rstar_rsun=rstar,
+                                   orbit_au=orbit_au)
+                              if planet_key == "custom" else None))
+            if planet_key == "custom":
+                # follow-until-overridden: while the user has not touched
+                # T_irr (its value still equals the last derived default),
+                # keep it tracking the star/orbit fields; the first manual
+                # edit breaks the link. Without this, T_irr freezes at the
+                # WASP-39 b-seeded value from the first render no matter
+                # what system is typed in afterwards.
+                _prev_auto = st.session_state.get(_k("tirr_auto"))
+                if (_prev_auto is not None
+                        and st.session_state.get(_k("tirr")) == _prev_auto):
+                    st.session_state[_k("tirr")] = tirr0
+                st.session_state[_k("tirr_auto")] = tirr0
             tp_kwargs["Tirr"] = st.number_input(
                 "T_irr (K)", 800.0, 2500.0, tirr0, 20.0, key=_k("tirr"))
             tp_kwargs["Tint"] = st.number_input(

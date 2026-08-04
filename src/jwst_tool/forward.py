@@ -390,11 +390,14 @@ def _default_tp_mode(params: dict) -> str:
     return "guillot"
 
 
-def default_tirr(planet: str) -> float:
+def default_tirr(planet: str, system: dict | None = None) -> float:
     """Guillot T_irr default for ``planet`` -- sqrt(2) * T_eq, GUI-identical
-    (planets.default_tirr is the single definition both sides call)."""
+    (planets.default_tirr is the single definition both sides call). For the
+    custom planet pass ``system`` (star_teff, rstar_rsun, orbit_au) so T_eq
+    derives from the entered star and orbit instead of the WASP-39 b seed."""
     return planets.default_tirr(
-        planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS))
+        planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS),
+        system=(system if planet not in planets.PLANETS else None))
 
 # --- PICASO equilibrium provider + climate T-P mode (v18) -------------------
 # chem_provider selects the atmospheric-state engine; everything downstream of
@@ -952,13 +955,18 @@ def canonical_params(params: dict) -> dict:
         raise ValueError(f"unknown stellar UV spectrum {sflux!r} "
                          f"(choose from {list(planets.SFLUX_CHOICES)})")
     star_ref = planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS)["star"]
+    # resolved BEFORE the literal: the custom planet's Tirr default derives
+    # from these three (planets.system_teq), so they must exist first
+    _teff = round(float(params.get("star_teff", star_ref["teff"])), 1)
+    _rstar = round(float(params.get("rstar_rsun", sysd["rstar_rsun"])), 4)
+    _orbit = round(float(params.get("orbit_au", sysd["orbit_au"])), 5)
     cp = {
         "planet": planet,
         "science_mode": science_mode,
         # Star identity for the eclipse normalization Fp/Fs (v16 emission):
         # part of the MODEL only in emission mode (zeroed in transmission --
         # there the star lives purely on the noise side).
-        "star_teff": round(float(params.get("star_teff", star_ref["teff"])), 1),
+        "star_teff": _teff,
         "star_logg": round(float(params.get("star_logg", star_ref["log_g"])), 2),
         "star_feh": round(float(params.get("star_feh",
                                            star_ref["metallicity"])), 2),
@@ -967,8 +975,8 @@ def canonical_params(params: dict) -> dict:
         "yconv_cri": round(yconv_cri, 6),
         "rp_rjup": round(float(params.get("rp_rjup", sysd["rp_rjup"])), 4),
         "gs_cgs": round(float(params.get("gs_cgs", sysd["gs_cgs"])), 1),
-        "rstar_rsun": round(float(params.get("rstar_rsun", sysd["rstar_rsun"])), 4),
-        "orbit_au": round(float(params.get("orbit_au", sysd["orbit_au"])), 5),
+        "rstar_rsun": _rstar,
+        "orbit_au": _orbit,
         "sflux": sflux,
         "met_x_solar": round(float(params.get("met_x_solar", 10.0)), 4),
         # Composition is fully STRUCTURAL (v13): met_x_solar scales the cfg's
@@ -1019,7 +1027,9 @@ def canonical_params(params: dict) -> dict:
         # T_eq was not WASP-39 b's -- 1580 vs 1700 on HD 189733 b, vs 2050 on
         # HD 209458 b (470 K), vs 1050 on WASP-107 b. Deriving it here closes
         # the drift for all four instead of just the reference planet.
-        "Tirr": round(float(params.get("Tirr", default_tirr(planet))), 2),
+        "Tirr": round(float(params.get("Tirr", default_tirr(
+            planet, system=dict(star_teff=_teff, rstar_rsun=_rstar,
+                                orbit_au=_orbit)))), 2),
         "Tint": round(float(params.get("Tint", 100.0)), 2),
         "log_kappa": round(float(params.get("log_kappa", -2.3)), 3),
         "log_gamma": round(float(params.get("log_gamma", -1.0)), 3),

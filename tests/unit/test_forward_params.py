@@ -150,6 +150,32 @@ def test_guillot_default_tirr_follows_the_selected_planet():
     assert forward.default_tirr("hd209458b") == 2050.0   # was 1580 via the API
 
 
+def test_custom_planet_tirr_derives_from_the_entered_system():
+    """The CUSTOM planet's T_irr default follows the star and orbit the user
+    supplies (T_eq = Teff sqrt(Rstar/2a)); before 2026-08-04 it silently kept
+    WASP-39 b's literature T_eq for every custom system."""
+    sys_cool = dict(star_teff=3300.0, rstar_rsun=0.30, orbit_au=0.05)
+    teq = planets.system_teq(**sys_cool)                    # ~350 K
+    expect = min(max(round(teq * math.sqrt(2.0) / 10.0) * 10.0, 800.0), 2500.0)
+    cp = forward.canonical_params(dict(planet="custom", tp_mode="guillot",
+                                       **sys_cool))
+    assert cp["Tirr"] == expect
+    # a different entered system must move the default
+    cp_hot = forward.canonical_params(dict(
+        planet="custom", tp_mode="guillot",
+        star_teff=6100.0, rstar_rsun=1.2, orbit_au=0.03))
+    assert cp_hot["Tirr"] != cp["Tirr"]
+    # registry planets keep their literature-teq_k defaults (behavior pinned
+    # above); the system fields must NOT override a registry entry
+    cp_reg = forward.canonical_params(dict(planet="hd209458b",
+                                           tp_mode="guillot"))
+    assert cp_reg["Tirr"] == 2050.0
+    # an explicit Tirr always wins over the derived default
+    cp_exp = forward.canonical_params(dict(planet="custom", tp_mode="guillot",
+                                           Tirr=1234.0, **sys_cool))
+    assert cp_exp["Tirr"] == 1234.0
+
+
 def test_tp_table_window_check_is_chemistry_grid_scoped():
     # The modelable-temperature gate judges the profile the ENGINE evaluates
     # (re-gridded onto CHEM_P_SPAN_DYN), not every row in the file: a full
