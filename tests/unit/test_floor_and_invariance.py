@@ -30,6 +30,76 @@ def _bins(mode_result, edges, floor_spec, **kw):
                                       floor_spec, **kw)
 
 
+# --- no editorial floor is ever applied implicitly (item 5) -------------------
+
+def test_floor_spec_is_a_required_argument_everywhere():
+    """No API may supply a floor the caller did not ask for.
+
+    The 15-40 ppm per-mode values are pre-flight planning conventions, not
+    calibrations, and applied as a hard minimum they SET the reported precision
+    for any well-observed target. A default value anywhere would let an
+    editorial number reach a headline result silently.
+    """
+    import inspect
+
+    from jwst_tool import detect
+
+    for fn in (noise_mod.depth_error_bins, detect.evaluate_mode):
+        p = inspect.signature(fn).parameters["floor_spec"]
+        assert p.default is inspect.Parameter.empty, (
+            f"{fn.__qualname__} grew a default floor_spec ({p.default!r})")
+
+
+def test_registry_floors_are_named_as_suggestions_not_defaults():
+    """The registry key must read as illustrative at every call site."""
+    from jwst_tool import instruments as ins
+
+    for key, m in ins.MODES.items():
+        assert "floor_ppm_suggested" in m, key
+        assert "floor_ppm" not in m, (
+            f"{key}: bare `floor_ppm` reads as an applied default")
+        assert 0.0 < m["floor_ppm_suggested"] <= 200.0, key
+
+
+def test_no_module_applies_a_registry_floor_by_itself():
+    """`floor_ppm_suggested` may only be READ by the GUI as a prefill.
+
+    The science modules must never reach into the registry for a floor: that is
+    exactly the silent-editorial-default path this test exists to prevent.
+
+    Checks the parsed AST, not the raw text, so documenting the rule in a
+    docstring does not trip it -- only a real string reference does. (Comments
+    never reach the AST; a module docstring is one Constant holding the whole
+    docstring, not the bare key.)
+    """
+    import ast
+    import pathlib
+
+    src = pathlib.Path(noise_mod.__file__).parent
+    for mod in ("noise.py", "detect.py", "fisher.py", "binning.py"):
+        tree = ast.parse((src / mod).read_text(), str(src / mod))
+        refs = [n for n in ast.walk(tree)
+                if isinstance(n, ast.Constant) and n.value == "floor_ppm_suggested"]
+        assert not refs, (
+            f"{mod}:{refs[0].lineno} reads the registry's suggested floor; only "
+            "app.py may, and only to prefill a widget the user then owns")
+
+
+def test_default_calculation_is_the_pandeia_random_sigma():
+    """Acceptance: with no floor chosen, sigma is the Pandeia random sigma."""
+    mr = _mode_result()
+    edges = np.geomspace(3.0, 5.0, 12)
+    nz = _bins(mr, edges, None)
+    assert np.array_equal(nz["sigma"], np.sqrt(nz["var_phot"]))
+    assert np.all(nz["floor"] == 0.0)
+    # and an explicitly selected floor still uses the PandExo hard minimum
+    chosen_ppm = 40.0
+    nz_floor = _bins(mr, edges, chosen_ppm)
+    assert np.array_equal(
+        nz_floor["sigma"],
+        np.maximum(np.sqrt(nz_floor["var_phot"]), chosen_ppm * 1e-6))
+
+
 # --- floor semantics (PandExo convention) -------------------------------------
 
 def test_no_floor_returns_random_errors_exactly():

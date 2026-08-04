@@ -31,6 +31,47 @@ import traceback
 import numpy as np
 
 
+def _version_file_release(root, name):
+    """First line of `root/name`, or None. Used for the refdata/PSF releases."""
+    if not root:
+        return None
+    p = os.path.join(root, name)
+    if os.path.isfile(p):
+        with open(p) as f:
+            first = f.readline().strip()
+        return first or None
+    return None
+
+
+def _pandexo_commit(pandexo_dir):
+    """Exact PandExo git commit, or None when installed from a non-git source.
+
+    PandExo is consumed from MASTER, whose behavior moves between releases with
+    no version bump (the NIRISS SOSS 30-group cap landed on master one day
+    after the 2026-07-12 parity run without changing `pandexo.engine`'s
+    version). A version string alone therefore does not identify what ran, so
+    the gate requires this commit.
+    """
+    try:
+        import subprocess
+        top = subprocess.run(
+            ["git", "-C", pandexo_dir, "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=10)
+        if top.returncode != 0:
+            return None
+        r = subprocess.run(["git", "-C", pandexo_dir, "rev-parse", "HEAD"],
+                           capture_output=True, text=True, timeout=10)
+        head = r.stdout.strip()
+        if r.returncode != 0 or not head:
+            return None
+        dirty = subprocess.run(
+            ["git", "-C", pandexo_dir, "status", "--porcelain"],
+            capture_output=True, text=True, timeout=10).stdout.strip()
+        return head + ("-dirty" if dirty else "")
+    except Exception:
+        return None
+
+
 def _provenance():
     import pandeia.engine
     import pandexo
@@ -39,13 +80,22 @@ def _provenance():
         pandexo_version = version("pandexo.engine")
     except Exception:
         pandexo_version = str(getattr(pandexo, "__version__", "unknown"))
+    pandexo_dir = os.path.dirname(pandexo.__file__)
+    refdata = os.environ.get("pandeia_refdata")
+    psf_dir = os.environ.get("PSF_DIR")
     return {
         "pandeia_engine_version": str(getattr(pandeia.engine, "__version__",
                                               "unknown")),
         "pandexo_version": pandexo_version,
-        "pandexo_path": os.path.dirname(pandexo.__file__),
-        "refdata": os.environ.get("pandeia_refdata"),
-        "psf_dir": os.environ.get("PSF_DIR"),
+        "pandexo_commit": _pandexo_commit(pandexo_dir),
+        "pandexo_path": pandexo_dir,
+        "refdata": refdata,
+        "refdata_version": (_version_file_release(refdata, "VERSION")
+                            or _version_file_release(refdata, "VERSION_DATA")),
+        "psf_dir": psf_dir,
+        # the PSF RELEASE, not just the directory: a mixed PSF tree changes the
+        # point-spread function and hence the extracted flux on this side too
+        "psf_version": _version_file_release(psf_dir, "VERSION_PSF"),
         "python": sys.version.split()[0],
         "numpy": np.__version__,
     }

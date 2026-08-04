@@ -160,6 +160,46 @@ def test_no_intro_gate():
     assert not [b for b in at.button if "I understand" in (b.label or "")]
 
 
+def test_noise_floor_has_no_default_and_blocks_the_run():
+    """Item 5: neither candidate default is neutral, so the tool picks neither.
+
+    A 15-40 ppm hard minimum SETS the reported precision for a well-observed
+    target (sigma_final = max(sigma_random, floor), never averaged down), while
+    no floor reports a Pandeia random sigma that ignores 1/f and visit-long
+    systematics. The run is blocked until the user owns the choice.
+    """
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.run()
+    assert not at.exception, at.exception
+
+    def _floor_error(app):
+        return [e.value for e in app.error
+                if "minimum noise floor" in (e.value or "").lower()]
+
+    # nothing preselected, run blocked, and the block is explained
+    assert at.radio(key="n0_floormode").value is None
+    assert [b for b in at.button if (b.label or "") == "Run"][0].disabled
+    assert _floor_error(at), [e.value for e in at.error]
+
+    # "No floor" is a valid EXPLICIT choice: the floor gate clears.
+    # (Only the floor gate is asserted here -- the Run button is also gated on
+    # params_error/mode selection, which depend on installed engine data.)
+    at.radio(key="n0_floormode").set_value("none").run()
+    assert not at.exception, at.exception
+    assert not _floor_error(at)
+
+
+def test_constant_floor_prefill_is_labeled_illustrative():
+    """The 15-40 ppm prefill must never read as a calibration for the program."""
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.run()
+    at.radio(key="n0_floormode").set_value("constant").run()
+    assert not at.exception, at.exception
+    caps = " ".join((c.value or "") for c in at.caption).lower()
+    assert "illustrative" in caps
+    assert "not in-flight calibrations" in caps
+
+
 def test_emission_results_use_eclipse_terms():
     """An emission run's verdict and spectrum header say "eclipse", never
     "transit" (2026-07-29 UX review, item 1.5), and a valid result that

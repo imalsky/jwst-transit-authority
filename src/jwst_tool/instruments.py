@@ -2,9 +2,10 @@
 
 Each mode entry carries the Pandeia configuration used by ``pandeia_worker.py``
 (running inside the selected backend's conda env -- the DEFAULT ``current``
-backend is pandeia.engine 2026.2 + pandeia_data-2026.2-jwst; ``legacy`` is the
-pinned 3.0 pair, see the BACKEND SELECTION block below) plus display metadata
-and a default systematic noise floor.
+backend is the MATCHED TRIPLE pandeia.engine 2026.7 + pandeia_data-2026.7-jwst
++ pandeia_psfs-2026.7-jwst; ``archival_2026_2`` and ``legacy`` are
+reproducibility-only, see the BACKEND SELECTION block below) plus display metadata
+and an illustrative (never applied by default) systematic noise floor.
 
 Mode tokens in ``MODES`` are the canonical (pinned-3.0) Pandeia names; some were
 renamed in 2026-era engines. ``engine_mode()`` resolves each to the token the
@@ -12,14 +13,31 @@ ACTIVE backend accepts, and both the production path (``noise.noise_job``) and
 the parity harness go through it -- so a mode is never submitted under a name the
 running engine rejects.
 
-Noise floors (``floor_ppm``): default CONSTANT minimum-uncertainty values per
-mode, applied with PandExo semantics (sigma_final = max(sigma_random, floor)
-on the final bins -- noise.resolve_floor; never quadrature, never rescaled by
-the binning R). The values are the pre-flight planning convention (Greene et
-al. 2016 assumed 20/30/50 ppm for NIRISS/NIRCam/MIRI); in-flight results are
-often better (e.g. Schlawin et al. 2021 find ~<10 ppm for NIRCam grism), so
-the defaults sit between the two. Every floor is editable in the GUI,
-including "none" and a wavelength-dependent table.
+Noise floors (``floor_ppm_suggested``): ILLUSTRATIVE per-mode planning values.
+They are NOT defaults and NOT calibrations -- nothing applies them unless a
+caller asks for them by name. There is deliberately no default floor anywhere
+in this tool: `detect.evaluate_mode` and `noise.depth_error_bins` take
+`floor_spec` as a REQUIRED argument, and the GUI preselects no floor type, so a
+nonzero systematic floor can only ever enter a result through an explicit
+choice that is then recorded in the run provenance.
+
+Why the care: the floor is applied with PandExo semantics (sigma_final =
+max(sigma_random, floor) on the final bins -- noise.resolve_floor; never
+quadrature, never rescaled by the binning R, never averaged down by adding
+events). A 15-40 ppm hard minimum therefore DOMINATES the answer for any
+well-observed target -- the reported precision becomes the floor, not the
+calculation -- while a zero floor claims a precision nobody has demonstrated.
+Neither is a neutral default, which is why the tool refuses to pick one.
+
+Provenance of the numbers: the pre-flight planning convention (Greene et al.
+2016 assumed 20/30/50 ppm for NIRISS/NIRCam/MIRI). Schlawin et al. 2021
+(arXiv:2010.03564) is often cited alongside them for "<10 ppm on NIRCam grism";
+that paper was submitted in 2020, BEFORE launch, and its below-10-ppm figure is
+a PRE-LAUNCH ESTIMATE OF SELECTED RANDOM DETECTOR TERMS (correctable
+pre-amplifier / RTN / hot-pixel contributions after processing), not an
+in-flight measurement of a total time-series floor. 1/f drift and visit-long
+systematics are not modeled by the Pandeia extracted-noise calculation at all,
+so no value here is a measured end-to-end floor for any real program.
 
 Noise sensitivity factor (``noise_infl``): OPTIONAL multiplicative factor on
 the Pandeia random sigma. DEFAULT 1.0 FOR EVERY MODE -- the baseline forecast
@@ -74,50 +92,98 @@ NOISE_CACHE = OUTPUT_DIR / "noise_cache"
 # The worker runs in its own conda env (pandeia has heavy deps); noise.run_pandeia
 # refuses loudly if the python is missing.
 #
-# BACKEND SELECTION (JWST_TOOL_BACKEND, 2026-07-13): DEFAULT is "current" --
-# pandeia.engine 2026.2 + pandeia_data-2026.2-jwst, the STScI JWST 5.1 release,
-# the pair validated mode-by-mode against PandExo (tests/parity/; PandExo
-# itself pins engine 2026.2). "current" is the backend TOKEN, not a currency
-# claim: STScI's supported Cycle 6 release moved to 2026.7 on 2026-07-16, so
-# 2026.2 output is one calibration release behind the live ETC until the full
-# engine/refdata/PSF tuple is upgraded and parity is regenerated
-# (docs/audit_decisions_2026-07-21.md). "legacy" selects the pinned pandeia
-# 3.0 + pandeia_data-3.0rc3 pair,
-# retained ONLY as an explicit reproducibility backend. Every result records the
-# exact engine/refdata versions in "__provenance__", and the versions are in
-# every cache key (switching backends self-invalidates caches). "current"'s
-# refdata/psf default under DATA_DIR (data/pandeia_data-2026.2-jwst,
-# data/pandeia_psfs-2026.2-jwst -- one-time download, see README), so it is
-# portable across checkouts; only the conda python path and "legacy"'s refdata
-# (an external picaso tree) are machine-specific. The explicit
-# JWST_TOOL_PANDEIA_{PYTHON,REFDATA,PSF_DIR} env vars override any of them
-# per-path on another machine.
+# BACKEND SELECTION (JWST_TOOL_BACKEND). DEFAULT is "current", and since
+# 2026-08-03 "current" means the SUPPORTED STScI release as a MATCHED TRIPLE:
+#
+#     pandeia.engine == 2026.7
+#     pandeia_data-2026.7-jwst      (the ~20 MiB reference tree)
+#     pandeia_psfs-2026.7-jwst      (the ~4 GiB PSF library)
+#
+# All three releases must be equal; `pandeia_worker._check_backend_match`
+# enforces it before any calculation and records all three in "__provenance__"
+# and in the cache fingerprint. STScI supports only the latest ETC release and
+# labels older ones archival and unsuitable for planning new proposals:
+# https://outerspace.stsci.edu/spaces/PEN/pages/77530136/Pandeia%2BEngine%2BInstallation
+#
+# The old 2026.2 tuple is still selectable, but under its honest name
+# "archival_2026_2" -- the token was NOT silently repointed, because caches and
+# committed artifacts recorded as "current" would then look like current-release
+# output. "legacy" remains the pinned pandeia 3.0 + 3.0rc3 reproducibility
+# backend. Switching backends self-invalidates caches (engine + refdata + psf in
+# every cache key).
+#
+# PORTABILITY: refdata/psf default under DATA_DIR, so they travel with a
+# checkout. There is deliberately NO baked-in default interpreter path: the
+# backend env is machine-specific and must come from JWST_TOOL_PANDEIA_PYTHON.
+# JWST_TOOL_PANDEIA_{PYTHON,REFDATA,PSF_DIR} override any path per-machine.
+_SUPPORTED_PANDEIA_RELEASE = "2026.7"
+
 _BACKENDS = {
     "current": dict(
-        python="/opt/homebrew/Caskroom/miniforge/base/envs/pandeia_2026/bin/python",
+        python=None,          # no baked-in path: see JWST_TOOL_PANDEIA_PYTHON
+        refdata=str(DATA_DIR / "pandeia_data-2026.7-jwst"),
+        psf=str(DATA_DIR / "pandeia_psfs-2026.7-jwst"),
+        release="2026.7",
+        supported=True,
+        status="Pandeia 2026.7 / pandeia_data-2026.7-jwst / "
+               "pandeia_psfs-2026.7-jwst (the STScI-supported release, "
+               "enforced as a matched triple)"),
+    "archival_2026_2": dict(
+        python=None,
         refdata=str(DATA_DIR / "pandeia_data-2026.2-jwst"),
         psf=str(DATA_DIR / "pandeia_psfs-2026.2-jwst"),
-        status="Pandeia 2026.2 / pandeia_data-2026.2-jwst (STScI JWST 5.1 "
-               "release, validated vs PandExo in tests/parity/; STScI's "
-               "supported Cycle 6 release is now 2026.7 -- forecasts here "
-               "are one calibration release behind the live ETC)"),
+        release="2026.2",
+        supported=False,
+        status="ARCHIVAL Pandeia 2026.2 / pandeia_data-2026.2-jwst "
+               "(reproducibility only; STScI supports 2026.7 and labels this "
+               "release archival -- NOT suitable for planning new proposals)"),
     "legacy": dict(
-        python="/opt/homebrew/Caskroom/miniforge/base/envs/picaso_base/bin/python",
-        refdata="/Users/imalsky/Documents/Important_Docs/JWST_CYCLE5/picaso_ian/data/pandeia_data-3.0rc3",
+        python=None,
+        refdata=str(DATA_DIR / "pandeia_data-3.0rc3"),
         psf="",
-        status="LEGACY Pandeia 3.0 / pandeia_data-3.0rc3 (pinned reproducibility "
-               "backend; several releases behind the STScI ETC -- set "
-               "JWST_TOOL_BACKEND=current for the 2026.2 backend)"),
+        release="3.0",
+        supported=False,
+        status="LEGACY Pandeia 3.0 / pandeia_data-3.0rc3 (pinned "
+               "reproducibility backend, several releases behind the STScI "
+               "ETC; NOT suitable for planning new proposals -- unset "
+               "JWST_TOOL_BACKEND for the supported 2026.7 backend)"),
 }
 JWST_TOOL_BACKEND = os.environ.get("JWST_TOOL_BACKEND", "current").lower()
 if JWST_TOOL_BACKEND not in _BACKENDS:
     raise RuntimeError(
-        f"JWST_TOOL_BACKEND={JWST_TOOL_BACKEND!r} unknown; choose 'current' "
-        f"(Pandeia 2026.2, default) or 'legacy' (pinned 3.0).")
+        f"JWST_TOOL_BACKEND={JWST_TOOL_BACKEND!r} unknown; choose "
+        f"{sorted(_BACKENDS)} -- 'current' is the supported "
+        f"{_SUPPORTED_PANDEIA_RELEASE} triple, 'archival_2026_2' and 'legacy' "
+        "are reproducibility-only backends.")
 _BE = _BACKENDS[JWST_TOOL_BACKEND]
 BACKEND_STATUS = _BE["status"]
+BACKEND_RELEASE = _BE["release"]
+BACKEND_IS_SUPPORTED = _BE["supported"]
 
+# The backend interpreter is machine-specific and has NO portable default. It
+# stays None until used; `require_pandeia_python()` turns a missing setting into
+# one actionable message instead of a subprocess/import traceback.
 PICASO_PYTHON = os.environ.get("JWST_TOOL_PANDEIA_PYTHON", _BE["python"])
+
+
+def require_pandeia_python() -> str:
+    """Return the backend interpreter path, or raise one actionable error."""
+    if PICASO_PYTHON:
+        return PICASO_PYTHON
+    raise RuntimeError(
+        "No Pandeia backend interpreter configured. The engine runs in its own "
+        "environment (heavy dependencies), and its path is machine-specific, so "
+        "there is no default to fall back on.\n"
+        f"  Set JWST_TOOL_PANDEIA_PYTHON to the python of an environment with "
+        f"pandeia.engine=={_BE['release']} installed, e.g.\n"
+        "    export JWST_TOOL_PANDEIA_PYTHON=/path/to/envs/pandeia/bin/python\n"
+        f"  Backend '{JWST_TOOL_BACKEND}' also expects\n"
+        f"    refdata: {_BE['refdata']}\n"
+        f"    PSFs:    {_BE['psf'] or '(none: this backend carries its own)'}\n"
+        "  See README 'Pandeia backend' and `jwst-tool data` for the setup "
+        "steps.")
+
+
 PANDEIA_REFDATA = os.environ.get("JWST_TOOL_PANDEIA_REFDATA", _BE["refdata"])
 # pandeia_data >= 2026 splits the PSF library out of the refdata tree and the
 # engine reads it from $PSF_DIR (the "current" backend sets it; the 3.0-era
@@ -140,12 +206,19 @@ PYSYN_CDBS = str(DATA_DIR / "cdbs")
 # decides which name is valid, so this is keyed by JWST_TOOL_BACKEND and both the
 # production noise path and the parity harness resolve through engine_mode() --
 # one source of truth, no path can send a name the selected engine refuses.
-#   current (Pandeia 2026.x): NIRCam grism time series "ssgrism" -> "lw_tsgrism".
+#   current (2026.7) / archival_2026_2: NIRCam grism time series
+#                             "ssgrism" -> "lw_tsgrism" (both are 2026-era).
 #   legacy  (Pandeia 3.0):    identity (3.0 still calls it "ssgrism").
 _MODE_RENAMES = {
     "current": {"nircam": {"ssgrism": "lw_tsgrism"}},
+    "archival_2026_2": {"nircam": {"ssgrism": "lw_tsgrism"}},
     "legacy": {},
 }
+# Every backend token MUST appear above: a missing entry would silently submit
+# the canonical 3.0 name to a 2026 engine, which hard-rejects it mid-run.
+assert set(_MODE_RENAMES) == set(_BACKENDS), (
+    f"mode-rename map {sorted(_MODE_RENAMES)} does not cover the backend "
+    f"tokens {sorted(_BACKENDS)}")
 ENGINE_MODE_RENAMES = _MODE_RENAMES[JWST_TOOL_BACKEND]
 
 
@@ -241,7 +314,7 @@ MODES = {
         strategy=dict(aperture_size=0.7, sky_annulus=[0.75, 1.5]),
         background="ecliptic", background_level="medium",
         wl_min=0.6, wl_max=5.25,
-        floor_ppm=20.0, noise_infl=1.0, ngroup_min=2,
+        floor_ppm_suggested=20.0, noise_infl=1.0, ngroup_min=2,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     "nirspec_g395h": dict(
@@ -253,7 +326,7 @@ MODES = {
         strategy=dict(aperture_size=0.7, sky_annulus=[0.75, 1.5]),
         background="ecliptic", background_level="medium",
         wl_min=2.87, wl_max=5.18,
-        floor_ppm=15.0, noise_infl=1.0, ngroup_min=2,
+        floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=2,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     "nirspec_g235h": dict(
@@ -265,7 +338,7 @@ MODES = {
         strategy=dict(aperture_size=0.7, sky_annulus=[0.75, 1.5]),
         background="ecliptic", background_level="medium",
         wl_min=1.66, wl_max=3.07,
-        floor_ppm=15.0, noise_infl=1.0, ngroup_min=2,
+        floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=2,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     "niriss_soss": dict(
@@ -277,7 +350,7 @@ MODES = {
         strategy=dict(order=1),
         background="ecliptic", background_level="medium",
         wl_min=0.85, wl_max=2.8,
-        floor_ppm=20.0, noise_infl=1.0, ngroup_min=2, ngroup_max=30,
+        floor_ppm_suggested=20.0, noise_infl=1.0, ngroup_min=2, ngroup_max=30,
     ),
     "nircam_f322w2": dict(
         label="NIRCam F322W2",
@@ -287,7 +360,7 @@ MODES = {
         strategy=dict(aperture_size=0.4, sky_annulus=[0.5, 1.5]),
         background="ecliptic", background_level="medium",
         wl_min=2.45, wl_max=3.95,
-        floor_ppm=25.0, noise_infl=1.0, ngroup_min=2, ngroup_max=100,
+        floor_ppm_suggested=25.0, noise_infl=1.0, ngroup_min=2, ngroup_max=100,
     ),
     "nircam_f444w": dict(
         label="NIRCam F444W",
@@ -297,7 +370,7 @@ MODES = {
         strategy=dict(aperture_size=0.4, sky_annulus=[0.5, 1.5]),
         background="ecliptic", background_level="medium",
         wl_min=3.9, wl_max=4.95,
-        floor_ppm=25.0, noise_infl=1.0, ngroup_min=2, ngroup_max=100,
+        floor_ppm_suggested=25.0, noise_infl=1.0, ngroup_min=2, ngroup_max=100,
     ),
     "miri_lrs": dict(
         label="MIRI LRS (slitless)",
@@ -307,7 +380,7 @@ MODES = {
         strategy=dict(aperture_size=0.6, sky_annulus=[1.0, 2.8]),
         background="ecliptic", background_level="medium",
         wl_min=5.0, wl_max=12.0,
-        floor_ppm=40.0, noise_infl=1.0, ngroup_min=5,
+        floor_ppm_suggested=40.0, noise_infl=1.0, ngroup_min=5,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
 }

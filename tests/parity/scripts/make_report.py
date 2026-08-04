@@ -1,7 +1,14 @@
 """Render REPORT.md from parity_summary.json (run after run_parity.py).
 
-Usage: python tests/parity/make_report.py
+The report is generated from VALIDATED JSON only. `run_parity.py` now writes a
+`gate` block recording whether the artifact passed its release gate; a summary
+that failed (or predates the gate) produces a report headed FAIL that says so,
+and `--require-pass` refuses to write one at all. Before this, a stale,
+saturated, or version-mismatched run rendered a report that read like a pass.
+
+Usage: python tests/parity/scripts/make_report.py [--require-pass]
 """
+import argparse
 import json
 from datetime import date
 from pathlib import Path
@@ -17,8 +24,67 @@ def fmt_ratio(s: dict | None) -> str:
             f"(n={s['n']})")
 
 
-def main():
+def _gate_header(summary: dict) -> list[str]:
+    """PASS/FAIL banner + provenance table, at the very top of the report."""
+    gate = summary.get("gate")
+    out = []
+    if gate is None:
+        out += [
+            "> **GATE: NOT EVALUATED.** This summary predates the fail-closed "
+            "release gate, so nothing here has been checked for worker "
+            "version, engine/refdata/PSF release agreement, PandExo identity, "
+            "saturated rows, or the numerical thresholds. It is a forensic "
+            "artifact, NOT a release certificate. Regenerate with "
+            "`run_parity.py`.",
+            ""]
+    elif gate.get("passed"):
+        out += [
+            f"**GATE: PASS.** Worker v{gate.get('required_worker_version')}, "
+            f"Pandeia {gate.get('required_pandeia_release')} on both sides, "
+            "every declared threshold met.",
+            ""]
+    else:
+        probs = gate.get("problems", [])
+        out += [
+            f"> **GATE: FAIL ({len(probs)} problem(s)).** This artifact is NOT "
+            "a release certificate and must not be cited as one.",
+            ""]
+        out += [f"> - {p}" for p in probs]
+        out += [""]
+
+    # Provenance for every star, both sides -- what actually produced the run.
+    out += ["## Provenance", "",
+            "| star | side | engine | refdata | PSFs | worker / PandExo |",
+            "|---|---|---|---|---|---|"]
+    for sname, star in summary.get("stars", {}).items():
+        po = star.get("provenance_ours") or {}
+        pp = star.get("provenance_pandexo") or {}
+        out.append(
+            f"| {sname} | this tool | {po.get('engine_version', '?')} "
+            f"| {po.get('refdata_version', '?')} "
+            f"| {po.get('psf_version') or 'not recorded'} "
+            f"| worker v{po.get('worker_version', '?')} |")
+        _commit = pp.get("pandexo_commit")
+        out.append(
+            f"| {sname} | PandExo | {pp.get('pandeia_engine_version', '?')} "
+            f"| {pp.get('refdata_version') or 'not recorded'} "
+            f"| {pp.get('psf_version') or 'not recorded'} "
+            f"| {pp.get('pandexo_version') or 'unknown'} "
+            f"@ {_commit[:12] if _commit else 'commit not recorded'} |")
+    out.append("")
+    return out
+
+
+def main(require_pass: bool = False):
     summary = json.loads((OUTPUTS / "parity_summary.json").read_text())
+    gate = summary.get("gate")
+    if require_pass and not (gate and gate.get("passed")):
+        raise SystemExit(
+            "make_report: --require-pass given but parity_summary.json "
+            + ("has no gate block (regenerate with run_parity.py)"
+               if gate is None else
+               f"FAILED its gate ({len(gate.get('problems', []))} problems). "
+               "Fix the run; do not publish a report for a failing artifact."))
     cfg = summary["config"]
     lines = []
     w = lines.append
@@ -27,10 +93,15 @@ def main():
     w(f"Generated {date.today().isoformat()} by `run_parity.py` + "
       "`make_report.py` in this directory.")
     w("")
-    w("Both sides run on the SAME current Pandeia backend, so every "
-      "difference below is an ESTIMATOR/policy difference, not an engine "
-      "calibration difference. PandExo is current master (commit in the "
-      "provenance block). Configuration: constant transit depth "
+    lines.extend(_gate_header(summary))
+    w("Both sides run on the SAME Pandeia backend -- the exact engine, "
+      "reference-data, and PSF releases are in the provenance table above, "
+      "and the gate refuses the run if they disagree across the two sides. "
+      "Every difference below is therefore an ESTIMATOR/policy difference, "
+      "not an engine calibration difference. (This says nothing about whether "
+      "that release is the SUPPORTED one; the gate banner does.) PandExo is "
+      "used from master at the commit recorded above. Configuration: "
+      "constant transit depth "
       f"{cfg['depth']}, transit duration {cfg['transit_duration_s']/3600:.4f} h, "
       "equal out-of-transit baseline, saturation limit "
       f"{cfg['sat_limit']:.0%}, no noise floor, native (R=None) grids.")
@@ -188,17 +259,31 @@ def main():
       "approximation adds ~+0.5% sigma at 1% depth (grows with depth; "
       "docstring in noise.pixel_depth_variance).")
     w("")
-    w("4. **What may be claimed:** the instrument configuration, timing, "
-      "group optimization, saturation handling, and extraction of this "
-      "tool match current PandExo on the current engine. Absolute sigmas "
-      "are NOT PandExo-identical and are not labeled as such: they are "
-      "pandeia-extracted-noise forecasts, conservative relative to "
-      "PandExo's analytic noise by the mode-dependent margins quantified "
-      "above.")
+    _passed = bool(gate and gate.get("passed"))
+    w("4. **What may be claimed:** "
+      + ("the instrument configuration, timing, group optimization, "
+         "saturation handling, and extraction of this tool match the PandExo "
+         "release named in the provenance table above, on the supported "
+         "Pandeia engine. Absolute sigmas are NOT PandExo-identical and are "
+         "not labeled as such: they are pandeia-extracted-noise forecasts, "
+         "conservative relative to PandExo's analytic noise by the "
+         "mode-dependent margins quantified above."
+         if _passed else
+         "NOTHING, until this artifact passes its gate. The rows above are "
+         "forensic measurements of whatever engine, refdata, PSF tree, worker "
+         "version, and PandExo revision the provenance table names -- which is "
+         "not necessarily the shipping configuration. Regenerate on the "
+         "supported release before citing any parity claim."))
     w("")
     (OUTPUTS / "REPORT.md").write_text("\n".join(lines))
     print(f"wrote {OUTPUTS / 'REPORT.md'}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--require-pass", action="store_true",
+        help="refuse to write a report unless the summary passed its gate "
+             "(use this in a release job)")
+    raise SystemExit(main(require_pass=ap.parse_args().require_pass))

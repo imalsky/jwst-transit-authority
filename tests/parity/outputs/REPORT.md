@@ -1,6 +1,19 @@
 # PandExo numerical parity report
 
-Generated 2026-07-12 by `run_parity.py` + `make_report.py` in this directory.
+Generated 2026-08-03 by `run_parity.py` + `make_report.py` in this directory.
+
+> **GATE: NOT EVALUATED.** This summary predates the fail-closed release gate, so nothing here has been checked for worker version, engine/refdata/PSF release agreement, PandExo identity, saturated rows, or the numerical thresholds. It is a forensic artifact, NOT a release certificate. Regenerate with `run_parity.py`.
+
+## Provenance
+
+| star | side | engine | refdata | PSFs | worker / PandExo |
+|---|---|---|---|---|---|
+| w39_like | this tool | 2026.2 | 2026.2 | not recorded | worker v5 |
+| w39_like | PandExo | 2026.2 | not recorded | not recorded | unknown @ commit not r |
+| bright_hot | this tool | 2026.2 | 2026.2 | not recorded | worker v5 |
+| bright_hot | PandExo | 2026.2 | not recorded | not recorded | unknown @ commit not r |
+| faint_k | this tool | 2026.2 | 2026.2 | not recorded | worker v5 |
+| faint_k | PandExo | 2026.2 | not recorded | not recorded | 2026.2 @ commit not r |
 
 Both sides run on the SAME current Pandeia backend, so every difference below is an ESTIMATOR/policy difference, not an engine calibration difference. PandExo is current master (commit in the provenance block). Configuration: constant transit depth 0.01, transit duration 2.8036 h, equal out-of-transit baseline, saturation limit 80%, no noise floor, native (R=None) grids.
 
@@ -16,7 +29,7 @@ These show the quantities that match 1:1 -- the parity result. The depth-uncerta
 The two are INDEPENDENT tools calling the same Pandeia engine, so only what is read straight from the shared engine is bit-for-bit identical; anything each computes on its own agrees closely but not exactly. This is a property of a cross-tool test, not a defect -- forcing bit-equality would mean one tool copying the other's numbers, which is not a validation.
 
 - **Bit-identical (max difference exactly 0):** the instrument configuration (subarray, readout, disperser, filter, aperture, background) and the extracted WAVELENGTH GRID -- every extracted pixel, every mode and star (verified: max |Δλ| = 0).
-- **Groups agree to ≤1 on the moderate/bright stars, to ~1% relative (up to 5 groups absolute) on the faint Ks=13 star:** each tool independently optimizes the ramp to the same 80% saturation target; the freedom left is rounding to an integer group count (e.g. G395H 124 vs 125; faint-star ramps of ~500-1000 groups differ by up to 5). Per-group integration time matches to <0.1%; total integration time and count then inherit the group choice (up to ~5.5% where a single group of ~16 dominates, bright G395H). CORRECTION (2026-07-19, worker v6): the ~2.5% bright-MIRI t_int gap was NOT the group choice (ngroup was identical, 39/39) -- it was the between-integration reset frame. MIRI FASTR1 has nreset1=0/nreset2=1, so the worker's nint=1 total_exposure_time (tframe*ngroup) missed one tframe per integration vs PandExo's (ngroup+1)*tframe; worker v6 measures the true cycle as the nint=2 minus nint=1 exposure difference, which reproduces PandExo's MIRI timing exactly (the NIR modes were already exact). The MIRI rows below predate v6 and carry the old, slightly optimistic integration counts. Only VALID configurations are compared: PRISM saturates on the two bright stars (both tools flag it; this tool floors at ngroup=2 while PandExo drops to ngroup=1) and is excluded there, and is compared on the faint star where it is unsaturated and matches (ngroup 20/20).
+- **Groups agree to ≤1 on the moderate/bright stars, to ~1% relative (up to 5 groups absolute) on the faint Ks=13 star:** each tool independently optimizes the ramp to the same 80% saturation target; the freedom left is rounding to an integer group count (e.g. G395H 124 vs 125; faint-star ramps of ~500-1000 groups differ by up to 5). Per-group integration time matches to <0.1%; total integration time and count then inherit the group choice (up to ~5.5% where a single group of ~16 dominates, bright G395H; ~2.5% bright MIRI). Only VALID configurations are compared: PRISM saturates on the two bright stars (both tools flag it; this tool floors at ngroup=2 while PandExo drops to ngroup=1) and is excluded there, and is compared on the faint star where it is unsaturated and matches (ngroup 20/20).
 - **Extracted flux agrees to a systematic ~0.3%** (binned median 0.997 for G395H), with per-pixel scatter from the two tools' independent extraction of the same 2D calculation -- photon-level for the smooth NIRSpec/MIRI traces (MIRI LRS matches to ~0.15%), larger for the curved NIRISS SOSS order-1 trace and the saturating low-R PRISM. The tool integrates over bins, so the per-pixel jitter averages out; the systematic is what enters the noise. The narrow downward spikes in this tool's flux are STELLAR ABSORPTION LINES in Pandeia's PHOENIX spectrum (hydrogen recombination -- e.g. Brackett-α 4.052 μm, Pfund-δ 3.297 μm -- plus molecular bands on cool stars, so they multiply on cooler targets: 9 lines at 6250 K, 193 at 4500 K); PandExo's separately-loaded stellar spectrum smooths them. They are physically real, cancel in the in/out transit-depth ratio, and wash out in binning.
 
 Columns: sigma ratio = (this tool's per-pixel transit-depth sigma) / (PandExo's), median [5th, 95th percentile] over matched pixels. 'matched' uses PandExo's integration counts in the tool formula (isolates the noise model); 'policy' uses the tool's own floor(T/t_int) counts (adds the integration-counting policy). flux ratio compares extracted stellar count rates (engine parity; expect 1.0000).
@@ -121,4 +134,4 @@ PandExo warnings for nircam_f444w: {'Group Number Too High?': 'Optimized NGROUPS
 
 3. **Residual policy differences (documented, small):** integration counts are floored here vs rounded in PandExo (at most one integration per window); ngroup_min is 2 here while PandExo will select 1 group (PRISM on a bright star); the symmetric in/out approximation adds ~+0.5% sigma at 1% depth (grows with depth; docstring in noise.pixel_depth_variance).
 
-4. **What may be claimed:** the instrument configuration, timing, group optimization, saturation handling, and extraction of this tool match current PandExo on the current engine. Absolute sigmas are NOT PandExo-identical and are not labeled as such: they are pandeia-extracted-noise forecasts, conservative relative to PandExo's analytic noise by the mode-dependent margins quantified above.
+4. **What may be claimed:** NOTHING, until this artifact passes its gate. The rows above are forensic measurements of whatever engine, refdata, PSF tree, worker version, and PandExo revision the provenance table names -- which is not necessarily the shipping configuration. Regenerate on the supported release before citing any parity claim.

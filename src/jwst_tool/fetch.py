@@ -82,17 +82,23 @@ FETCHES = (
 # What fetch cannot script, printed verbatim after the downloads. Box shared
 # links serve HTML to programmatic clients, so these two stay browser steps.
 MANUAL = """\
-Two downloads need a browser (STScI Box refuses scripted requests):
-  1. Pandeia reference data (~15 MB):
-       https://stsci.box.com/v/pandeia-data-v2026p2-jwst
+The Pandeia backend is a MATCHED TRIPLE: the engine, the reference data, and
+the PSF library must all be release {release}. The worker refuses to run a
+mixed set, so do not upgrade one without the others.
+
+Two downloads need a browser (STScI Box refuses scripted requests). Both links
+are on STScI's installation page, which lists the trees for the supported
+release:
+  https://outerspace.stsci.edu/spaces/PEN/pages/77530136/Pandeia%2BEngine%2BInstallation
+
+  1. Pandeia reference data, pandeia_data-{release}-jwst (~20 MB):
      extract to: {refdata}
-  2. Pandeia PSF library (~4 GB):
-       https://stsci.box.com/v/pandeia-psfs-v2026p2-jwst
+  2. Pandeia PSF library, pandeia_psfs-{release}-jwst (~4 GB):
      extract to: {psf}
 
 The Pandeia engine runs in its own conda environment (once):
-  conda create -n pandeia_2026 python=3.11
-  conda run -n pandeia_2026 pip install pandeia.engine==2026.2
+  conda create -n pandeia_{env_suffix} python=3.11
+  conda run -n pandeia_{env_suffix} pip install pandeia.engine=={release}
 then point JWST_TOOL_PANDEIA_PYTHON at that environment's python.
 
 Fetched automatically on first use, nothing to do now: HITRAN molecular
@@ -189,6 +195,8 @@ def run_fetch() -> int:
             print(f"  FAILED: {f.label}: {e}", file=sys.stderr, flush=True)
     print()
     print(MANUAL.format(refdata=ins.PANDEIA_REFDATA,
+                        release=ins.BACKEND_RELEASE,
+                        env_suffix=ins.BACKEND_RELEASE.replace(".", "_"),
                         psf=ins.PANDEIA_PSF_DIR or "(backend has no split "
                         "PSF dir; not needed)"))
     if failures:

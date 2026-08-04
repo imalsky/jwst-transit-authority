@@ -311,6 +311,31 @@ def transits_to_target(result: dict, target_sig: float) -> dict:
                 sig_inf=sig_inf)
 
 
+# Native-grid pixel-census keys the worker exports from v7 on. They are counted
+# BEFORE the worker's finite/positive `good` filter, which is the only place a
+# fully saturated channel can still be seen: pandeia returns non-finite extracted
+# noise exactly there, so a post-filter count of full saturation reads low, and
+# reads ZERO for a mode that saturated everywhere.
+_NATIVE_PIXEL_KEYS = (
+    "n_pix_native",
+    "n_pix_unusable_dropped",
+    "n_pix_part_sat_native",
+    "n_pix_full_sat_native",
+)
+
+
+def _native_pixel_counts(mode_result: dict) -> dict:
+    """Pass the worker's native-grid pixel census through, or None per key.
+
+    None means UNMEASURED (a pre-v7 payload), never zero and never the
+    post-filter count -- substituting either would report a saturated column as
+    clean. Same convention as `fd_err` being NaN rather than 0.0 for an
+    unmeasured finite-difference error (2026-07-19 audit response).
+    """
+    return {k: (int(mode_result[k]) if mode_result.get(k) is not None else None)
+            for k in _NATIVE_PIXEL_KEYS}
+
+
 def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
                   R_bin: float, t_in_s: float, t_out_s: float, n_transits: int,
                   floor_spec, noise_inflation: float = 1.0,
@@ -531,8 +556,17 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         median_sigma_ppm=float(np.median(nz["sigma"]) * 1e6),
         n_bins=int(nz["wl_center"].size),
         n_pix_partial_sat=binning.bin_counts(op, n_part_sat > 0).astype(int),
+        # POST-FILTER count: full-sat pixels among the ones the worker returned.
+        # It cannot see channels the worker already dropped as non-finite, which
+        # is precisely the fully saturated ones -- use the *_native fields below
+        # for any display or export. Kept (unchanged meaning) so nothing that
+        # reads it silently changes definition.
         n_pix_full_sat_dropped=int(np.sum(n_full_sat > 0)),
         n_pix_degenerate_dropped=int(degen.sum()),
+        # NATIVE-GRID truth from the worker (v7+). None = "not measured" for a
+        # payload predating v7; never substitute the post-filter count, which
+        # would under-report saturation as if it had been counted.
+        **_native_pixel_counts(mode_result),
         ngroup=int(mode_result["ngroup"]),
         sat_frac=float(mode_result["sat_frac"]),
         sat_ngroups=mode_result.get("sat_ngroups"),

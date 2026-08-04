@@ -1,9 +1,17 @@
 """PICASO-native RT vs the tool's ExoJax RT on ONE identical atmosphere.
 
-Offline validation ONLY (the production path is always provider chemistry +
-ExoJax; decision 2026-07-20). Requires the native opacity DB
+Offline CROSS-MODEL COMPARISON ONLY (the production path is always provider
+chemistry + ExoJax; decision 2026-07-20). Requires the native opacity DB
 (opacities/opacities/opacities_0.3_15_R15000.db) in the reference tree and
 the full tool stack. Writes tests/parity_picaso/outputs/REPORT.md and a PNG.
+
+WHAT THIS IS NOT: it is not a parity check unless every declared target below
+passes, and it does not validate absolute spectral agreement. The two codes use
+different opacity sources, different broadening, and different reference-radius
+conventions, so a disagreement here does not by itself identify a bug in either
+-- and equally, a disagreement outside target must never be reported as parity.
+`main()` returns nonzero when a target fails so a release gate can consume it;
+`--diagnostic` writes the report and returns 0 for exploratory runs.
 
 Method: the SAME state -- W39b geometry, isothermal 1100 K, blended
 equilibrium chemistry at 10x solar / C/O 0.55, absorbers restricted to the
@@ -18,15 +26,22 @@ STATED TOLERANCE TARGETS (why exact agreement is NOT expected):
 * different reference-radius conventions (picaso anchors the transit radius
   at a reference pressure; the tool anchors Rp at the RT bottom): a BROADBAND
   OFFSET is expected and removed (reported separately) before comparing;
-* different gravity treatments: picaso's altitude integration uses
-  g(z) = GM/z^2 (mass+radius are REQUIRED -- passing gravity alone leaves
-  planet.mass NaN and the native transmission silently returns all-NaN),
-  while the tool's RT uses the constant surface gravity.
+* gravity is NOT a difference between the two sides (corrected 2026-08-03;
+  the previous text here claimed the tool used constant surface gravity, which
+  stopped being true at the 2026-07-28 audit and left this docstring asserting
+  a false explanation for the residuals). BOTH sides now integrate altitude on
+  an inverse-square profile: picaso uses g(z) = GM/z^2 (mass+radius are
+  REQUIRED -- passing gravity alone leaves planet.mass NaN and the native
+  transmission silently returns all-NaN), and the tool's RT uses
+  `vulcan_forward.exojax_rt._gravity_profile_invsq`, g(r) = g_btm*(R_btm/r)^2,
+  consistently for both the chord heights and the pressure-to-column-mass
+  conversion (pinned by vulcan-forward's tests/test_gravity_profile.py).
 Targets: |offset| < 2000 ppm; median |residual| after offset removal
-< 150 ppm; p95 < 400 ppm in 1-10 um. Violations are findings to report,
-not necessarily bugs -- this is a cross-model comparison, never a CI gate.
+< 150 ppm; p95 < 400 ppm in 1-10 um.
 """
+import argparse
 import json
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -35,11 +50,91 @@ import numpy as np
 
 OUT_DIR = Path(__file__).resolve().parents[1] / "outputs"
 FIG_DIR = Path(__file__).resolve().parents[1] / "figs"
+REPO_DIR = Path(__file__).resolve().parents[3]
 R_BIN = 100.0
 WL_MIN, WL_MAX = 1.0, 12.0
 MOLS = ["H2O", "CO2", "CO", "CH4"]
 T_ISO = 1100.0
 MET, CO = 10.0, 0.55
+
+
+def _git_head(path):
+    """Short HEAD of the checkout containing `path`, or None."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10)
+        head = out.stdout.strip()
+        if out.returncode != 0 or not head:
+            return None
+        dirty = subprocess.run(
+            ["git", "-C", str(path), "status", "--porcelain"],
+            capture_output=True, text=True, timeout=10).stdout.strip()
+        return head + ("-dirty" if dirty else "")
+    except Exception:
+        return None
+
+
+def _pkg_version(name):
+    try:
+        from importlib.metadata import version
+        return version(name)
+    except Exception:
+        return None
+
+
+def collect_provenance(db_path):
+    """Exact identity of everything that can move these numbers.
+
+    Without this the archived artifact cannot be attributed to a code state,
+    which is how the committed report survived the gravity change while still
+    describing the pre-change behavior.
+    """
+    import platform
+
+    prov = {
+        "generated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "python": platform.python_version(),
+        "platform": platform.platform(),
+        "vulcan_jwst_tool_commit": _git_head(REPO_DIR),
+        "vulcan_jwst_tool_version": _pkg_version("vulcan-jwst-tool"),
+        "vulcan_forward_version": _pkg_version("vulcan-forward"),
+        "vulcan_jax_version": _pkg_version("vulcan-jax"),
+        "exojax_version": _pkg_version("exojax"),
+        "picaso_version": _pkg_version("picaso"),
+        "numpy_version": _pkg_version("numpy"),
+        "jax_version": _pkg_version("jax"),
+        "native_opacity_db": str(db_path),
+        "native_opacity_db_name": Path(db_path).name,
+        "gravity_profile": "inverse-square on BOTH sides (see module docstring)",
+    }
+    try:
+        from vulcan_forward import paths as _vf_paths
+        prov["vulcan_forward_commit"] = _git_head(
+            Path(_vf_paths.__file__).resolve().parents[3])
+    except Exception:
+        prov["vulcan_forward_commit"] = None
+
+    # Installed metadata can be STALE relative to the checkout actually being
+    # exercised (an editable install keeps the old dist-info version). Record
+    # the imported package's own __version__ next to it so a mismatch is
+    # visible in the artifact instead of silently mislabeling it.
+    for pkg, key in (("jwst_tool", "vulcan_jwst_tool"),
+                     ("vulcan_forward", "vulcan_forward"),
+                     ("vulcan_jax", "vulcan_jax")):
+        try:
+            mod = __import__(pkg)
+            prov[f"{key}_imported_version"] = getattr(mod, "__version__", None)
+        except Exception:
+            prov[f"{key}_imported_version"] = None
+    prov["version_metadata_consistent"] = all(
+        prov.get(f"{k}_imported_version") in (None, prov.get(f"{k}_version"))
+        for k in ("vulcan_jwst_tool", "vulcan_forward", "vulcan_jax"))
+    try:
+        prov["native_opacity_db_bytes"] = Path(db_path).stat().st_size
+    except OSError:
+        prov["native_opacity_db_bytes"] = None
+    return prov
 
 
 def bin_to_r(wl, y, r=R_BIN, lo=WL_MIN, hi=WL_MAX):
@@ -57,7 +152,7 @@ def bin_to_r(wl, y, r=R_BIN, lo=WL_MIN, hi=WL_MAX):
     return np.asarray(wl_b), np.asarray(y_b)
 
 
-def main():
+def main(diagnostic: bool = False):
     from jwst_tool import forward, planets
     from jwst_tool import picaso_chem as pc
     from jwst_tool import picaso_env as pe
@@ -143,13 +238,16 @@ def main():
         p95_abs_ppm=float(np.percentile(np.abs(resid), 95)),
         max_abs_ppm=float(np.max(np.abs(resid))),
         n_bins=int(wt.size))
+    prov = collect_provenance(db)
     print(json.dumps(stats, indent=1))
+    print(json.dumps(prov, indent=1))
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     FIG_DIR.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(OUT_DIR / "parity_native_rt.npz",
                         wl=wt, depth_tool=dt, depth_native=dn_i,
-                        resid_ppm=resid, stats_json=json.dumps(stats))
+                        resid_ppm=resid, stats_json=json.dumps(stats),
+                        provenance_json=json.dumps(prov))
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -173,15 +271,44 @@ def main():
         ("broadband offset |x| < 2000 ppm", abs(stats["offset_ppm"]) < 2000),
         ("median |resid| < 150 ppm", stats["median_abs_ppm"] < 150),
         ("p95 |resid| < 400 ppm", stats["p95_abs_ppm"] < 400)]
+    all_pass = all(ok for _label, ok in verdicts)
+
+    # The HEADING and the claim follow the measurement, not the other way
+    # round. An artifact outside target is a cross-model discrepancy, and
+    # saying "parity" on top of failing numbers is exactly what change 7 of the
+    # 2026-08 handoff was written to stop.
+    if all_pass:
+        title = "# Native-PICASO RT vs tool ExoJax RT: one-state parity"
+        headline = (
+            "**VERDICT: PASS.** Every declared target below is met on this one "
+            "state, so this artifact supports a one-state numerical parity "
+            "claim between the native PICASO RT and the tool's ExoJax RT.")
+    else:
+        title = ("# Native-PICASO RT vs tool ExoJax RT: one-state CROSS-MODEL "
+                 "DISCREPANCY")
+        headline = (
+            "**VERDICT: FAIL (outside target).** At least one declared target "
+            "below is not met. This artifact is a cross-model discrepancy "
+            "record: it does NOT validate absolute spectral agreement and must "
+            "not be described as parity, or cited as evidence that the "
+            "consumers' physics is validated against real spectra. The two "
+            "codes use different opacity sources, broadening, and "
+            "reference-radius conventions, so the disagreement does not by "
+            "itself identify a bug in either.")
+
+    prov_rows = "\n".join(f"| {k} | {v} |" for k, v in sorted(prov.items()))
     lines = [
-        "# Native-PICASO RT vs tool ExoJax RT: one-state parity",
+        title,
+        "",
+        headline,
         "",
         f"Generated {time.strftime('%Y-%m-%d %H:%M')} by "
-        "scripts/run_native_rt_parity.py. OFFLINE validation only; the "
+        "scripts/run_native_rt_parity.py. OFFLINE comparison only; the "
         "production path is always provider chemistry + ExoJax. See the "
         "script docstring for the method and why exact agreement is not "
         "expected (different opacity sources + reference-radius "
-        "conventions).",
+        "conventions). Gravity is NOT one of the differences: both sides "
+        "integrate altitude on an inverse-square profile.",
         "",
         f"State: W39b geometry, isothermal {T_ISO:.0f} K, blended "
         f"equilibrium at {MET:g}x solar / C/O {CO:g}, absorbers "
@@ -195,14 +322,38 @@ def main():
         f"| max abs residual | {stats['max_abs_ppm']:.0f} ppm |",
         f"| bins (R={R_BIN:.0f}, {WL_MIN}-{WL_MAX} um) | {stats['n_bins']} |",
         "",
-        "Targets (stated in the script docstring, findings not CI gates):",
+        "Declared targets:",
         ""]
     lines += [f"- {'PASS' if ok else 'OUTSIDE TARGET'}: {label}"
               for label, ok in verdicts]
-    lines += ["", "Figure: ../figs/parity_native_rt.png"]
+    lines += [
+        "",
+        "## Provenance",
+        "",
+        "| key | value |",
+        "|---|---|",
+        prov_rows,
+        "",
+        "Figure: ../figs/parity_native_rt.png"]
     (OUT_DIR / "REPORT.md").write_text("\n".join(lines) + "\n")
     print("wrote", OUT_DIR / "REPORT.md")
 
+    if not all_pass:
+        failed = [label for label, ok in verdicts if not ok]
+        print("FAIL: outside declared target(s): " + "; ".join(failed),
+              file=sys.stderr)
+        if diagnostic:
+            print("(--diagnostic: reporting 0 anyway; NOT a release gate pass)",
+                  file=sys.stderr)
+            return 0
+        return 1
+    return 0
+
 
 if __name__ == "__main__":
-    sys.exit(main())
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--diagnostic", action="store_true",
+        help="write the report for a failing comparison and still exit 0. For "
+             "exploration only -- a release gate must NOT pass this flag.")
+    sys.exit(main(diagnostic=ap.parse_args().diagnostic))

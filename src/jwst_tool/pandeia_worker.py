@@ -1,5 +1,6 @@
 """Pandeia ETC worker -- runs INSIDE the selected backend's conda env (DEFAULT
-"current" = pandeia.engine 2026.2; "legacy" = pinned 3.0; see instruments._BACKENDS).
+"current" = the matched 2026.7 engine/refdata/PSF triple; "archival_2026_2" and
+"legacy" = reproducibility only; see instruments._BACKENDS).
 
 Standalone on purpose: no imports from the rest of the tool, stdlib + pandeia only.
 
@@ -30,6 +31,14 @@ Per mode key:
                                     scalar missed it on MIRI FASTR1),
      "ngroup": .., "sat_frac": .., "sat_ngroups": ..,
      "saturated": bool, "engine_version": "..",
+     "n_pix_native": ..,             NATIVE-GRID counts (worker v7), taken
+     "n_pix_unusable_dropped": ..,   BEFORE the finite/positive `good` filter.
+     "n_pix_part_sat_native": ..,    Fully saturated channels are exactly the
+     "n_pix_full_sat_native": ..,    ones with non-finite extracted noise, so
+                                     they are removed by `good` and the
+                                     per-pixel n_full_sat curve below can no
+                                     longer see them. These four are the
+                                     reporting truth; the arrays are science.
      "warnings": {...}}      -- or {"error": "..."} if that mode failed.
 
 Star normalization (worker_version >= 4): band-integrated synphot photsys
@@ -214,6 +223,23 @@ def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
     wl = np.asarray(wl, dtype=float)
     good = np.isfinite(wl) & np.isfinite(flux) & np.isfinite(noise) & (flux > 0) & (noise > 0)
 
+    # FULL-GRID saturation aggregates, computed BEFORE `good` is applied
+    # (worker_version >= 7). Fully saturated channels are exactly the ones whose
+    # extracted noise pandeia returns non-finite, so `good` removes them and the
+    # `n_*_sat[good]` curves below can no longer see them -- a column saturated
+    # everywhere used to export a full-saturation count of ZERO. The science
+    # estimator is unchanged (it must keep excluding unusable pixels); these are
+    # reporting-only counts on the native grid, and they are what display/export
+    # must quote.
+    n_part = _sat_curve(rpt, "n_partial_saturated", wl.shape[0])
+    n_full = _sat_curve(rpt, "n_full_saturated", wl.shape[0])
+    native_counts = {
+        "n_pix_native": int(wl.shape[0]),
+        "n_pix_unusable_dropped": int((~good).sum()),
+        "n_pix_part_sat_native": int((n_part > 0).sum()),
+        "n_pix_full_sat_native": int((n_full > 0).sum()),
+    }
+
     if not good.any():
         # pandeia returned no usable pixels (e.g. NIRSpec PRISM on a bright star:
         # saturation within the shortest ramp NaNs the extracted noise everywhere)
@@ -226,11 +252,10 @@ def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
             "ngroup": int(ng_best),
             "sat_frac": float(rpt["scalar"]["fraction_saturation"]),
             "saturated": True,
+            **native_counts,
             "warnings": {k: str(v) for k, v in rpt["warnings"].items()},
         }
 
-    n_part = _sat_curve(rpt, "n_partial_saturated", wl.shape[0])
-    n_full = _sat_curve(rpt, "n_full_saturated", wl.shape[0])
     r_native, r_src = _native_r(refdata, m, wl[good])
 
     # Per-integration CYCLE time (worker v6): the nint=1 total_exposure_time
@@ -269,6 +294,7 @@ def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
         "sat_ngroups": (float(sat_ng) if sat_ng is not None
                         and np.isfinite(sat_ng) else None),
         "saturated": bool(saturated),
+        **native_counts,
         "engine_version": str(getattr(pandeia.engine, "__version__", "unknown")),
         "warnings": {k: str(v) for k, v in rpt["warnings"].items()},
     }
@@ -300,11 +326,36 @@ def _refdata_version(refdata):
     return None, "no VERSION/VERSION_PSF file or pandeia_data-<ver> dir name"
 
 
-def _check_backend_match(engine_version, refdata):
-    """Enforce STScI's matching rule (engine and refdata versions must be the
-    same release) BEFORE any calculation: a mismatched pair otherwise fails
-    deep inside the engine (or worse, runs with wrong calibrations). Returns
-    the provenance fields; raises RuntimeError on mismatch/undeterminable."""
+def _psf_version(psf_dir):
+    """PSF-library release from VERSION_PSF, else the pandeia_psfs-<ver> dir
+    name. Returns (version|None, source)."""
+    p = os.path.join(psf_dir, "VERSION_PSF")
+    if os.path.isfile(p):
+        with open(p) as f:
+            first = f.readline().strip()
+        if first:
+            return first, "VERSION_PSF"
+    base = os.path.basename(os.path.normpath(psf_dir))
+    if base.startswith("pandeia_psfs-"):
+        return base[len("pandeia_psfs-"):], "directory name"
+    return None, "no VERSION_PSF file or pandeia_psfs-<ver> dir name"
+
+
+def _check_backend_match(engine_version, refdata, psf_dir=None):
+    """Enforce STScI's matching rule across the FULL TRIPLE before any
+    calculation: engine release == refdata release == PSF-library release.
+
+    A mismatched engine/refdata pair fails deep inside the engine, or worse
+    runs with wrong calibrations. The PSF library is the same hazard and was
+    previously only checked for EXISTENCE (`VERSION_PSF` present), so a 2026.2
+    PSF tree could serve a 2026.7 engine with no version error at all, and the
+    PSF release never reached provenance. `psf_dir=None`/"" means this backend
+    carries its own PSFs inside the refdata tree (the 3.0-era layout), which is
+    the only case where there is nothing separate to match.
+
+    Returns the provenance fields; raises RuntimeError naming the offending
+    component on any mismatch or undeterminable version.
+    """
     ref_ver, source = _refdata_version(refdata)
     if ref_ver is None:
         raise RuntimeError(
@@ -316,12 +367,37 @@ def _check_backend_match(engine_version, refdata):
         raise RuntimeError(
             f"pandeia.engine {engine_version} does not match pandeia_data "
             f"{ref_ver} (from {source}) at {refdata}. STScI requires the "
-            "engine and refdata releases to be the same. Fix the pair: point "
-            "JWST_TOOL_PANDEIA_PYTHON at an env whose engine matches "
-            "JWST_TOOL_PANDEIA_REFDATA (the default validated pair is engine "
-            "2026.2 + pandeia_data-2026.2-jwst in the pandeia_2026 env; the "
-            "legacy backend pins 3.0 + 3.0rc3 in picaso_base).")
-    return {"refdata_version": ref_ver, "refdata_version_source": source}
+            "engine, refdata, and PSF releases to be the same. Fix the set: "
+            "point JWST_TOOL_PANDEIA_PYTHON at an env whose engine matches "
+            "JWST_TOOL_PANDEIA_REFDATA (the supported triple is engine 2026.7 "
+            "+ pandeia_data-2026.7-jwst + pandeia_psfs-2026.7-jwst).")
+
+    prov = {"refdata_version": ref_ver, "refdata_version_source": source}
+    if not psf_dir:
+        prov["psf_version"] = None
+        prov["psf_version_source"] = "backend carries PSFs inside refdata"
+        return prov
+
+    psf_ver, psf_source = _psf_version(psf_dir)
+    if psf_ver is None:
+        raise RuntimeError(
+            f"cannot determine the pandeia_psfs version of {psf_dir} "
+            f"({psf_source}); refusing to run against an unidentifiable PSF "
+            "library. Point JWST_TOOL_PANDEIA_PSF_DIR at an intact "
+            "pandeia_psfs tree.")
+    psf_rel = _release(psf_ver)
+    if psf_rel is None or psf_rel != eng_rel:
+        raise RuntimeError(
+            f"PSF library release {psf_ver} (from {psf_source}) at {psf_dir} "
+            f"does not match pandeia.engine {engine_version} / pandeia_data "
+            f"{ref_ver}. All three must be the same release -- a mixed PSF "
+            "tree changes the point-spread function and therefore the "
+            "extracted flux and noise, silently. Point "
+            "JWST_TOOL_PANDEIA_PSF_DIR at the pandeia_psfs tree for release "
+            f"{eng_rel}.")
+    prov["psf_version"] = psf_ver
+    prov["psf_version_source"] = psf_source
+    return prov
 
 
 def _preflight(job):
@@ -395,12 +471,17 @@ def main():
             f"missing {_vega} -- the legacy 3.x engine normalizes vegamag "
             "through synphot's vega_file and needs the local CALSPEC copy "
             "to run offline; fetch it from https://ssb.stsci.edu/trds/")
-    match = _check_backend_match(engine_version, job["refdata"])
+    match = _check_backend_match(engine_version, job["refdata"],
+                                 job.get("psf_dir"))
+    _psf_dir = job.get("psf_dir") or ""
     out = {
         "__provenance__": {
             "engine_version": engine_version,
             "refdata_path": job["refdata"],
             "refdata_name": os.path.basename(os.path.normpath(job["refdata"])),
+            "psf_path": _psf_dir,
+            "psf_name": (os.path.basename(os.path.normpath(_psf_dir))
+                         if _psf_dir else ""),
             **match,
             "python": sys.version.split()[0],
             "numpy": np.__version__,
@@ -408,8 +489,10 @@ def main():
         },
     }
     print(f"[pandeia] engine {engine_version} + {out['__provenance__']['refdata_name']} "
-          f"(refdata {match['refdata_version']} from {match['refdata_version_source']})",
-          flush=True)
+          f"(refdata {match['refdata_version']} from {match['refdata_version_source']}"
+          + (f"; PSFs {match['psf_version']} from {match['psf_version_source']}"
+             if match.get("psf_version") else "; PSFs inside refdata")
+          + ")", flush=True)
     for m in job["modes"]:
         key = m["key"]
         print(f"[pandeia] {key} ...", flush=True)

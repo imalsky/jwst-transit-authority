@@ -322,18 +322,26 @@ def check_pandeia_backend(python: str | Path = None,
                           refdata: str | Path = None,
                           psf_dir: str | Path | None = None) -> list[Item]:
     """The ACTIVE backend's three path roots (mirrors the worker preflight)."""
-    python = Path(python if python is not None else ins.PICASO_PYTHON)
+    # PICASO_PYTHON is None until the machine-specific backend env is set.
+    # datacheck REPORTS, so an unset path is a MISSING item, never a crash.
+    _py = python if python is not None else ins.PICASO_PYTHON
+    python = Path(_py) if _py else None
     refdata = Path(refdata if refdata is not None else ins.PANDEIA_REFDATA)
     psf_dir = (ins.PANDEIA_PSF_DIR if psf_dir is None else psf_dir) or ""
 
+    _py_ok = python is not None and python.exists()
     items = [Item(
         key="pandeia:python", label="Pandeia engine environment (python)",
-        status=OK if python.exists() else MISSING, required=True,
-        detail=(_found(python) if python.exists() else f"absent: {python}"),
-        remedy="Create a conda env with the matching engine, e.g.  "
-               "conda create -n pandeia_2026 python=3.11  then  "
-               "<env>/bin/pip install pandeia.engine==2026.2  and point "
-               "JWST_TOOL_PANDEIA_PYTHON at its python.")]
+        status=OK if _py_ok else MISSING, required=True,
+        detail=(_found(python) if _py_ok else
+                (f"absent: {python}" if python is not None
+                 else "JWST_TOOL_PANDEIA_PYTHON not set (no default: the "
+                      "backend environment is machine-specific)")),
+        remedy=("Create a conda env with the matching engine, e.g.  "
+                f"conda create -n pandeia_{ins.BACKEND_RELEASE.replace('.', '_')} "
+                "python=3.11  then  <env>/bin/pip install "
+                f"pandeia.engine=={ins.BACKEND_RELEASE}  and point "
+                "JWST_TOOL_PANDEIA_PYTHON at its python."))]
 
     ver = _refdata_version(refdata)
     items.append(Item(
@@ -341,23 +349,44 @@ def check_pandeia_backend(python: str | Path = None,
         status=OK if refdata.is_dir() else MISSING, required=True,
         detail=(f"{_found(refdata)}" + (f" (version {ver})" if ver else ""))
                if refdata.is_dir() else f"absent: {refdata}",
-        remedy="Download the release matching the engine (current pair: "
-               "pandeia_data-2026.2-jwst, ~15 MiB) from "
-               "https://stsci.box.com/v/pandeia-data-v2026p2-jwst and "
-               "extract it to the path above (or point "
-               "JWST_TOOL_PANDEIA_REFDATA elsewhere)."))
+        remedy=(
+            "Download the reference tree for the SAME release as the engine "
+            f"(this backend: pandeia_data-{ins.BACKEND_RELEASE}-jwst, ~20 MiB) "
+            "and extract it to the path above (or point "
+            "JWST_TOOL_PANDEIA_REFDATA elsewhere). Links are on STScI's "
+            "installation page: https://outerspace.stsci.edu/spaces/PEN/pages/"
+            "77530136/Pandeia%2BEngine%2BInstallation -- the engine, this "
+            "tree, and the PSF tree must all be the same release.")))
 
     if psf_dir:                                  # split-PSF layout (>= 2026)
         pv = Path(psf_dir) / "VERSION_PSF"       # worker preflight checks this
+        # Report the PSF RELEASE, not just presence. The worker refuses a PSF
+        # tree whose release differs from the engine/refdata (item 3); showing
+        # only "present" here would hide exactly the mismatch it now catches.
+        psf_ver = None
+        if pv.is_file():
+            try:
+                psf_ver = pv.read_text().splitlines()[0].strip() or None
+            except OSError:
+                psf_ver = None
+        _psf_matches = (psf_ver or "").startswith(ins.BACKEND_RELEASE)
         items.append(Item(
             key="pandeia:psf", label="Pandeia PSF library (split layout)",
-            status=OK if pv.is_file() else MISSING, required=True,
-            detail=(_found(Path(psf_dir)) if pv.is_file() else
-                    f"no VERSION_PSF under: {psf_dir}"),
-            remedy="Download pandeia_psfs-2026.2-jwst (~4 GiB) from "
-                   "https://stsci.box.com/v/pandeia-psfs-v2026p2-jwst and "
-                   "extract it to the path above (or point "
-                   "JWST_TOOL_PANDEIA_PSF_DIR elsewhere)."))
+            status=(OK if (pv.is_file() and _psf_matches) else MISSING),
+            required=True,
+            detail=(
+                f"{_found(Path(psf_dir))} (release {psf_ver})"
+                if pv.is_file() and _psf_matches else
+                (f"RELEASE MISMATCH: PSF tree is {psf_ver}, backend needs "
+                 f"{ins.BACKEND_RELEASE} -- {psf_dir}" if pv.is_file() else
+                 f"no VERSION_PSF under: {psf_dir}")),
+            remedy=(
+                f"Download pandeia_psfs-{ins.BACKEND_RELEASE}-jwst (~4 GiB), "
+                "the SAME release as the engine and reference data, and "
+                "extract it to the path above (or point "
+                "JWST_TOOL_PANDEIA_PSF_DIR elsewhere). Links are on STScI's "
+                "installation page: https://outerspace.stsci.edu/spaces/PEN/"
+                "pages/77530136/Pandeia%2BEngine%2BInstallation")))
     return items
 
 
@@ -368,7 +397,11 @@ def probe_pandeia_engine(python: str | Path = None,
     Returns the version string, or an 'unavailable (...)' explanation.
     Never raises -- this is a report, the run path has its own loud gate.
     """
-    python = Path(python if python is not None else ins.PICASO_PYTHON)
+    _py = python if python is not None else ins.PICASO_PYTHON
+    if not _py:
+        return ("unavailable (JWST_TOOL_PANDEIA_PYTHON is not set; the backend "
+                "environment is machine-specific and has no default)")
+    python = Path(_py)
     if not python.exists():
         return f"unavailable (no python at {python})"
     try:

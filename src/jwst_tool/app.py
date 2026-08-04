@@ -1275,17 +1275,38 @@ with st.sidebar:
                    "binned uncertainties: a hard minimum, never added in "
                    "quadrature, never rescaled by the binning R, and never "
                    f"averaged down by adding {_evw}s.")
+        # NO PRESELECTION (index=None). A 15-40 ppm hard minimum dominates the
+        # reported precision for any well-observed target, and a zero floor
+        # claims a precision nobody has demonstrated -- neither is a neutral
+        # default, so the tool makes the user own the choice and records it.
         floor_mode = st.radio(
             "Floor type", ["constant", "none", "file"], horizontal=True,
-            key=K("floormode"),
+            index=None, key=K("floormode"),
             format_func={"constant": "Constant (ppm)", "none": "No floor",
-                         "file": "Wavelength table"}.get)
+                         "file": "Wavelength table"}.get,
+            help="Required: there is no default. 'No floor' reports the Pandeia "
+                 "random sigma alone (optimistic -- it averages down with "
+                 "events and ignores 1/f and visit-long systematics). "
+                 "'Constant' applies a hard minimum; the prefilled values are "
+                 "pre-flight planning conventions, not calibrations for your "
+                 "program.")
         floor_table = None
+        if floor_mode is None:
+            st.info(
+                "Choose a floor type to continue. The choice changes the "
+                "reported precision and is saved with the run.")
+        floors = {k: None for k in mode_keys}
         if floor_mode == "constant":
             floors = {k: st.number_input(
                 f"{ins.MODES[k]['label']} minimum floor (ppm)", 0.0, 200.0,
-                ins.MODES[k]["floor_ppm"], 5.0, key=K(f"floor_{k}"))
+                ins.MODES[k]["floor_ppm_suggested"], 5.0, key=K(f"floor_{k}"))
                 for k in mode_keys}
+            st.caption(
+                "Prefilled from the pre-flight planning convention (Greene+2016 "
+                "20/30/50 ppm for NIRISS/NIRCam/MIRI). These are ILLUSTRATIVE, "
+                "not in-flight calibrations: the achievable floor depends on "
+                "brightness, readout, extraction, wavelength, visit strategy, "
+                "and pipeline. Edit them for your program.")
         elif floor_mode == "file":
             up = st.file_uploader(
                 "Two columns: wavelength (µm), floor (ppm)",
@@ -1313,12 +1334,17 @@ with st.sidebar:
                         f"{e} Edit the file and upload it again.")
                     floor_table = None
             if floor_table is None:
-                st.warning("No valid floor table is loaded; runs will use "
-                           "NO floor until one is provided.")
-        if floor_mode != "constant":
-            floors = {k: None for k in mode_keys}
+                st.warning("No valid floor table is loaded. Upload one, or "
+                           "select 'No floor' if that is what you intend -- "
+                           "the run is blocked until the choice is explicit.")
         if floor_mode == "file" and floor_table is not None:
             floors = {k: floor_table for k in mode_keys}
+        # An unmade floor choice blocks the run: it is the one setting where
+        # both candidate defaults bias the headline number, so it must not be
+        # implicit.
+        floor_choice_made = (floor_mode == "none"
+                             or floor_mode == "constant"
+                             or (floor_mode == "file" and floor_table is not None))
 
         st.markdown("**Random-noise multiplier** (× Pandeia σ, optional)")
         st.caption("Default **1.0**: the Pandeia prediction as-is. Published "
@@ -1736,9 +1762,16 @@ if params_error:
     st.error(f"Cannot run with the current settings: {params_error}")
 if not mode_keys:
     st.error("Select at least one instrument mode (step 4).")
+if not floor_choice_made:
+    st.error("Choose a minimum noise floor type (step 4, Noise model). There "
+             "is no default: a 15-40 ppm floor sets the reported precision for "
+             "a well-observed target, and no floor reports the Pandeia random "
+             "sigma alone, which averages down with events and excludes 1/f "
+             "and visit-long systematics.")
 col_btn, col_note = st.columns([1, 3])
 run_clicked = col_btn.button("Run", type="primary", width="stretch",
-                             disabled=bool(params_error) or not mode_keys)
+                             disabled=(bool(params_error) or not mode_keys
+                                       or not floor_choice_made))
 col_note.caption(f"**{planet_label}**, {grid_lbl}, model spectrum: "
                  f"**{est}**. Instrument noise is cached per star.")
 
@@ -1911,7 +1944,14 @@ if run_clicked:
             target_prec=target_prec, target_sig=target_sig,
             n_transits=n_transits, show_noise=show_noise, seed=seed,
             r_bin=r_bin, planet=planet_label, scenario=scenario,
-            floor_mode=floor_mode)
+            floor_mode=floor_mode,
+            # the SELECTED floor, not the registry suggestion: a result must
+            # carry the number that produced it (acceptance for item 5).
+            floor_selected={
+                k: (None if floors[k] is None
+                    else (float(floors[k]) if np.isscalar(floors[k])
+                          else "wavelength table"))
+                for k in mode_keys})
 
 # ---------------------------------------------------------------------------
 # Render. Order (2026-07-29 UX review, item 2.7): staleness/failure notices,
@@ -2369,8 +2409,19 @@ for r in sorted(results, key=key_order):
     if r["saturated"]:
         notes.append(f"saturates (full-well {r['sat_frac']:.2f} at min groups)")
     n_part = int(np.sum(np.asarray(r.get("n_pix_partial_sat", 0)) > 0))
-    if r.get("n_pix_full_sat_dropped"):
-        notes.append(f"{r['n_pix_full_sat_dropped']} fully saturated pixels excluded")
+    # Quote the NATIVE-grid count (worker v7+): a fully saturated channel has
+    # non-finite extracted noise, so the worker's own usable-pixel filter drops
+    # it and the post-filter count under-reports -- reading zero for a mode that
+    # saturated everywhere. None = the payload predates v7, so say "unmeasured"
+    # rather than printing a number that would read as "none saturated".
+    _n_full_native = r.get("n_pix_full_sat_native")
+    if _n_full_native is None:
+        if r.get("n_pix_full_sat_dropped"):
+            notes.append(f"at least {r['n_pix_full_sat_dropped']} fully "
+                         "saturated pixels excluded (native count unmeasured; "
+                         "re-run for a worker v7 census)")
+    elif _n_full_native:
+        notes.append(f"{_n_full_native} fully saturated pixels excluded")
     if r.get("n_pix_degenerate_dropped"):
         notes.append(f"{r['n_pix_degenerate_dropped']} degenerate-wavelength "
                      "pixels excluded")

@@ -22,9 +22,27 @@ def test_fetch_specs_are_well_formed():
 
 def test_manual_block_names_the_unscriptable_pieces():
     txt = fetch.MANUAL
-    assert "stsci.box.com" in txt
+    # Point at STScI's installation page rather than a release-specific Box
+    # link: the page always lists the trees for the supported release, so the
+    # instructions cannot silently rot to an archival release (item 3).
+    assert "outerspace.stsci.edu" in txt
     assert "conda create" in txt
     assert "{refdata}" in txt and "{psf}" in txt
+    # the triple must be stated, and the release must come from the backend
+    assert "MATCHED TRIPLE" in txt
+    assert "{release}" in txt and "{env_suffix}" in txt
+
+
+def test_manual_block_renders_with_the_active_backend_release():
+    from jwst_tool import instruments as ins
+
+    rel = ins.BACKEND_RELEASE
+    txt = fetch.MANUAL.format(refdata="/ref", psf="/psf", release=rel,
+                              env_suffix=rel.replace(".", "_"))
+    assert f"pandeia_data-{rel}-jwst" in txt
+    assert f"pandeia_psfs-{rel}-jwst" in txt
+    assert f"pandeia.engine=={rel}" in txt
+    assert "{" not in txt.replace("%2B", "")        # every field substituted
 
 
 class _FakeResponse(io.BytesIO):

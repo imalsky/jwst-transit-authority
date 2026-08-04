@@ -21,7 +21,8 @@ through
 2. current PandExo master (`scripts/pandexo_worker.py`, a standalone script
    that runs inside the current-Pandeia conda env),
 
-both on the SAME current engine/refdata generation (2026.2). Differences are
+both on the SAME engine/refdata/PSF release (the gate requires the supported
+2026.7 triple on both sides and records all three). Differences are
 therefore estimator and policy differences, never engine calibration
 differences. The tool's default pinned 3.0 backend is untouched.
 

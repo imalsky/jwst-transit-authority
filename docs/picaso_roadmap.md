@@ -39,18 +39,23 @@ findings behind its design decisions, and the features deliberately deferred
   structure). `jwst-tool data` gains a "PICASO provider data" section;
   reference data is selected ONLY by `JWST_TOOL_PICASO_REFDATA` (no baked-in
   path) and fingerprinted by CONTENT into every cache key.
-- **Native-RT parity harness**: `tests/parity_picaso/` compares picaso's own
-  `get_transit_1d` against the tool's ExoJax RT on one identical state --
-  offline validation only, never a production path. MEASURED (2026-07-20,
-  W39b isothermal 1100 K, shared absorbers H2O/CO2/CO/CH4, R = 100 bins):
-  broadband offset -2207 ppm (reference-radius conventions; removed), then
-  median |residual| 688 ppm, p95 1540 ppm -- OUTSIDE the up-front targets
-  (150/400 ppm), dominated by the opacity sources (the native DB is the
-  resampled R=15,000 'default_3.3' product; the tool uses HITRAN through
-  exojax PreMODIT) plus the g(z)-vs-constant-gravity conventions. This is
-  the honest cross-model envelope, reported in
-  tests/parity_picaso/outputs/REPORT.md; it is exactly why the production
-  path never mixes the two RTs.
+- **Native-RT cross-model harness**: `tests/parity_picaso/` compares picaso's
+  own `get_transit_1d` against the tool's ExoJax RT on one identical state --
+  offline only, never a production path. It is NOT a parity result: all three
+  declared targets are missed, so it records a cross-model DISCREPANCY and does
+  not validate absolute spectral agreement. MEASURED (2026-07-20, W39b
+  isothermal 1100 K, shared absorbers H2O/CO2/CO/CH4, R = 100 bins): broadband
+  offset -2207 ppm (reference-radius conventions; removed), then median
+  |residual| 688 ppm, p95 1540 ppm -- OUTSIDE the up-front targets (150/400
+  ppm), dominated by the opacity sources (the native DB is the resampled
+  R=15,000 'default_3.3' product; the tool uses HITRAN through exojax
+  PreMODIT). **Correction 2026-08-03:** the old attribution here also blamed
+  "g(z)-vs-constant-gravity conventions". That is wrong for current code -- the
+  tool's RT moved to an inverse-square profile in the 2026-07-28 audit, so BOTH
+  sides now integrate altitude on g(r) ~ 1/r^2 and gravity is not a difference
+  between them. The archived numbers predate that change and are STALE pending a
+  rerun. Reported in tests/parity_picaso/outputs/REPORT.md; the size of the
+  envelope is exactly why the production path never mixes the two RTs.
 
 ## Stated science limits (intrinsic, not bugs)
 
@@ -238,8 +243,8 @@ findings behind its design decisions, and the features deliberately deferred
 measured-2026-07-20 battery: within-node native parity, leave-one-node-out
 blend accuracy, lnZ FD closure, picaso-vs-vulcan spectrum sanity, and the
 climate smoke matrix (W39b x rfacv {0, 0.5, 1}, solar node, HD 189733 b,
-WASP-107 b). The native-RT parity report lives in
-`tests/parity_picaso/outputs/REPORT.md`.
+WASP-107 b). The native-RT CROSS-MODEL report (outside target, not a parity
+result) lives in `tests/parity_picaso/outputs/REPORT.md`.
 
 ## v18.1 (tool 0.12.1, model-cache v19): review-response hardening
 

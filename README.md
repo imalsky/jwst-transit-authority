@@ -30,14 +30,32 @@ pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/
    deliberately not a package dependency:
 
 ```bash
-conda create -n pandeia_2026 python=3.11
-conda run -n pandeia_2026 pip install pandeia.engine==2026.2
+conda create -n pandeia_2026_7 python=3.11
+conda run -n pandeia_2026_7 pip install pandeia.engine==2026.7
 ```
 
-This release uses Pandeia 2026.2, the release PandExo pins and the one the
-parity suite validates against. STScI's current JWST Cycle 6 release is 2026.7,
-so this tool is one calibration release behind the live ETC. The full policy is
-in [`docs/physics_and_conventions.md`](docs/physics_and_conventions.md).
+The backend is a **matched triple**: the engine, the reference data, and the PSF
+library must all be the same release. The default `current` backend means
+
+| component | required release |
+|---|---|
+| `pandeia.engine` | 2026.7 |
+| `pandeia_data-2026.7-jwst` | 2026.7 |
+| `pandeia_psfs-2026.7-jwst` | 2026.7 |
+
+The worker checks all three before any calculation and refuses a mixed set, so a
+2026.2 PSF tree can no longer serve a 2026.7 engine and silently change the
+extracted flux and noise. All three versions are recorded in each result's
+`__provenance__` and in the cache key.
+
+2026.7 is the release STScI supports; it labels older releases archival and
+unsuitable for planning new proposals
+([installation page](https://outerspace.stsci.edu/spaces/PEN/pages/77530136/Pandeia%2BEngine%2BInstallation)).
+The previous 2026.2 tuple is still selectable for reproducibility as
+`JWST_TOOL_BACKEND=archival_2026_2` (renamed, not repointed, so older caches and
+artifacts recorded as `current` cannot pass for current-release output), and the
+pinned Pandeia 3.0 pair remains as `legacy`. The full policy is in
+[`docs/physics_and_conventions.md`](docs/physics_and_conventions.md).
 
 3. Tell the tool where to keep data and caches. Add these to your shell profile so
    they persist, then open a new terminal:
@@ -46,7 +64,7 @@ in [`docs/physics_and_conventions.md`](docs/physics_and_conventions.md).
 export VULCAN_PROJECT_ROOT="$HOME/vulcan"
 export JWST_TOOL_DATA_DIR="$HOME/vulcan/jwst_data"
 export JWST_TOOL_OUTPUT_DIR="$HOME/vulcan/jwst_output"
-export JWST_TOOL_PANDEIA_PYTHON="$(conda run -n pandeia_2026 which python)"
+export JWST_TOOL_PANDEIA_PYTHON="$(conda run -n pandeia_2026_7 which python)"
 export VULCAN_FORWARD_DATA="$HOME/vulcan/forward_data"
 ```
 
@@ -159,7 +177,7 @@ src/jwst_tool/
 tests/unit/            numpy-only suite: python -m pytest tests -q
 tests/live/            env-gated live validation
 tests/parity/          PandExo parity harness and report
-tests/parity_picaso/   PICASO-native RT vs ExoJAX parity, offline
+tests/parity_picaso/   PICASO-native RT vs ExoJAX cross-model check, offline
 ```
 
 ## Documentation

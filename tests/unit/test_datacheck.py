@@ -32,23 +32,55 @@ def test_pandeia_backend_all_missing(tmp_path):
     assert all(it.remedy for it in items)          # every failure has a remedy
 
 
+def _backend_release():
+    from jwst_tool import instruments as ins
+    return ins.BACKEND_RELEASE
+
+
 def test_pandeia_backend_present_reads_version(tmp_path):
+    """A MATCHED triple at the active backend's release reports OK."""
+    rel = _backend_release()
     py = tmp_path / "env" / "bin" / "python"
     py.parent.mkdir(parents=True)
     py.touch()
-    ref = tmp_path / "pandeia_data-2026.2-jwst"
+    ref = tmp_path / f"pandeia_data-{rel}-jwst"
     ref.mkdir()
-    (ref / "VERSION").write_text("2026.2\n")
+    (ref / "VERSION").write_text(f"{rel}\n")
     psf = tmp_path / "psfs"
     psf.mkdir()
-    (psf / "VERSION_PSF").write_text("2026.2\n")
+    (psf / "VERSION_PSF").write_text(f"{rel}\n")
     items = datacheck.check_pandeia_backend(python=py, refdata=ref,
                                             psf_dir=str(psf))
     by = {it.key: it for it in items}
     assert by["pandeia:python"].status == datacheck.OK
     assert by["pandeia:refdata"].status == datacheck.OK
-    assert "2026.2" in by["pandeia:refdata"].detail       # version surfaced
+    assert rel in by["pandeia:refdata"].detail           # version surfaced
     assert by["pandeia:psf"].status == datacheck.OK
+    assert rel in by["pandeia:psf"].detail               # PSF release surfaced
+
+
+def test_pandeia_psf_release_mismatch_is_reported(tmp_path):
+    """Item 3: a PSF tree from a DIFFERENT release must not read as OK.
+
+    The worker refuses this set before calculating; the status panel has to
+    agree, or a user sees a green PSF row for a backend that cannot run.
+    """
+    rel = _backend_release()
+    other = "2026.2" if rel != "2026.2" else "2026.7"
+    py = tmp_path / "env" / "bin" / "python"
+    py.parent.mkdir(parents=True)
+    py.touch()
+    ref = tmp_path / f"pandeia_data-{rel}-jwst"
+    ref.mkdir()
+    (ref / "VERSION").write_text(f"{rel}\n")
+    psf = tmp_path / "psfs"
+    psf.mkdir()
+    (psf / "VERSION_PSF").write_text(f"{other}\n")
+    by = {it.key: it for it in datacheck.check_pandeia_backend(
+        python=py, refdata=ref, psf_dir=str(psf))}
+    assert by["pandeia:psf"].status == datacheck.MISSING
+    assert "RELEASE MISMATCH" in by["pandeia:psf"].detail
+    assert other in by["pandeia:psf"].detail and rel in by["pandeia:psf"].detail
 
 
 def test_pandeia_psf_dir_without_version_file_is_missing(tmp_path):

@@ -22,6 +22,16 @@ with constant edge extension. It is NOT added in quadrature, NOT scaled with
 the requested resolving power, and does NOT average down when transits are
 added (the random term does; the floor caps it from below).
 
+`floor_spec` has NO DEFAULT anywhere and must be passed explicitly. Because the
+floor is a hard minimum, a 15-40 ppm value SETS the reported precision for any
+well-observed target -- so a default floor would silently make an editorial
+planning number the headline result, while a default of zero would claim a
+precision no program has demonstrated (Pandeia models pixel-level and
+correlated read noise, but no 1/f drift and no visit-long systematics). Neither
+is neutral; the caller chooses, and the choice is recorded in the run
+provenance. The per-mode values in `instruments.MODES` are named
+`floor_ppm_suggested` and are only ever read to prefill a GUI widget.
+
 What this is, and is not: a Pandeia-extracted-noise BOX-TRANSIT APPROXIMATION
 under the selected extraction/detector configuration -- an instrument-model
 planning forecast. A per-mode parity suite against current PandExo (engine
@@ -66,8 +76,12 @@ def backend_fingerprint() -> dict:
     if _BACKEND_FINGERPRINT is not None:
         return _BACKEND_FINGERPRINT
     engine = "unavailable"
-    py = Path(ins.PICASO_PYTHON)
-    if py.exists():
+    # PICASO_PYTHON is None until the machine-specific backend env is set; the
+    # fingerprint stays "unavailable" rather than raising here (this runs on the
+    # cache-key path, and a missing backend must fail at RUN time with the one
+    # actionable message, not while building a key).
+    py = Path(ins.PICASO_PYTHON) if ins.PICASO_PYTHON else None
+    if py is not None and py.exists():
         try:
             r = subprocess.run(
                 [str(py), "-c",
@@ -109,6 +123,14 @@ def backend_fingerprint() -> dict:
     _BACKEND_FINGERPRINT = {
         "engine_version": engine,
         "refdata_name": ref.name,
+        # PSF tree identity is a FIRST-CLASS key, not just a hashed VERSION
+        # file: a mixed PSF release changes the point-spread function and hence
+        # the extracted flux and noise. The worker now also REFUSES a release
+        # that differs from the engine/refdata (item 3).
+        "psf_name": (Path(ins.PANDEIA_PSF_DIR).name
+                     if ins.PANDEIA_PSF_DIR else ""),
+        "backend_token": ins.JWST_TOOL_BACKEND,
+        "backend_release": ins.BACKEND_RELEASE,
         "refdata_version_files": sorted(refver),
         "cdbs_identity": cdbs_id,
     }
@@ -147,8 +169,10 @@ def noise_job(star: dict, mode_keys: list[str], sat_limit: float = 0.80) -> dict
         "modes": modes,
         # cache-buster: bump whenever pandeia_worker.py output changes
         # (output semantics in the worker docstring, per-version history
-        # in notes.md)
-        "worker_version": 6,
+        # in notes.md). v7 = native-grid saturation counts taken before the
+        # `good` filter + the matched engine/refdata/PSF release triple in
+        # __provenance__.
+        "worker_version": 7,
     }
 
 
@@ -168,7 +192,7 @@ def run_pandeia(job: dict, progress=None, force: bool = False) -> dict:
     if cache.exists() and not force:
         return json.loads(cache.read_text())
 
-    py = Path(ins.PICASO_PYTHON)
+    py = Path(ins.require_pandeia_python())
     if not py.exists():
         raise RuntimeError(
             f"Pandeia backend python not found at {py} (the '{ins.JWST_TOOL_BACKEND}' "
