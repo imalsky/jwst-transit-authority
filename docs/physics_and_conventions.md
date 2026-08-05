@@ -177,10 +177,9 @@ and it is what the public Space pins for reproducibility. STScI labels 2026.2
 archival and unsuitable for planning new proposals. See
 [`audit_decisions_2026-07-21.md`](audit_decisions_2026-07-21.md).
 
-Set `JWST_TOOL_BACKEND=legacy` to select the pinned pandeia 3.0 and
-`pandeia_data-3.0rc3` pair. It is retained only as an explicit reproducibility
-backend, and a legacy run always labels itself LEGACY. It never presents as
-2026-backend output.
+The pinned pandeia 3.0 / `pandeia_data-3.0rc3` `legacy` backend was removed.
+Reproducing a pre-2026.2 (3.0-era) run now requires checking out a commit
+that still carries it.
 
 Three guarantees hold across backends. The worker refuses to run a mismatched
 engine and reference-data pair. Every result and cache file records the exact

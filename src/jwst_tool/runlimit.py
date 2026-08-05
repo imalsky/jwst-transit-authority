@@ -1,17 +1,15 @@
-"""Cross-process limiter for heavy runs (v18.1, public-Space protection).
+"""Cross-process limiter for heavy runs (public-Space protection).
 
-The live Space is deliberately public, so any visitor can launch multi-minute
-forward/ETC/adjoint subprocesses. This caps the number running at once
-per instance with OS-level advisory locks; when every slot is busy the GUI
-declines the launch with a friendly message instead of queueing (cached
-results stay instant; there are no accounts and no fairness guarantees).
+The live Space is public, so any visitor can launch multi-minute
+subprocesses. This caps how many run at once per instance with OS-level
+advisory locks; when every slot is busy the GUI declines the launch instead
+of queueing.
 
-Lifecycle contract (same as the climate cache lock, and for the same reason):
-slot files are opened and flock'd but NEVER unlinked -- a slot releases when
-its holder closes the fd or dies, and unlinking a path another process may
-still hold flock'd creates two simultaneous "exclusive" locks on different
-inodes. The pid/tag/start-time written into a slot file is observability
-metadata only.
+Lifecycle contract (same as the climate cache lock): slot files are flock'd
+but NEVER unlinked -- a slot releases when its holder closes the fd or dies,
+and unlinking a path another process may still hold flock'd creates two
+"exclusive" locks on different inodes. The pid/tag/start-time in a slot file
+is observability metadata only.
 """
 from __future__ import annotations
 

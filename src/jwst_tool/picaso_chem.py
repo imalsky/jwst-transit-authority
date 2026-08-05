@@ -1,65 +1,39 @@
 """PICASO equilibrium-chemistry provider: composition-blended Visscher grid.
 
-Pure numpy + stdlib at import time (the fast test suite exercises the math on
-synthetic fixtures without picaso installed); the reference tree is touched
-only inside the loaders, resolved through :mod:`jwst_tool.picaso_env`.
+Pure numpy + stdlib at import time; the reference tree is touched only
+inside the loaders, resolved through :mod:`jwst_tool.picaso_env`.
 
-Scientific contract (2026-07-20 review, rev 3):
+Contract:
 
-* ``chemeq_visscher_2121`` picks the NEAREST node file in ([M/H], C/O) with no
-  composition interpolation -- naive FD composition rows through the stock API
-  would be exactly zero inside a cell. This module instead blends the 2x2
-  bracketing node files bilinearly in (feh = log10 met, C/O) of the LOG10
-  abundances, then interpolates (T, P) within the blended table using exactly
-  picaso's own ``chem_interp`` convention (bilinear in 1/T and log10 P of the
-  log10 abundance; verified to 4e-15 dex against the native implementation).
-  Unlike picaso we REFUSE outside the table instead of extrapolating.
-* Composition derivatives are therefore SYMMETRIC TWO-CELL INTERPOLANT
-  SECANTS: the default baselines sit ON grid nodes, where the interpolant is
-  continuous with a kinked derivative, so a central difference spans the two
-  adjacent cells and no unique local derivative exists. The forward model
-  computes left/right one-sided secants and HARD-ERRORS when their
-  disagreement exceeds ``FD_KINK_TOL`` (never report a Fisher row whose
-  one-sided slopes differ materially).
-* Gas accounting: the gas total includes EVERY gas-phase column -- ions and
-  electrons too (they contribute number density; the electron mass is
-  5.49e-4 amu) -- and excludes only the true condensate column (graphite),
-  which is renamed ``C-gr_l_s`` so the shared RT path's condensate mask
-  handles it exactly like VULCAN's ``*_l_s`` reservoirs. The tables do NOT
-  sum to 1 everywhere (documented upstream; species outside the reported set
-  are missing, and low-T cells floor uncalculated species at 1e-50): the
-  shared path renormalizes the retained gas per layer, and the provider
-  certificate records the per-layer pre-normalization sum -- refusing below
-  ``GAS_SUM_MIN``, flagging below ``GAS_SUM_WARN``.
-* Known data defect (measured 2026-07-20/21): feh1.0_co0.55 carries ONE
-  corrupted row at (900 K, logP = -5.523). Anatomy: EVERY species in the
-  row is uniformly deflated by ~x0.747 (a spurious ~25% phantom abundance
-  entered the row's normalization at generation), plus two junk residues:
-  VO ~9.9e6x and CrH ~4.8e4x too high (both spectroscopically inert at
-  ~1e-12 and not RT species). The same cell is clean in all four
-  neighboring node files. Handling (v18.1 review decision): a VERSIONED,
-  CONTENT-GUARDED correction -- ``KNOWN_TABLE_CORRECTIONS`` replaces the
-  row by the log-mean of its T-neighbors ONLY while the file's row still
-  hashes to the registered corrupt bytes (an upstream fix makes the entry
-  a no-op); every application is recorded in the certificate/npz. The
-  measured spectral difference between the correction and the previous
-  renormalize-through treatment is <= 2.2 ppm worst-case (900 K profile).
-  Any OTHER isolated anomaly (a row below ``SUSPECT_SUM`` whose T-neighbor
-  rows are clean) inside the evaluated span REFUSES loudly -- unvetted
-  corruption is never renormalized through. The extreme-metallicity files
-  (|feh| >= 1.5) systematically sum to 0.86-0.98 at T <~ 500 K with
-  equally-low neighbor rows -- expected missing-species behavior, NOT
-  isolated corruption: renormalized and certificate-flagged, never
-  refused.
-* Realized composition: gas-phase C/O from the blended abundances matches the
-  file label only where nothing has condensed (verified: 0.458 vs label 0.46
-  at 2000 K; at 800-1200 K silicate condensation sequesters O and the
-  gas-phase C/O rises to ~0.55 -- real physics, not an interpolation error).
-  The certificate records the per-layer realized gas C/O for exactly this
-  reason, plus a hot-layer summary (``realized_gas_co_hotT``: the median
-  over layers with T >= ``CO_CHECK_T_K``, where condensation cannot shift
-  it) that the GUI surfaces for comparison against the label. No code path
-  refuses on a label mismatch -- it is a reported diagnostic, not a gate.
+* The stock ``chemeq_visscher_2121`` snaps to the NEAREST node file, so
+  naive FD composition rows would be exactly zero inside a cell. This
+  module blends the 2x2 bracketing node files bilinearly in (feh, C/O) of
+  the LOG10 abundances, then interpolates (T, P) with picaso's own
+  ``chem_interp`` convention (bilinear in 1/T and log10 P of log10
+  abundance; verified to 4e-15 dex against the native implementation).
+  Outside the table we REFUSE, never extrapolate.
+* Composition derivatives are two-cell interpolant secants: on a grid node
+  the derivative is kinked, so the forward model computes left/right
+  one-sided secants and HARD-ERRORS above ``FD_KINK_TOL``.
+* Gas accounting: the gas total includes EVERY gas-phase column (ions and
+  electrons too) and excludes only graphite, renamed ``C-gr_l_s`` so the
+  shared condensate mask treats it like VULCAN's ``*_l_s`` reservoirs. The
+  tables do NOT sum to 1 everywhere: the shared path renormalizes the
+  retained gas per layer; the certificate records the per-layer
+  pre-normalization sum -- refusing below ``GAS_SUM_MIN``, flagging below
+  ``GAS_SUM_WARN``.
+* Table defects: ``KNOWN_TABLE_CORRECTIONS`` applies versioned,
+  content-guarded row corrections only while the row still hashes to the
+  registered corrupt bytes (spectral impact <= 2.2 ppm for the catalogued
+  cell); every application is recorded. Any OTHER isolated anomaly (a low
+  row with clean T-neighbors) inside the evaluated span REFUSES loudly --
+  unvetted corruption is never renormalized through. Systematically low
+  sums at extreme metallicity / low T are missing-species behavior:
+  renormalized and certificate-flagged, never refused.
+* Realized gas-phase C/O can differ from the file label where condensation
+  sequesters O (real physics). The certificate records the per-layer
+  realized C/O plus ``realized_gas_co_hotT`` (median over T >=
+  ``CO_CHECK_T_K``); a label mismatch is a diagnostic, never a gate.
 """
 from __future__ import annotations
 
@@ -85,35 +59,29 @@ CK_NODES_AVAILABLE = tuple(
     if not (f in _EXTREME_FEH and c not in _EXTREME_CO))
 assert len(CK_NODES_AVAILABLE) == 70
 
-#: RT molecules the provider supplies (NO SO2/S2/S8/CS2: equilibrium sulfur
-#: sits in H2S/OCS -- photochemical sulfur science, CS2 included, stays
-#: VULCAN-only). H2S is BASE here (v20): it is the dominant equilibrium
-#: sulfur reservoir at 700-1500 K (and in picaso's own default species set),
-#: and leaving it opt-in made the default eq-vs-kinetics comparison
-#: asymmetric on sulfur (the vulcan base carries SO2 while the picaso base
-#: carried no S at all). C2H4/C2H6 joined the extras in v25: the Visscher
-#: tables carry both gas columns and SPECIES_ELEMENTS already counts them.
+#: RT molecules the provider supplies. NO SO2/S2/S8/CS2: equilibrium sulfur
+#: sits in H2S/OCS; photochemical sulfur science stays VULCAN-only. H2S is
+#: BASE (the dominant equilibrium sulfur reservoir at 700-1500 K); opt-in
+#: H2S made the default eq-vs-kinetics comparison asymmetric on sulfur.
 PICASO_MOLECULES = ["H2O", "CO2", "CO", "CH4", "H2S"]
 PICASO_EXTRA_MOLECULES = ["C2H2", "C2H4", "C2H6", "HCN", "NH3", "OCS"]
 
-#: registry vulcan-token -> table column, for species where the SNCHO
-#: network and the Visscher tables disagree on the name; the picaso chem
-#: adapter aliases sidx so the shared depth path's registry-token lookup
-#: works under both engines
+#: vulcan-token -> table column where the SNCHO network and the Visscher
+#: tables disagree on the name; the adapter aliases sidx so registry-token
+#: lookups work under both engines
 VULCAN_TO_TABLE = {"COS": "OCS"}
 
-#: table span (validated by the loader) and provider pressure policy: the
-#: tables start at 1e-6 bar, so the provider chemistry grid spans exactly
-#: [1e-6 bar, chemistry bottom]; ABOVE 1e-6 bar the RT interpolation map
-#: constant-extends the top layer (stated policy, certificate-recorded).
+#: validated table span + pressure policy: tables start at 1e-6 bar, so the
+#: provider chemistry grid spans [1e-6 bar, chemistry bottom]; above that
+#: the RT map constant-extends the top layer (stated policy).
 TABLE_T_K = (75.0, 6000.0)
 TABLE_P_LOGBAR = (-6.0, 4.0)
 N_T, N_P = 101, 21
 
 GAS_SUM_MIN = 0.70     # refuse: pre-normalization gas sum below this anywhere
 GAS_SUM_WARN = 0.98    # certificate flag threshold
-SUSPECT_SUM = 0.90     # loader-level suspect-row threshold (catches the
-                       # feh1.0_co0.55 glitch cell at 0.746)
+SUSPECT_SUM = 0.90     # loader-level suspect-row threshold (the known glitch
+                       # cell sums to 0.746)
 FLOOR_LOG10 = -45.0    # post-blend values at/below this are exact zeros
                        # (the files floor uncalculated species at 1e-50)
 FD_KINK_TOL = 0.5      # max |j_right - j_left| / max|j_sym| before a
@@ -124,12 +92,10 @@ CO_CHECK_T_K = 2000.0  # realized-C/O vs label comparisons only above this
 GRAPHITE = "C-gr"
 GRAPHITE_OUT = "C-gr_l_s"   # renamed so the shared condensate mask catches it
 
-#: Versioned, content-guarded corrections for CATALOGUED table defects
-#: (module docstring has the vetting evidence). Keyed by node token; each
-#: entry names the cell, the sha1-16 of the exact corrupt ROW bytes (the
-#: np.loadtxt float64 row including the T/logP columns -- if upstream fixes
-#: the file the hash no longer matches and the correction is a NO-OP), and
-#: the correction method. Never a general repair heuristic.
+#: Versioned, content-guarded corrections for CATALOGUED table defects.
+#: Each entry names the cell, the sha1-16 of the exact corrupt ROW bytes
+#: (an upstream fix changes the hash and makes the entry a NO-OP), and the
+#: method. Never a general repair heuristic.
 KNOWN_TABLE_CORRECTIONS = {
     "feh1.0_co0.55": (
         {"T": 900.0, "logP": -5.523,
@@ -153,9 +119,8 @@ _ELEMENT_MASS = {  # standard atomic weights, amu
 }
 _M_E = 5.48579909e-4     # electron mass, amu
 
-#: element counts per table column (charge ignored for mass -- an ion's mass
-#: differs from its parent by one electron mass, far below the 5-digit
-#: standard-atomic-weight precision used here; e- carries its own mass)
+#: element counts per table column (charge ignored for mass: one electron
+#: mass is far below the atomic-weight precision here; e- has its own mass)
 SPECIES_ELEMENTS = {
     "e-": {}, "H2": {"H": 2}, "H": {"H": 1}, "H+": {"H": 1}, "H-": {"H": 1},
     "H2-": {"H": 2}, "H2+": {"H": 2}, "H3+": {"H": 3}, "He": {"He": 1},
@@ -280,9 +245,9 @@ def load_node_table(node: str) -> SimpleNamespace:
         corrections_applied.append(
             {"node": node, "T": float(T[iT]), "logP": float(Plog[iP]),
              "method": entry["method"], "row_sha1": row_sha})
-    # suspect-row bookkeeping (gas total = everything but graphite),
-    # AFTER corrections; ``isolated`` = both T-neighbor rows are clean, the
-    # signature of point corruption rather than systematic missing species
+    # suspect-row bookkeeping AFTER corrections (gas total = everything but
+    # graphite); ``isolated`` = both T-neighbor rows clean, the signature of
+    # point corruption rather than systematic missing species
     igr = species.index(GRAPHITE)
     gas_cols = [j for j in range(len(species)) if j != igr]
     sums = (10.0 ** cube)[:, :, gas_cols].sum(axis=2)
@@ -377,11 +342,11 @@ def evaluate(met_x_solar: float, co_ratio: float, T_prof: np.ndarray,
              p_bar: np.ndarray) -> SimpleNamespace:
     """Blended equilibrium state on a T-P profile.
 
-    Returns raw (unnormalized) linear VMRs for all 50 columns with graphite
-    renamed ``C-gr_l_s`` -- the shared RT path's condensate mask + per-layer
-    gas normalization then treats it exactly like a VULCAN reservoir column.
-    The certificate block carries the normalization / realized-composition /
-    suspect-cell diagnostics; GAS_SUM_MIN violations raise here.
+    Returns raw (unnormalized) linear VMRs for all columns with graphite
+    renamed ``C-gr_l_s``; the shared RT path applies the condensate mask and
+    per-layer gas normalization. The certificate carries the normalization /
+    realized-composition / suspect-cell diagnostics; GAS_SUM_MIN violations
+    raise here.
     """
     cell = bracketing_cells(met_x_solar, co_ratio)
     tabs = [[load_node_table(n) for n in row] for row in cell["nodes"]]
@@ -414,12 +379,10 @@ def evaluate(met_x_solar: float, co_ratio: float, T_prof: np.ndarray,
     realized_co = np.where(denomO > 0.0, (y @ nC) / np.maximum(denomO, 1e-300),
                            np.nan)
 
-    # suspect table rows that can actually influence this profile: any
-    # loader-flagged cell within the (T, P) bounding box of the profile.
-    # ISOLATED anomalies (clean T-neighbors -> point corruption, not the
-    # systematic missing-species deficits) REFUSE unless a registered
-    # correction already handled them -- unvetted corruption is never
-    # renormalized through (v18.1).
+    # loader-flagged cells within the profile's (T, P) bounding box. ISOLATED
+    # anomalies (clean T-neighbors = point corruption) REFUSE unless a
+    # registered correction already handled them -- unvetted corruption is
+    # never renormalized through.
     tmin, tmax = float(np.min(T_prof)), float(np.max(T_prof))
     plmin = float(np.min(np.log10(p_bar)))
     plmax = float(np.max(np.log10(p_bar)))
@@ -447,8 +410,7 @@ def evaluate(met_x_solar: float, co_ratio: float, T_prof: np.ndarray,
     cert = dict(
         nodes=cell["nodes"], wf=round(cell["wf"], 6), wc=round(cell["wc"], 6),
         feh=round(cell["feh"], 6), co=round(cell["co"], 6),
-        # the full per-layer pre-normalization gas sums (v18.1: the summary
-        # stats alone overstated what was recorded)
+        # full per-layer pre-normalization gas sums, not just summary stats
         gas_sum_layers=[round(float(v), 6) for v in pre_norm_sum],
         gas_sum_min=float(pre_norm_sum.min()),
         gas_sum_median=float(np.median(pre_norm_sum)),

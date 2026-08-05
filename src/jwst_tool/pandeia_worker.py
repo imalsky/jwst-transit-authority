@@ -1,8 +1,6 @@
-"""Pandeia ETC worker -- runs INSIDE the selected backend's conda env (DEFAULT
-"current" = the matched 2026.7 engine/refdata/PSF triple; "archival_2026_2" and
-"legacy" = reproducibility only; see instruments._BACKENDS).
-
-Standalone on purpose: no imports from the rest of the tool, stdlib + pandeia only.
+"""Pandeia ETC worker -- runs INSIDE the selected backend's conda env
+(see instruments._BACKENDS). Standalone on purpose: no imports from the rest
+of the tool, stdlib + pandeia only.
 
     python pandeia_worker.py job.json result.json
 
@@ -14,56 +12,40 @@ job.json:
                 "strategy": {...}, "ngroup_min":.., "ngroup_max":..}, ...]}
 
 result.json: one entry per mode key, plus a reserved "__provenance__" entry
-(engine/refdata/python versions -- the exact backend identity of this run;
-written before any mode runs so even an all-failed result is attributable).
-Per mode key:
+(the exact backend identity, written before any mode runs). Per mode key:
     {"wl": [...um], "flux": [...e-/s], "noise_1int": [...e-/s, sigma for 1 integ],
      "n_part_sat": [...], "n_full_sat": [...],   per-pixel saturated-group counts
      "r_native": [...] | null,      native resolving power R(lambda) on the wl
-                                    grid (refdata dispersion file; null when the
-                                    disperser has no such file -- host then skips
-                                    the LSF blur, safe for high-R modes only),
+                                    grid (null = host skips the LSF blur,
+                                    safe for high-R modes only),
      "r_native_source": "..",
-     "t_cycle_s": ..,                per-integration CYCLE time in a TSO series
-                                    (worker v6: the nint=2 minus nint=1
-                                    exposure-time difference, which includes
-                                    the between-integration reset -- the nint=1
-                                    scalar missed it on MIRI FASTR1),
+     "t_cycle_s": ..,               per-integration CYCLE time in a TSO series
+                                    (nint=2 minus nint=1 exposure difference,
+                                    which includes the between-integration
+                                    reset),
      "ngroup": .., "sat_frac": .., "sat_ngroups": ..,
      "saturated": bool, "engine_version": "..",
-     "n_pix_native": ..,             NATIVE-GRID counts (worker v7), taken
-     "n_pix_unusable_dropped": ..,   BEFORE the finite/positive `good` filter.
-     "n_pix_part_sat_native": ..,    Fully saturated channels are exactly the
-     "n_pix_full_sat_native": ..,    ones with non-finite extracted noise, so
-                                     they are removed by `good` and the
-                                     per-pixel n_full_sat curve below can no
-                                     longer see them. These four are the
-                                     reporting truth; the arrays are science.
+     "n_pix_native": ..,             NATIVE-GRID counts, taken BEFORE the
+     "n_pix_unusable_dropped": ..,   finite/positive `good` filter (fully
+     "n_pix_part_sat_native": ..,    saturated channels have non-finite
+     "n_pix_full_sat_native": ..,    extracted noise, so `good` drops them);
+                                     these four are the reporting truth.
      "warnings": {...}}      -- or {"error": "..."} if that mode failed.
 
-Star normalization (worker_version >= 4): band-integrated synphot photsys
-normalization to the 2MASS Ks magnitude in vegamag ("2mass,ks" bandpass from
-the minimal CDBS comp/nonhst tree) -- the same convention as the STScI web
-ETC. The Vega reference: the 2026+ engine uses its OWN refdata Vega
-(sed/hst_calspec/alpha_lyr_stis_010.fits, exactly the web ETC's); the legacy
-3.x engine goes through synphot's vega_file, pinned to the local CALSPEC
-alpha_lyr_stis_011 copy (required for legacy only; the two Vegas agree to
-0.08 mmag in Ks). The old at_lambda shortcut (monochromatic
-666.7 Jy zero point AT 2.159 um) mis-scales the flux by ~1-4% depending on
-spectral type (CO bandhead for cool stars, Brackett-gamma wing for warm ones;
-Cohen 2003 isophotal calibration holds only for A0V shapes), which fed
-saturation/ngroup choices at full amplitude.
+Star normalization: band-integrated synphot photsys normalization to the
+2MASS Ks magnitude in vegamag (web-ETC convention). Never revert to the
+at_lambda monochromatic shortcut -- it mis-scales the flux by ~1-4% with
+spectral type. Vega reference: the engine uses its OWN refdata Vega; the
+local synphot vega_file pin is only an offline guard (the two agree to
+0.08 mmag in Ks).
 
-Group selection: probe at ngroup_min, form two candidates -- the PandExo-style
-linear extrapolation of the brightest-pixel full-well fraction, and pandeia's
-own scalar sat_ngroups (min groups-to-saturation over extraction pixels) scaled
-by sat_limit -- take the smaller, then VERIFY: run the chosen ngroup and step
-down until the measured fraction_saturation is actually under sat_limit (the
-linear assumption alone can overshoot). If even ngroup_min busts the limit the
-mode is flagged saturated (kept, with its degraded ngroup_min numbers, so the
-GUI can say WHY it's bad). Channel-level saturation comes from the report's 1d
-n_partial_saturated / n_full_saturated curves so the host can exclude or flag
-affected pixels instead of trusting one mode-wide boolean.
+Group selection: probe at ngroup_min, take the smaller of the PandExo-style
+linear full-well extrapolation and pandeia's sat_ngroups scaled by
+sat_limit, then VERIFY: run the chosen ngroup and step down until the
+measured saturation fraction is under sat_limit. A mode saturated even at
+ngroup_min is kept, flagged, with its degraded numbers so the GUI can say
+why. Channel-level saturation comes from the report's 1d curves so the host
+can exclude or flag per pixel.
 """
 import copy
 import glob
@@ -84,10 +66,8 @@ def _make_calc(build_default_calc, m, star):
     calc["configuration"]["detector"]["nexp"] = 1
     for k, v in (m.get("strategy") or {}).items():
         calc["strategy"][k] = v
-    # sky background model (pandeia's default is "minzodi"/"benchmark"); the
-    # registry pins PandExo's TSO convention ("ecliptic" at "medium"). BOTH
-    # keys are required together -- the engine resolves them to one canned
-    # file (<background>_<level>.fits) and fails on a partial pair.
+    # the registry pins PandExo's TSO background convention; the engine
+    # needs BOTH keys (it resolves them to one canned file)
     if m.get("background"):
         calc["background"] = m["background"]
         if not m.get("background_level"):
@@ -98,8 +78,7 @@ def _make_calc(build_default_calc, m, star):
     calc["scene"][0]["spectrum"]["sed"] = {
         "sed_type": "phoenix", "teff": float(star["teff"]),
         "log_g": float(star["log_g"]), "metallicity": float(star["metallicity"])}
-    # band-integrated 2MASS Ks normalization in vegamag (web-ETC convention);
-    # see module docstring for why the at_lambda shortcut was retired
+    # band-integrated 2MASS Ks vegamag normalization (module docstring)
     calc["scene"][0]["spectrum"]["normalization"] = {
         "type": "photsys", "bandpass": "2mass,ks",
         "norm_flux": float(star["ks_mag"]), "norm_fluxunit": "vegamag"}
@@ -109,12 +88,8 @@ def _make_calc(build_default_calc, m, star):
 def _native_r(refdata, m, wl):
     """Native resolving power R(lambda) interpolated onto the extracted grid,
     from the mode's refdata dispersion file. Returns (list|None, source str).
-
-    Disperser token: config disperser where present; MIRI LRS is the p750l
-    prism; SOSS picks the order-specific file. Missing file -> (None, note):
-    the host then applies no LSF blur, which is only safe for high-R modes --
-    every low-R mode used here (PRISM, LRS, SOSS) has a dispersion file in
-    pandeia_data (verified for 3.0rc3).
+    Missing file -> (None, note): the host applies no LSF blur, safe only
+    for high-R modes.
     """
     disp = (m.get("config", {}).get("instrument", {}) or {}).get("disperser")
     if m["instrument"] == "miri" and m["mode"] == "lrsslitless":
@@ -142,12 +117,9 @@ def _native_r(refdata, m, wl):
 
 
 def _clamp_ngroup(ng, ng_min, ng_max):
-    """Clamp a candidate group count to the mode's supported [ng_min, ng_max].
-
-    ng_max is the PandExo-compatible hard maximum for the mode (NIRCam grism =
-    100; see instruments.PANDEXO_NGROUP_MAX). This is the ONE place the group
-    optimizer's output is bounded, so a selected ramp can never exceed the
-    supported range on a faint target (2026-07-12 audit item 5)."""
+    """Clamp a candidate group count to the mode's [ng_min, ng_max] -- the
+    ONE place the group optimizer's output is bounded
+    (instruments.PANDEXO_NGROUP_MAX)."""
     return max(int(ng_min), min(int(ng_max), int(ng)))
 
 
@@ -161,11 +133,9 @@ def _run(perform_calculation, calc, ngroup, nint=1):
 def _sat_curve(rpt, key, n_pix):
     """Per-pixel saturated-group counts from the 1d report.
 
-    LOAD-BEARING (worker v6): detect.evaluate_mode drops fully saturated
-    pixels from the measurement operator via these curves, so a missing or
-    renamed report key must FAIL here -- the old silent all-zeros fallback
-    would have quietly stopped excluding saturated pixels after an engine
-    rename (STScI does rename report keys between releases)."""
+    LOAD-BEARING: a missing or renamed report key must FAIL here -- a silent
+    all-zeros fallback would stop excluding saturated pixels after an engine
+    key rename (STScI does rename them)."""
     try:
         wave, curve = rpt["1d"][key]
     except Exception as e:
@@ -192,9 +162,8 @@ def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
     sat_probe = float(probe["scalar"]["fraction_saturation"])
     sat_ng = probe["scalar"].get("sat_ngroups")
 
-    # candidate group counts: linear extrapolation of the probe's full-well
-    # fraction, and pandeia's own groups-to-saturation estimate; take the
-    # smaller (more conservative), then verify empirically below.
+    # candidates: linear extrapolation of the probe's full-well fraction and
+    # pandeia's groups-to-saturation estimate; take the smaller, verify below
     cands = []
     if sat_probe > 0:
         cands.append(int(math.floor(ng_min * sat_limit / sat_probe)))
@@ -223,14 +192,10 @@ def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
     wl = np.asarray(wl, dtype=float)
     good = np.isfinite(wl) & np.isfinite(flux) & np.isfinite(noise) & (flux > 0) & (noise > 0)
 
-    # FULL-GRID saturation aggregates, computed BEFORE `good` is applied
-    # (worker_version >= 7). Fully saturated channels are exactly the ones whose
-    # extracted noise pandeia returns non-finite, so `good` removes them and the
-    # `n_*_sat[good]` curves below can no longer see them -- a column saturated
-    # everywhere used to export a full-saturation count of ZERO. The science
-    # estimator is unchanged (it must keep excluding unusable pixels); these are
-    # reporting-only counts on the native grid, and they are what display/export
-    # must quote.
+    # Native-grid saturation counts, taken BEFORE `good`: fully saturated
+    # channels have non-finite extracted noise, so `good` removes them and a
+    # post-filter count would read zero. Reporting-only; the estimator still
+    # excludes unusable pixels. Display/export must quote these.
     n_part = _sat_curve(rpt, "n_partial_saturated", wl.shape[0])
     n_full = _sat_curve(rpt, "n_full_saturated", wl.shape[0])
     native_counts = {
@@ -258,17 +223,10 @@ def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
 
     r_native, r_src = _native_r(refdata, m, wl[good])
 
-    # Per-integration CYCLE time (worker v6): the nint=1 total_exposure_time
-    # is NOT the marginal cost of one integration in a TSO series when the
-    # first-reset and between-integration-reset counts differ. MIRI FASTR1
-    # has nreset1=0, nreset2=1 (2026.2 refdata), so the nint=1 scalar was one
-    # tframe SHORT per integration -- integrations were overcounted by
-    # (ngroup+1)/ngroup and sigma was optimistic by up to ~9% at ngroup_min
-    # (the committed parity run shows the exact one-frame gap vs PandExo at
-    # identical ngroup). All four NIR rapid patterns have nreset1=nreset2=1,
-    # where the two agree exactly. The engine-truth marginal cost is the
-    # nint=2 minus nint=1 exposure-time difference -- one extra cheap call,
-    # no refdata timing-ladder reimplementation to drift.
+    # Per-integration CYCLE time: the nint=1 total_exposure_time misses the
+    # between-integration reset when nreset1 != nreset2 (MIRI FASTR1), making
+    # sigma optimistic by up to ~9% at ngroup_min. Keep the engine-truth
+    # nint=2 minus nint=1 exposure difference.
     t_exp_1 = float(rpt["scalar"]["total_exposure_time"])
     rpt2 = _run(perform_calculation, calc, ng_best, nint=2)
     t_cycle = float(rpt2["scalar"]["total_exposure_time"]) - t_exp_1
@@ -309,10 +267,9 @@ def _release(version):
 
 
 def _refdata_version(refdata):
-    """Best-available refdata version: the VERSION file (some pandeia_data
-    releases), VERSION_DATA (the 2026+ split data trees), else VERSION_PSF's
-    first line (3.0-era trees have only that), else the pandeia_data-<ver>
-    directory name. Returns (version|None, source)."""
+    """Best-available refdata version: VERSION, VERSION_DATA, or VERSION_PSF
+    first line, else the pandeia_data-<ver> directory name.
+    Returns (version|None, source)."""
     for name in ("VERSION", "VERSION_DATA", "VERSION_PSF"):
         p = os.path.join(refdata, name)
         if os.path.isfile(p):
@@ -345,13 +302,10 @@ def _check_backend_match(engine_version, refdata, psf_dir=None):
     """Enforce STScI's matching rule across the FULL TRIPLE before any
     calculation: engine release == refdata release == PSF-library release.
 
-    A mismatched engine/refdata pair fails deep inside the engine, or worse
-    runs with wrong calibrations. The PSF library is the same hazard and was
-    previously only checked for EXISTENCE (`VERSION_PSF` present), so a 2026.2
-    PSF tree could serve a 2026.7 engine with no version error at all, and the
-    PSF release never reached provenance. `psf_dir=None`/"" means this backend
-    carries its own PSFs inside the refdata tree (the 3.0-era layout), which is
-    the only case where there is nothing separate to match.
+    A mismatched pair runs with wrong calibrations; the PSF library is the
+    same hazard, so its RELEASE is checked, not just existence.
+    `psf_dir=None`/"" means the backend carries its PSFs inside the refdata
+    tree (3.0-era layout) -- the only case with nothing separate to match.
 
     Returns the provenance fields; raises RuntimeError naming the offending
     component on any mismatch or undeterminable version.
@@ -374,19 +328,13 @@ def _check_backend_match(engine_version, refdata, psf_dir=None):
 
     prov = {"refdata_version": ref_ver, "refdata_version_source": source}
     if not psf_dir:
-        # Only the legacy 3.x layout embeds its PSFs in the refdata tree.
-        # Current (year-numbered) Pandeia releases split them into a separate
-        # pandeia_psfs tree.  Treating a missing path as "embedded" for every
-        # engine silently bypasses one third of the matched-triple check.
-        if not eng_rel.startswith("3."):
-            raise RuntimeError(
-                f"pandeia.engine {engine_version} requires a separate PSF "
-                "library, but no PSF_DIR was supplied. Point "
-                "JWST_TOOL_PANDEIA_PSF_DIR at the matching pandeia_psfs tree "
-                f"for release {eng_rel}.")
-        prov["psf_version"] = None
-        prov["psf_version_source"] = "backend carries PSFs inside refdata"
-        return prov
+        # every supported backend uses the split-PSF layout; a missing path
+        # would silently bypass a third of the matched-triple check
+        raise RuntimeError(
+            f"pandeia.engine {engine_version} requires a separate PSF "
+            "library, but no PSF_DIR was supplied. Point "
+            "JWST_TOOL_PANDEIA_PSF_DIR at the matching pandeia_psfs tree "
+            f"for release {eng_rel}.")
 
     psf_ver, psf_source = _psf_version(psf_dir)
     if psf_ver is None:
@@ -418,8 +366,7 @@ def _preflight(job):
         problems.append(f"pandeia_refdata does not exist: {job['refdata']}")
     psf_dir = job.get("psf_dir")
     if psf_dir:
-        # split-layout (pandeia_data >= 2026) PSF library; must be an intact
-        # tree, not just an existing directory
+        # split-layout PSF library: must be an intact tree, not just a dir
         if not os.path.isfile(os.path.join(psf_dir, "VERSION_PSF")):
             problems.append(
                 f"PSF_DIR has no VERSION_PSF file: {psf_dir} (point "
@@ -433,10 +380,6 @@ def _preflight(job):
             problems.append(
                 f"PHOENIX grid missing or dangling symlink: {phx} "
                 f"-> {os.path.realpath(phx)} (the star SED cannot be built)")
-        # NOTE (worker v6): the local CALSPEC Vega file is required by the
-        # LEGACY 3.x engine only -- checked in main() once the engine version
-        # is known. The 2026+ engine loads its OWN refdata Vega
-        # (sed/hst_calspec/alpha_lyr_stis_010.fits) and never reads the pin.
         rel = os.path.join("comp", "nonhst", "2mass_ks_001_syn.fits")
         if not os.path.isfile(os.path.join(cdbs, rel)):
             problems.append(f"missing {rel} in PYSYN_CDBS -- the 2MASS Ks "
@@ -458,14 +401,9 @@ def main():
         os.environ["PSF_DIR"] = job["psf_dir"]
     import warnings as _w
     _w.filterwarnings("ignore")
-    # synphot's default vega_file is an ssb.stsci.edu URL: point it at the
-    # local CALSPEC copy so the LEGACY 3.x engine's vegamag normalization
-    # (synphot from_vega, which honors this pin) works offline. The 2026+
-    # engine never reads it -- it loads its OWN refdata Vega at import
-    # (sed/hst_calspec/alpha_lyr_stis_010.fits; band-integrated Ks ratio to
-    # the local 011 file 0.99993, 0.08 mmag), which is why the pin is set
-    # when available but only REQUIRED for a 3.x engine (checked below,
-    # once the engine version is known).
+    # point synphot's vega_file (default: a URL) at the local CALSPEC copy as
+    # an offline guard; the engine loads its OWN refdata Vega and never reads
+    # the pin
     _vega = os.path.join(job["cdbs"], "calspec", "alpha_lyr_stis_011.fits")
     if os.path.isfile(_vega):
         import synphot
@@ -475,12 +413,6 @@ def main():
 
     import pandeia.engine
     engine_version = str(getattr(pandeia.engine, "__version__", "unknown"))
-    if (_release(engine_version) or "").startswith("3.") \
-            and not os.path.isfile(_vega):
-        raise RuntimeError(
-            f"missing {_vega} -- the legacy 3.x engine normalizes vegamag "
-            "through synphot's vega_file and needs the local CALSPEC copy "
-            "to run offline; fetch it from https://ssb.stsci.edu/trds/")
     match = _check_backend_match(engine_version, job["refdata"],
                                  job.get("psf_dir"))
     _psf_dir = job.get("psf_dir") or ""

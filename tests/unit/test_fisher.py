@@ -1,11 +1,11 @@
-"""Rank-aware Fisher tests (2026-07 audit 8.1 tests 7-8): duplicated Jacobian
-columns must be reported as degenerate, near-singular matrices must not return
-arbitrary finite sigmas, and the well-conditioned case must match the analytic
-inverse."""
+"""Rank-aware Fisher tests: duplicated Jacobian columns must be reported as
+degenerate, near-singular matrices must not return arbitrary finite sigmas,
+the well-conditioned case must match the analytic inverse, and the no-floor
+transits-to-target limit must be exact."""
 import numpy as np
 import pytest
 
-from jwst_tool import fisher
+from jwst_tool import detect, fisher
 
 
 def test_well_conditioned_matches_analytic():
@@ -40,8 +40,8 @@ def test_duplicated_parameters_flagged_unconstrained():
 
 def test_near_degenerate_does_not_return_garbage():
     """An almost-duplicated row (relative difference 1e-8) is numerically
-    unconstrained: the old np.linalg.inv path returned a huge-but-finite
-    'constraint' here without any error."""
+    unconstrained; a plain np.linalg.inv would return a huge-but-finite
+    'constraint' without any error."""
     rng = np.random.default_rng(1)
     row = rng.standard_normal(50)
     J = np.stack([row, row * (1 + 1e-8), rng.standard_normal(50)])
@@ -55,8 +55,8 @@ def test_near_degenerate_does_not_return_garbage():
 
 
 def test_gaussian_prior_reproduces_analytic_posterior():
-    """Audit 8.1 test 8: adding a known Gaussian prior as explicit precision
-    must reproduce the analytic posterior covariance."""
+    """Adding a known Gaussian prior as explicit precision must reproduce the
+    analytic posterior covariance."""
     J = np.array([[1.0, 0.3], [0.2, 1.1], [0.5, 0.5]]).T
     s = np.array([1e-4, 2e-4, 1.5e-4])
     F = (J / s[None, :] ** 2) @ J.T
@@ -73,7 +73,7 @@ def test_mode_forecast_diag_passthrough():
     diag = {}
     out = fisher.mode_forecast(result, ["p0"], diag=diag)
     assert set(out) == {"p0"} and np.isfinite(out["p0"])
-    # dimension = free + lnR0 + the (always-present) constant offset (P0-A)
+    # dimension = free + lnR0 + the always-present constant offset
     assert diag["fisher_dimension"] == 3 and diag["fisher_rank"] == 3
 
 
@@ -98,10 +98,8 @@ def test_segment_offset_widens_forecast_and_absorbs_step():
 
 def test_single_segment_forecast_unchanged():
     """A single-segment mode and a no-seg call must agree: both carry exactly
-    one constant-offset nuisance (the global offset). The old premise here --
-    "one segment adds no usable offset beyond lnR0" -- was recheck bug P0-A:
-    lnR0 is a physical derivative, not a constant, so the offset is always
-    its own nuisance row now."""
+    one constant-offset nuisance. lnR0 is a physical derivative, not a
+    constant, so the offset is always its own nuisance row."""
     rng = np.random.default_rng(3)
     jac = rng.standard_normal((3, 30))             # 2 free + lnR0
     s = np.full(30, 1e-4)
@@ -126,10 +124,9 @@ def test_combined_forecast_counts_offsets_per_segment():
 
 
 def test_mode_forecast_equals_combined_single_result():
-    """2026-07-12 recheck P0-A: mode_forecast(r) and combined_forecast([r])
-    must implement the SAME statistical model (free params + shared lnR0 +
-    one constant offset per segment + slope rows). The old mode_forecast
-    omitted the first segment's offset."""
+    """mode_forecast(r) and combined_forecast([r]) must implement the SAME
+    statistical model (free params + shared lnR0 + one constant offset per
+    segment + slope rows), INCLUDING the first segment's offset."""
     rng = np.random.default_rng(7)
     nb = 45
     seg = np.array([0] * 22 + [1] * 23)
@@ -153,10 +150,9 @@ def test_mode_forecast_equals_combined_single_result():
 
 
 def test_constant_science_derivative_unconstrained():
-    """Recheck P0-A reproducer: an exactly CONSTANT science derivative must be
-    absorbed by the constant calibration offset (unconstrained), even when
-    the lnR0 derivative is NOT constant (0.3 + 0.2x): lnR0 cannot stand in
-    for the offset."""
+    """An exactly CONSTANT science derivative must be absorbed by the constant
+    calibration offset (unconstrained), even when the lnR0 derivative is NOT
+    constant: lnR0 cannot stand in for the offset."""
     nb = 40
     x = np.linspace(0.0, 1.0, nb)
     jac = np.stack([np.ones(nb), 0.3 + 0.2 * x])   # [free=const, lnR0 nonconst]
@@ -182,7 +178,7 @@ def test_per_segment_constant_derivative_unconstrained():
 
 def test_mode_forecast_matches_schur_complement():
     """Marginalized sigma against an independent Schur-complement GLS
-    calculation on the full nuisance-augmented design (recheck test 4)."""
+    calculation on the full nuisance-augmented design."""
     rng = np.random.default_rng(11)
     nb = 60
     seg = np.array([0] * 30 + [1] * 30)
@@ -267,3 +263,50 @@ def test_combined_conditional_accumulates_modes():
     fisher.combined_forecast([r1], ["p0"], conditional=c1)
     fisher.combined_forecast([r1, r2], ["p0"], conditional=c12)
     assert c12["p0"] <= c1["p0"] * (1 + 1e-12)
+
+
+# --- fisher no-floor limits ---------------------------------------------------
+
+def _result(scenario: str, floor_ppm: float, n=60, signal_ppm=150.0) -> dict:
+    wl = np.linspace(3.0, 5.0, n)
+    bump = signal_ppm * 1e-6 * np.exp(
+        -0.5 * ((np.log(wl) - np.log(4.0)) / 0.10) ** 2)
+    return dict(wl=wl, depth=0.02 + bump, depth_wo=np.full(n, 0.02),
+                floor=np.full(n, floor_ppm * 1e-6),
+                var_phot=np.full(n, 300e-6) ** 2, n_transits_eval=1,
+                scenario=scenario, seg=np.zeros(n, int),
+                slope_rows=np.zeros((0, n)))
+
+
+def _fisher_result(scenario: str, floor_ppm: float, n=60) -> dict:
+    wl = np.linspace(3.0, 5.0, n)
+    r = _result(scenario, floor_ppm, n=n)
+    rng = np.random.default_rng(0)
+    jac = np.vstack([1e-4 * np.sin(2.0 * wl), 1e-4 * np.cos(3.0 * wl),
+                     1e-4 * rng.normal(size=n)])
+    r["jac_bins"] = jac
+    r["jac_names"] = ["lnZ", "lnKzz", "lnR0"]
+    r["sigma"] = np.maximum(np.sqrt(r["var_phot"]), r["floor"])
+    r["cov"] = None
+    return r
+
+
+@pytest.mark.parametrize("scenario", ["random", "conservative"])
+def test_fisher_no_floor_limit_is_zero_not_1e_minus_26(scenario):
+    """Precision improves without bound with no floor, so the display-unit
+    limit is exactly 0.0 and the scan stays monotone."""
+    r = _fisher_result(scenario, 0.0)
+    names = ["lnZ", "lnKzz", "lnR0"]
+    tt = fisher.transits_to_target(r, names, "lnZ", 1e9,
+                                   detect.sigma_at_transits)
+    assert tt["sig_inf"] == 0.0
+    assert tt["reachable"] and tt["n_last"] is None
+
+
+@pytest.mark.parametrize("scenario", ["random", "conservative"])
+def test_fisher_floored_limit_stays_finite_and_positive(scenario):
+    r = _fisher_result(scenario, 100.0)
+    names = ["lnZ", "lnKzz", "lnR0"]
+    tt = fisher.transits_to_target(r, names, "lnZ", 1e9,
+                                   detect.sigma_at_transits)
+    assert np.isfinite(tt["sig_inf"]) and tt["sig_inf"] > 0.0

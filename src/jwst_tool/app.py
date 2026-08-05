@@ -12,16 +12,13 @@ parameter (Fisher forecast from consistency-checked Jacobians, vs a target
 uncertainty). Planets beyond WASP-39b come from the registry in planets.py (or
 a fully custom system).
 
-Layout (2026-07-29 UX pass; opacity & line lists moved into the Atmosphere
-step and the sidebar helps trimmed 2026-08-04): the sidebar is four numbered
-steps (Target, Atmosphere, Science goal, Observation) plus one "More settings"
-group holding the solver/diagnostic controls; the result page leads with the
-verdict and collapses certificates/provenance into "Model quality and
-provenance". Widget KEYS are unchanged from the pre-redesign layout (tests and
-cached session state rely on them); only placement, labels, and help text
-moved. A downloaded configuration JSON is a complete, shareable run setup;
-"Load a configuration" (share_config.py) restores it into the widget state
-before any widget instantiates.
+Layout: four numbered sidebar steps (Target, Atmosphere, Science goal,
+Observation) plus one "More settings" group; the result page leads with the
+verdict and collapses certificates/provenance. Widget KEYS must never change
+(tests and cached session state rely on them); only placement, labels, and
+help text may move. A downloaded configuration JSON is a complete, shareable
+run setup; "Load a configuration" (share_config.py) restores it into the
+widget state before any widget instantiates.
 """
 from __future__ import annotations
 
@@ -54,15 +51,10 @@ from jwst_tool import planets
 from jwst_tool import runlimit
 from jwst_tool import picaso_chem
 
-# House figure style: the maintainer's science.mplstyle, vendored next to
-# this file (journal look: full box, inward major+minor ticks, frameless
-# legend, 12 pt base), with the font family flipped to serif (Palatino,
-# DejaVu Serif fallback on machines without it) and matching STIX math. The
-# white faces are pinned explicitly because downloaded figures must stay
-# white on any Streamlit theme. Data colors stay the fixed per-mode palette
-# in instruments.MODE_COLOR (every color >= 3:1 on white), and every series
-# also carries a fixed marker (MODE_MARKER) so no series relies on color
-# alone.
+# House figure style: the vendored science.mplstyle, flipped to serif + STIX
+# math. White faces are pinned so downloaded figures stay white on any
+# Streamlit theme. Data colors/markers stay the fixed per-mode palette in
+# instruments.MODE_COLOR / MODE_MARKER (no series relies on color alone).
 plt.style.use(str(TOOL_DIR / "science.mplstyle"))
 plt.rcParams.update({
     "font.family": "serif",
@@ -92,14 +84,9 @@ def _not_reached_reason(scenario: str, val: str, floored: bool,
                         evw: str) -> str:
     """Honest phrasing for a target the transit scan did not reach.
 
-    Under the default random scenario with a floor, sig_inf is an exact
-    ceiling (score monotone in N). Under a correlated scenario sig_inf is only
-    the N-to-infinity limit -- scores can peak at finite N -- so the statement
-    comes from the full 1..N_TRANSITS_CAP scan. With NO floor
-    (``floored=False``) nothing caps the score at all: the only true statement
-    is that the scan reached its limit, so say that instead of "never"
-    (printing the sig_inf limit there gave a ~1e26 sigma, 2026-07-28 audit;
-    calling it "never" overstated the calculation, 2026-07-29 UX review)."""
+    With a floor, sig_inf is an exact ceiling under the random scenario and
+    only the N-to-infinity limit under a correlated one. With NO floor
+    nothing caps the score: say the scan reached its limit, never "never"."""
     if not floored:
         return (f"not reached within the scan limit of "
                 f"{detect.N_TRANSITS_CAP} {evw}s; with no noise floor set, a "
@@ -121,7 +108,7 @@ def _transits_cell(tt: dict, scenario: str, val_never: str, floored: bool,
     """'events to target' table cell, window-aware for correlated scenarios.
 
     "unreachable" is reserved for a floor-proven result; a scan that only ran
-    out of events reads ">N (scan limit)" (2026-07-29 UX review, item 1.6)."""
+    out of events reads ">N (scan limit)"."""
     if not tt["reachable"]:
         if not floored:
             return f">{detect.N_TRANSITS_CAP} (scan limit; no floor set)"
@@ -137,9 +124,7 @@ st.set_page_config(page_title="JWST Exoplanet Observation Planner",
                    layout="wide")
 
 # ---------------------------------------------------------------------------
-# Header: short orientation, no acknowledgment gate (the former mandatory
-# 415-word intro is now the collapsed "How the model works" section below --
-# 2026-07-29 UX review, item 2.1)
+# Header: short orientation, no acknowledgment gate
 # ---------------------------------------------------------------------------
 st.title("JWST exoplanet observation planner")
 st.markdown(
@@ -215,11 +200,9 @@ _STATUS_LABEL = {datacheck.OK: "installed", datacheck.MISSING: "MISSING",
 
 @st.cache_data(ttl=3600, show_spinner="Checking installed data ...")
 def _cached_full_report(_nonce: int, _backend: str, _picaso_root: str):
-    # v18.1 latency fix, twice over: the report is DISK-persisted (the Space
-    # entrypoint warms it in the background at boot, so even the first
-    # visitor gets an instant panel) and the in-process st.cache keeps
-    # reruns free. The manifest check inside is sampled, not exhaustive
-    # (full pass: `jwst-tool data --deep`). The refresh button deletes the
+    # Disk-persisted (the Space entrypoint warms it at boot) on top of the
+    # in-process st.cache. The manifest check is sampled, not exhaustive
+    # (full pass: `jwst-tool data --deep`); the refresh button deletes the
     # disk cache and rebuilds.
     cached = datacheck.load_cached_report()
     if cached is not None:
@@ -278,12 +261,9 @@ with st.expander("Data status: what this machine has installed"
               help="The status above is cached for an hour. Refresh after "
                    "installing data.")
 
-# Measured FD/AD Fisher-row wall times (WASP-39b defaults; rationale in
-# forward.py's FD_STEPS block): an FD composition row re-solves the chemistry
-# 4x, an FD Kzz/T row is 4 cold solves, an AD row is one warm-started
-# derivative. Threaded through every GUI mention below so a re-measurement
-# updates one place (the slow-run estimator at the FD warning uses their
-# midpoints, 7 and 4).
+# Measured FD/AD Fisher-row wall times (WASP-39b defaults; see forward.py's
+# FD_STEPS). Threaded through every GUI mention below so a re-measurement
+# updates one place (the slow-run estimator uses the midpoints, 7 and 4).
 _FD_COMP_MIN, _FD_COMP_MAX = 6, 8      # minutes per FD composition row
 _FD_THETA_MIN, _FD_THETA_MAX = 3, 5    # minutes per FD Kzz/T row
 _AD_ROW_MIN, _AD_ROW_MAX = 1, 2        # minutes per AD row
@@ -309,23 +289,10 @@ class _TimedBar:
     readout to every label.
 
     The remaining estimate blends the pre-run prior (when given) with the
-    measured pace, weighting the measurement by the completed fraction, so
-    it starts at the prior and converges to the measured rate; with no
-    prior it is purely measured and appears once the first progress
-    fraction lands. It is labeled "about" -- stage weights are rough.
-
-    The blend is over the two REMAINING-time estimates, not the two totals.
-    Blending totals is the natural-looking thing to write and is what this
-    class did until 2026-07-21:
-
-        total = frac * (e / frac) + (1 - frac) * prior
-
-    but ``frac * (e / frac)`` is identically ``e``, so that collapses to
-    ``remaining = (1 - frac) * prior`` -- the measured pace cancels out and
-    the countdown is FROZEN for the whole stage, no matter how long it
-    actually runs. A photochemistry stage that overran its weight by 13x
-    still read "about 58 s left" at 7m50s elapsed. Keep the blend on
-    remaining times."""
+    measured pace, weighted by the completed fraction; with no prior it is
+    purely measured. Blend the two REMAINING-time estimates, never the two
+    totals -- blending totals cancels the measured pace and freezes the
+    countdown for the whole stage."""
 
     def __init__(self, prior_total_s: float | None = None,
                  text: str = "starting ..."):
@@ -339,9 +306,7 @@ class _TimedBar:
         e = time.monotonic() - self._t0
         remaining = None
         if self._frac > 0.0:
-            # measured: at the pace observed so far, (1 - frac) of the work
-            # is still ahead. Grows with e when a stage overruns -- which is
-            # the whole point of showing a live estimate.
+            # measured pace: grows with e when a stage overruns
             measured_left = e * (1.0 - self._frac) / self._frac
             if self._prior:
                 prior_left = max(self._prior * (1.0 - self._frac), 0.0)
@@ -371,12 +336,11 @@ class _TimedBar:
 
 def _watch_proc(proc, on_line, on_tick, tick_s: float = 1.0) -> None:
     """Dispatch each stdout line of ``proc`` to ``on_line``, calling
-    ``on_tick`` at least every ``tick_s`` seconds of silence so the
-    elapsed/remaining readout keeps counting through long quiet solver
-    stages. Reads the raw pipe fd (select + os.read), so no completed line
-    ever sits hidden in a Python-level buffer. Where select() cannot watch
-    pipes (Windows) it degrades to blocking reads: same lines, the clock
-    just only advances when output arrives."""
+    ``on_tick`` at least every ``tick_s`` seconds of silence. Selects on the
+    raw pipe fd (os.read chunking) so the clock ticks through silent solver
+    stages; never revert to blocking readline loops (they freeze the
+    readout). On Windows (no select on pipes) it degrades to blocking
+    reads."""
     fd = proc.stdout.fileno()
     tail = b""
     can_select = sys.platform != "win32"
@@ -405,19 +369,11 @@ def _managed_proc(cmd):
 
 
 # --- downloads that must not cancel a run ----------------------------------
-# A download button is a WIDGET: clicking one queues a rerun, and a queued
-# rerun CANCELS the script run in flight -- which on the Run pass is the
-# forward model itself, because compute() runs at the BOTTOM of this same
-# script. Every download rendered above that point is therefore a live cancel
-# control for the whole multi-minute wait, and users click them (that is the
-# 2026-08-04 bug report: the configuration download stopped runs on the
-# Space).
-#
-# Such a button reserves its position with `_deferred_download` and is filled
-# by `_render_deferred_downloads` once `run_clicked` is known -- which is only
-# after the whole sidebar has rendered, so a placeholder is the only way the
-# sidebar's own downloads can know. Dead for the duration of the run, live
-# again the moment compute() returns.
+# Clicking a download button queues a rerun, and a queued rerun CANCELS the
+# script run in flight -- on the Run pass that is the forward model itself.
+# So every download rendered before `run_clicked` is known reserves its slot
+# with `_deferred_download` and is filled by `_render_deferred_downloads`:
+# dead for the duration of a run, live again the moment compute() returns.
 _DEFERRED_DOWNLOADS: list = []
 
 
@@ -452,9 +408,9 @@ _TARGET_DEFAULT = {"lnZ": 0.10, "dlnCO": 0.05, "lnKzz": 0.30,
                    "log_kappa_cloud": 0.30, "alpha_cloud": 0.50,
                    "mie_log_rg": 0.30, "mie_sigmag": 0.20,
                    "mie_log_mmr": 0.50}
-# Every freeable Fisher parameter can be chosen as the constraint goal, which
-# looks up _TARGET_DEFAULT[goal_param] -- so a missing entry would KeyError the
-# UI. Guard it at import (caught by the smoke test) rather than at click time.
+# Every freeable Fisher parameter can be the constraint goal and looks up
+# _TARGET_DEFAULT[goal_param]; guard for missing entries at import, not at
+# click time.
 _FREEABLE = (set(forward.CHEM_PARAM_NAMES) | set(forward.CLOUD_FISHER_PARAMS)
              | set(forward.MIE_FISHER_PARAMS)
              | {p for ns in forward.TP_PARAM_NAMES.values() for p in ns})
@@ -467,9 +423,8 @@ if _missing_target:
 # ---------------------------------------------------------------------------
 # Sidebar controls
 # ---------------------------------------------------------------------------
-# Reset = bump a nonce that namespaces EVERY widget key: all widgets are
-# re-created at their defaults (session_state.clear() alone does not reset
-# keyless widgets, whose state lives outside the exposed dict).
+# Reset = bump a nonce that namespaces EVERY widget key: session_state.clear()
+# alone does not reset keyless widgets.
 _NONCE = st.session_state.setdefault("reset_nonce", 0)
 
 
@@ -495,10 +450,8 @@ def _apply_pending_config() -> None:
     """Apply a loaded configuration file to the widget state.
 
     Must run BEFORE any widget instantiates (Streamlit forbids writing a
-    widget's session-state key afterwards). The file's content hash is
-    remembered so it applies once, not on every rerun -- the user can keep
-    editing after loading. Either the whole mapping applies or nothing does
-    (widget_state validates before returning)."""
+    widget's key afterwards). The content hash makes it apply once, not on
+    every rerun; either the whole mapping applies or nothing does."""
     up = st.session_state.get(K("cfg_upload"))
     if up is None:
         return
@@ -524,18 +477,15 @@ def _apply_pending_config() -> None:
 
 _apply_pending_config()
 
-# The chemistry-engine choice, read EARLY from session state so widgets that
-# render before the engine selectbox (the stellar-UV selector in step 1) can
-# adapt. Streamlit updates widget state before the rerun executes, so this
-# matches the selectbox that renders later in the same run; on the very first
-# render it is the default (VULCAN).
+# Chemistry-engine choice, read EARLY from session state so widgets that
+# render before the engine selectbox can adapt; on the very first render it
+# is the default (VULCAN).
 _pic_hint = st.session_state.get(K("provider"), "vulcan") == "picaso"
 
 with st.sidebar:
     # -----------------------------------------------------------------------
-    # Step 0: Load a configuration (optional). The uploaded file was already
-    # APPLIED by _apply_pending_config() above, before any widget existed;
-    # this section is the widget itself plus the outcome messages.
+    # Step 0: Load a configuration. The file was already APPLIED by
+    # _apply_pending_config(); this is the widget plus the outcome messages.
     # -----------------------------------------------------------------------
     st.markdown("### 0 · Configuration")
     _cfg_up = st.file_uploader(
@@ -573,9 +523,8 @@ with st.sidebar:
         key=K("scimode"),
         format_func={"transmission": "Transmission (transit)",
                      "emission": "Emission (secondary eclipse)"}.get)
-    # Event word for every observation-facing label: the noise model is the
-    # same calculation either way (N events + out-of-event baseline), only the
-    # vocabulary changes with the observation type.
+    # Event word for observation-facing labels: only the vocabulary changes
+    # with the observation type, not the calculation.
     _evw = "eclipse" if science_mode == "emission" else "transit"
 
     def _k(name: str) -> str:            # per-planet widget state
@@ -622,9 +571,8 @@ with st.sidebar:
                        "photolysis, so this selection has no effect there.")
 
     # Registry planets carry a literature T_eq; the CUSTOM planet derives it
-    # from the entered star and orbit (zero albedo, full redistribution) --
-    # otherwise every custom system inherited WASP-39 b's temperature scale
-    # through the Guillot T_irr default and the runtime estimate.
+    # from the entered star and orbit so it does not inherit WASP-39 b's
+    # temperature scale.
     if planet_key == "custom":
         teq = planets.system_teq(teff, rstar, orbit_au)
         st.caption(f"T_eq derived from the star and orbit above: "
@@ -647,14 +595,11 @@ with st.sidebar:
         st.session_state[K("jacm")] = "fd"   # tables are not differentiable
 
     with st.expander("Temperature-pressure profile"):
-        # canonical_params refuses tp_mode='file' under the PICASO provider
-        # (no default-temperature path in equilibrium); hide it here too --
-        # GUI gating is convenience, canonical_params stays the hard guard.
+        # canonical_params refuses tp_mode='file' under PICASO; hide it here
+        # too (GUI gating is convenience, canonical_params is the hard guard).
         _tp_opts = (["guillot", "picaso_climate"] if _pic
                     else ["guillot", "file", "picaso_climate"])
-        # Mirror canonical_params' default exactly, so "the defaults" mean the
-        # same profile whether the run comes from the GUI or the API: the
-        # measured WASP-39b table under the kinetics engine, Guillot otherwise.
+        # Mirror canonical_params' default so GUI and API defaults agree.
         _tp_default = forward._default_tp_mode(
             {"planet": planet_key, "chem_provider": chem_provider})
         if st.session_state.get(_k("tp")) not in _tp_opts:
@@ -670,19 +615,17 @@ with st.sidebar:
         tp_kwargs = {}
         tp_file, tp_file_path, tp_file_ok = "", None, True
         if tp_mode == "guillot":
-            # one definition shared with canonical_params, so the widget
-            # default and the API default can never drift apart again
+            # one definition shared with canonical_params, so the widget and
+            # API defaults cannot drift apart
             tirr0 = planets.default_tirr(
                 pdef, system=(dict(star_teff=teff, rstar_rsun=rstar,
                                    orbit_au=orbit_au)
                               if planet_key == "custom" else None))
             if planet_key == "custom":
-                # follow-until-overridden: while the user has not touched
-                # T_irr (its value still equals the last derived default),
-                # keep it tracking the star/orbit fields; the first manual
-                # edit breaks the link. Without this, T_irr freezes at the
-                # WASP-39 b-seeded value from the first render no matter
-                # what system is typed in afterwards.
+                # follow-until-overridden: while T_irr still equals the last
+                # derived default, keep it tracking the star/orbit fields;
+                # the first manual edit breaks the link (otherwise T_irr
+                # freezes at the first-render seed).
                 _prev_auto = st.session_state.get(_k("tirr_auto"))
                 if (_prev_auto is not None
                         and st.session_state.get(_k("tirr")) == _prev_auto):
@@ -722,7 +665,7 @@ with st.sidebar:
                     "that setting.")
         elif tp_mode == "file":
             # the shipped table is PER-PLANET; a planet without one may only
-            # upload (and is told why its table is missing/refused)
+            # upload
             _ship_name = forward.shipped_tp_table_name(planet_key)
             _src_opts = ([forward.TP_FILE_SHIPPED, forward.TP_FILE_UPLOAD]
                          if _ship_name else [forward.TP_FILE_UPLOAD])
@@ -764,8 +707,7 @@ with st.sidebar:
                         "Kzz in cm^2 s^-1, used when the vertical-mixing "
                         "profile is set to 'Tabulated'. Any number of "
                         "rows. The two header lines are required.")
-                    # deferred: the sidebar renders long before run_clicked
-                    # exists, and clicking a download cancels a run in flight
+                    # deferred: clicking a download cancels a run in flight
                     _deferred_download(
                         "Download this example (edit and re-upload)",
                         _tp_example, "example_atm.txt",
@@ -774,9 +716,8 @@ with st.sidebar:
                     "Upload an array: T-P (+ optional Kzz) as text",
                     type=["txt", "dat"],
                     key=_k("tpup"))
-                # a loaded shared configuration can carry the table content;
-                # the uploader (whose state cannot be set programmatically)
-                # takes precedence when the user picks a new file
+                # a loaded configuration can carry the table; the uploader
+                # (whose state cannot be set) wins when a new file is picked
                 if up_tp is None and st.session_state.get("restored_tp_path"):
                     try:
                         _rp_tp = Path(st.session_state["restored_tp_path"])
@@ -802,7 +743,7 @@ with st.sidebar:
                     _dst_tp.parent.mkdir(parents=True, exist_ok=True)
                     if not _dst_tp.exists():
                         _dst_tp.write_bytes(_raw_tp)
-                    try:                       # loud validation, immediately
+                    try:                       # loud validation, immediate
                         _tab_tp = forward._read_tp_table(_dst_tp)
                         tp_file_path = str(_dst_tp)
                         st.caption(
@@ -830,11 +771,9 @@ with st.sidebar:
 
     with st.expander("Composition"):
         if tp_mode == "picaso_climate":
-            # EXACT-CK-NODE selectors: the climate correlated-k tables are
-            # per-node files with no composition interpolation, so climate
-            # mode only accepts compositions sitting exactly on a node
-            # (canonical_params is the hard guard; these menus simply can't
-            # produce anything else).
+            # EXACT-CK-NODE selectors: the climate correlated-k tables have
+            # no composition interpolation, so these menus only offer exact
+            # nodes (canonical_params is the hard guard).
             from jwst_tool import picaso_chem as pchem
             _feh_opts = [x for x in pchem.FEH_NODES if -1.0 <= x <= 2.0]
             _feh = st.selectbox(
@@ -860,14 +799,11 @@ with st.sidebar:
                 *forward.PICASO_CO_RANGE, 0.50, 0.01,
                 format="%.3f", key=K("co_pic"))
         else:
-            # Composition is fully STRUCTURAL (v13, one path for every
-            # value): metallicity scales the cfg's O/C/N/S abundances
-            # together, C/O then sets C_H = co * O_H, and FastChem
-            # re-initializes at exactly that composition -- the
-            # upstream-VULCAN workflow. No perturbative knob, no fixed-O
-            # validity ceiling: C-rich (> 1) is the same code path. A corner
-            # with no certified steady state errors loudly (longdy gate); it
-            # can never return a wrong spectrum.
+            # Composition is STRUCTURAL, one path for every value:
+            # metallicity scales O/C/N/S together, C/O sets C_H = co * O_H,
+            # FastChem re-initializes at exactly that composition. No
+            # perturbative knob; C-rich (> 1) is the same code path; an
+            # uncertified corner errors loudly (longdy gate).
             met = st.number_input(
                 "Metallicity (× solar)", 0.1, 100.0, 10.0, 0.5,
                 format="%.2f", key=K("met"))
@@ -876,13 +812,10 @@ with st.sidebar:
                 0.10, 2.00, float(forward.CO_BASELINE), 0.05,
                 format="%.3f", key=K("co"))
 
-    # Kzz and photochemistry are first-class VULCAN physics choices, so they
-    # live here in the Atmosphere step (moved out of More settings,
-    # 2026-07-29). They render BEFORE the science-goal step, so the AD
+    # Kzz and photochemistry render BEFORE the science-goal step, so the AD
     # photo-lock reads the EFFECTIVE differentiation method from session
     # state: the widget value counts only when a Jacobian is actually
-    # requested (constrain goal, or detect + the constraints checkbox),
-    # matching canonical_params' normalization to "fd" otherwise.
+    # requested, matching canonical_params' normalization to "fd" otherwise.
     if _pic:
         kzz_mode, kzz_x = "const", 1.0
         kzz_const, kzz_kmax, kzz_plev, kzz_kdeep = 1.0e9, 0.0, 0.0, 0.0
@@ -906,9 +839,9 @@ with st.sidebar:
             if _kzz_file_ok:
                 _kzz_opts.append("file")
                 # Same rule as canonical_params: a table that carries Kzz
-                # supplies the mixing profile, so it is the default rather
-                # than a flat stand-in. Seed session_state on first render
-                # (Streamlit ignores index= once the key exists).
+                # supplies the mixing profile, so "file" is the default.
+                # Seed session_state on first render (Streamlit ignores
+                # index= once the key exists).
                 if _k("kzzmode") not in st.session_state:
                     st.session_state[_k("kzzmode")] = "file"
             elif st.session_state.get(_k("kzzmode")) == "file":
@@ -966,9 +899,8 @@ with st.sidebar:
                 "Upwind molecular-diffusion advection (vm_mol)", value=False,
                 key=K("vmmol"), disabled=not use_moldiff)
 
-    # Opacity & line lists live HERE in the Atmosphere step (moved out of
-    # More settings 2026-08-04): which molecules shape the spectrum is a
-    # first-class science choice, and all extras default ON.
+    # Opacity & line lists live in the Atmosphere step so extra_mols is a
+    # live variable by step 3; all extras default ON.
     with st.expander("Opacity & line lists (ExoJAX)"):
         _base_set, _extra_set = ((forward.MOLECULES, forward.EXTRA_MOLECULES)
                                  if not _pic else
@@ -981,26 +913,23 @@ with st.sidebar:
             "any to save about 7 s each on a new run."
             + (" No SO2 here: in equilibrium, sulfur sits in H2S and "
                "OCS. Making SO2 needs the VULCAN engine." if _pic else ""))
-        # live line-list availability for the CURRENT broadening choice (the
-        # widget below; previous-run value via session_state, default "air")
+        # live line-list availability for the CURRENT broadening choice
+        # (widget below; via session_state, default "air")
         _mol_status = datacheck.molecule_linelist_status(
             list(_extra_set),
             broadening=st.session_state.get(K("broad"), "air"))
         _MOL_NOTE = {datacheck.OK: "opacity cached",
                      datacheck.AUTO: "downloads on first use",
                      datacheck.MISSING: "engine data missing"}
-        # All extras default ON (2026-08-02): the measured cost on the
-        # default WASP-39b run is ~59 s wall for all eight (~7 s each:
-        # opacity build + one removed spectrum) on a 190 s baseline --
-        # a complete detection report is worth more than a faster first
-        # run. Deselecting molecules still works and still saves time.
+        # All extras default ON: ~7 s each on a new run; a complete detection
+        # report is worth more than a faster first run.
         extra_mols = st.multiselect(
             "Extra opacity molecules", list(_extra_set),
             default=list(_extra_set),
             key=K(f"xmols_{chem_provider}"),
             format_func=lambda m: f"{m}  ({_MOL_NOTE[_mol_status[m]]})")
-        # h2he uses separate per-molecule caches; count what is already local
-        # for the molecule set in play (CO is cached ExoMol, ignores the knob)
+        # h2he has per-molecule caches; CO is cached ExoMol and ignores the
+        # broadening choice
         _h2he_mols = [m for m in forward.MOLECULES + extra_mols if m != "CO"]
         _h2he_cached = sum(
             1 for v in datacheck.molecule_linelist_status(
@@ -1023,10 +952,8 @@ with st.sidebar:
 
     with st.expander("Clouds & scattering (ExoJAX)"):
         if science_mode == "emission":
-            # canonical_params forces Rayleigh OFF in emission (the pure-
-            # absorption day-side solver has no scattering channel) -- show
-            # the forced state instead of a checked-but-ignored box (v18.1
-            # review)
+            # canonical_params forces Rayleigh OFF in emission (no scattering
+            # channel); show the forced state, not a checked-but-ignored box
             st.session_state[K("rayl")] = False
         use_rayleigh = st.checkbox(
             "H2/He Rayleigh scattering", value=True, key=K("rayl"),
@@ -1042,9 +969,7 @@ with st.sidebar:
                 0.0, 4.0, 0.0, 0.25, key=K("ca"))
         else:
             log_kappa_cloud, alpha_cloud = -1.0, 0.0
-        # Mie condensate deck (v16): physically-grounded condensate optics
-        # from an exojax miegrid, an alternative (or addition) to the
-        # power-law deck.
+        # Mie condensate deck: condensate optics from an exojax miegrid.
         _mie_opts = [""] + list(forward.MIE_CONDENSATES)
         mie_condensate = st.selectbox(
             "Mie condensate cloud", _mie_opts, index=0, key=K("miec"),
@@ -1069,29 +994,25 @@ with st.sidebar:
                 float(forward.MIE_LOG_MMR_RANGE[1]), -6.0, 0.25, key=K("miemmr"))
 
     # -----------------------------------------------------------------------
-    # Step 3: Science goal (the organizing decision: only the controls the
-    # selected goal needs are shown -- 2026-07-29 UX review, items 2.3/2.4)
+    # Step 3: Science goal (only the controls the selected goal needs)
     # -----------------------------------------------------------------------
     st.divider()
     st.markdown("### 3 · Science goal")
-    # Condensation renders LATER in the script (More settings), so it is read
-    # from session_state: Streamlit updates widget state before the rerun,
-    # so this matches the widget below except on the very first render.
+    # Condensation renders LATER (More settings), so read it from
+    # session_state; matches the widget except on the very first render.
     _conden_ss = bool(st.session_state.get(K("conden"), False))
-    # Freeable parameters per engine/mode. Under PICASO + climate, C/O
-    # (dlnCO) is NOT offered: climate composition sits exactly on a
-    # chemistry-table node where no trustworthy C/O derivative exists
-    # (canonical_params refuses it too -- the menu just spares the user the
-    # error).
+    # Under PICASO + climate, dlnCO is NOT offered: climate composition sits
+    # exactly on a chemistry-table node with no trustworthy C/O derivative
+    # (canonical_params refuses it too).
     if _pic:
         _chem_free = (["lnZ"] if tp_mode == "picaso_climate"
                       else ["lnZ", "dlnCO"])
     else:
         _chem_free = list(forward.CHEM_PARAM_NAMES)
     avail_free = _chem_free + forward.TP_PARAM_NAMES[tp_mode]
-    if cloud_on:                         # v16: cloud-deck marginalization
+    if cloud_on:
         avail_free = avail_free + list(forward.CLOUD_FISHER_PARAMS)
-    if mie_condensate:                   # v16: Mie-deck marginalization
+    if mie_condensate:
         avail_free = avail_free + list(forward.MIE_FISHER_PARAMS)
     mol_options = forward.active_molecules(
         {"chem_provider": chem_provider, "extra_mols": extra_mols})
@@ -1168,8 +1089,7 @@ with st.sidebar:
             help="Scales the reported bounds: 3 means the tables and the "
                  "verdict quote 3σ half-widths.")
 
-    # Constraint settings (free parameters + differentiation method) render
-    # only when the run will actually compute derivatives (UX review 2.3).
+    # Constraint settings render only when the run will compute derivatives.
     fisher_params: list = []
     jac_method = "fd"
     if _conden_ss:
@@ -1184,11 +1104,9 @@ with st.sidebar:
     if goal == "constrain" or do_fisher:
         with st.expander("Constraint settings", expanded=(goal == "constrain")):
             if goal == "constrain" and marginalize:
-                # defaults FILTERED by the live menu and the key carries the
-                # provider (v18.1): under picaso lnKzz is not an option, and
-                # Streamlit hard-raises on a default outside the options --
-                # an unfiltered default crashed every constrain-goal render
-                # after switching to the PICASO engine.
+                # Defaults FILTERED by the live menu, key carries the
+                # provider: Streamlit hard-raises on a default outside the
+                # options (e.g. lnKzz under picaso).
                 fisher_extra = st.multiselect(
                     "Jointly free parameters", avail_free,
                     default=[p for p in ("lnZ", "dlnCO", "lnKzz")
@@ -1241,10 +1159,8 @@ with st.sidebar:
                  f"Kzz or temperature. AD takes about "
                  f"{_AD_ROW_MIN}-{_AD_ROW_MAX} min per row. Cloud and "
                  "Mie rows take seconds."))
-            # Loud slow-path flag: finite differences re-solve the chemistry
-            # per row, so freeing many parameters can take a long time --
-            # point the user at AD before they launch a multi-hour run (AD
-            # is unavailable for picaso, so this only applies to VULCAN).
+            # Loud slow-path flag: FD re-solves the chemistry per row, so
+            # point the user at AD before a multi-hour run (VULCAN only).
             if fisher_params and jac_method == "fd" and not _pic:
                 _n_comp = sum(p in ("lnZ", "dlnCO") for p in fisher_params)
                 _n_theta = sum(p in ("lnKzz", "Tirr", "Tint", "log_kappa",
@@ -1299,10 +1215,9 @@ with st.sidebar:
         st.caption("A hard minimum: σ_final = max(σ_random, floor) on the "
                    "final bins. It is never added in quadrature and never "
                    f"averages down with more {_evw}s.")
-        # NO PRESELECTION (index=None). A 15-40 ppm hard minimum dominates the
-        # reported precision for any well-observed target, and a zero floor
-        # claims a precision nobody has demonstrated -- neither is a neutral
-        # default, so the tool makes the user own the choice and records it.
+        # NO PRESELECTION (index=None): a 15-40 ppm floor dominates the
+        # reported precision and a zero floor claims undemonstrated precision
+        # -- neither is neutral, so the user must own the choice.
         floor_mode = st.radio(
             "Floor type", ["constant", "none", "file"], horizontal=True,
             index=None, key=K("floormode"),
@@ -1351,8 +1266,7 @@ with st.sidebar:
                         f"{e} Edit the file and upload it again.")
                     floor_table = None
             elif st.session_state.get("restored_floor_table") is not None:
-                # carried by a loaded shared configuration; the uploader
-                # (whose state cannot be set programmatically) wins when
+                # carried by a loaded configuration; the uploader wins when
                 # the user picks a new file
                 try:
                     floor_table = np.asarray(
@@ -1372,9 +1286,8 @@ with st.sidebar:
                            "the choice is explicit.")
         if floor_mode == "file" and floor_table is not None:
             floors = {k: floor_table for k in mode_keys}
-        # An unmade floor choice blocks the run: it is the one setting where
-        # both candidate defaults bias the headline number, so it must not be
-        # implicit.
+        # An unmade floor choice blocks the run: both candidate defaults bias
+        # the headline number, so it must not be implicit.
         floor_choice_made = (floor_mode == "none"
                              or floor_mode == "constant"
                              or (floor_mode == "file" and floor_table is not None))
@@ -1405,9 +1318,7 @@ with st.sidebar:
 
     # -----------------------------------------------------------------------
     # More settings: solver grid, condensation, boundary conditions,
-    # opacity, and display controls. The rest of the old flat sidebar lives
-    # here, behind one entry point (2026-07-29 UX review, item 2.2; Kzz and
-    # photochemistry graduated to the Atmosphere step the same day).
+    # advanced RT, and display controls, behind one entry point.
     # -----------------------------------------------------------------------
     st.divider()
     st.markdown("### More settings")
@@ -1417,10 +1328,8 @@ with st.sidebar:
                "the run's provenance.")
 
     with st.expander("Solver & vertical grid"):
-        # Vertical layers: the chemistry AND the ExoJAX RT share this one
-        # grid (art_nlayer is LOCKED to nz). Not to be confused with the
-        # PICASO climate solve's own fixed internal grid (see the
-        # convective-zone seed help in step 2).
+        # The chemistry AND the ExoJAX RT share this one grid (art_nlayer is
+        # LOCKED to nz); the PICASO climate solve has its own internal grid.
         nz = st.number_input(
             "Vertical layers (chemistry + RT)", *forward.NZ_RANGE,
             forward.NZ_DEFAULT, 10, key=K("nz_pic" if _pic else "nz"),
@@ -1448,10 +1357,8 @@ with st.sidebar:
 
     if _pic:
         # Equilibrium provider: condensation and boundary conditions do not
-        # exist -- canonical_params refuses explicit requests, the GUI
-        # simply never offers them (mixing/photochemistry are gated the
-        # same way in the Atmosphere step). Quench/lnKzz is a deferred
-        # feature (docs/picaso_roadmap.md in the repo).
+        # exist; canonical_params refuses explicit requests, the GUI never
+        # offers them.
         use_condense = use_settling = False
         diff_esc, top_flux, bot_flux = [], [], []
         st.caption("Condensation and boundary conditions apply to the "
@@ -1557,9 +1464,8 @@ with st.sidebar:
                  "standard convention. Too low a top saturates strong "
                  "bands (CO2 4.3, CO 4.7 µm).")
         if science_mode == "emission":
-            # canonical_params pins simpson in emission (no transit chord
-            # exists there) -- show the pinned state, not a live-looking
-            # choice that is silently ignored (v18.1 review)
+            # canonical_params pins simpson in emission (no transit chord);
+            # show the pinned state, not a silently ignored choice
             st.session_state[K("rtint")] = "simpson"
         rt_integration = st.selectbox(
             "Transit chord integration", ["simpson", "trapezoid"], index=0,
@@ -1581,8 +1487,8 @@ with st.sidebar:
                                  value=False, key=K("shownoise"))
         seed = st.number_input("Random-noise seed", 0, 9999, 0, key=K("seed"))
 
-    # Reset, behind a confirmation step: one click used to clear a long
-    # configuration AND the current results (UX review 2.6).
+    # Reset sits behind a confirmation step: one click must not clear a long
+    # configuration and the current results.
     st.divider()
     if st.session_state.get("confirm_reset"):
         st.warning("Reset all settings to their defaults and clear the "
@@ -1635,7 +1541,7 @@ except (ValueError, RuntimeError) as e:  # stale widget combo mid-rerun, or a
 if tp_mode == "file" and not tp_file_ok and params_error is None:
     params_error = "file-mode T-P selected but no valid table is loaded"
 
-# rough runtime hint keyed off the resolution knobs (old fast ~1.8, high ~2.8 min)
+# rough runtime hint keyed off the resolution settings
 if _pic:
     # equilibrium states are seconds; the RT/opacity build dominates
     base_min = 0.6 + 0.25 * len(extra_mols)
@@ -1657,10 +1563,8 @@ if tp_mode == "picaso_climate":      # climate solve (cached after the first)
 # condensing solves carry the window + pin + stricter gate overhead
 if use_condense:
     base_min += 1.5
-# Jacobian rows: fd = 4 re-init build+solve cycles per composition row and
-# 4 cold solves per Kzz/T-P row (picaso: 4 fast table re-evaluations; the RT
-# call dominates); Tint_cl = 4 full climate re-solves; the cloud AND Mie deck
-# rows are RT-only (~seconds); ad = ~1 warm jvp per solve row
+# Jacobian-row cost model: fd = 4 solves per row; Tint_cl = 4 full climate
+# re-solves; cloud and Mie rows are RT-only (~seconds); ad = ~1 warm jvp
 _solve_min = (0.15 if _pic else max(1.0, base_min * 0.5))
 _rt_only = set(forward.CLOUD_FISHER_PARAMS) | set(forward.MIE_FISHER_PARAMS)
 n_cloud_rows = sum(1 for n in fisher_params if n in _rt_only)
@@ -1745,8 +1649,8 @@ with st.expander("Run summary & configuration"):
                            if tp_file_path else None),
             floor_table=(np.asarray(floor_table).tolist()
                          if floor_table is not None else None))
-        # deferred: this button sits directly above the progress box, so it
-        # is the natural thing to click while waiting several minutes
+        # deferred: sits right above the progress box, the natural thing to
+        # click during a multi-minute wait
         _deferred_download(
             "Download configuration (JSON)",
             json.dumps(_share, indent=2, default=str).encode(),
@@ -1779,10 +1683,9 @@ def compute():
     if not mode_keys:
         st.error("Select at least one instrument mode (step 4).")
         return None
-    # v18.1 public-instance protection: heavy subprocesses (forward + ETC)
-    # hold ONE concurrency slot for their whole duration; when every slot is
-    # busy the launch is declined instead of piling more solvers onto the
-    # shared hardware. Cached results never need a slot.
+    # Heavy subprocesses (forward + ETC) hold ONE concurrency slot for their
+    # whole duration; when every slot is busy the launch is declined. Cached
+    # results never need a slot.
     _slot = runlimit.acquire("forward+etc")
     if _slot is None:
         st.error(
@@ -1912,7 +1815,7 @@ if run_clicked:
             r_bin=r_bin, planet=planet_label, scenario=scenario,
             floor_mode=floor_mode,
             # the SELECTED floor, not the registry suggestion: a result must
-            # carry the number that produced it (acceptance for item 5).
+            # carry the number that produced it
             floor_selected={
                 k: (None if floors[k] is None
                     else (float(floors[k]) if np.isscalar(floors[k])
@@ -1920,10 +1823,9 @@ if run_clicked:
                 for k in mode_keys})
 
 # ---------------------------------------------------------------------------
-# Render. Order (2026-07-29 UX review, item 2.7): staleness/failure notices,
-# then the VERDICT, then spectrum / ranking / mode details / parameter
-# forecast, then the collapsed "Model quality and provenance" certificates,
-# then the advanced adjoint diagnostics.
+# Render order: staleness/failure notices, the VERDICT, then spectrum /
+# ranking / mode details / forecast, then the collapsed certificates, then
+# the adjoint diagnostics.
 # ---------------------------------------------------------------------------
 if "out" not in st.session_state:
     st.stop()
@@ -1933,8 +1835,7 @@ meta = st.session_state["out_meta"]
 model, results = out["model"], out["results"]
 goal_r = meta.get("goal", "detect")
 # the atmosphere's absolute C/O, for the dlnCO -> absolute-C/O display
-# conversion (sigma_CO = C/O * sigma_lnCO); since v13 params_json carries it
-# directly as co_ratio (composition is structural)
+# conversion (sigma_CO = C/O * sigma_lnCO)
 _cpj = json.loads(str(model["params_json"]))
 # Event word for the CACHED run's results (the sidebar radio may have moved
 # since the run; the stored canonical params are the truth for this output).
@@ -1943,12 +1844,10 @@ _ev = ("eclipse" if str(_cpj.get("science_mode", "transmission")) == "emission"
 _tt_col = f"{_ev}s to target"
 co_eval = float(_cpj.get("co_ratio", forward.CO_BASELINE))
 
-# Staleness guard: results persist in session_state across sidebar edits, so the
-# spectrum shown can be from DIFFERENT settings than the sidebar now reads --
-# most visibly the transmission/emission GEOMETRY (and a failed run, e.g. an
-# emission corner that refuses, leaves the previous result on screen). Say so
-# loudly, and LIST the changed fields (UX review 2.9), instead of silently
-# showing a transmission spectrum under an "emission" sidebar.
+# Staleness guard: results persist in session_state across sidebar edits, so
+# the spectrum shown can be from DIFFERENT settings than the sidebar now
+# reads -- most visibly the transmission/emission geometry. Say so loudly and
+# LIST the changed fields.
 _shown_stale, _changed = False, []
 try:
     _cur_cp = json.loads(json.dumps(forward.canonical_params(params),
@@ -1994,8 +1893,7 @@ if goal_r == "detect":
     tsig = float(meta.get("target_sig") or 3.0)
     ntr = meta["n_transits"]
     if not ok:
-        # every selected mode saturates: there is no "best mode" to rank
-        # (UX review 1.7 -- never rank saturated results)
+        # every selected mode saturates: never rank saturated results
         st.warning(
             f"**No selected mode is usable: all selected modes saturate "
             f"for this star** (Ks = {star['ks_mag']:g}). Select other "
@@ -2014,9 +1912,8 @@ if goal_r == "detect":
             st.success(verdict + "  Meets the target.")
         elif bsig > 0:
             # floor-aware transit solver: the photon term averages down with
-            # N, the systematic floor does not -- a plain 1/sqrt(N) law was
-            # optimistic exactly where it mattered (floor-dominated bright
-            # stars)
+            # N, the systematic floor does not -- a plain 1/sqrt(N) law is
+            # optimistic exactly where it matters
             tt = detect.transits_to_target(best, tsig)
             _scen = meta.get("scenario", "random")
             if tt["reachable"]:
@@ -2047,9 +1944,8 @@ else:
     target = float(meta["target_prec"])
     tsig = float(meta.get("target_sig") or 3.0)
     with_jac = [r for r in results if r.get("jac_bins") is not None]
-    # one saturation policy everywhere: a saturated mode is unusable data, so it
-    # is excluded from BOTH the per-mode ranking and the combined forecast (the
-    # combined row used to silently include modes the per-mode view dropped)
+    # one saturation policy everywhere: a saturated mode is unusable data,
+    # excluded from BOTH the per-mode ranking and the combined forecast
     usable_jac = [r for r in with_jac if not r["saturated"]]
     per_mode = {}          # tsig-sigma half-widths, display units
     for r in usable_jac:
@@ -2061,7 +1957,6 @@ else:
         gp, fisher_mod.combined_forecast(usable_jac, fisher_names)[gp], co_eval=co_eval)
         if len(usable_jac) >= 2 else np.inf)
     # distinguish "all modes saturated" from "no spectral response"
-    # (UX review 1.7: the old message blamed the Jacobian either way)
     if with_jac and not usable_jac:
         st.warning(
             f"**No selected mode is usable: all selected modes saturate "
@@ -2122,15 +2017,11 @@ order = np.argsort(wl)
 wl_s, d_s = wl[order], model["depth"][order] * 1e6
 _fname_base = f"jwst_tool_{_slug(meta.get('planet', 'planet'))}"
 
-# DISPLAY smoothing (2026-07-29): the native model is an undersampled line
-# forest -- at native R ~ 1500 the individual lines (R_line ~ 3e5 at the
-# transmission photosphere) are far narrower than the grid, so each strong
-# line renders as a one-sample spike and the raw curve reads as noise. For
-# the PLOT the model is convolved to a constant display resolution (>= 3x
-# the analysis binning R, floor 300) with the SAME tested LSF operator the
-# science path uses for MIRI/PRISM (flat weight = plain blur; auto-no-op if
-# the kernel is unresolved by the grid). No score touches this curve, and
-# the un-smoothed native model stays in the "Native model (CSV)" download.
+# DISPLAY smoothing: at native R ~ 1500 the unresolved line forest renders
+# as one-sample spikes, so the PLOT is convolved to a constant display R
+# (>= 3x the analysis R, floor 300) with the SAME tested LSF operator the
+# science path uses (flat weight). No score touches this curve; the native
+# model stays in the "Native model (CSV)" download.
 _disp_R = float(max(300, 3 * int(meta["r_bin"])))
 _disp_wl_r = np.array([float(wl_s[0]), float(wl_s[-1])])
 _disp_curve = np.array([_disp_R, _disp_R])
@@ -2160,10 +2051,8 @@ for r in results:
     if meta["show_noise"]:
         y = y + rng.normal(0.0, r["sigma"] * 1e6)
     label = r["label"] + (" (saturated!)" if r["saturated"] else "")
-    # plot at the response-weighted effective wavelength (matters near detector
-    # gaps / steep throughput); falls back to the bin center if absent.
-    # Marker shape + color together identify the mode: no series relies on
-    # color alone (UX review 4.2).
+    # plot at the response-weighted effective wavelength (matters near
+    # detector gaps); marker + color together identify the mode
     x = r.get("wl_eff", r["wl"])
     ax.errorbar(x, y, yerr=r["sigma"] * 1e6, fmt=mk, ms=4.2, lw=1.0,
                 color=c, ecolor=c, elinewidth=0.8, capsize=0, zorder=3,
@@ -2178,8 +2067,7 @@ ticks = [t for t in (1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 7.0, 10.0, 12.0)
 ax.set_xticks(ticks)
 ax.set_xticklabels([f"{t:g}" for t in ticks])
 ax.set_xlim(lo * 0.97, hi * 1.03)
-# y-limits: the model in-window AND every plotted error bar (large-sigma
-# points used to clip out of view)
+# y-limits: keep the model in-window AND every plotted error bar in view
 sel = (wl_s >= lo * 0.97) & (wl_s <= hi * 1.03)
 y_lo = min(float(d_plot[sel].min()), min(pt_lo))
 y_hi = max(float(d_plot[sel].max()), max(pt_hi))
@@ -2191,8 +2079,7 @@ _depth_lbl = ("eclipse depth (ppm)"
               else "transit depth (ppm)")
 ax.set_ylabel(_depth_lbl)
 ax.grid(alpha=0.25)
-# legend below the axes: up to nine entries no longer crowd the data
-# (UX review 4.4); marker + color pairs identify each mode
+# legend below the axes; marker + color pairs identify each mode
 _handles, _labels = ax.get_legend_handles_labels()
 _lg_rows = int(np.ceil(len(_labels) / 3))
 fig.subplots_adjust(bottom=0.11 + 0.058 * _lg_rows)
@@ -2262,10 +2149,8 @@ with col1:
             names.append("ALL USABLE (combined)")
             vals.append(comb)
             cols.append("#555555")
-        # no parenthetical: the transit count and "lower is better" pushed the
-        # label past the axes width and it was cut off. Both are already on
-        # the page -- the count in the run summary and the verdict line, the
-        # direction in the caption under this figure.
+        # no parenthetical: it pushed the label past the axes width, and the
+        # count and direction are already on the page
         xrefs, xlabel = (), f"expected ±{forward.param_axis(gp)} at {tsig:g}σ"
         fmt_v = lambda v: f"{v:.3g}"
         vline_target = target
@@ -2275,10 +2160,9 @@ with col1:
         ax2.text(b.get_width() + max(vals) * 0.02,
                  b.get_y() + b.get_height() / 2, fmt_v(v),
                  va="center", fontsize=10, color="#333333")
-    # reference/target labels sit just ABOVE the axes box (x in data
-    # coordinates, y in axes fraction) so they never collide with the bars
-    # or each other; a reference line equal to the target is skipped (at the
-    # default 3σ target the two coincided and the labels overprinted)
+    # reference/target labels sit just ABOVE the axes box so they never
+    # collide with the bars; a reference equal to the target is skipped
+    # (coincident labels overprint)
     _blend2 = mtransforms.blended_transform_factory(ax2.transData,
                                                     ax2.transAxes)
     for ref in xrefs:
@@ -2343,9 +2227,8 @@ with col2:
                 "are not modeled, so fluxes and forecasts in those "
                 "windows are uncertain.")
     else:
-        # transmission probes p <~ 0.1 bar (the tool's photosphere
-        # convention); a hot deep adiabat below that is invisible to the
-        # chord geometry and must not trip the ultra-hot warning
+        # transmission probes p <~ 0.1 bar; a hot deep adiabat below that is
+        # invisible to the chord geometry and must not trip the warning
         _probe = _p_arr <= 0.1
         if _probe.any() and float(_T_arr[_probe].max()) > 2000.0:
             st.warning(
@@ -2374,11 +2257,10 @@ for r in sorted(results, key=key_order):
     if r["saturated"]:
         notes.append(f"saturates (full-well {r['sat_frac']:.2f} at min groups)")
     n_part = int(np.sum(np.asarray(r.get("n_pix_partial_sat", 0)) > 0))
-    # Quote the NATIVE-grid count (worker v7+): a fully saturated channel has
-    # non-finite extracted noise, so the worker's own usable-pixel filter drops
-    # it and the post-filter count under-reports -- reading zero for a mode that
-    # saturated everywhere. None = the payload predates v7, so say "unmeasured"
-    # rather than printing a number that would read as "none saturated".
+    # Quote the NATIVE-grid count: a fully saturated channel has non-finite
+    # extracted noise, so the worker's own filter drops it and the
+    # post-filter count under-reports. None = the payload predates the
+    # census; say "unmeasured", never a number that reads "none saturated".
     _n_full_native = r.get("n_pix_full_sat_native")
     if _n_full_native is None:
         if r.get("n_pix_full_sat_dropped"):
@@ -2407,8 +2289,8 @@ for r in sorted(results, key=key_order):
         _proj = r.get("sigma_detect_proj", float("nan"))
         if np.isfinite(_proj):
             row["σ_detect (proj)"] = round(_proj, 1)
-        # experimental correlated scenarios stay OUT of the reference table
-        # unless the user explicitly selected one
+        # experimental correlated scenarios stay OUT of the table unless the
+        # user explicitly selected one
         if meta.get("scenario", "random") != "random":
             for _sc, _v in r.get("sigma_detect_by_scenario", {}).items():
                 if _sc != r.get("scenario"):
@@ -2495,10 +2377,8 @@ if fisher_names and "jac" in model:
         v = tsig_f * fisher_mod.display_sigma(n, s, co_eval=co_eval)
         return "unconstrained" if not np.isfinite(v) or v > 1e4 else f"{v:.3g}"
 
-    # long format, one row per mode x parameter (UX review 4.5: the old
-    # two-columns-per-parameter layout forced horizontal scrolling), with
-    # the marginalized and conditional bounds side by side -- both read off
-    # the SAME nuisance-augmented Fisher matrix
+    # long format, one row per mode x parameter, marginalized and conditional
+    # side by side -- both read off the SAME nuisance-augmented Fisher matrix
     _marg_col = f"marginalized ± at {tsig_f:g}σ"
     _cond_col = "conditional ± (others fixed)"
 
@@ -2515,8 +2395,8 @@ if fisher_names and "jac" in model:
     usable_f = [r for r in with_jac if not r["saturated"]]
     for r in with_jac:
         if r["saturated"]:
-            # shown for completeness, but a saturated mode contributes no
-            # usable data -- same exclusion policy as the verdict + combined
+            # shown for completeness; a saturated mode contributes no usable
+            # data (same exclusion policy as the verdict + combined)
             frows.append({"mode": r["label"],
                           "parameter": "(saturated, excluded)",
                           _marg_col: "", _cond_col: "", "unit": ""})
@@ -2594,8 +2474,7 @@ elif out.get("fisher_names"):
     st.info("A constraint forecast was requested but the cached model has "
             "no Jacobian. Press Run to compute it.")
 
-# --- model quality and provenance (collapsed: supports the result, does not
-# precede it -- UX review 2.7) ------------------------------------------------
+# --- model quality and provenance (collapsed: supports the result) ---------
 with st.expander("Model quality and provenance"):
     if out.get("provenance"):
         _pv = out["provenance"]
@@ -2604,10 +2483,8 @@ with st.expander("Model quality and provenance"):
             f"{_pv['engine_version']} + {_pv['refdata_name']} "
             f"(refdata {_pv['refdata_version']}), worker v{_pv['worker_version']} "
             ",  recorded in every noise cache.")
-    # chemistry certificate, provider-aware (v18): the VULCAN runner's own
-    # longdy per gated stage, or the PICASO provider's blend/normalization
-    # certificate -- everything shown passed its gate, or run_model would
-    # have raised
+    # chemistry certificate, provider-aware: everything shown passed its
+    # gate, or run_model would have raised
     if "conv_longdy" in model and np.asarray(model["conv_longdy"]).size:
         _gate = float(np.asarray(model["conv_gate"], float)[0])
         st.caption(
@@ -2680,7 +2557,7 @@ with st.expander("Model quality and provenance"):
             if m == "ad-jvp":
                 _parts.append(f"{_sym} AD (warm jvp)")
             elif not np.isfinite(e):
-                # v17: ungated single-central-difference RT rows report their
+                # ungated single-central-difference RT rows report their
                 # h-vs-2h metric as NaN (unmeasured), never a false 0.0
                 _parts.append(f"{_sym} FD-RT (smooth, ungated)")
             else:
@@ -2703,13 +2580,10 @@ with st.expander("Model quality and provenance"):
             f"Rows: {', '.join(_parts)}.")
 
 # --- advanced diagnostics: adjoint sensitivities (reverse-mode AD) -----------
-# High-dimensional sensitivities of the model just run: one reverse-mode
-# adjoint solve gives dL/dlnk over EVERY reaction and dL/dT over EVERY layer
-# -- questions finite differences cannot afford (thousands of re-runs).
-# Analyzes the CACHED model's canonical params (_cpj), never the live sidebar.
-# An expert research feature, kept out of the default flow (UX review 2.8);
-# when the run's engine/settings make it unavailable, one caption says so
-# instead of a full panel.
+# One reverse-mode adjoint solve gives dL/dlnk over EVERY reaction and dL/dT
+# over EVERY layer. Analyzes the CACHED model's canonical params (_cpj),
+# never the live sidebar. Expert feature, kept out of the default flow; when
+# unavailable, one caption says so instead of a full panel.
 st.subheader("Advanced diagnostics")
 with st.expander("Adjoint sensitivities: which reactions and temperatures "
                  "control a molecule?"):
@@ -2770,9 +2644,8 @@ with st.expander("Adjoint sensitivities: which reactions and temperatures "
                     with st.status("Running reverse-mode adjoint diagnostics …",
                                    expanded=True) as status:
                         # no prior: the first run on a machine compiles the
-                        # step-VJP (hours on CPU) while later runs skip it, so
-                        # any pre-run estimate would be wrong one way or the
-                        # other. The remaining-time readout is purely measured.
+                        # step-VJP (hours on CPU), later runs skip it; the
+                        # remaining-time readout is purely measured
                         bar = _TimedBar(text="starting …")
                         adjoint_diag.ADJOINT_CACHE.mkdir(parents=True,
                                                          exist_ok=True)
@@ -2811,16 +2684,13 @@ with st.expander("Adjoint sensitivities: which reactions and temperatures "
                                           state="complete")
                             st.rerun()
                 finally:
-                    # release even on failure: this runs inside the
-                    # long-lived Streamlit server, so a leaked slot
-                    # would stay held until a server restart
+                    # release even on failure: a leaked slot would stay held
+                    # until a server restart
                     _adj_slot.release()
         else:
             _trust = bool(adj["magnitudes_trusted"])
-            # pair antisymmetry is an ADDITIONAL diagnostic (added
-            # 2026-07-21); older cached npz predate it, so show it only when
-            # present. It is diagnostic-only, never a trust gate (see
-            # adjoint_diag docstring).
+            # pair antisymmetry: older cached npz predate it, so show only
+            # when present. Diagnostic-only, never a trust gate.
             _pa_txt = (f", forward/reverse pair antisymmetry "
                        f"{float(adj['pair_antisym']):.3g} (diagnostic only, "
                        "not a trust gate)" if "pair_antisym" in adj else "")

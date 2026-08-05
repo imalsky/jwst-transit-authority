@@ -1,10 +1,8 @@
 """pandeia_worker backend-identity helpers (no pandeia needed: the worker's
 pandeia imports are function-local, so the module imports with numpy alone).
 
-The engine/refdata release-match gate is the STScI rule "engine and refdata
-versions must be the same", applied to the leading numeric release segment so
-the validated 3.0 + 3.0rc3 pair passes while 2026.1-engine-on-3.0rc3-refdata
-(the documented base-env failure mode) is refused BEFORE a deep engine error.
+The release-match gate compares leading numeric release segments: 3.0 +
+3.0rc3 passes; a mixed engine/refdata pair is refused BEFORE a deep error.
 """
 import os
 
@@ -14,7 +12,7 @@ from jwst_tool import instruments as ins
 from jwst_tool import pandeia_worker as pw
 
 
-# --- ngroup limits (PandExo compatibility, 2026-07-12 audit item 5) ----------
+# --- ngroup limits (PandExo compatibility) -----------------------------------
 
 def test_nircam_modes_respect_pandexo_group_cap():
     """NIRCam grism must not permit more than PandExo's hard 100-group max."""
@@ -35,9 +33,7 @@ def test_every_mode_respects_its_instrument_cap():
 
 
 def test_optimizer_clamp_never_exceeds_ngroup_max():
-    """The worker's group selection is bounded by _clamp_ngroup at every step;
-    a faint-target candidate far above ng_max still returns <= ng_max, and a
-    saturated candidate below ng_min still returns >= ng_min."""
+    """_clamp_ngroup bounds any candidate into [ngroup_min, ngroup_max]."""
     for key, m in ins.MODES.items():
         lo, hi = m["ngroup_min"], m["ngroup_max"]
         for cand in (-5, 0, 1, lo, lo + 1, hi - 1, hi, hi + 50, 10_000):
@@ -85,14 +81,12 @@ def test_refdata_version_undeterminable(tmp_path):
 # --- _check_backend_match ---------------------------------------------------
 
 def test_match_accepts_validated_pair(tmp_path):
-    tree = tmp_path / "pandeia_data-3.0rc3"
-    tree.mkdir()
-    (tree / "VERSION_PSF").write_text("3.0\n")
-    prov = pw._check_backend_match("3.0", str(tree))
+    # a matched engine/refdata release with a matching PSF tree passes and
+    # records the provenance
+    ref, psf = _triple(tmp_path, "3.0", "3.0")
+    prov = pw._check_backend_match("3.0", ref, psf)
     assert prov["refdata_version"] == "3.0"
-    assert prov["refdata_version_source"] == "VERSION_PSF"
-    # no separate PSF tree on this backend: PSFs live inside refdata
-    assert prov["psf_version"] is None
+    assert prov["psf_version"] == "3.0"
 
 
 def test_match_refuses_mismatched_engine(tmp_path):
@@ -108,14 +102,10 @@ def test_match_refuses_unidentifiable_refdata(tmp_path):
         pw._check_backend_match("3.0", str(tmp_path))
 
 
-# --- matched engine/refdata/PSF triple (item 3) ------------------------------
+# --- matched engine/refdata/PSF triple ---------------------------------------
 
 def _triple(tmp_path, data_ver, psf_ver):
-    """Build a (refdata, psf_dir) pair at the requested releases.
-
-    Version files only -- the real PSF tree is ~4 GiB and the check is a
-    release comparison, so the test needs neither.
-    """
+    """Build (refdata, psf_dir) version-file stubs at the requested releases."""
     ref = tmp_path / f"pandeia_data-{data_ver}-jwst"
     ref.mkdir()
     (ref / "VERSION_DATA").write_text(f"{data_ver}\n")
@@ -141,12 +131,8 @@ def test_matched_triple_runs_and_records_all_three_versions(tmp_path):
 ])
 def test_every_pairwise_mismatch_is_refused(tmp_path, engine, data_ver,
                                             psf_ver, offender):
-    """Any component out of step must fail BEFORE a calculation.
-
-    The PSF row is the one that used to slip through: the worker only checked
-    that VERSION_PSF existed, never its release, so a 2026.2 PSF tree could
-    serve a 2026.7 engine and silently change the extracted flux and noise.
-    """
+    """Any component out of step must fail BEFORE a calculation; the PSF
+    release is the one that used to go unchecked."""
     ref, psf = _triple(tmp_path, data_ver, psf_ver)
     with pytest.raises(RuntimeError, match=offender):
         pw._check_backend_match(engine, ref, psf)
@@ -168,13 +154,13 @@ def test_unidentifiable_psf_tree_is_refused(tmp_path):
         pw._check_backend_match("2026.7", ref, str(blank))
 
 
-def test_backend_without_separate_psf_tree_is_allowed(tmp_path):
-    """The 3.0-era layout carries PSFs inside refdata; nothing to match."""
+def test_any_backend_without_separate_psf_tree_is_refused(tmp_path):
+    """Every backend uses the split-PSF layout since the legacy (3.0)
+    backend was removed: a missing PSF dir is always an error."""
     ref, _ = _triple(tmp_path, "3.0", "3.0")
     for psf_dir in (None, ""):
-        prov = pw._check_backend_match("3.0", ref, psf_dir)
-        assert prov["psf_version"] is None
-        assert "inside refdata" in prov["psf_version_source"]
+        with pytest.raises(RuntimeError, match="requires a separate PSF"):
+            pw._check_backend_match("3.0", ref, psf_dir)
 
 
 @pytest.mark.parametrize("psf_dir", [None, ""])
@@ -186,7 +172,7 @@ def test_current_backend_without_separate_psf_tree_is_refused(tmp_path,
         pw._check_backend_match("2026.7", ref, psf_dir)
 
 
-# --- backend registry (item 3) ----------------------------------------------
+# --- backend registry --------------------------------------------------------
 
 def test_current_backend_is_the_supported_release_triple():
     assert ins.JWST_TOOL_BACKEND in ins._BACKENDS
@@ -198,24 +184,21 @@ def test_current_backend_is_the_supported_release_triple():
 
 
 def test_archival_backend_is_named_and_labeled_unsupported():
-    """The 2026.2 token was renamed, not silently repointed: caches and
-    committed artifacts recorded as 'current' must not look current-release."""
+    """The 2026.2 token was renamed, not silently repointed."""
     arch = ins._BACKENDS["archival_2026_2"]
     assert arch["release"] == "2026.2"
     assert arch["supported"] is False
     assert "ARCHIVAL" in arch["status"]
     assert "NOT suitable for planning new proposals" in arch["status"]
-    assert ins._BACKENDS["legacy"]["supported"] is False
+    # the Pandeia 3.0 "legacy" backend was removed outright
+    assert "legacy" not in ins._BACKENDS
 
 
 def test_no_backend_carries_a_personal_absolute_path():
     """No checked-in SOURCE literal may point into one person's home.
 
-    Checks the source text, not the resolved values: refdata/psf are built from
-    DATA_DIR, so in an editable checkout they legitimately resolve under the
-    developer's home. The defect was a hardcoded
-    /Users/imalsky/Documents/Important_Docs/... refdata for the legacy backend,
-    which simply does not exist anywhere else.
+    Checks the source text, not resolved values: refdata/psf legitimately
+    resolve under a developer's home in an editable checkout.
     """
     import pathlib
 
@@ -238,7 +221,7 @@ def test_missing_backend_python_gives_one_actionable_error(monkeypatch):
     assert ins.require_pandeia_python() == "/some/env/bin/python"
 
 
-# --- native-grid saturation census (worker v7) ------------------------------
+# --- native-grid saturation census -------------------------------------------
 
 def _stub_report(sat_frac, wl, flux, noise, n_full, n_part, t_exp=100.0):
     """Minimal pandeia report shaped the way `_one_mode` reads it."""
@@ -301,13 +284,10 @@ def _run_one_mode(wl, flux, noise, n_full, n_part, sat_frac=0.5):
 
 
 def test_full_saturation_is_counted_before_the_good_filter():
-    """The item-6 acceptance case: one good pixel + one fully saturated pixel.
+    """Saturation is counted on NATIVE curves, before the good-pixel filter.
 
-    A fully saturated channel is exactly where pandeia returns non-finite
-    extracted noise, so the `good` filter removes it. Counting saturation from
-    the FILTERED curves therefore reported zero saturated pixels on a column
-    that was in fact saturated. The science grid must still be the one good
-    pixel; the census must still say one fully saturated pixel.
+    A fully saturated channel has non-finite extracted noise, so counting
+    from the filtered curves reported zero saturated pixels.
     """
     out = _run_one_mode(
         wl=[1.0, 2.0],
@@ -328,8 +308,7 @@ def test_full_saturation_is_counted_before_the_good_filter():
 
 
 def test_native_census_survives_an_all_unusable_mode():
-    """A mode with no usable pixel returns unusable=True -- and still reports
-    how many native pixels were there and how many were saturated."""
+    """An all-unusable mode still reports its native and saturated counts."""
     out = _run_one_mode(
         wl=[1.0, 2.0],
         flux=[1.0e6, 5.0e5],
@@ -359,10 +338,8 @@ def test_detect_never_substitutes_the_post_filter_count():
 
 
 def test_sat_curve_is_loud_on_missing_or_misaligned_keys():
-    """worker v6: the saturation curves are LOAD-BEARING (detect drops fully
-    saturated pixels through them), so a missing/renamed report key or a
-    grid-length mismatch must raise -- the old silent all-zeros fallback would
-    have quietly stopped masking saturated pixels after an engine rename."""
+    """The saturation curves are load-bearing: a missing/renamed report key or
+    a grid-length mismatch raises, never the old silent all-zeros fallback."""
     import numpy as np
     rpt = {"1d": {"n_full_saturated": [[1.0, 2.0, 3.0], [0.0, 1.0, np.nan]]}}
     curve = pw._sat_curve(rpt, "n_full_saturated", 3)

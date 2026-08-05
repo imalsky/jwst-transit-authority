@@ -43,16 +43,14 @@ def test_pairing_sums_reversible_and_keeps_photo_single():
 
 def test_adjoint_key_ignores_rt_only_knobs():
     # the adjoint runs on the chemistry state alone: spectra-only settings
-    # (sampling, broadening, clouds, extra RT molecules, Fisher config) must
-    # not fragment the cache
+    # must not fragment the cache
     k0 = adjoint_diag.adjoint_key(_p(), "SO2")
     assert adjoint_diag.adjoint_key(
         _p(nu_pts=8000, broadening="h2he", cloud_on=True,
            extra_mols=["HCN"], fisher_params=["lnZ"], jac_method="ad",
            use_photo=True), "SO2") == k0
-    # v2 (_ADJ_VERSION 2): the v15/v16 RT/observable-only additions must be
-    # stripped too -- pre-v2 an RT top-pressure change re-triggered the
-    # multi-hour adjoint on an identical chemistry state
+    # RT/observable-only knobs are stripped too: an RT top-pressure change
+    # once re-triggered the multi-hour adjoint on an identical chemistry state
     assert adjoint_diag.adjoint_key(
         _p(rt_ptop_bar=1.0e-9, rt_integration="trapezoid", rt_dit_res=0.5,
            mie_condensate="MgSiO3", mie_log_rg=-5.0, mie_sigmag=2.0,
@@ -73,8 +71,7 @@ def test_load_result_missing_is_none():
 
 
 def test_run_adjoint_refuses_condensing_states():
-    # detection-only condensation can never meet the adjoint: refused up
-    # front, before any heavy import (numpy-only testable)
+    # condensing states are refused up front, before any heavy import
     import pytest
 
     with pytest.raises(RuntimeError, match="condensing state"):

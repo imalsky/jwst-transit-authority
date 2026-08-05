@@ -1,15 +1,10 @@
-"""2026-07-12 external-audit regression suite.
+"""External-audit regression suite: three confirmed defects, pinned.
 
-Three confirmed defects, each pinned here so it cannot come back:
-  * the minimum noise floor now has exact PandExo semantics --
-    sigma_final = max(sigma_random, floor) on the FINAL bins, with
-    none / constant-ppm / wavelength-table choices, constant edge extension,
-    no quadrature, no sqrt(R/100) rescaling, and no averaging below the
-    floor with added transits;
-  * Fisher rank detection is invariant under per-parameter unit rescaling
-    (Jacobi-whitened eigendecomposition);
-  * the matched-template nuisance projection is invariant under nuisance-row
-    rescaling (correlation-form normal matrix).
+  * the minimum noise floor has exact PandExo semantics: sigma_final =
+    max(sigma_random, floor) on the FINAL bins -- no quadrature, no
+    sqrt(R/100) rescaling, no averaging below the floor with added transits;
+  * Fisher rank detection is invariant under per-parameter unit rescaling;
+  * the nuisance projection is invariant under nuisance-row rescaling.
 """
 import numpy as np
 import pytest
@@ -30,15 +25,13 @@ def _bins(mode_result, edges, floor_spec, **kw):
                                       floor_spec, **kw)
 
 
-# --- no editorial floor is ever applied implicitly (item 5) -------------------
+# --- no editorial floor is ever applied implicitly ----------------------------
 
 def test_floor_spec_is_a_required_argument_everywhere():
     """No API may supply a floor the caller did not ask for.
 
-    The 15-40 ppm per-mode values are pre-flight planning conventions, not
-    calibrations, and applied as a hard minimum they SET the reported precision
-    for any well-observed target. A default value anywhere would let an
-    editorial number reach a headline result silently.
+    The 15-40 ppm per-mode values are planning conventions, not calibrations;
+    a default anywhere would let them reach a headline result silently.
     """
     import inspect
 
@@ -64,13 +57,8 @@ def test_registry_floors_are_named_as_suggestions_not_defaults():
 def test_no_module_applies_a_registry_floor_by_itself():
     """`floor_ppm_suggested` may only be READ by the GUI as a prefill.
 
-    The science modules must never reach into the registry for a floor: that is
-    exactly the silent-editorial-default path this test exists to prevent.
-
-    Checks the parsed AST, not the raw text, so documenting the rule in a
-    docstring does not trip it -- only a real string reference does. (Comments
-    never reach the AST; a module docstring is one Constant holding the whole
-    docstring, not the bare key.)
+    Checks the parsed AST, not raw text, so documenting the rule in a
+    docstring or comment does not trip it -- only a real string reference.
     """
     import ast
     import pathlib
@@ -169,8 +157,7 @@ def test_invalid_floor_specs_raise(bad):
 
 
 def test_transits_approach_floor_from_above():
-    """sigma(N) must decrease monotonically toward the floor and never cross
-    below it -- the hard-minimum multi-transit behavior."""
+    """sigma(N) decreases monotonically toward the floor, never below it."""
     mr = _mode_result()
     edges = np.geomspace(3.0, 5.0, 10)
     nz = _bins(mr, edges, 30.0)
@@ -186,8 +173,7 @@ def test_transits_approach_floor_from_above():
 
 
 def test_detect_and_noise_share_the_final_sigma():
-    """The sigma the detection score consumes is the SAME clamped sigma the
-    noise module quotes (one final uncertainty everywhere)."""
+    """The detection score consumes the same clamped sigma noise quotes."""
     mr = _mode_result()
     wl = np.asarray(mr["wl"])
     edges = np.geomspace(3.0, 5.0, 10)
@@ -202,10 +188,8 @@ def test_detect_and_noise_share_the_final_sigma():
 # --- Fisher unit-rescaling invariance ------------------------------------------
 
 def test_fisher_rank_and_sigmas_invariant_under_unit_rescaling():
-    """Audit item 4 regression: rescale every parameter by independent factors
-    spanning 1e-12..1e12; physical sigmas, rank, and the constrained subspace
-    must not change. The raw-eigenvalue threshold flipped an exactly finite
-    constraint to 'unconstrained' under a pure unit change."""
+    """Rescaling parameters over 1e-12..1e12 must not change sigmas, rank, or
+    the constrained subspace (the raw-eigenvalue threshold did)."""
     rng = np.random.default_rng(0)
     J0 = rng.standard_normal((5, 60)) * np.array(
         [1e-4, 1.0, 1e3, 1e-7, 5e2])[:, None]
@@ -229,11 +213,8 @@ def test_fisher_rank_and_sigmas_invariant_under_unit_rescaling():
 
 
 def test_fisher_multi_dim_null_space_invariant_under_rescaling():
-    """A 2-D null space (two independent degeneracies), with two parameters
-    still constrained. Rank and the finite/inf classification must be invariant
-    under per-parameter rescaling -- which requires the null-overlap test to use
-    a basis-invariant subspace projection (the null eigenvectors of a degenerate
-    eigenspace are only defined up to rotation)."""
+    """A 2-D null space stays invariant under rescaling, which requires the
+    basis-invariant subspace projection in the null-overlap test."""
     rng = np.random.default_rng(4)
     J0 = rng.standard_normal((6, 80)) * np.array(
         [1.0, 1e3, 1e-5, 1.0, 1e2, 1e-3])[:, None]
@@ -267,9 +248,8 @@ def test_fisher_zero_response_parameter_reads_inf():
 # --- nuisance-row rescaling invariance -----------------------------------------
 
 def test_detection_score_invariant_under_nuisance_row_rescaling():
-    """Audit item 5 regression: the profiled score depends only on the SPAN of
-    the nuisance rows. The raw-eigenvalue threshold silently dropped a valid
-    down-scaled row (changing the score by factors)."""
+    """The profiled score depends only on the SPAN of the nuisance rows; the
+    raw-eigenvalue threshold silently dropped a valid down-scaled row."""
     rng = np.random.default_rng(7)
     n = 60
     wl = np.geomspace(3.0, 5.0, n)
@@ -292,9 +272,8 @@ def test_detection_score_invariant_under_nuisance_row_rescaling():
 
 
 def test_detection_score_invariant_under_nuisance_basis_rotation():
-    """Audit item 5, second required regression: the profiled score depends only
-    on the SPAN of the nuisance rows, so ANY nonsingular remix (rotation + mixing
-    + scaling), not just per-row rescaling, must leave it unchanged."""
+    """ANY nonsingular remix of the nuisance rows, not just per-row rescaling,
+    must leave the profiled score unchanged."""
     rng = np.random.default_rng(9)
     n = 60
     wl = np.geomspace(3.0, 5.0, n)
@@ -330,10 +309,9 @@ def test_zero_nuisance_row_is_ignored():
     assert b == pytest.approx(a, rel=1e-12)
 
 
-# --- fail-fast on invalid public noise/covariance inputs (recheck P2-E) ------
-# noise_inflation was squared (so -1 silently acted as +1, 0 zeroed the
-# uncertainty, NaN poisoned it); build_cov accepted negative variances (a
-# plausible positive diagonal came back) and NaN/negative wavelengths.
+# --- fail-fast on invalid public noise/covariance inputs ----------------------
+# noise_inflation is squared, so -1 silently acted as +1; build_cov accepted
+# negative variances and NaN/negative wavelengths.
 
 def _tiny_mode_result(n=50):
     return dict(wl=np.linspace(3.0, 4.0, n).tolist(),

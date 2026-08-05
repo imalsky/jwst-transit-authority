@@ -2,48 +2,34 @@
 
 Pure data, importable by the light GUI path (no jax/vulcan/exojax imports).
 
-Every planet runs on the SAME W39b-validated machinery: the WASP-39b SNCHO
-photo network + 10x-solar FastChem baseline (the import-locked network), with
-the planet identity injected through the existing hooks. Shared code path, not
-per-planet validation -- the committed parity/live evidence is W39b-centered
-(docs/audit_decisions_2026-07-21.md) --
+Every planet runs on the SAME W39b-validated machinery (the WASP-39b SNCHO
+photo network + 10x-solar FastChem baseline), with the planet identity
+injected through the existing hooks:
 
     chemistry : cfg_overrides {Mp, Rp, r_star, orbit_radius, sflux_file, ...}
-                (VULCAN derives gs = G*Mp/Rp^2; gs_cgs is converted to Mp at the
-                boundary in forward.py. vulcan_chem.build_chem_model applies them
-                before the pre-loop)
+                (VULCAN derives gs = G*Mp/Rp^2; gs_cgs is converted to Mp at
+                the boundary in forward.py)
     RT        : profile {rp_cm, gs_cgs, rstar_cm}
-                (exojax_rt.build_rt_model reads them for geometry/normalization)
     noise     : star dict -> pandeia phoenix SED + Ks normalization
     timing    : t14_hr -> in/out-of-transit integration split
 
-T-P and Kzz are explicit modes, never silently substituted (the WASP-39b GCM
-baseline modes were removed 2026-07-13; the globally isothermal T-P mode was
-removed 2026-07-21 -- it held the CO/CH4/NH3 quench region at one temperature).
-Under Guillot the structural baseline is isothermal at a representative
-temperature (it sets only the hydrostatic grid + EQ init; the on-graph tp_eval
-supplies T(P) for chemistry and RT), while ``file`` / ``picaso_climate`` make
-the tabulated profile itself the structure. Kzz is const / Pfunc / JM16 / the
-table's own column. Per-planet defaults live in ``tp_table_default`` below and
-are tabulated in docs/physics_and_conventions.md.
+T-P and Kzz are explicit modes, never silently substituted. Under Guillot the
+structural baseline is isothermal at a representative temperature (it sets
+only the hydrostatic grid + EQ init; tp_eval supplies T(P) for chemistry and
+RT); ``file`` / ``picaso_climate`` make the tabulated profile the structure.
+Kzz is const / Pfunc / JM16 / the table's own column.
 
 Values are literature defaults for PLANNING (all editable in the GUI):
 WASP-39b Mancini+2018/Tsai+2023; HD 189733b Torres+2008 (a: Bouchy+2005);
 HD 209458b Torres+2008 (a, gs from Southworth+2010); WASP-107b Piaulet+2021.
-(Provenance audited against the NASA Exoplanet Archive 2026-07-15: every
-numeric field within the literature spread.) Stellar UV: shipped VULCAN spectra,
-nearest available spectral type (shown in the GUI, never silently swapped).
+Stellar UV: shipped VULCAN spectra, nearest available spectral type (shown in
+the GUI, never silently swapped).
 
-``star["metallicity"]`` is DELIBERATELY 0.0 for every host, and is not a
-literature value (WASP-39 is published near -0.12). It selects the PHOENIX
-node for the noise SED and the emission-mode stellar surface flux, and both
-consumers renormalize the SED to the star's observed 2MASS Ks magnitude, so a
-0.1-0.2 dex node shift changes only the SED SHAPE across the JWST bands -- a
-sub-percent effect on forecast sigmas, far below the ~2-56% pandeia-vs-PandExo
-noise-model envelope (tests/parity/outputs/REPORT.md). Keeping every host on
-the solar node keeps the four registry entries on one interpolation cell of
-the minimal shipped CDBS grid. The GUI exposes [Fe/H] as an editable field
-(-2.0 to 0.5), so a run that cares sets it explicitly.
+``star["metallicity"]`` is DELIBERATELY 0.0 for every host, not a literature
+value: it only selects the PHOENIX node for the noise SED, both consumers
+renormalize to the observed 2MASS Ks magnitude, and a 0.1-0.2 dex node shift
+is a sub-percent effect on forecast sigmas. The GUI exposes [Fe/H] as an
+editable field, so a run that cares sets it explicitly.
 """
 from __future__ import annotations
 
@@ -72,19 +58,11 @@ SFLUX_CHOICES = {
 #   tp_table          the table exists and is SELECTABLE for this planet
 #   tp_table_default  a default run on it has been VERIFIED end-to-end here
 #
-# Shipping a table is not evidence that the tool converges on it. HD 189733 b
-# has a perfectly good bundled profile that the solver does NOT certify at the
-# default settings (measured 2026-07-22: longdy 0.0998 against the 0.1 gate but
-# conv_normal False -- a stall exit, so the run correctly hard-refuses), while
-# its analytic default converges in 36 s. Making that table the default would
-# have turned a working planet into one that errors on arrival, so it is
-# offered rather than imposed. `tp_table_note` carries the reason in both
-# directions so neither the gap nor the caveat is silent.
-#
-# The tool runs every planet on the W39b cfg's FIXED chemistry grid
-# (forward.CHEM_P_SPAN_DYN = 0.1 to 7.6e6 dyn/cm^2), so a table only has to be
-# valid ACROSS THAT SPAN; rows deeper or higher are never evaluated. What
-# disqualifies HD 209458 b is that its thermosphere is already inside the span.
+# Shipping a table is not evidence the tool converges on it (HD 189733 b's
+# bundled profile stall-exits at the default settings, so it is offered, not
+# imposed); tp_table_note carries the reason in both directions. A table only
+# has to be valid across the fixed chemistry span (forward.CHEM_P_SPAN_DYN);
+# HD 209458 b's thermosphere is already inside that span, which disqualifies it.
 PLANETS = {
     "wasp39b": dict(
         label="WASP-39 b",
@@ -175,17 +153,13 @@ def default_tirr(planet: dict, system: dict | None = None) -> float:
     """Guillot T_irr default: sqrt(2) * T_eq, on the GUI's 20 K step grid and
     clipped to the widget range.
 
-    Registry entries use their literature ``teq_k``. For the CUSTOM planet the
-    caller passes ``system`` (star_teff, rstar_rsun, orbit_au) and T_eq is
-    DERIVED from the entered star and orbit -- without this, an untouched
-    custom T_irr silently kept WASP-39 b's temperature no matter what system
-    the user typed in (fixed 2026-08-04).
+    Registry entries use their literature ``teq_k``. For the CUSTOM planet
+    the caller passes ``system`` (star_teff, rstar_rsun, orbit_au) and T_eq
+    is DERIVED from it -- otherwise an untouched custom T_irr silently keeps
+    WASP-39 b's temperature.
 
-    ONE definition, used by BOTH canonical_params and the sidebar widget. It
-    used to be a hard-coded constant on the API side and a T_eq expression in
-    the GUI, so a "default" API run and a "default" GUI run built different
-    profiles for every planet whose T_eq was not WASP-39 b's (HD 209458 b
-    disagreed by 470 K)."""
+    ONE definition, used by BOTH canonical_params and the sidebar widget; a
+    split default built different profiles per planet (history: notes.md)."""
     teq = (system_teq(system["star_teff"], system["rstar_rsun"],
                       system["orbit_au"])
            if system is not None else planet["teq_k"])

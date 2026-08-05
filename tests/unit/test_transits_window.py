@@ -1,11 +1,9 @@
-"""transits_to_target under correlated scenarios (2026-07-15 audit, HIGH).
+"""transits_to_target under correlated scenarios.
 
-Under the correlated presets the systematic is the floor EXCESS, which grows
-as photon noise averages down: sigma_detect(N) can PEAK at a finite N and
-decline toward the floor-only limit. The old gate `target > sig_inf ->
-unreachable` therefore returned false "never"s for targets reachable in a
-finite window. Pinned: the correlated path scans and reports the window; the
-random path still short-circuits on its exact ceiling.
+The floor-excess systematic grows as photon noise averages down, so
+sigma_detect(N) can PEAK at a finite N; the old `target > sig_inf ->
+unreachable` gate returned false "never"s. Pinned: the correlated path scans
+and reports the window; the random path still short-circuits on its ceiling.
 """
 from __future__ import annotations
 

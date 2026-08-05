@@ -1,49 +1,33 @@
 """PICASO radiative-convective climate runner: certified, cached, locked.
 
-Heavy-path module (imports picaso via picaso_env on use; never imported by the
-GUI's light path or the numpy-only test suite).
+Heavy-path module (imports picaso via picaso_env on use; never imported by
+the GUI's light path or the numpy-only test suite).
 
 Contracts:
 
 * CERTIFICATION -- a solve is cached and served ONLY when every gate passes
-  (fail loud, never a degraded profile): picaso's converged flag; the solver's
-  own TOA flux-balance metric |flux_net[0]|/|tidal[0]| below
-  ``FLUX_BALANCE_MAX``; finite, strictly-ordered P and finite positive T;
-  dlnT/dlnP within ``(GRAD_MIN, GRAD_MAX)`` everywhere (catches the
-  pathological-RCB / runaway-gradient failure modes picaso's own docs warn
-  can hide behind a "converged" flag); the convective zone must not reach the
-  model top. The certificate is stored WITH the profile and revalidated on
-  every cache load.
-* DETERMINISM + the rcb seed -- the solve is bit-deterministic for
-  identical inputs (measured 2026-07-20: repeat and fresh-opacity reruns
-  differ by exactly 0 K), so the cache is exact. ``climate_rcb`` is a
-  NUMERICAL SEED (PICASO's ``rcb_guess``, the initial convective-zone
-  topology), NOT a physical model parameter. PICASO grows convective zones
-  upward but cannot shrink one seeded too shallow, so a shallow seed imposes
-  a spurious convective region; the earlier "341 K rcb 60 vs 65 degeneracy"
-  is that documented initialization failure, not physics. The default seed is
-  now the deep one (85, per PICASO's guidance to initialize near the deepest
-  layer). It is still cache-keyed and the Tint_cl FD row differentiates at
-  FIXED seed until seed-independence is certified (rerun from 85 + a second
-  bottom-only guess and require agreement in the RCB location and the T-P over
-  the consumed range).
+  (fail loud, never a degraded profile): converged flag; TOA flux metric
+  below ``FLUX_BALANCE_MAX``; finite ordered P and finite positive T;
+  dlnT/dlnP within ``(GRAD_MIN, GRAD_MAX)``; convective zone below the model
+  top. The certificate is stored WITH the profile and revalidated on every
+  cache load.
+* DETERMINISM -- the solve is bit-deterministic for identical inputs, so the
+  cache is exact. ``climate_rcb`` is a NUMERICAL SEED (PICASO's
+  ``rcb_guess``), NOT a physical parameter: PICASO cannot shrink a zone
+  seeded too shallow, so the default is the deep seed (85). It stays
+  cache-keyed and the Tint_cl FD row differentiates at FIXED seed until
+  seed-independence is certified.
 * CACHE KEY -- ``climate_subset(cp)``: the climate inputs + the FULL climate
-  reference-data content fingerprint (selected CK table, continuum DBs,
-  adiabat table, wavenumber grid, config/version, stellar-grid manifest).
-  ``chem_provider`` is EXCLUDED: the converged T-P is provider-independent,
-  so both providers share one solve.
-* LOCKING -- atomic writes (tmp + os.replace) plus a process-safe fcntl.flock
-  per-key lock whose file is NEVER unlinked (v18.1): flock releases on close
-  or process death -- that is the whole guarantee, and unlink-based "stale
-  lock breaking" reintroduces the classic two-inode double-lock race (two
-  processes each holding an exclusive flock on different inodes of the same
-  path -- reproduced in the 2026-07-21 review). A dead holder's lock releases
-  automatically; a LIVE slow holder means WAIT (up to ``LOCK_TIMEOUT_S``,
-  then raise loudly -- never break). The pid/start-time written into the
-  file is observability metadata only.
-* GUESS -- a DETERMINISTIC analytic Guillot profile built only from the
-  canonical inputs (never warm-started from a previous solve; order
-  independence measured). rfacv=0 runs star-free (``setup_nostar``).
+  reference-data content fingerprint. ``chem_provider`` is EXCLUDED (the
+  converged T-P is provider-independent; both providers share one solve).
+* LOCKING -- atomic writes (tmp + os.replace) plus a per-key fcntl.flock
+  whose file is NEVER unlinked: unlink-based "stale lock breaking" creates
+  the two-inode double-lock race. A dead holder's flock releases on its own;
+  a LIVE holder is waited on (up to ``LOCK_TIMEOUT_S``, then raise -- never
+  break). The pid/start-time in the file is observability metadata only.
+* GUESS -- a DETERMINISTIC analytic Guillot profile from the canonical
+  inputs only (never warm-started). rfacv=0 runs star-free
+  (``setup_nostar``).
 """
 from __future__ import annotations
 
@@ -61,24 +45,20 @@ from jwst_tool import picaso_env as pe
 from jwst_tool.forward import (CHEM_P_SPAN_DYN, CLIMATE_N_LEVELS,
                                CLIMATE_P_SPAN_BAR, T_WINDOW)
 
-_CLIMATE_VERSION = 2   # v2 (2026-07-21): rcb reinterpreted as a deep numerical
-                       # seed (default 60->85); invalidates every v1 cache built
-                       # under the shallow-seed shallow-RCB assumption.
+_CLIMATE_VERSION = 2   # bump to invalidate cached solves (history: notes.md)
 CLIMATE_CACHE = Path(_ins.OUTPUT_DIR) / "picaso_climate_cache"
 
-FLUX_BALANCE_MAX = 1.0e-3   # solver's own TOA metric |flux_net[0]/tidal[0]|
-                            # (converged W39b solves land at ~1e-6; 1e-3
-                            # catches a gross imbalance hiding behind the flag)
-GRAD_MIN, GRAD_MAX = -0.25, 0.50   # dlnT/dlnP sanity envelope (inversions
-                                   # allowed, runaways refused; steepest
-                                   # plausible adiabat ~0.35)
+FLUX_BALANCE_MAX = 1.0e-3   # TOA |flux_net[0]/tidal[0]|: converged W39b lands
+                            # ~1e-6; catches gross imbalance behind the flag
+GRAD_MIN, GRAD_MAX = -0.25, 0.50   # dlnT/dlnP envelope: inversions allowed,
+                                   # runaways refused (steepest adiabat ~0.35)
 CVZ_TOP_MIN = 5             # convective zone must not reach the model top
 LOCK_TIMEOUT_S = 3600.0     # no healthy climate solve takes an hour
 LOCK_POLL_S = 5.0
 
-# deterministic analytic-guess constants (Guillot 2010 eq. 29; guess only --
-# the converged profile does not depend on them beyond the solve's basin,
-# and they are fixed so the guess is a pure function of the canonical inputs)
+# Guillot 2010 eq. 29 guess constants -- fixed so the guess is a pure
+# function of the canonical inputs (guess only; the converged profile does
+# not depend on them beyond the solve's basin)
 _GUESS_KAPPA_IR = 1.0e-2    # cm^2/g
 _GUESS_GAMMA = 0.4
 _GUESS_F = 0.25
@@ -187,13 +167,11 @@ def _write_atm_table(P_bar: np.ndarray, T: np.ndarray, path: Path) -> None:
     """VULCAN atm table (descending P, bottom row EXACTLY the chemistry-grid
     bottom) for the vulcan-provider structural path.
 
-    The bottom row is interpolated to CHEM_P_SPAN_DYN[1] exactly: the raw
-    climate level just below it can sit above the RT temperature window
-    (measured on W39b: T(8.5 bar) ~ 3015 K > 2980), while T at the chemistry
-    bottom itself is in-window -- writing raw levels would trip the T-window
-    refusal even though the consumed span is fine. Above the table top
-    (1e-6 bar) the engine holds the topmost T constant (the standard file-
-    mode convention, logged by run_model)."""
+    The bottom row is interpolated to CHEM_P_SPAN_DYN[1]: a raw climate level
+    just below it can sit above the RT temperature window while T at the
+    chemistry bottom is in-window, so writing raw levels would trip the
+    T-window refusal. Above the table top the engine holds the topmost T
+    constant (standard file-mode convention)."""
     P_dyn = np.asarray(P_bar, float) * 1.0e6
     T = np.asarray(T, float)
     bottom = CHEM_P_SPAN_DYN[1]
@@ -232,9 +210,8 @@ def _write_atm_table(P_bar: np.ndarray, T: np.ndarray, path: Path) -> None:
 def interp_T(clim, p_bar: np.ndarray) -> np.ndarray:
     """Climate T on an arbitrary pressure grid (log-P linear interp).
 
-    Above the climate top (1e-6 bar) the topmost T is held CONSTANT -- the
-    stated pressure policy (the equilibrium tables start there too); below
-    the climate bottom is refused."""
+    Above the climate top the topmost T is held CONSTANT (stated policy);
+    below the climate bottom is refused."""
     p = np.asarray(p_bar, float)
     Pc = np.asarray(clim.pressure_bar, float)
     if np.any(p > Pc.max() * (1 + 1e-9)):
@@ -246,10 +223,8 @@ def interp_T(clim, p_bar: np.ndarray) -> np.ndarray:
 
 
 def _revalidate(ns) -> bool:
-    """Re-run every gate that can be evaluated from the STORED data (v18.1):
-    a cache entry is served only if its arrays still pass the structural
-    gates and its stored solver metrics still pass the thresholds -- loading
-    is never weaker than solving."""
+    """Re-run every gate evaluable from the STORED data: a cache entry is
+    served only if it still passes -- loading is never weaker than solving."""
     P = np.asarray(ns.pressure_bar, float)
     T = np.asarray(ns.T, float)
     c = ns.cert
@@ -330,9 +305,8 @@ def _solve(cp: dict, tint: float, log) -> dict:
                       rfacv=float(cp["rfacv"]))
     log("[fwd] climate: solving (iteration lines stream below; the first "
         "solve on a machine also compiles, which can add minutes) ...")
-    # verbose=True: picaso prints one line per iteration to stdout, which
-    # the GUI console shows -- without it the solve is silent for minutes
-    # and reads as a hang (2026-07-21 Space report)
+    # verbose=True streams one line per iteration to the GUI console --
+    # without it the solve is silent for minutes and reads as a hang
     out = cl.climate(opa, save_all_profiles=False, with_spec=False,
                      verbose=True)
     out["_wall_s"] = time.time() - t0
@@ -356,9 +330,9 @@ def get_or_run(cp: dict, log, tint_override: float | None = None):
         return hit
 
     CLIMATE_CACHE.mkdir(parents=True, exist_ok=True)
-    # ONE fd for the whole acquisition; the lock FILE is never unlinked (the
-    # module-docstring locking contract). A dead holder's flock releases on
-    # its own; a live holder is waited on, never broken.
+    # ONE fd for the whole acquisition; the lock FILE is never unlinked. A
+    # dead holder's flock releases on its own; a live holder is waited on,
+    # never broken.
     lf = open(lock_path, "a+")
     t_wait0 = time.time()
     t_last_note = 0.0
@@ -370,10 +344,9 @@ def get_or_run(cp: dict, log, tint_override: float | None = None):
                 got_lock = True
                 break
             except OSError as exc:
-                # ONLY contention means "wait" -- any other errno (e.g. an
-                # unsupported-flock filesystem on a mounted volume) must
-                # raise loudly, never silently poll for an hour looking
-                # like a hang (2026-07-21 Space report)
+                # ONLY contention errnos mean "wait" -- anything else (e.g. a
+                # no-flock filesystem) must raise loudly, never poll for an
+                # hour looking like a hang
                 import errno as _errno
                 if exc.errno not in (_errno.EAGAIN, _errno.EACCES,
                                      _errno.EWOULDBLOCK):
@@ -427,7 +400,7 @@ def get_or_run(cp: dict, log, tint_override: float | None = None):
                                      if np.ndim(v) else float(v))
                                  for k, v in out["flux_balance"].items()}}
         # tmp name must END in .npz: savez_compressed appends the suffix to
-        # any other name, which would orphan the tmp and break os.replace
+        # any other name, orphaning the tmp and breaking os.replace
         tmp = npz_path.with_name(f"{npz_path.stem}.tmp{os.getpid()}.npz")
         np.savez_compressed(
             tmp, pressure_bar=P, temperature_K=T,
@@ -449,19 +422,16 @@ def get_or_run(cp: dict, log, tint_override: float | None = None):
             except OSError:
                 pass
         lf.close()
-        # the lock FILE stays: unlinking a path whose inode another process
-        # may still flock creates two simultaneous "exclusive" locks
+        # the lock FILE stays: unlinking a path another process may still
+        # flock creates two simultaneous "exclusive" locks
 
 
 def warm_default() -> None:
     """Pre-solve the GUI's default climate configuration (Space boot warmer).
 
-    Idempotent: a cache hit returns in milliseconds, so booting an instance
-    whose /data volume already holds the solve costs nothing. Takes a run
-    slot so warming never starves visitors; when the instance is already
-    busy it skips and says so (the first visitor then pays the solve, as
-    before). The solve also compiles picaso's numba kernels, which
-    NUMBA_CACHE_DIR persists for the forward subprocesses.
+    Idempotent (a cache hit returns in milliseconds). Takes a run slot so
+    warming never starves visitors; skips (and says so) when busy. Also
+    compiles picaso's numba kernels, persisted via NUMBA_CACHE_DIR.
     """
     from jwst_tool import forward, runlimit
     cp = forward.canonical_params({"tp_mode": "picaso_climate"})

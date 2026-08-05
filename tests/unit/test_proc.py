@@ -1,10 +1,8 @@
 """A GUI worker must not outlive the script run that started it.
 
-Streamlit cancels a running script by raising a ScriptControlException --
-a BaseException -- inside the next ``st.*`` call. Before `proc.terminating`
-that unwound past the forward model / ETC / adjoint child, leaving a solver
-on the CPU after `runlimit` had already released its slot. These tests pin
-the guard against both an ordinary Exception and a BaseException.
+Streamlit cancels a run with ScriptControlException, a BaseException; before
+`proc.terminating` that left a solver running after `runlimit` released its
+slot. The guard is pinned against Exception and BaseException both.
 """
 from __future__ import annotations
 

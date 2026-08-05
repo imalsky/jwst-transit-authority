@@ -1,6 +1,5 @@
-"""Correlated-noise scenario tier (2026-07-12): the floor-budget covariance
-builder (PSD, scenario-invariant per-bin totals), the full-covariance metric
-in the matched-template score and the Fisher forecast, and the per-segment
+"""Correlated-noise scenario tier: the floor-budget covariance builder, the
+full-covariance metric in the score and Fisher forecast, and the per-segment
 slope nuisances the conservative scenario profiles."""
 import numpy as np
 import pytest
@@ -31,12 +30,9 @@ def test_unknown_scenario_raises():
 
 @pytest.mark.parametrize("scenario", ["moderate", "conservative"])
 def test_cov_psd_and_scenario_invariant_totals(scenario):
-    """C must be positive definite, and its DIAGONAL must equal the diagonal
-    scenario's variance exactly -- max(var_phot, floor^2) = sigma_final^2
-    under the PandExo floor convention: scenarios re-allocate the floor
-    EXCESS, they never change the per-bin total error bar. (atol=0: the
-    original version of this test used np.allclose's default atol, which is
-    vacuous on ~1e-10 variances.)"""
+    """C is PD and its diagonal equals max(var_phot, floor^2) exactly:
+    scenarios re-allocate the floor EXCESS, never the per-bin total.
+    (atol=0: the default atol is vacuous on ~1e-10 variances.)"""
     wl, var_phot, floor = _grid(seed=3)
     C = noise_mod.build_cov(wl, var_phot, floor, scenario)
     assert C.shape == (wl.size, wl.size)
@@ -64,9 +60,8 @@ def test_cov_diagonal_matches_sigma_path():
 
 
 def test_smooth_signal_penalized_by_correlated_floor():
-    """A spectrally smooth template loses S/N once the floor is smooth-
-    correlated (the systematic can mimic it); a narrow feature is much less
-    affected. This is the qualitative point of the scenario tier."""
+    """A smooth template loses S/N under a smooth-correlated floor; a narrow
+    feature is much less affected."""
     wl, _vp, _fl = _grid(n=80, seed=5)
     var_phot = np.full(wl.size, 1e-11)
     floor = np.full(wl.size, 2e-5)
@@ -85,9 +80,8 @@ def test_smooth_signal_penalized_by_correlated_floor():
 # --- slope nuisances ----------------------------------------------------------
 
 def test_per_segment_slope_profiled_out():
-    """A per-segment linear-in-ln-wl trend must profile to ~0 with the slope
-    rows supplied (and NOT without them) -- the calibration freedom real
-    per-visit fits float."""
+    """A per-segment linear-in-ln-wl trend profiles to ~0 with the slope rows
+    supplied, and NOT without them."""
     wl = np.linspace(3.0, 5.0, 40)
     seg = np.array([0] * 20 + [1] * 20)
     lnl = np.log(wl)
@@ -105,8 +99,7 @@ def test_per_segment_slope_profiled_out():
 
 
 def test_narrow_feature_survives_slope_profiling():
-    # feature at the second segment's CENTER: a centered symmetric bump is the
-    # case slope freedom genuinely cannot absorb (an edge feature partly can)
+    # a bump centered in a segment is the case slope freedom cannot absorb
     wl = np.linspace(3.0, 5.0, 40)
     seg = np.array([0] * 20 + [1] * 20)
     signal = 8e-5 * np.exp(-0.5 * ((wl - 4.5) / 0.05) ** 2)

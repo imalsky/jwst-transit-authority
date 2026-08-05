@@ -1,11 +1,9 @@
-"""Closure tests (2026-07 audit item E): the noise model against SYNTHETIC
-COUNTS (not Gaussian depth draws), the covariance metric against Monte Carlo,
-and -- opt-in, slow -- the autodiff Jacobian against finite differences of the
-full forward model.
+"""Closure tests: the noise model against synthetic Poisson counts, the
+covariance metric against Monte Carlo, and (opt-in, slow) the autodiff
+Jacobian against finite differences of the full forward model.
 
-The default-run tests stay numpy-only. The FD test runs the real VULCAN-JAX ->
-ExoJAX forward three times (~5-10 min); enable with JWST_TOOL_RUN_SLOW=1
-(heavy validation is scheduled by the owner, never run by default)."""
+Default runs stay numpy-only; the FD test needs JWST_TOOL_RUN_SLOW=1 and
+runs the real forward model three times (~5-10 min)."""
 import os
 
 import numpy as np
@@ -15,10 +13,8 @@ from jwst_tool import binning, noise as noise_mod
 
 
 def test_poisson_count_closure():
-    """Simulate the MEASUREMENT: in/out-of-transit integrations as Poisson
-    counts per pixel, the depth estimator binned through the count-space
-    operator. The empirical bin mean/variance must close with the analytic
-    depth_error_bins variance built from the same exposure numbers."""
+    """Empirical bin mean/variance of Poisson-count depth estimates must
+    close with the analytic depth_error_bins variance."""
     rng = np.random.default_rng(11)
     n_pix = 300
     wl = np.sort(rng.uniform(3.0, 4.0, n_pix))
@@ -54,11 +50,8 @@ def test_poisson_count_closure():
 
 
 def test_matched_filter_amplitude_variance_closure():
-    """The S/N calibration behind sigma_detect: for template u and noise
-    covariance C, the profiled amplitude estimate A = (u^T C^-1 y)/(u^T C^-1 u)
-    on pure-noise draws must have variance 1/(u^T C^-1 u) -- i.e. the quoted
-    sigma_detect is the true S/N unit under the scenario covariance. Also
-    pins the failure of the diagonal assumption on correlated noise."""
+    """The profiled amplitude estimate on pure-noise draws must have variance
+    1/(u^T C^-1 u); the diagonal assumption must fail on correlated noise."""
     rng = np.random.default_rng(13)
     n = 60
     wl = np.geomspace(3.0, 5.0, n)
@@ -84,17 +77,11 @@ def test_matched_filter_amplitude_variance_closure():
                     reason="slow: 3 full VULCAN-JAX+ExoJAX forward runs "
                            "(~5-10 min, JAX required); set JWST_TOOL_RUN_SLOW=1")
 def test_jacobian_row_matches_finite_difference():
-    """One cached FD Jacobian row (v13: Richardson central difference at
-    h = 10 K with the h-vs-2h gate) against an INDEPENDENT, smaller-step
-    (h = 2 K) central difference of two separately cached forward runs.
-    Different step, different cache entries, same certified-solve machinery:
-    agreement pins that the production row measures the physical derivative,
-    not a step-size artifact.
+    """The cached FD Jacobian row must agree with an independent smaller-step
+    (h = 2 K) central difference: different step, different cache entries.
 
-    Agreement gate is deliberately loose: the default resolution certifies
-    chemistry at yconv 1e-2 and both estimates carry convergence noise --
-    shape correlation plus ~15% scale is what steady-state uniqueness
-    guarantees at this tolerance."""
+    Loose gate on purpose: chemistry certifies at yconv 1e-2, so shape
+    correlation plus ~15% scale is what steady-state uniqueness guarantees."""
     from jwst_tool import forward
 
     def quiet(_s):

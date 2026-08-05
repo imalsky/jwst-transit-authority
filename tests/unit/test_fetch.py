@@ -22,9 +22,8 @@ def test_fetch_specs_are_well_formed():
 
 def test_manual_block_names_the_unscriptable_pieces():
     txt = fetch.MANUAL
-    # Point at STScI's installation page rather than a release-specific Box
-    # link: the page always lists the trees for the supported release, so the
-    # instructions cannot silently rot to an archival release (item 3).
+    # STScI's installation page, not a release-specific Box link: the page
+    # always lists the supported release, so instructions cannot rot.
     assert "outerspace.stsci.edu" in txt
     assert "conda create" in txt
     assert "{refdata}" in txt and "{psf}" in txt

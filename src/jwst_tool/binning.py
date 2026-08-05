@@ -1,77 +1,50 @@
 """One measurement operator per instrument mode: count-space binning shared by
 the noise, the model, and every Jacobian row.
 
-Why this module exists (2026-07-11 external audit, P0.1): the tool used to
-report inverse-variance combined bin errors (noise.py) while binning the model
-and Jacobians with local wavelength/trapezoid weights (detect.py). Those are
-two DIFFERENT estimators, so the forecast model point was not the expectation
-value of the statistic whose variance was being quoted. Everything now goes
-through one operator built from the Pandeia extracted-pixel grid:
-
-    pixels -> bin     d_b   = sum_i(w_i d_i) / sum_i(w_i),   w_i = F_i
-    variance          Var_b = sum_i(w_i^2 Var_i) / (sum_i w_i)^2
-    model -> pixel    d_i   = average of the piecewise-linear model over the
-                              pixel's wavelength cell (midpoint edges)
-
-Count-space weights (w_i = extracted stellar count rate F_i) are the estimator
-real reductions implement: the binned light curve is the SUM of extracted
-counts across the bin's pixels, so the fitted bin depth is the flux-weighted
-mean of the per-pixel depths. In the photon-dominated limit (Var_i ~ 1/F_i)
-this coincides with inverse-variance weighting; where background or read noise
-contribute, count-space is slightly wider -- the honest variance of the
-estimator actually used. The same weights bin the model, the removed-molecule
-model, and the Jacobians, so signal, derivative, and noise all describe the
-same statistic.
-
-The model is averaged over each pixel's wavelength cell (exact integral of the
-piecewise-linear model), never point-sampled, so a model grid finer than the
-pixel grid (e.g. MIRI LRS) cannot alias. Where the FINAL binning approaches
-the instrument's NATIVE resolving power (MIRI LRS, PRISM, blue SOSS),
-detect.evaluate_mode additionally blurs the model -- the depth, the
-removed-molecule depth, and EVERY Jacobian row, with one flux weight -- to
-R_native via smooth_to_native_r (the flux-weighted count-ratio Gaussian LSF
-in this module) BEFORE the cell average; for high-R modes that kernel is
-unresolved by the model grid and the blur is a no-op. The Gaussian R(lambda)
-kernel is an approximation to the full Pandeia response matrix
-(monochromatic impulses through the 3D engine); impulse-response validation
-against the engine is a documented pending gate, and Pandeia's extraction
-already carries PSF/throughput into F_i and sigma_i.
+Guardrails:
+* ONE operator bins noise, model, and Jacobians -- never reintroduce separate
+  binning paths; the model point must be the expectation of the statistic
+  whose variance is quoted.
+* Count-space weights (w_i = extracted stellar count rate F_i) are the
+  estimator real reductions implement: d_b = sum(w d)/sum(w),
+  Var_b = sum(w^2 Var)/(sum w)^2. In the photon limit this equals
+  inverse-variance weighting; with background/read noise it is slightly
+  wider -- the honest variance of the estimator actually used.
+* The model is averaged over each pixel's wavelength cell (exact integral of
+  the piecewise-linear model), never point-sampled, so a finer model grid
+  cannot alias.
+* Where final bins approach the NATIVE resolving power (MIRI LRS, PRISM,
+  blue SOSS), detect.evaluate_mode blurs depth, removed-molecule depth, and
+  every Jacobian row to R_native via smooth_to_native_r BEFORE the cell
+  average; on high-R modes the blur is a no-op. The Gaussian R(lambda)
+  kernel approximates the full Pandeia response matrix (impulse-response
+  validation against the engine is a documented pending gate).
 """
 from __future__ import annotations
 
 import numpy as np
 
 # A pixel's cell half-width toward a neighbor is half that gap, capped at
-# GAP_CAP x the smaller of its two adjacent gaps. The cap only matters at
-# detector gaps (NRS1/NRS2) and band ends, where a raw midpoint cell would
-# smear the model across wavelengths the pixel never sees.
+# GAP_CAP x the smaller adjacent gap (matters at detector gaps and band ends,
+# where a raw midpoint cell would smear the model).
 GAP_CAP = 1.5
 
-# A gap between adjacent (usable) pixels larger than this factor times the
-# mode's median pixel spacing marks a DETECTOR-SEGMENT boundary (NIRSpec
-# G395H/G235H NRS1|NRS2: gap ~150x median). Real dispersion gradients (PRISM,
-# MIRI LRS) vary smoothly by factors of a few, far below this. Interior holes
-# carved by saturation masks can also split a segment -- that only ADDS a
-# nuisance offset (conservative), never removes one.
+# A gap larger than this factor x the median pixel spacing marks a
+# DETECTOR-SEGMENT boundary (NRS1|NRS2 gap ~150x median; real dispersion
+# gradients vary smoothly by factors of a few).
 SEGMENT_GAP_FACTOR = 20.0
 
-# Pixels whose local wavelength spacing is below this fraction of the mode's
-# median spacing sit on a DEGENERATE wavelength solution (e.g. pandeia_data
-# 3.0rc3 G395H piles ~700 samples within <1e-4 um at the NRS2 red edge, spacing
-# down to 3.7e-6 um vs 6.6e-4 median). Counting them as independent spectral
-# samples overstates the information in that bin (~sqrt(n) too-small sigma)
-# and mislocates their flux in wavelength, so they are excluded -- loudly, via
-# the n_pix_degenerate count surfaced by detect.evaluate_mode. Real dispersion
-# gradients (PRISM, MIRI LRS) vary smoothly by factors of a few, far above
-# this cut.
+# Local spacing below this fraction of the median = a DEGENERATE wavelength
+# solution (e.g. the G395H red-edge pileup). Counting such pixels as
+# independent samples overstates the information (~sqrt(n) too-small sigma),
+# so they are excluded loudly via n_pix_degenerate.
 DEGENERATE_WL_FRAC = 0.02
 
 
 def _validate_wl(wl, name: str) -> np.ndarray:
-    """Loud wavelength-grid validation (2026-07-12 re-audit, item 7): a NaN or
-    infinite wavelength is an upstream data error, never a sample to drop
-    silently -- np.argsort would park NaNs at the end and every gap statistic
-    downstream would be poisoned or silently truncated. Returns float array."""
+    """Finite, non-empty wavelength array or ValueError; invalid samples are
+    never silently dropped (a NaN would poison every gap statistic).
+    Returns float array."""
     wl = np.asarray(wl, float)
     if wl.size == 0:
         raise ValueError(f"{name}: empty wavelength array")
@@ -85,20 +58,18 @@ def _validate_wl(wl, name: str) -> np.ndarray:
 
 
 def _positive_gap_median(gaps: np.ndarray) -> float:
-    """Median pixel spacing over STRICTLY POSITIVE gaps. Duplicate wavelengths
-    contribute zero-width gaps; including them made the median collapse to 0
-    on duplicate-majority grids, which silently disabled both the degenerate
-    mask (`local < 0.02*0` is never true) and the segment splitter
-    (2026-07-12 re-audit, item 7). Returns 0.0 when every gap is zero."""
+    """Median pixel spacing over STRICTLY POSITIVE gaps. Zero-width duplicate
+    gaps would collapse the median to 0 and silently disable both the
+    degenerate mask and the segment splitter. Returns 0.0 when every gap is
+    zero."""
     pos = gaps[gaps > 0.0]
     return float(np.median(pos)) if pos.size else 0.0
 
 
 def degenerate_wl_mask(wl_pix: np.ndarray) -> np.ndarray:
-    """True for pixels on a degenerate wavelength solution (see above).
-    Returned in the INPUT pixel order. Exact-duplicate wavelengths are always
-    degenerate (zero local spacing = zero spectral support); a grid whose
-    every pixel is duplicated comes back all-True, never all-False."""
+    """True for pixels on a degenerate wavelength solution, in INPUT order.
+    Exact duplicates are always degenerate (zero spectral support); an
+    all-duplicate grid returns all-True."""
     wl_pix = _validate_wl(wl_pix, "degenerate_wl_mask: wl_pix")
     order = np.argsort(wl_pix)
     wl_s = wl_pix[order]
@@ -119,12 +90,9 @@ def degenerate_wl_mask(wl_pix: np.ndarray) -> np.ndarray:
 def segment_ids(wl_pix: np.ndarray) -> np.ndarray:
     """Detector-segment id (0, 1, ...) per pixel, in the INPUT pixel order.
 
-    Segments are contiguous wavelength runs separated by gaps larger than
-    SEGMENT_GAP_FACTOR x the median pixel spacing -- the NRS1/NRS2 split for
-    the two-detector NIRSpec gratings, one segment for every other mode. Each
-    segment gets its own calibration-offset nuisance in the detection score
-    and the Fisher forecasts (Moran+2023 / Madhusudhan+2023-style NRS1/NRS2
-    steps of tens of ppm are universal in real G395H fits)."""
+    Segments split at gaps larger than SEGMENT_GAP_FACTOR x the median pixel
+    spacing (the NRS1|NRS2 split; one segment for every other mode). Each
+    segment gets its own calibration-offset nuisance downstream."""
     wl_pix = _validate_wl(wl_pix, "segment_ids: wl_pix")
     order = np.argsort(wl_pix)
     if wl_pix.size < 2:
@@ -159,45 +127,28 @@ def smooth_to_native_r(wl_model: np.ndarray, y: np.ndarray,
     """Blur a native transit-depth model to the instrument's Gaussian LSF of
     resolving power R(lambda) over [band_lo, band_hi]; returns a full-length copy.
 
-    Needed where the final bins approach or beat the NATIVE resolving power
-    (MIRI LRS R~40-160 across 5-12 um, NIRSpec PRISM R~30-300, blue SOSS):
-    there the LSF redistributes the depth signal across bins to first order.
-    For high-R modes the kernel is unresolved by the model grid and this is a
-    no-op (returned unchanged) -- consistent with the sub-ppm edge-effect
-    estimate for e.g. G395H at R_bin=100.
+    Only bites where final bins approach native R (MIRI LRS, PRISM, blue
+    SOSS); on high-R modes the kernel is unresolved by the model grid and the
+    input is returned unchanged.
 
-    STELLAR-FLUX WEIGHTING (``weight``, 2026-07-12 re-audit item 2). The
-    instrument does not measure the LSF-average of the transit depth. It
-    measures LSF-averaged in- and out-of-transit COUNTS and forms their ratio:
-    with stellar flux F and depth d,
+    ``weight`` is the stellar flux at ``wl_model``. The instrument measures
+    LSF-averaged COUNTS, so d_obs = L[F d] / L[F], the flux-weighted LSF mean
+    -- never revert to the flat L[d] blur (it mislocated depth by tens of ppm
+    near structured stellar spectra). ``None`` or a constant weight reduces
+    exactly to the flat blur. F is only pixel-resolved (sub-pixel stellar
+    lines are a documented limit). The operator is LINEAR in d for fixed F,
+    so a Jacobian row blurs with the SAME weight as the depth.
 
-        d_obs = 1 - L[F (1 - d)] / L[F] = L[F d] / L[F],
-
-    i.e. the FLUX-WEIGHTED LSF mean of d, not the flat mean L[d]. The two
-    differ wherever F varies across a kernel (a stellar line, a throughput
-    gradient, the SOSS blue drop-off): the flat blur mislocated the depth
-    signal by tens of ppm near structured stellar spectra. Pass the stellar
-    flux at ``wl_model`` as ``weight`` to get the correct ratio; ``None`` (or a
-    constant weight) reduces exactly to the flat blur. F is only resolved to
-    the extracted pixel scale, so sub-pixel stellar lines cannot be recovered
-    here (a documented limitation); this corrects the pixel-resolved structure,
-    which is what the native-R blur redistributes. The operator stays LINEAR in
-    d for fixed F, so a Jacobian row blurs with the SAME weight as the depth.
-
-    Implementation: cell-average the piecewise-linear model (and the weight)
-    onto a uniform ln-lambda grid finer than the narrowest kernel (flux-
-    conserving, no aliasing of unresolved lines), convolve with the
-    wavelength-dependent Gaussian, and interpolate back onto the model points
-    inside the band. The working band extends 5 sigma beyond [band_lo, band_hi]
-    so one-sided kernels never touch the returned region.
+    Implementation: cell-average model and weight onto a uniform ln-lambda
+    grid finer than the narrowest kernel, convolve with the
+    wavelength-dependent Gaussian, interpolate back inside the band. The
+    working band extends 5 sigma past the edges so one-sided kernels never
+    touch the returned region.
     """
     wl, yv = _validate_model(wl_model, y, "smooth_to_native_r")
-    # Validate the weight BEFORE any early return: the no-op paths (band with
-    # no model points, kernel unresolved by the model grid) used to skip this,
-    # so a NaN/negative stellar flux raised on MIRI LRS / PRISM and passed
-    # silently on the high-R gratings -- the same bad input diagnosed or not
-    # depending on the mode (2026-07-28 audit). A check that cannot change the
-    # result still has to say the input is invalid.
+    # Validate the weight BEFORE any early return: the no-op paths must still
+    # reject a NaN/negative stellar flux, or the same bad input raises or
+    # passes depending on the mode.
     if weight is not None:
         wv = np.asarray(weight, float)
         if wv.shape != wl.shape or not np.all(np.isfinite(wv)) \
@@ -228,9 +179,9 @@ def smooth_to_native_r(wl_model: np.ndarray, y: np.ndarray,
     n = int(np.ceil((hi - lo) / dl)) + 1
     grid = lo + dl * np.arange(n)
 
-    # flux-conserving cell average of the piecewise-linear model in ln-lambda,
-    # via the EXACT piecewise-quadratic antiderivative (linear interp of icum
-    # would misplace flux for cell edges between nodes -- audit item 2)
+    # Exact piecewise-quadratic antideriv of the piecewise-linear model. Never
+    # np.interp a cumulative-trapezoid integral to cell edges: only O(h^2),
+    # ~1-2 ppm off.
     icum = _pl_cumint(lnw, yv)
     edges = np.concatenate([[grid[0] - 0.5 * dl], grid + 0.5 * dl])
     edges = np.clip(edges, lnw[0], lnw[-1])
@@ -238,15 +189,10 @@ def smooth_to_native_r(wl_model: np.ndarray, y: np.ndarray,
     w_raw = np.diff(edges)
     widths = np.maximum(w_raw, 1e-300)
     yg = np.diff(ic) / widths
-    # Zero-width END cells (the edge clip collapses cells whose grid overshoot
-    # lands past the model span -- decided by an uncontrolled grid-alignment
-    # fractional part) hold NO model content: 0/1e-300 = 0 above, and that
-    # spurious zero used to fill the entire constant pad below, dragging the
-    # weight=None blur toward zero over the last ~4 kernel sigmas of the band
-    # (~49% of a constant depth at the edge on a MIRI-like clamped grid; the
-    # weighted path survived only because the flux floor demoted the cell).
-    # Constant extension must carry the nearest cell WITH content instead --
-    # a normalized kernel then preserves a constant for ANY weight (v17 fix).
+    # Zero-width END cells (edge clip past the model span) hold NO model
+    # content. Constant-extend from the nearest cell WITH content -- the
+    # spurious zeros otherwise fill the pad and drag the weight=None blur
+    # ~49% low at the band edge.
     _valid = np.flatnonzero(w_raw > 0.0)
     if _valid.size == 0:        # cannot happen for a validated band, be loud
         raise ValueError(
@@ -258,20 +204,16 @@ def smooth_to_native_r(wl_model: np.ndarray, y: np.ndarray,
     if _valid[-1] < yg.size - 1:
         yg[_valid[-1] + 1:] = yg[_valid[-1]]
 
-    # stellar-flux weight on the same grid (cell-averaged the same way), so the
-    # convolution forms L[F d]/L[F] rather than the flat L[d] (re-audit item 2).
-    # None/constant weight -> Fg constant -> exactly the flat blur. A tiny
-    # positive floor keeps an (unphysical) all-zero-flux window from dividing by
-    # zero -- it falls back to flat weighting there.
+    # Stellar-flux weight cell-averaged the same way, so the convolution forms
+    # L[F d]/L[F], not the flat L[d]. A tiny positive floor keeps an all-zero-
+    # flux window from dividing by zero (falls back to flat weighting there).
     if weight is None:
         Fg = np.ones_like(yg)
     else:
         wv = np.asarray(weight, float)   # already validated above
         icf = _pl_antideriv(edges, lnw, wv, _pl_cumint(lnw, wv))
         Fg = np.maximum(np.diff(icf) / widths, 0.0)
-        # zero-width end cells: constant-extend the flux weight exactly like
-        # yg (pre-v17 they held weight 0 and only the 1e-12 floor kept the
-        # spurious zero DEPTH pad from biting on the weighted path)
+        # zero-width end cells: constant-extend the flux weight exactly like yg
         if _valid[0] > 0:
             Fg[:_valid[0]] = Fg[_valid[0]]
         if _valid[-1] < Fg.size - 1:
@@ -315,30 +257,20 @@ def build_operator(wl_pix: np.ndarray, w_pix: np.ndarray, edges: np.ndarray,
 
     wl_pix, w_pix : Pandeia pixel wavelengths (any order) and weights
                     (extracted stellar count rates). Weights must be finite
-                    and >= 0; a zero-weight pixel is excluded from the
-                    estimator (it carries no counts), a negative or non-finite
-                    weight raises (upstream extraction error, never sanitized).
+                    and >= 0; zero-weight pixels are excluded, negative or
+                    non-finite weights raise (never sanitized).
     edges         : final bin edges (finite, strictly ascending, >= 2).
     wl_lo, wl_hi  : model wavelength span; pixel cells are clipped to it and
-                    pixels whose cell falls outside are dropped (their model
-                    expectation is undefined) -- from BOTH model and noise,
-                    so the two stay the same estimator.
+                    pixels falling outside are dropped from BOTH model and
+                    noise, so the two stay the same estimator.
     valid         : optional per-pixel bool mask (e.g. saturation exclusion).
 
-    Bin-assignment policy: a pixel belongs to the bin containing its CENTER
-    wavelength (extracted pixels are indivisible samples grouped into bins;
-    no fractional pixel-response splitting across bin edges is performed),
-    while the MODEL is integrated over the pixel's full cell. This matches
-    how real reductions group extracted pixels; it is not an arbitrary-edge
-    fractional regridding and is not claimed to be one.
-
-    Duplicate-wavelength policy: an exact-duplicate pixel has a zero-width
-    cell (no wavelength support), so it drops out of the estimator here; such
-    pixels are degenerate-wavelength pixels and callers exclude + COUNT them
-    via degenerate_wl_mask (surfaced as n_pix_degenerate) -- that is the loud
-    channel, not this operator. An operator left with NO usable pixel raises
-    with the per-criterion exclusion breakdown (2026-07-12 re-audit, item 7)
-    instead of returning an empty object that fails downstream.
+    A pixel belongs to the bin containing its CENTER wavelength (indivisible
+    extracted samples, as real reductions group them); the MODEL is
+    integrated over the pixel's full cell. Exact-duplicate pixels have
+    zero-width cells and drop out here; callers count them loudly via
+    degenerate_wl_mask (n_pix_degenerate). An operator left with NO usable
+    pixel raises with the per-criterion exclusion breakdown.
 
     Returns dict:
       keep     (n_bins,)  bins with >=1 usable pixel
@@ -435,10 +367,8 @@ def bin_counts(op: dict, flag_pix: np.ndarray) -> np.ndarray:
 
 
 def _validate_model(wl: np.ndarray, y: np.ndarray, name: str) -> tuple[np.ndarray, np.ndarray]:
-    """Model-grid validation for the piecewise-linear integrators: strictly
-    ascending finite wavelengths (what _pl_antideriv's searchsorted assumes)
-    and finite values. A NaN model value would propagate NaN into every bin
-    it touches -- raise instead (repo loud-errors rule)."""
+    """Strictly ascending finite wavelength grid + finite values, or
+    ValueError (a NaN model value would propagate into every bin)."""
     wl = _validate_wl(wl, f"{name}: wl_model")
     if wl.size < 2 or np.any(np.diff(wl) <= 0.0):
         raise ValueError(f"{name}: model wavelength grid must be strictly "
@@ -456,30 +386,21 @@ def _validate_model(wl: np.ndarray, y: np.ndarray, name: str) -> tuple[np.ndarra
 
 def _pl_cumint(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     """Running integral of the piecewise-linear (x, y) AT the nodes:
-    icum[k] = int_{x[0]}^{x[k]}. The trapezoid rule is EXACT for a
-    piecewise-linear integrand, so this is exact at the nodes (only float64
-    cumsum roundoff); the sub-node evaluation is done by _pl_antideriv."""
+    icum[k] = int_{x[0]}^{x[k]}. Trapezoid is exact for a piecewise-linear
+    integrand; sub-node evaluation is _pl_antideriv."""
     return np.concatenate([[0.0], np.cumsum(0.5 * (y[1:] + y[:-1]) * np.diff(x))])
 
 
 def _pl_antideriv(xq: np.ndarray, x: np.ndarray, y: np.ndarray,
                   icum: np.ndarray) -> np.ndarray:
-    """EXACT antiderivative of the piecewise-linear function (x, y) evaluated at
-    query points xq, given its node integrals ``icum`` (from _pl_cumint).
+    """EXACT antiderivative of the piecewise-linear (x, y) at query points xq,
+    given its node integrals ``icum`` (from _pl_cumint).
 
-    The antiderivative of a piecewise-LINEAR spectrum is piecewise-QUADRATIC,
-    so linearly interpolating ``icum`` between nodes (np.interp) is wrong
-    whenever a query point falls inside an interval -- exactly the case for a
-    detector cell edge lying between model nodes (2026-07-12 audit, item 2:
-    the y=x, [0.1,0.2] counterexample returned 0.5 instead of 0.15). The
-    quadratic term is carried explicitly here: for x in interval k
-    ([x_k, x_{k+1}]),
-
-        I(x) = icum[k] + y_k (x - x_k) + 0.5 slope_k (x - x_k)^2,
-        slope_k = (y_{k+1} - y_k) / (x_{k+1} - x_k).
-
-    Query points are clamped to [x_0, x_{-1}] (the model span; callers already
-    clip pixel cells to it). ``x`` must be strictly ascending."""
+    The antiderivative is piecewise-QUADRATIC: never np.interp ``icum`` to
+    cell edges -- only O(h^2), ~1-2 ppm off for edges between model nodes.
+    For x in interval k: I(x) = icum[k] + y_k (x - x_k)
+    + 0.5 slope_k (x - x_k)^2. Queries are clamped to the model span;
+    ``x`` must be strictly ascending."""
     xq = np.asarray(xq, float)
     xc = np.clip(xq, x[0], x[-1])
     k = np.clip(np.searchsorted(x, xc, side="right") - 1, 0, x.size - 2)
@@ -492,11 +413,9 @@ def bin_model(op: dict, wl_model: np.ndarray, y_model: np.ndarray) -> np.ndarray
     """Bin a native model through the operator: exact cell average of the
     piecewise-linear model per pixel, then the count-weighted bin mean.
 
-    ``wl_model`` must be ascending and span every pixel cell (build_operator's
-    wl_lo/wl_hi clipping guarantees this). Linear in y_model, so the binned
-    Jacobian is the operator applied to each Jacobian row. Exact for a constant
-    model (constant-depth conservation) AND, via the exact piecewise-quadratic
-    antiderivative, for any pixel cell whose edges fall between model nodes."""
+    ``wl_model`` must be ascending and span every pixel cell. Linear in
+    y_model, so the binned Jacobian is the operator applied to each row;
+    exact for a constant model and for cell edges between model nodes."""
     wl, y = _validate_model(wl_model, y_model, "bin_model")
     icum = _pl_cumint(wl, y)
     ia = _pl_antideriv(op["cell_lo"], wl, y, icum)

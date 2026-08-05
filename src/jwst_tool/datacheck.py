@@ -1,24 +1,16 @@
 """Data-availability detection for vulcan-jwst-tool.
 
-One module that KNOWS every external dataset the tool touches, probes the
-filesystem for each, and reports a structured, honest status: present,
-missing, or fetched-on-first-use. Consumed three ways:
+Knows every external dataset the tool touches, probes the filesystem, and
+reports a structured status: present, missing, or fetched-on-first-use.
+Consumers: the ``jwst-tool data`` CLI, the GUI data-status panel and widget
+annotations, and the unit tests (every check takes explicit paths).
 
-* ``jwst-tool data``            CLI report with per-item remedies
-  (``--deep`` also asks the Pandeia env for its engine version)
-* the GUI "Data status" panel + the availability annotations on the
-  molecule / broadening / UV-spectrum widgets
-* the unit tests (every check takes explicit paths, so they run on tmp dirs)
-
-Detection never REPLACES the loud runtime failures (repo standing rule): the
-workers still raise on missing data at run time; this module only makes the
-state visible up front, with the exact remedy, before a 2-minute run dies on
-a missing file.
+Detection never REPLACES the loud runtime failures (repo standing rule);
+it only makes the state visible up front, with the exact remedy.
 
 Import discipline: stdlib only (no numpy/jax/streamlit); the one non-stdlib
-touch is an optional ``import jwst_tool.engine_config``, which is
-documented import-light and raises a clear RuntimeError when its data tree is
-missing -- that exception text IS the status detail.
+touch is an optional ``import jwst_tool.engine_config``, whose RuntimeError
+text IS the status detail.
 """
 from __future__ import annotations
 
@@ -37,9 +29,8 @@ from jwst_tool import planets
 # Report structure
 # ---------------------------------------------------------------------------
 
-#: status values: "ok" (present), "missing" (absent, manual fetch),
-#: "on-first-use" (absent, but the stack fetches it automatically when first
-#: needed -- requires network at that moment)
+#: OK = present; MISSING = absent, manual fetch; AUTO = fetched
+#: automatically on first use (network required then)
 OK, MISSING, AUTO = "ok", "missing", "on-first-use"
 
 
@@ -97,14 +88,8 @@ def check_python_stack() -> list[Item]:
 # ---------------------------------------------------------------------------
 
 def _engine_config():
-    """The engine-config view, or an exception instance.
-
-    ``jwst_tool.engine_config`` is import-light (stdlib + the engine's
-    stdlib-only constants/paths modules) and resolves data locations lazily, so
-    the data root is probed explicitly here: an unset or wrong
-    $VULCAN_FORWARD_DATA raises a RuntimeError naming the remedy, and that
-    message is exactly what the report should show.
-    """
+    """The engine-config view, or an exception instance whose text is the
+    status detail (an unset/wrong $VULCAN_FORWARD_DATA raises here)."""
     try:
         mod = importlib.import_module("jwst_tool.engine_config")
         _ = mod.DATA_DIR        # probe the engine's data-root contract
@@ -114,13 +99,11 @@ def _engine_config():
 
 
 def linelist_path(mol: str, broadening: str = "air") -> Path | None:
-    """Cache file ExoJAX/radis writes for ``mol``'s HITRAN list (None = not a
-    HITRAN-sourced molecule, or engine config unavailable).
+    """Cache file ExoJAX/radis writes for ``mol``'s HITRAN list (None = not
+    HITRAN-sourced, or engine config unavailable).
 
-    Layouts mirror exojax_rt._build_opa: air lists live directly under the
-    engine's line-list tree, h2he lists in its h2he/ subdir (the path stem must stay a
-    radis-parseable molecule token -- pinned in the engine repo's
-    test_opacity_cache_paths).
+    Air lists live under the engine's line-list tree, h2he lists in its
+    h2he/ subdir; the path stem must stay a radis-parseable molecule token.
     """
     cfg = _engine_config()
     if isinstance(cfg, Exception):
@@ -154,9 +137,8 @@ def molecule_linelist_status(mols: list[str],
             p = linelist_path(m, broadening)
             out[m] = OK if (p is not None and p.exists()) else AUTO
         else:                                   # exomol_cached CO
-            # spec["db"] is a suffix RELATIVE to the engine's opacity cache
-            # (the table is location-independent), so resolve it -- never
-            # is_dir() the bare suffix, which would test the CWD.
+            # spec["db"] is relative to the opacity cache; resolve it --
+            # never is_dir() the bare suffix (that tests the CWD)
             try:
                 co_dir = Path(cfg.CO_CACHED_DIR)
             except RuntimeError:                # data root not configured
@@ -167,10 +149,8 @@ def molecule_linelist_status(mols: list[str],
 
 
 def miegrid_path(condensate: str) -> Path:
-    """Path of the exojax Mie lookup grid for ``condensate`` under DATA_DIR
-    (generated once by tools/generate_miegrid.py; the forward model only loads
-    it). The filename convention is exojax's own (PdbCloud.set_miegrid_filename,
-    nurange-independent)."""
+    """Mie lookup grid path for ``condensate`` under DATA_DIR (generated by
+    tools/generate_miegrid.py; the filename convention is exojax's own)."""
     return (Path(ins.DATA_DIR) / "exojax_mie" /
             f"miegrid_lognorm_{condensate}.mg.npz")
 
@@ -322,8 +302,7 @@ def check_pandeia_backend(python: str | Path = None,
                           refdata: str | Path = None,
                           psf_dir: str | Path | None = None) -> list[Item]:
     """The ACTIVE backend's three path roots (mirrors the worker preflight)."""
-    # PICASO_PYTHON is None until the machine-specific backend env is set.
-    # datacheck REPORTS, so an unset path is a MISSING item, never a crash.
+    # an unset backend python is a MISSING item, never a crash: this reports
     _py = python if python is not None else ins.PICASO_PYTHON
     python = Path(_py) if _py else None
     refdata = Path(refdata if refdata is not None else ins.PANDEIA_REFDATA)
@@ -360,9 +339,8 @@ def check_pandeia_backend(python: str | Path = None,
 
     if psf_dir:                                  # split-PSF layout (>= 2026)
         pv = Path(psf_dir) / "VERSION_PSF"       # worker preflight checks this
-        # Report the PSF RELEASE, not just presence. The worker refuses a PSF
-        # tree whose release differs from the engine/refdata (item 3); showing
-        # only "present" here would hide exactly the mismatch it now catches.
+        # report the PSF RELEASE, not just presence: a release mismatch is
+        # exactly what the worker refuses, so it must show here
         psf_ver = None
         if pv.is_file():
             try:
@@ -387,6 +365,19 @@ def check_pandeia_backend(python: str | Path = None,
                 "JWST_TOOL_PANDEIA_PSF_DIR elsewhere). Links are on STScI's "
                 "installation page: https://outerspace.stsci.edu/spaces/PEN/"
                 "pages/77530136/Pandeia%2BEngine%2BInstallation")))
+    else:
+        # every supported backend uses the split-PSF layout; an empty PSF dir
+        # is a misconfiguration, never "PSFs embedded in refdata"
+        items.append(Item(
+            key="pandeia:psf", label="Pandeia PSF library (split layout)",
+            status=MISSING, required=True,
+            detail="no PSF directory configured (JWST_TOOL_PANDEIA_PSF_DIR "
+                   "is empty)",
+            remedy=(
+                f"Download pandeia_psfs-{ins.BACKEND_RELEASE}-jwst (~4 GiB) "
+                "and point JWST_TOOL_PANDEIA_PSF_DIR at it. Links are on "
+                "STScI's installation page: https://outerspace.stsci.edu/"
+                "spaces/PEN/pages/77530136/Pandeia%2BEngine%2BInstallation")))
     return items
 
 
@@ -437,11 +428,8 @@ def check_synphot_cdbs(cdbs: str | Path = None) -> list[Item]:
                f"and place its grp/redcat/trds/grid/phoenix tree at {phx} "
                "(a real directory is fine; the shipped symlink just points "
                "at an existing local copy)."))
-    # The local CALSPEC Vega pin is REQUIRED by the legacy 3.x engine only
-    # (worker v6: the 2026+ engine loads its OWN refdata Vega and never reads
-    # the pin -- pandeia_worker._preflight/main); under "current" it is set
-    # when present but a run works without it.
-    _vega_required = ins.JWST_TOOL_BACKEND == "legacy"
+    # the CALSPEC Vega copy is only an offline pin for the tool-side
+    # synphot/stsynphot; the engine loads its own refdata Vega
     for rel, label, required, remedy in (
             (Path("comp") / "nonhst" / "2mass_ks_001_syn.fits",
              "2MASS Ks bandpass (Ks normalization)", True,
@@ -449,8 +437,8 @@ def check_synphot_cdbs(cdbs: str | Path = None) -> list[Item]:
              "fetch https://ssb.stsci.edu/trds/comp/nonhst/"
              "2mass_ks_001_syn.fits (8.6 KB)."),
             (Path("calspec") / "alpha_lyr_stis_011.fits",
-             "Vega spectrum (vegamag normalization; required by the legacy "
-             "3.x engine only)", _vega_required,
+             "Vega spectrum (offline pin for tool-side synphot; the engine "
+             "uses its own refdata Vega)", False,
              "Fetch https://ssb.stsci.edu/trds/calspec/alpha_lyr_stis_011.fits"
              f" (288 KB) to {cdbs / 'calspec'}/")):
         p = cdbs / rel
@@ -463,16 +451,14 @@ def check_synphot_cdbs(cdbs: str | Path = None) -> list[Item]:
 
 
 def check_picaso_data(deep: bool = False) -> list[Item]:
-    """PICASO provider + climate reference data (opt-in feature, all
+    """PICASO provider + climate reference data (opt-in, all
     ``required=False``): the tree selected by ``JWST_TOOL_PICASO_REFDATA``.
 
-    Light checks only (stat/listdir; picaso itself is never imported here --
-    the installed dist version comes from package metadata).
+    Light checks only (stat/listdir; picaso itself is never imported here).
     """
     from jwst_tool import picaso_env as pe
 
     items = []
-    # the installed package (metadata only, no import)
     try:
         ver = pe.picaso_version()
         items.append(Item(
@@ -483,7 +469,6 @@ def check_picaso_data(deep: bool = False) -> list[Item]:
             key="picaso:package", label="picaso package",
             status=MISSING, required=False, detail=str(exc),
             remedy="pip install picaso==4.0.1"))
-    # the reference tree root
     try:
         root = pe.refdata_root()
     except RuntimeError as exc:
@@ -560,10 +545,8 @@ def check_picaso_data(deep: bool = False) -> list[Item]:
     if manifest.is_file():
         try:
             entries = json.loads(manifest.read_text())["files"]
-            # SAMPLED by default (v18.1 GUI-latency fix): a full pass stats
-            # every entry -- thousands of files, tens of seconds on a remote
-            # Space volume. The sample is deterministic (every k-th entry);
-            # `jwst-tool data --deep` runs the full pass.
+            # sampled by default: a full stat pass over thousands of entries
+            # takes tens of seconds on a remote volume; --deep runs them all
             rels = sorted(entries)
             if deep or len(rels) <= 48:
                 sample = rels
@@ -693,14 +676,11 @@ def format_report(report: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Disk-persisted report cache (v18.1 GUI-latency fix)
+# Disk-persisted report cache
 # ---------------------------------------------------------------------------
-# The full report walks every external dataset; on a Space the volumes are
-# remote and the first page load paid the whole scan behind a spinner. The
-# report is therefore persisted to disk: the GUI serves the file when fresh,
-# and the Space entrypoint warms it in the BACKGROUND at boot so even the
-# first visitor gets an instant panel. The GUI's refresh button deletes the
-# file and rebuilds.
+# The full report walks every external dataset (slow on remote volumes), so
+# it is persisted: the GUI serves the file when fresh, the Space entrypoint
+# warms it in the background at boot, and the refresh button rebuilds.
 
 REPORT_CACHE_FILE = Path(ins.OUTPUT_DIR) / "datacheck_report.json"
 REPORT_CACHE_MAX_AGE_S = 3600.0
@@ -736,8 +716,7 @@ def load_cached_report(max_age_s: float = REPORT_CACHE_MAX_AGE_S):
 
 
 def warm_report_cache(**kw) -> dict:
-    """Compute the full report and persist it (atomic write). Called by the
-    Space entrypoint in the background at boot and by the GUI on a miss."""
+    """Compute the full report and persist it (atomic write)."""
     import os
     import time
     report = full_report(**kw)

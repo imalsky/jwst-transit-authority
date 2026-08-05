@@ -1,5 +1,6 @@
-"""Detection-score + noise-math tests (2026-07 revised audit): offset/segment
-profiling in the matched-template score, and the loud sub-cycle-window error."""
+"""Detection-score and noise-math tests: offset/segment profiling in the
+matched-template score, loud input validation, transit-count validation, and
+no-floor detection-limit semantics."""
 import numpy as np
 import pytest
 
@@ -19,9 +20,8 @@ def test_constant_offset_profiled_out():
 
 
 def test_segment_step_profiled_out():
-    """A signal that is a per-detector STEP (one level on NRS1, another on
-    NRS2) must profile to ~0 once the segment offsets are supplied -- otherwise
-    a calibration step reads as a molecular detection."""
+    """A per-detector STEP must profile to ~0 once segment offsets are
+    supplied; otherwise a calibration step reads as a molecular detection."""
     seg = np.array([0] * 15 + [1] * 15)
     signal = np.where(seg == 0, 2e-5, 9e-5)        # different level per detector
     err = np.full(seg.size, 1e-5)
@@ -50,8 +50,8 @@ def test_real_feature_survives_offset_and_step():
 
 
 def test_pixel_variance_raises_on_subcycle_window():
-    """A transit window shorter than one integration cycle must raise, not
-    silently pretend one integration fits (the retired max(1, ...))."""
+    """A transit window shorter than one integration cycle must raise, never
+    silently pretend one integration fits."""
     mode_result = dict(wl=[3.0, 3.1], flux=[1e3, 1e3],
                        noise_1int=[30.0, 30.0], t_cycle_s=100.0)
     with pytest.raises(ValueError, match="shorter than one integration"):
@@ -79,9 +79,8 @@ def test_noise_inflation_scales_variance():
 
 
 def test_one_bin_offset_profiles_to_zero():
-    """2026-07-12 recheck P2-D: with a free constant offset, a single bin has
-    no shape information -- the score must be 0, not |s|/sigma (the old
-    size>1 guard returned a false 3-sigma 'detection')."""
+    """With a free constant offset a single bin has no shape information: the
+    score must be 0, never |s|/sigma."""
     s = detect.detection_significance(np.array([3e-4]), np.array([1e-4]),
                                       marginalize_offset=True)
     assert s == pytest.approx(0.0, abs=1e-9)
@@ -116,11 +115,10 @@ def _lsf_mode_inputs(depth_baseline):
 
 
 def test_jacobian_lsf_does_not_depend_on_baseline_shape():
-    """2026-07-12 recheck P1-C: the LSF is a linear operator on every vector;
-    whether the BASELINE happens to be a fixed point of the blur (e.g. an
-    exactly flat depth) must not decide whether Jacobian rows are smoothed.
-    The binned Jacobian must be identical for a flat and a broad-bump
-    baseline, and must differ from the unsmoothed native-R=inf case."""
+    """The LSF is a linear operator on every vector; whether the BASELINE is a
+    fixed point of the blur (e.g. exactly flat) must not decide whether
+    Jacobian rows are smoothed. Same binned Jacobian for flat and broad-bump
+    baselines, and both differ from the unsmoothed no-r_native case."""
     mr_flat, model_flat = _lsf_mode_inputs(lambda wl: np.zeros(wl.size))
     mr_bump, model_bump = _lsf_mode_inputs(
         lambda wl: 5e-3 * np.exp(-0.5 * ((wl - 1.5) / 0.2) ** 2))
@@ -138,7 +136,7 @@ def test_jacobian_lsf_does_not_depend_on_baseline_shape():
     assert np.max(np.abs(r_none["jac_bins"][0] - r_flat["jac_bins"][0])) > 5e-6
 
 
-# --- fail-fast input validation (2026-07-13 recheck 5.1, 5.2) ----------------
+# --- fail-fast input validation ----------------------------------------------
 
 def test_detection_significance_rejects_bad_inputs():
     good_s = np.array([3e-4, 1e-4, 2e-4])
@@ -179,3 +177,101 @@ def test_sigma_and_cov_at_transits_reject_bad_n():
             detect.sigma_at_transits(result, bad)
         with pytest.raises(ValueError, match="positive integer"):
             detect.cov_at_transits(result, bad)
+
+
+# --- transit-count validation and no-floor limits ----------------------------
+
+def _mr(n_pix=10):
+    return dict(flux=np.full(n_pix, 1e4), noise_1int=np.full(n_pix, 1e2),
+                t_cycle_s=10.0)
+
+
+def _scaler_result(n_pix=10):
+    return dict(var_phot=np.full(n_pix, 1e-8), floor=np.zeros(n_pix),
+                n_transits_eval=1)
+
+
+@pytest.mark.parametrize("bad", [2.7, 0, -1, 0.5, -2.5, "3", None])
+def test_bad_n_transits_refused_by_every_entry_point(bad):
+    """A non-positive-integer count raises in the variance AND the scalers,
+    never floored into a different (optimistic) transit count."""
+    with pytest.raises((ValueError, TypeError)):
+        noise_mod.pixel_depth_variance(_mr(), 3600.0, 3600.0, bad)
+    with pytest.raises((ValueError, TypeError)):
+        detect.sigma_at_transits(_scaler_result(), bad)
+
+
+@pytest.mark.parametrize("good", [1, 3, np.int64(4), 5.0])
+def test_integer_valued_n_transits_accepted_and_scales_as_1_over_n(good):
+    v1 = noise_mod.pixel_depth_variance(_mr(), 3600.0, 3600.0, 1)
+    vn = noise_mod.pixel_depth_variance(_mr(), 3600.0, 3600.0, good)
+    assert np.allclose(vn * int(good), v1, rtol=0, atol=0)
+
+
+def test_detect_and_noise_share_one_validator():
+    """One shared validator, not two copies that can drift apart."""
+    assert detect._n_transits is noise_mod.n_transits_int
+
+
+def test_depth_error_bins_records_validated_count():
+    edges = np.linspace(3.0, 5.0, 6)
+    mr = dict(wl=np.linspace(3.0, 5.0, 200).tolist(),
+              flux=np.full(200, 5e3).tolist(),
+              noise_1int=np.full(200, 70.0).tolist(), t_cycle_s=20.0)
+    out = noise_mod.depth_error_bins(mr, edges, 3600.0, 3600.0, 4, None)
+    assert out["n_transits"] == 4
+    with pytest.raises(ValueError):
+        noise_mod.depth_error_bins(mr, edges, 3600.0, 3600.0, 4.5, None)
+
+
+def _result(scenario: str, floor_ppm: float, n=60, signal_ppm=150.0) -> dict:
+    wl = np.linspace(3.0, 5.0, n)
+    bump = signal_ppm * 1e-6 * np.exp(
+        -0.5 * ((np.log(wl) - np.log(4.0)) / 0.10) ** 2)
+    return dict(wl=wl, depth=0.02 + bump, depth_wo=np.full(n, 0.02),
+                floor=np.full(n, floor_ppm * 1e-6),
+                var_phot=np.full(n, 300e-6) ** 2, n_transits_eval=1,
+                scenario=scenario, seg=np.zeros(n, int),
+                slope_rows=np.zeros((0, n)))
+
+
+@pytest.mark.parametrize("scenario", ["random", "conservative"])
+def test_no_floor_gives_infinite_detect_limit_not_1e26(scenario):
+    """With no floor, sigma averages down without bound: the limit is inf and
+    the finite clip absurdity never reaches a user-facing surface."""
+    tt = detect.transits_to_target(_result(scenario, 0.0), 8.0)
+    assert tt["sig_inf"] == float("inf")
+    assert tt["reachable"] and tt["n"] is not None
+    # no floor -> no floor EXCESS -> no correlated term -> monotone scan, so
+    # no reachability WINDOW is reported even under a correlated preset
+    assert tt["n_last"] is None
+
+
+@pytest.mark.parametrize("scenario", ["random", "conservative"])
+def test_no_floor_correlated_covariance_is_absent_and_score_is_monotone(
+        scenario):
+    r = _result(scenario, 0.0)
+    assert all(detect.cov_at_transits(r, n) is None for n in (1, 5, 50, 500))
+    sc = [detect.detection_significance(
+              np.asarray(r["depth"]) - np.asarray(r["depth_wo"]),
+              detect.sigma_at_transits(r, n),
+              nuisance=detect._result_nuisance(r),
+              cov=detect.cov_at_transits(r, n))
+          for n in (1, 2, 5, 20, 100, 500)]
+    assert np.all(np.diff(sc) > 0.0)
+
+
+@pytest.mark.parametrize("scenario", ["random", "conservative"])
+def test_floored_limit_is_finite_and_unchanged_by_the_fix(scenario):
+    """The floored path keeps its exact previous behavior."""
+    tt = detect.transits_to_target(_result(scenario, 100.0), 8.0)
+    assert np.isfinite(tt["sig_inf"]) and 0.0 < tt["sig_inf"] < 100.0
+    assert not tt["reachable"]          # target above the floor-capped limit
+
+
+def test_no_floor_unreachable_target_still_reports_inf_limit():
+    """Beyond-cap targets are unreachable with sig_inf = inf: 'ran out of
+    transits', not 'a systematic caps it'."""
+    r = _result("random", 0.0, signal_ppm=2.0)
+    tt = detect.transits_to_target(r, 5.0)
+    assert not tt["reachable"] and tt["sig_inf"] == float("inf")

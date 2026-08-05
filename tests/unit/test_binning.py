@@ -1,6 +1,7 @@
-"""Operator tests for the count-space measurement operator (2026-07 audit 8.1):
-constant-depth conservation, estimator/variance consistency (Monte Carlo),
-model-vs-noise same-estimator identity, Jacobian linearity, gap handling."""
+"""Operator tests for the count-space measurement operator: constant-depth
+conservation, estimator/variance consistency (Monte Carlo), model-vs-noise
+same-estimator identity, Jacobian linearity, gap handling, strict grid
+validation, and the native-R LSF (flux-weighted) blur."""
 import numpy as np
 import pytest
 
@@ -30,11 +31,9 @@ def test_constant_depth_conservation():
 
 
 def test_pl_antideriv_exact_on_audit_counterexample():
-    """2026-07-12 audit item 2: the antiderivative of a piecewise-linear model
-    is piecewise-QUADRATIC, so linearly interpolating the cumulative integral
-    (the old np.interp path) is wrong between nodes. Model y=x on [0,1]:
-    int_0^0.1 = 0.005, int_0^0.2 = 0.02, average over [0.1,0.2] = 0.15 (the
-    old code returned 0.5)."""
+    """The antiderivative of a piecewise-linear model is piecewise-QUADRATIC;
+    linearly interpolating the cumulative integral is wrong between nodes.
+    Model y=x on [0,1]: average over [0.1,0.2] = 0.15 (np.interp gave 0.5)."""
     x = np.array([0.0, 1.0])
     y = np.array([0.0, 1.0])
     icum = binning._pl_cumint(x, y)
@@ -48,10 +47,8 @@ def test_pl_antideriv_exact_on_audit_counterexample():
 
 
 def test_bin_model_exact_for_linear_submodel():
-    """Audit item 2 end-to-end: a globally-linear model on a COARSE grid with
-    pixel cells falling BETWEEN nodes must bin to machine precision (a linear
-    model's cumulative integral is quadratic, so this was the failure case).
-    Exact cell average of a linear model over [lo,hi] is its midpoint value."""
+    """A globally-linear model on a COARSE grid with pixel cells BETWEEN nodes
+    must bin to machine precision (exact cell average = midpoint value)."""
     wl_model = np.array([2.0, 3.0, 4.0])          # coarse: only 2 intervals
     slope, intercept = 1.5, 0.7
     y = slope * wl_model + intercept
@@ -87,8 +84,7 @@ def test_model_binning_is_linear():
 
 def test_estimator_mc_mean_and_variance():
     """The reported (bin value, bin variance) must be the mean and variance of
-    the actual count-weighted estimator -- the audit's central consistency
-    requirement, checked by Monte Carlo."""
+    the actual count-weighted estimator, checked by Monte Carlo."""
     rng = np.random.default_rng(2)
     wl, flux = _fake_pixels(rng, n=400, wl0=2.0, wl1=3.0)
     edges = np.array([2.0, 2.3, 2.6, 3.0])
@@ -162,8 +158,8 @@ def test_full_sat_pixels_excluded_via_valid_mask():
 
 
 def test_rebinning_nested_vs_direct():
-    """Audit 8.1 test 5 analogue: binning pixels directly to coarse bins equals
-    count-weighted recombination of fine bins built from the same pixels."""
+    """Binning pixels directly to coarse bins equals count-weighted
+    recombination of fine bins built from the same pixels."""
     rng = np.random.default_rng(5)
     wl, flux = _fake_pixels(rng, n=1000, wl0=2.0, wl1=4.0)
     coarse = np.geomspace(2.0, 4.0, 9)
@@ -233,7 +229,7 @@ def test_smooth_to_native_r_conserves_flux_and_noops_at_high_r():
 
 def test_smooth_flux_weight_none_equals_constant_weight():
     """weight=None and a constant weight are the same operator (the flat blur):
-    L[F d]/L[F] = L[d] when F is constant (re-audit item 2)."""
+    L[F d]/L[F] = L[d] when F is constant."""
     wl = np.linspace(4.0, 12.0, 20000)
     y = 0.01 + 1e-3 * np.sin(50 * wl)
     r = np.full(wl.size, 80.0)
@@ -244,9 +240,9 @@ def test_smooth_flux_weight_none_equals_constant_weight():
 
 
 def test_smooth_flux_weight_preserves_constant_depth():
-    """A flat transit depth must survive the flux-weighted LSF unchanged for ANY
-    stellar-flux weight: L[F c]/L[F] = c. The flat blur also preserves it, but the
-    point is the ratio operator stays unbiased under a strong stellar gradient."""
+    """A flat transit depth must survive the flux-weighted LSF unchanged for
+    ANY stellar-flux weight: L[F c]/L[F] = c, unbiased even under a strong
+    stellar gradient."""
     wl = np.linspace(4.0, 12.0, 20000)
     c = 0.0123
     y = np.full(wl.size, c)
@@ -260,8 +256,8 @@ def test_smooth_flux_weight_preserves_constant_depth():
 
 def test_smooth_flux_weight_matches_direct_ratio_reference():
     """The flux-weighted native-R blur must equal an independent brute-force
-    evaluation of d_obs = L[F d]/L[F] on a dense grid, and must DIFFER from the
-    flat blur L[d] where the stellar flux has structure (the audit's failure)."""
+    evaluation of d_obs = L[F d]/L[F] on a dense grid, and must DIFFER from
+    the flat blur L[d] where the stellar flux has structure."""
     wl = np.linspace(4.0, 12.0, 40000)
     lnw = np.log(wl)
     d = 0.01 + 3e-3 * np.exp(-0.5 * ((wl - 8.0) / 0.10) ** 2)   # planetary feature
@@ -289,8 +285,8 @@ def test_smooth_flux_weight_matches_direct_ratio_reference():
 
 
 def test_degenerate_wavelength_pixels_flagged():
-    """A pileup of near-duplicate wavelengths (the pandeia_data-3.0rc3 G395H
-    red-edge artifact) must be flagged; smooth dispersion gradients must not."""
+    """A pileup of near-duplicate wavelengths (the G395H red-edge artifact)
+    must be flagged; smooth dispersion gradients must not."""
     base = np.linspace(2.0, 4.0, 500)
     pile = 3.0 + np.arange(300) * 4e-6            # 300 samples within 1.2e-3 um
     wl = np.concatenate([base, pile])
@@ -303,16 +299,13 @@ def test_degenerate_wavelength_pixels_flagged():
     assert not binning.degenerate_wl_mask(wl_smooth).any()
 
 
-# --- strict grid validation (2026-07-12 re-audit, item 7) ---------------------
-# Invalid wavelength grids used to degrade silently: NaNs were argsort-parked
-# and dropped, duplicate-majority grids zeroed the median gap (disabling the
-# degenerate mask entirely), and an all-invalid operator came back empty and
-# only failed later with a non-actionable numpy error. All of these must raise
-# loudly at the entry point, and exact duplicates must count as degenerate.
+# --- strict grid validation ---------------------------------------------------
+# Invalid grids must raise loudly at the entry point (never degrade silently),
+# and exact duplicates must count as degenerate.
 
 def test_exact_duplicates_are_degenerate():
-    """Duplicate-majority grid (the audit's reproducer): the zero-gap pixels
-    must be flagged even though the ALL-gap median is zero."""
+    """Duplicate-majority grid: the zero-gap pixels must be flagged even
+    though the ALL-gap median is zero."""
     wl = np.array([1.0, 1.0, 1.0, 1.0, 2.0, 3.0])
     bad = binning.degenerate_wl_mask(wl)
     assert bad[:4].all()          # zero spectral support
@@ -408,14 +401,11 @@ def test_smooth_rejects_bad_weight():
 
 
 def test_smooth_clamped_model_span_preserves_constant_at_band_edge():
-    """v17 regression (2026-07-19 audit): when the model grid spans EXACTLY the
-    band (evaluate_mode does this whenever the model barely covers the
-    instrument band), the working-grid edge clip can collapse the final cell to
-    zero width. Pre-fix, that cell's 0/1e-300 = 0 average filled the entire
-    constant pad, dragging the weight=None blur ~49% low at the band edge on a
-    MIRI-LRS-like configuration -- and 'weight=None equals a constant weight'
-    was false there. Both invariants must hold at machine precision now, across
-    a band_hi sweep that toggles the zero-width alignment."""
+    """When the model grid spans EXACTLY the band, the working-grid edge clip
+    can collapse the final cell to zero width; pre-fix that cell's 0/1e-300
+    average filled the constant pad, dragging the weight=None blur ~49% low at
+    the band edge. Both invariants must hold at machine precision across a
+    band_hi sweep that toggles the zero-width alignment."""
     c, R = 0.0123, 60.0
     for band_hi in np.linspace(10.90, 11.10, 9):
         wl = np.linspace(5.0, band_hi, 3000)   # model exactly spans the band
@@ -426,3 +416,53 @@ def test_smooth_clamped_model_span_preserves_constant_at_band_edge():
                                           weight=np.full(wl.size, 3.7))
         assert np.max(np.abs(flat - c)) < 1e-12, band_hi
         assert np.allclose(flat, ones, atol=0, rtol=1e-12), band_hi
+
+
+# --- LSF weight validation on both the active and the no-op paths -------------
+
+_WL_R = np.linspace(2.5, 4.0, 50)
+_R_CURVE = np.full(50, 100.0)
+
+
+def _lsf(wl_model, weight):
+    y = np.full_like(wl_model, 0.01)
+    return binning.smooth_to_native_r(wl_model, y, _WL_R, _R_CURVE,
+                                      3.0, 3.5, weight=weight)
+
+
+# fine grid -> kernel resolved (LSF active); coarse grid -> kernel unresolved
+# by the model grid, which is the no-op early return
+_ACTIVE = np.linspace(3.0, 3.5, 4000)
+_NOOP = np.linspace(3.0, 3.5, 12)
+
+
+def test_lsf_active_path_is_actually_active_and_noop_path_is_actually_noop():
+    """Guard the fixture itself: the two grids must exercise DIFFERENT paths,
+    or the validation test below would be vacuous."""
+    y_a = 0.01 + 1e-3 * np.sin(400.0 * _ACTIVE)
+    out_a = binning.smooth_to_native_r(_ACTIVE, y_a, _WL_R, _R_CURVE, 3.0, 3.5)
+    assert not np.allclose(out_a, y_a)          # blurred
+    y_n = 0.01 + 1e-3 * np.sin(400.0 * _NOOP)
+    out_n = binning.smooth_to_native_r(_NOOP, y_n, _WL_R, _R_CURVE, 3.0, 3.5)
+    assert np.array_equal(out_n, y_n)           # returned unchanged
+
+
+@pytest.mark.parametrize("grid", [_ACTIVE, _NOOP], ids=["active", "noop"])
+@pytest.mark.parametrize(
+    "make_bad",
+    [lambda g: np.full_like(g, np.nan),
+     lambda g: np.full_like(g, -1.0),
+     lambda g: np.full_like(g, np.inf),
+     lambda g: np.ones(g.size + 1)],
+    ids=["nan", "negative", "inf", "wrong-shape"])
+def test_lsf_weight_validated_on_both_paths(grid, make_bad):
+    """An invalid stellar-flux weight raises whether or not the kernel is
+    resolved; the diagnosis must not depend on the instrument mode."""
+    with pytest.raises(ValueError, match="weight"):
+        _lsf(grid, make_bad(grid))
+
+
+@pytest.mark.parametrize("grid", [_ACTIVE, _NOOP], ids=["active", "noop"])
+def test_lsf_valid_weight_preserves_a_flat_depth_on_both_paths(grid):
+    out = _lsf(grid, np.full_like(grid, 2.5))
+    assert np.allclose(out, 0.01, rtol=0, atol=1e-15)

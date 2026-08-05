@@ -31,12 +31,9 @@ _PROGRESS_EVERY = 100                  # progress line every N chunks
 def _engine_cfg():
     """The engine-config view, with the engine's data layout CREATED first.
 
-    This is a setup command, so it makes the directories it is about to download
-    into rather than reporting them as failures. The install instructions tell a
-    new user to export $VULCAN_FORWARD_DATA and then run this, and that directory
-    does not exist yet on a first run: without this the two CIA downloads
-    reported FAILED on a perfectly correct setup (fixed 2026-07-29). The root
-    itself is still never guessed -- an unset variable raises.
+    A setup command makes the directories it is about to download into
+    (otherwise the CIA downloads fail on a correct first-run setup). The root
+    itself is never guessed -- an unset $VULCAN_FORWARD_DATA raises.
     """
     import importlib
 
@@ -81,10 +78,9 @@ FETCHES = (
 )
 
 # What fetch does not download itself, printed verbatim after the downloads.
-# These two live on STScI Box, whose /v/ links serve HTML rather than the file.
-# That is scriptable (see the recipe below, verified 2026-08-04) but it depends
-# on Box's page markup, which is theirs to change without notice -- so it stays
-# out of the automatic path and is documented instead.
+# The two Pandeia pieces live on STScI Box, whose /v/ links serve HTML rather
+# than the file; the scriptable recipe depends on Box's page markup, so it
+# stays documented instead of automated.
 MANUAL = """\
 The Pandeia backend is a MATCHED TRIPLE: the engine, the reference data, and
 the PSF library must all be release {release}. The worker refuses to run a

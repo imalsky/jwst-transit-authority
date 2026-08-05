@@ -1,10 +1,7 @@
-"""GUI smoke test: the app renders end-to-end with no exception.
+"""GUI smoke tests: the app renders end-to-end with no exception.
 
-Runs only where the GUI extras (streamlit + pandas) are installed -- the
-dependency-light CI skips it. Uses Streamlit's AppTest; the pre-run render
-path exercises the data-status panel (datacheck.full_report) and every
-sidebar widget, without launching a forward-model run. (The mandatory intro
-gate was removed in the 2026-07-29 UX pass: the first render IS the tool.)
+Needs the GUI extras (streamlit + pandas); the dependency-light CI skips it.
+Uses Streamlit's AppTest; no forward-model run is launched.
 """
 from __future__ import annotations
 
@@ -27,10 +24,9 @@ def _run_app():
 
 def _synthetic_out(science_mode="transmission", saturated=False,
                    sigma_detect=0.0, n_transits=1):
-    """A minimal cached-result pair (out, out_meta) for post-run rendering.
+    """Minimal cached-result pair (out, out_meta) for post-run rendering.
 
-    sigma_detect stays either 0 (no-signal branch) or above the 3-sigma
-    target (success branch) so the render never calls
+    sigma_detect must stay 0 or above target so the render never calls
     detect.transits_to_target, which needs the full evaluate_mode payload.
     """
     import json
@@ -78,13 +74,8 @@ def test_app_renders_without_exception():
 
 
 def test_gui_structure_defaults_match_canonical_params():
-    """The GUI and the API must mean the SAME atmosphere by "the defaults".
-
-    Checked on EVERY planet, not just the reference one: the drift this test
-    exists to catch (a hard-coded API T_irr vs a T_eq-derived widget) was
-    invisible on WASP-39 b and 470 K wide on HD 209458 b. Structure mode, Kzz
-    mode, and T_irr must all agree, or a "default" GUI run and a "default"
-    API run silently model different atmospheres.
+    """GUI and API defaults must mean the same atmosphere on EVERY planet
+    (a hard-coded API T_irr once drifted 470 K from the widget on HD 209458 b).
     """
     from jwst_tool import forward, planets
 
@@ -98,10 +89,8 @@ def test_gui_structure_defaults_match_canonical_params():
         if cp["tp_mode"] == "file":
             assert at.selectbox(key=f"n0_{key}_kzzmode").value == \
                 cp["kzz_mode"] == "file", key
-        # T_irr: drive the GUI into Guillot mode so the widget renders, and
-        # compare it to what the API would default to for THIS planet. Compare
-        # against canonical_params, never against the same helper the widget
-        # calls -- that would pass even while the API drifted.
+        # Force Guillot mode so the T_irr widget renders; compare against
+        # canonical_params, never the helper the widget itself calls.
         at.selectbox(key=f"n0_{key}_tp").set_value("guillot").run()
         assert not at.exception, (key, at.exception)
         api_tirr = forward.canonical_params(
@@ -136,8 +125,7 @@ def test_sidebar_molecule_annotations_present():
 
 
 def test_results_render_with_synthetic_run():
-    """Drive the full post-Run render path (spectrum + ranking + T-P figures,
-    download buttons, mode table) on a synthetic result -- no forward model."""
+    """Full post-Run render path on a synthetic result (no forward model)."""
     out, out_meta = _synthetic_out()
     at = AppTest.from_file(str(APP), default_timeout=60)
     at.session_state["out"] = out
@@ -160,13 +148,8 @@ def _deferred_labels(at):
 
 
 def test_config_download_is_live_when_no_run_is_in_flight():
-    """Downloads rendered ABOVE compute() live in PLACEHOLDERS so they can go
-    dead for the duration of a run: a download button is a widget, clicking
-    one queues a rerun, and a queued rerun cancels the script run in flight --
-    i.e. the forward model itself. This pins the other half of that contract:
-    outside a run the placeholder holds the real, clickable download button,
-    not the dead stand-in.
-    """
+    """Outside a run the placeholders hold live download buttons, not dead
+    stand-ins (clicking a download widget mid-run cancels the run)."""
     at = _run_app()
     assert not at.exception, at.exception
     live, dead = _deferred_labels(at)
@@ -175,9 +158,7 @@ def test_config_download_is_live_when_no_run_is_in_flight():
 
 
 def test_tp_example_download_is_deferred_too():
-    """The sidebar's T-P example download has the same exposure, and the
-    sidebar renders long before run_clicked exists -- which is exactly why the
-    slots are filled after the Run button rather than in place."""
+    """The sidebar's T-P example download uses the same deferred slot."""
     at = AppTest.from_file(str(APP), default_timeout=60)
     at.session_state["n0_wasp39b_tp"] = "file"
     at.session_state["n0_wasp39b_tpsrc"] = "upload"   # forward.TP_FILE_UPLOAD
@@ -190,7 +171,7 @@ def test_tp_example_download_is_deferred_too():
 
 def test_no_intro_gate():
     """The first render is the tool itself: sidebar widgets exist immediately,
-    with no acknowledgment button blocking them (2026-07-29 UX pass)."""
+    with no acknowledgment button blocking them."""
     at = AppTest.from_file(str(APP), default_timeout=60)
     at.run()
     assert not at.exception, at.exception
@@ -199,13 +180,9 @@ def test_no_intro_gate():
 
 
 def test_noise_floor_has_no_default_and_blocks_the_run():
-    """Item 5: neither candidate default is neutral, so the tool picks neither.
-
-    A 15-40 ppm hard minimum SETS the reported precision for a well-observed
-    target (sigma_final = max(sigma_random, floor), never averaged down), while
-    no floor reports a Pandeia random sigma that ignores 1/f and visit-long
-    systematics. The run is blocked until the user owns the choice.
-    """
+    """No default floor: neither candidate is neutral, so the run is blocked
+    until the user picks one (a 15-40 ppm minimum SETS the reported precision;
+    no floor ignores 1/f and visit-long systematics)."""
     at = AppTest.from_file(str(APP), default_timeout=60)
     at.run()
     assert not at.exception, at.exception
@@ -219,9 +196,8 @@ def test_noise_floor_has_no_default_and_blocks_the_run():
     assert [b for b in at.button if (b.label or "") == "Run"][0].disabled
     assert _floor_error(at), [e.value for e in at.error]
 
-    # "No floor" is a valid EXPLICIT choice: the floor gate clears.
-    # (Only the floor gate is asserted here -- the Run button is also gated on
-    # params_error/mode selection, which depend on installed engine data.)
+    # "No floor" is a valid EXPLICIT choice: the floor gate clears. (Run is
+    # also gated on params_error/modes, which depend on installed engine data.)
     at.radio(key="n0_floormode").set_value("none").run()
     assert not at.exception, at.exception
     assert not _floor_error(at)
@@ -240,8 +216,7 @@ def test_constant_floor_prefill_is_labeled_illustrative():
 
 def test_emission_results_use_eclipse_terms():
     """An emission run's verdict and spectrum header say "eclipse", never
-    "transit" (2026-07-29 UX review, item 1.5), and a valid result that
-    MEETS the target renders as success."""
+    "transit", and an above-target result renders as success."""
     out, out_meta = _synthetic_out(science_mode="emission",
                                    sigma_detect=8.0, n_transits=3)
     at = AppTest.from_file(str(APP), default_timeout=60)
@@ -258,9 +233,8 @@ def test_emission_results_use_eclipse_terms():
 
 
 def test_all_saturated_state_has_no_best_mode():
-    """When every selected mode saturates, the verdict is a warning that says
-    so; no mode is presented as "best", and no error alert fires for what is
-    a valid calculation (2026-07-29 UX review, items 1.7 and 1.10)."""
+    """All modes saturated: warning verdict, no "best" mode, and no error
+    alert for what is a valid calculation."""
     out, out_meta = _synthetic_out(saturated=True, sigma_detect=5.0)
     at = AppTest.from_file(str(APP), default_timeout=60)
     at.session_state["out"] = out
@@ -288,11 +262,8 @@ def test_valid_below_target_result_is_warning_not_error():
 
 
 def test_picaso_provider_renders(monkeypatch):
-    # v18: switching the forward-model engine to PICASO must render (the
-    # kinetics sections collapse to the provider caption; composition swaps
-    # to the picaso ranges; the detect menu loses SO2). Works with or
-    # without the reference tree: canonical_params failures surface through
-    # the params_error caption, never an exception.
+    # Switching the engine to PICASO must render; canonical_params failures
+    # surface through the params_error caption, never an exception.
     at = _run_app()
     at.selectbox(key="n0_provider").set_value("picaso")
     at.run()
@@ -307,9 +278,8 @@ def test_picaso_climate_mode_renders():
 
 
 def test_picaso_constrain_goal_renders():
-    # v18.1 regression: the constrain-goal Fisher multiselect crashed with
-    # StreamlitAPIException under the PICASO engine (default lnKzz not in
-    # the provider's menu) -- both switch orders must render cleanly.
+    # Regression: the constrain-goal Fisher multiselect crashed under PICASO
+    # (default lnKzz not in the menu) -- both switch orders must render.
     at = _run_app()
     at.radio(key="n0_goal").set_value("constrain")
     at.run()
@@ -326,23 +296,15 @@ def test_picaso_constrain_goal_renders():
 
 
 def test_display_smoothing_is_nondestructive_and_actually_smooths():
-    """The spectrum figure plots the model convolved to a display resolution
-    (2026-07-29): at native sampling the unresolved line forest renders as
-    one-sample spikes. Two properties the app relies on: the operator must
-    not touch the caller's array (the "Native model (CSV)" download exports
-    that same un-smoothed array), and at the app's display resolution it
-    must measurably reduce the point-to-point spikiness -- otherwise the
-    plot change is cosmetically inert and the caption would be wrong.
-    """
+    """Display smoothing must not touch the caller's native array (the CSV
+    download exports it) and must measurably reduce spikiness."""
     import numpy as np
 
     from jwst_tool import binning
 
     wl = np.geomspace(1.0, 12.0, 4000)          # the real native grid shape
     rng = np.random.default_rng(0)
-    # smooth continuum plus an unresolved "line forest": isolated samples
-    # spiking upward, which is what a saturated line core looks like once
-    # its strength is conserved onto a grid ~200x coarser than the line
+    # smooth continuum plus isolated upward spikes (an unresolved line forest)
     native = (21000.0 + 200.0 * np.sin(8.0 * np.log(wl))
               + rng.choice([0.0, 0.0, 0.0, 600.0], size=wl.size))
     untouched = native.copy()
@@ -354,23 +316,19 @@ def test_display_smoothing_is_nondestructive_and_actually_smooths():
 
     assert np.array_equal(native, untouched), \
         "display smoothing mutated the caller's native model"
-    # RMS of the point-to-point differences, NOT the median: three quarters
-    # of the native samples share the same offset, so 62% of consecutive
-    # pairs are exactly equal and the median jump is ~0 -- a baseline no
-    # smoothed curve can beat. The RMS measures the spikiness that matters.
+    # RMS of point-to-point differences, NOT the median: most consecutive
+    # pairs are exactly equal, so the median jump is ~0 and unbeatable.
     rms_native = float(np.diff(untouched).std())
     rms_disp = float(np.diff(smoothed).std())
     assert rms_disp < 0.2 * rms_native, (rms_native, rms_disp)
-    # and the convolution conserves the continuum level it is drawn on top of
+    # the convolution conserves the continuum level
     assert abs(smoothed.mean() / untouched.mean() - 1.0) < 1e-4
 
 
 def test_ad_selection_locks_photochemistry_on():
-    """Kzz/photochemistry moved into the Atmosphere step (2026-07-29), which
-    renders BEFORE the differentiation method: the AD photo-lock now reads
-    the effective method from session state. Selecting AD under a constrain
-    goal must still force the photochemistry checkbox ON and disable it, and
-    switching back to detect (no constraints requested) must release it."""
+    """AD under a constrain goal forces the photochemistry checkbox ON and
+    disabled; switching back to detect releases it. (The photo widget renders
+    before the method menu, so the lock reads session state.)"""
     at = _run_app()
     at.radio(key="n0_goal").set_value("constrain")
     at.run()

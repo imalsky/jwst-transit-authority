@@ -53,8 +53,8 @@ unsuitable for planning new proposals
 ([installation page](https://outerspace.stsci.edu/spaces/PEN/pages/77530136/Pandeia%2BEngine%2BInstallation)).
 The previous 2026.2 tuple is still selectable for reproducibility as
 `JWST_TOOL_BACKEND=archival_2026_2` (renamed, not repointed, so older caches and
-artifacts recorded as `current` cannot pass for current-release output), and the
-pinned Pandeia 3.0 pair remains as `legacy`. The full policy is in
+artifacts recorded as `current` cannot pass for current-release output). The
+pinned Pandeia 3.0 `legacy` backend was removed. The full policy is in
 [`docs/physics_and_conventions.md`](docs/physics_and_conventions.md).
 
 3. Tell the tool where to keep data and caches. Add these to your shell profile so

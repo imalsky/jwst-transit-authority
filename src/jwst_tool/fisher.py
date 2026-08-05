@@ -1,39 +1,25 @@
-"""Fisher-information parameter forecast from the autodiff spectrum Jacobian.
+"""Fisher-information parameter forecast from the spectrum Jacobian.
 
-Given each instrument mode's binned Jacobian J (n_par, n_bins) and per-bin depth
-sigma, the Fisher matrix is
+Given each mode's binned Jacobian J (n_par, n_bins) and per-bin depth sigma,
 
     F_ij = sum_b J_ib J_jb / sigma_b^2
 
 and the marginalized 1-sigma forecast on parameter i is sqrt((F^-1)_ii).
 
-Nuisance handling (mirrors the zco_information campaign):
-  * per mode: the free parameters + lnR0 (reference-radius) + one constant
-    depth OFFSET per detector SEGMENT are jointly fit; the nuisances are
-    marginalized out of the report. A single-detector mode has one segment
-    (its offset is degenerate with lnR0 and drops out via the rank-aware
-    inversion); the two-detector NIRSpec gratings (G395H, G235H) get a
-    separate NRS1 and NRS2 offset, because a detector-to-detector step of
-    tens of ppm is universal in real fits (Moran+2023, Madhusudhan+2023) and
-    can otherwise masquerade as atmospheric structure.
-  * combined (all selected modes): one SHARED lnR0 plus one constant depth
-    OFFSET per SEGMENT across all modes (absolute-calibration nuisance between
-    detectors/visits), all marginalized. Offsets are what make
-    multi-instrument combinations honest -- within a single band an offset and
-    lnR0 are nearly degenerate.
+Nuisances, jointly fit and marginalized out of the report:
+  * per mode: lnR0 (reference radius) + one constant depth OFFSET per detector
+    SEGMENT (NRS1/NRS2 separately for the two-detector gratings -- a
+    detector-to-detector step of tens of ppm is universal in real fits and can
+    otherwise masquerade as atmospheric structure).
+  * combined: one SHARED lnR0 + one offset per SEGMENT across all modes.
 
-A parameter with (numerically) no spectral response, or with weight in a
-numerically null Fisher direction (a degeneracy), comes back as inf, shown as
-"unconstrained" by the GUI rather than a fake number. The inversion is ALWAYS
-rank-aware AND unit-invariant: rank detection happens on the Jacobi-whitened
-(unit-diagonal) Fisher matrix, so redefining a parameter's units cannot flip
-a constraint between finite and "unconstrained" (see _marg_sigmas).
-np.linalg.inv on an ill-conditioned Fisher matrix returns misleading finite
-numbers without raising, so it is never used. Forecast sigmas are local
-Cramer-Rao lower bounds under the quoted noise model -- best cases, not
-posterior widths (the standard Fisher-forecast caveats -- local Gaussian
-approximation, prior-free, degeneracy-blind beyond rank -- are Vallisneri
-2008, PRD 77, 042001, arXiv:gr-qc/0703086).
+A parameter with no spectral response, or loaded on a numerically null Fisher
+direction, comes back inf ("unconstrained" in the GUI). The inversion is
+ALWAYS rank-aware and unit-invariant: rank detection happens on the
+Jacobi-whitened (unit-diagonal) Fisher matrix (see _marg_sigmas).
+np.linalg.inv returns misleading finite numbers on ill-conditioned matrices,
+so it is never used. Forecast sigmas are local Cramer-Rao lower bounds under
+the quoted noise model -- best cases, not posterior widths (Vallisneri 2008).
 """
 from __future__ import annotations
 
@@ -41,32 +27,21 @@ import numpy as np
 
 _LN10 = np.log(10.0)
 
-# report-unit conversion: sigma in internal ln-units -> display units. lnZ/lnKzz
-# are natural-log internally but REPORTED in dex (log10), so divide by ln10. C/O
-# is handled separately in display_sigma (its display factor is the atmosphere's
-# absolute C/O, not a constant -- see below).
+# sigma in internal ln-units -> display units: lnZ/lnKzz report in dex. C/O
+# is handled in display_sigma (its factor is the atmosphere's absolute C/O).
 _TO_DISPLAY = {"lnZ": 1.0 / _LN10, "lnKzz": 1.0 / _LN10}
 
-# Relative eigenvalue threshold, applied to the WHITENED (unit-diagonal,
-# correlation-form) Fisher matrix: directions below REL_EIG_TOL x the largest
-# whitened eigenvalue are treated as numerically unconstrained (null space).
-# PRECISE GUARANTEE: whitening makes the rank decision invariant under
-# DIAGONAL per-parameter rescalings (unit changes) -- thresholding the raw
-# mixed-unit matrix flipped finite constraints to "unconstrained" (or back)
-# under a pure K-vs-kK rescaling (2026-07-12 external audit, confirmed). It
-# is NOT invariant under arbitrary MIXED reparameterizations of directions
-# sitting near the threshold: no numerical rank cut is metric-free, and a
-# publication-grade statement should quote the whitened eigenvalue spectrum
-# (the ``diag`` output) and, where it matters, the constrained
-# eigen-combinations rather than only coordinate-wise sigmas. eigh's noise
-# floor is ~1e-16 x wmax; 1e-10 keeps 6 decades of margin either way.
+# Relative eigenvalue threshold on the WHITENED (unit-diagonal) Fisher matrix:
+# directions below REL_EIG_TOL x the largest whitened eigenvalue are null.
+# Whitening makes the rank decision invariant under per-parameter unit
+# changes; thresholding the raw mixed-unit matrix flipped constraints under a
+# pure K-vs-kK rescaling. It is NOT invariant under arbitrary MIXED
+# reparameterizations near the threshold -- quote the whitened spectrum (the
+# ``diag`` output) where it matters. eigh's noise floor is ~1e-16 x wmax;
+# 1e-10 keeps 6 decades of margin either way.
 REL_EIG_TOL = 1e-10
-# A reported parameter whose projection ONTO the null subspace (whitened
-# coordinates) exceeds this is flagged inf (it lives partly in an unconstrained
-# direction). The metric is the L2 norm over the null eigenvectors -- a
-# basis-invariant subspace projection, not any single eigenvector's largest
-# component (that is arbitrary when the null eigenspace is degenerate;
-# 2026-07-12 external audit, item 3).
+# A parameter whose L2 projection onto the null subspace exceeds this reads
+# inf. Basis-invariant subspace norm, never a single eigenvector's component.
 NULL_LOAD_TOL = 1e-6
 
 
@@ -74,15 +49,12 @@ def _marg_sigmas(F: np.ndarray, n_report: int,
                  diag: dict | None = None) -> np.ndarray:
     """Rank-aware marginalized sigmas for the first n_report parameters of F.
 
-    The Fisher matrix mixes parameters with unrelated units (K, ln-units,
-    fractional depths), so rank detection happens in Jacobi-whitened
-    coordinates: q_i = theta_i * sqrt(F_ii), giving a unit-diagonal
-    (correlation-form) matrix whose eigen-spectrum is invariant under
-    per-parameter rescaling. Sigmas are transformed back to physical units
-    afterwards; a full-rank matrix reproduces inv(F) exactly. Parameters with
-    F_ii == 0 (no response at all) and parameters loaded on null directions
-    come back inf. Pass a dict as ``diag`` to receive rank / dimension /
-    condition number / eigenvalues (the whitened spectrum -- scale-free).
+    Rank detection happens in Jacobi-whitened coordinates (q_i = theta_i *
+    sqrt(F_ii), unit-diagonal correlation form), invariant under
+    per-parameter rescaling; sigmas transform back afterwards and a full-rank
+    matrix reproduces inv(F) exactly. F_ii == 0 or a null-direction load
+    reads inf. Pass a dict as ``diag`` to receive rank / dimension /
+    condition number / whitened eigenvalues.
     """
     F = np.asarray(F, float)
     F = 0.5 * (F + F.T)
@@ -114,8 +86,7 @@ def _marg_sigmas(F: np.ndarray, n_report: int,
     cov_w = ((V[:, good] ** 2) / w[good]).sum(axis=1)
     sig_nz = np.sqrt(cov_w) / d[nz]
     if (~good).any():
-        # basis-invariant projection onto the null subspace: L2 norm over the
-        # null eigenvectors, not a single vector's largest component (audit 3)
+        # L2 projection onto the null subspace (basis-invariant)
         load = np.sqrt(np.sum(V[:, ~good] ** 2, axis=1))
         sig_nz[load > NULL_LOAD_TOL] = np.inf
     full = np.full(n, np.inf)
@@ -125,13 +96,10 @@ def _marg_sigmas(F: np.ndarray, n_report: int,
 
 
 def _conditional_sigmas(F: np.ndarray, n_report: int) -> np.ndarray:
-    """CONDITIONAL sigmas 1/sqrt(F_ii) for the first n_report parameters:
-    every other parameter AND every nuisance held fixed at truth. The
-    optimistic Cramer-Rao complement of the marginalized sigma (conditional
-    <= marginalized always, up to numerical-rank inf); a large gap flags
-    degeneracy with other parameters/nuisances, not missing spectral
-    response. F_ii == 0 (no response at all) reads inf. Pure diagonal
-    read-off -- no inversion, so no rank subtleties."""
+    """Conditional sigmas 1/sqrt(F_ii) for the first n_report parameters
+    (every other parameter and nuisance held fixed). Always <= marginalized;
+    a large gap flags degeneracy, not missing spectral response. F_ii == 0
+    reads inf. Pure diagonal read-off, no inversion."""
     d = np.asarray(np.diag(np.asarray(F, float)), float)[:n_report]
     out = np.full(n_report, np.inf)
     pos = d > 0.0
@@ -156,20 +124,14 @@ def display_sigma(name: str, sigma: float, co_eval: float | None = None) -> floa
 
 
 def _segment_offset_rows(result: dict) -> np.ndarray:
-    """One constant-offset indicator row per detector segment INCLUDING the
-    first (n_seg rows; a single-segment mode gets one global constant), from
-    result["seg"] (per-bin segment id from detect.evaluate_mode).
+    """One constant-offset indicator row per detector segment INCLUDING
+    segment 0 (n_seg rows), from result["seg"].
 
-    The pre-2026-07-12 version omitted segment 0 on the premise that the
-    shared lnR0 derivative "already spans" the first segment's constant --
-    WRONG: lnR0 is a physical radiative-transfer derivative, generally not
-    constant in wavelength, so the calibration offset and lnR0 are distinct
-    nuisance directions, and a spectrally-constant science signal could read
-    as constrained (recheck item P0-A, confirmed by reproducer). Any exact
-    redundancy between rows is precisely what the rank-aware _marg_sigmas
-    handles. With every segment present, mode_forecast(r) implements the
-    SAME statistical model as combined_forecast([r]) -- pinned by
-    test_mode_forecast_equals_combined_single_result."""
+    lnR0 is a physical derivative, not a constant in wavelength, so it never
+    stands in for the first segment's offset; any exact redundancy between
+    rows is what the rank-aware _marg_sigmas handles. With every segment
+    present, mode_forecast(r) implements the same model as
+    combined_forecast([r]) (pinned by test)."""
     nb = np.asarray(result["sigma"]).size
     seg = np.asarray(result.get("seg", np.zeros(nb, int)), int)
     n_seg = int(seg.max()) + 1 if seg.size else 1
@@ -258,24 +220,20 @@ def combined_forecast(results: list[dict], free_names: list[str],
 def transits_to_target(result: dict, free_names: list[str], gp: str,
                        target_display: float, sigma_at_transits,
                        co_eval: float | None = None) -> dict:
-    """Smallest transit count at which the marginalized (display-unit) forecast on
-    ``gp`` reaches ``target_display`` -- with the systematic floor respected.
+    """Smallest transit count at which the marginalized display-unit forecast
+    on ``gp`` reaches ``target_display``, with the systematic floor respected.
 
-    ``sigma_at_transits(result, n) -> per-bin sigma`` comes from detect.py
-    (random variance scales 1/N; the minimum floor is a hard lower bound at
-    every N). Returns dict(n=int|None, n_last=int|None, reachable=bool,
-    sig_inf=float): ``sig_inf`` is the INFINITE-TRANSIT LIMIT of the scenario
-    noise model in display units. Under the diagonal "random" scenario the
-    forecast is monotone in N, so sig_inf is an exact best case and a target
-    below it short-circuits to unreachable. Under a correlated scenario the
-    floor-EXCESS systematic grows as photon noise averages down, the forecast
-    can be BEST at a finite N, and reachability comes from the full scan
-    (2026-07-15 audit -- the old sig_inf gate returned false "never"s there);
-    ``n_last`` is then the largest scanned count still meeting the target.
-    With NO floor set anywhere the precision improves without bound, so
-    ``sig_inf`` is 0.0 and the scan is monotone (no floor -> no floor excess ->
-    no correlated term at any finite N); unreachability then means the target
-    needs more than N_TRANSITS_CAP transits, not that a systematic caps it.
+    ``sigma_at_transits(result, n) -> per-bin sigma`` comes from detect.py.
+    Returns dict(n, n_last, reachable, sig_inf); ``sig_inf`` is the
+    infinite-transit limit of the scenario noise model in display units.
+    Under the diagonal "random" scenario the forecast is monotone in N, so a
+    target below sig_inf short-circuits to unreachable. Under a correlated
+    scenario the floor-EXCESS systematic grows with N and the forecast can be
+    best at a finite N, so reachability comes from the full scan and
+    ``n_last`` is the largest scanned count still meeting the target -- never
+    reintroduce the unconditional sig_inf gate. With no floor set anywhere,
+    sig_inf is 0.0 and the scan is monotone; unreachability then means the
+    target needs more than N_TRANSITS_CAP transits.
     """
     from . import detect as _detect  # local import: fisher stays numpy-only otherwise
 
@@ -287,12 +245,9 @@ def transits_to_target(result: dict, free_names: list[str], gp: str,
 
     _floor = np.asarray(result["floor"])
     if not np.any(_floor > 0.0):
-        # No floor anywhere: the forecast half-width -> 0 as N -> infinity, so
-        # the limit is 0 in display units (nothing caps the precision) and the
-        # scan is monotone -- no floor means no floor EXCESS, hence no
+        # No floor: nothing caps the precision, no floor excess, no
         # correlated term at any finite N. Reporting the 1e-30-clipped value
-        # here produced a ~1e-26 "best case" and a spurious reachability
-        # window (2026-07-28 audit).
+        # here produced a spurious reachability window.
         sig_inf, cov_inf, diagonal = 0.0, None, True
     else:
         cov_inf = _detect.cov_at_transits(result, 1, floor_only=True)

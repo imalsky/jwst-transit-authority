@@ -1,22 +1,16 @@
 """This tool's view of the shared forward engine's configuration.
 
-Until 2026-07-29 the planner imported ``retrieval_framework.forward.config``:
-the retrieval framework's own configuration module. That was the root of the
-dependency on a sibling APPLICATION -- the planner read another app's demo run
-profile, its molecule table, and its repo-relative data paths, and could not
-even be imported without a retrieval checkout whose observed-spectra directory
-existed. The engine is now the ``vulcan-forward`` distribution, so this module
-holds what the planner actually needs:
+Holds what the planner needs from the ``vulcan-forward`` engine:
 
-- physics constants re-exported from ``vulcan_forward.constants`` (one source of
-  truth, so the two applications cannot drift apart on molecule masses or
-  opacity sources),
+- physics constants re-exported from ``vulcan_forward.constants`` (one source
+  of truth, so the two applications cannot drift apart),
 - the planner's OWN base radiative-transfer profile, and
-- the engine's data locations, resolved lazily through the engine's env
-  contract so importing this module never touches the filesystem.
+- the engine's data locations, resolved lazily so importing this module never
+  touches the filesystem.
 
-The attribute surface is deliberately unchanged from the module it replaced, so
-every ``config.MOLECULES`` / ``cfg.CIA_H2HE_FILE`` call site keeps working.
+The attribute surface is deliberately unchanged from the retrieval-framework
+config module it replaced, so every ``config.MOLECULES`` /
+``cfg.CIA_H2HE_FILE`` call site keeps working. (history: notes.md)
 """
 from __future__ import annotations
 
@@ -31,14 +25,10 @@ W39B_CFG_NAME = _fwd.DEFAULT_CFG_NAME
 BULK_H2_VULCAN = _fwd.BULK_H2_VULCAN
 
 # --- the planner's own base RT profile -------------------------------------
-# Values are the ones this tool has always run with (they were inherited from
-# the retrieval's "WIDE" demo profile, which is exactly the coupling being
-# removed -- an observation planner should not be pinned to another
-# application's demo settings). run_model overrides the resolution knobs from
-# the canonical parameter set; the band edges come from the engine, which owns
-# the supported window: 1-15 um, whose short edge is set by the H2-H2 CIA
-# table. Bit-identical to the pre-extraction profile, pinned by
-# tests/unit/test_rt_profile_golden.py.
+# run_model overrides the resolution knobs from the canonical parameter set;
+# the band edges come from the engine, which owns the supported 1-15 um window
+# (short edge = the H2-H2 CIA table). Bit-identical to the pre-extraction
+# profile, pinned by tests/unit/test_rt_profile_golden.py.
 WIDE = {
     "use_photo": True,
     "nz": 150,
@@ -52,11 +42,9 @@ WIDE = {
 }
 
 # --- data locations --------------------------------------------------------
-# Resolved on ACCESS, not at import: the engine's contract is an explicit data
-# root ($VULCAN_FORWARD_DATA), and a tool that only wants to read its cache or
-# render a page must still be importable on a machine with no data installed.
-# Touching one of these without a configured root raises RuntimeError naming
-# the remedy, which is exactly what the data-status report displays.
+# Resolved on ACCESS, not at import: the tool must stay importable on a
+# machine with no data installed ($VULCAN_FORWARD_DATA contract). Touching
+# one without a configured root raises RuntimeError naming the remedy.
 _LAZY = {
     "DATA_DIR": lambda: _fwd_paths.data_root(),
     "DEMO_DATABASE": lambda: _fwd_paths.linelist_dir(),

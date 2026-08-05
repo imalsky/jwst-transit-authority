@@ -1,27 +1,20 @@
-"""Stellar surface flux for eclipse depths (emission mode, v16).
+"""Stellar surface flux for eclipse depths (emission mode).
 
 ``phoenix_surface_flux(nu_grid, teff, logg, feh)`` returns the stellar
-SURFACE flux density per wavenumber (erg s^-1 cm^-2 / cm^-1) on the native
-RT wavenumber grid, from the SAME minimal-CDBS PHOENIX grid the Pandeia
-noise side uses (``instruments.PYSYN_CDBS``; ``jwst-tool data`` shows its
-status), interpolated in (Teff, [Fe/H], log g) by stsynphot's catalog
-machinery.
+SURFACE flux density per wavenumber (erg s^-1 cm^-2 / cm^-1) on the native RT
+grid, from the same minimal-CDBS PHOENIX grid the Pandeia noise side uses.
 
-Units contract (the whole eclipse-depth normalization): the CDBS PHOENIX
-models are emergent SURFACE flux densities (L = 4 pi R_s^2 F_s), and ExoJax
-``ArtEmisPure`` returns the planet's emergent surface flux density in the
-same convention (hemispheric flux; pi B_nu in the blackbody limit), so
+Units contract: the CDBS PHOENIX models are emergent SURFACE flux densities
+and ExoJax ``ArtEmisPure`` returns the planet's in the same convention, so
 
     eclipse depth  d_ec(nu) = (F_p(nu) / F_s(nu)) * (R_p/R_s)^2
 
-with NO extra pi. That convention match is guarded by a loud energy-closure
-check here: the band-integrated F_s must agree with the band-integrated
-pi B_nu(T_eff) blackbody to better than a factor ~1.5 -- a grid that were
-secretly intensity (missing pi, ~3.1x) or Eddington flux (4 pi, ~12x) fails
-immediately instead of silently mis-normalizing every eclipse depth.
+with NO extra pi. Guarded by an energy-closure check: band-integrated F_s
+must match band-integrated pi B_nu(T_eff) to within ~1.5x -- a grid that
+were secretly intensity (~3.1x) or Eddington flux (~12x) fails immediately.
 
-Heavy-path module: imports stsynphot (astropy + synphot) on first call;
-never imported by the GUI's light path.
+Heavy-path module: imports stsynphot on first call; never imported by the
+GUI's light path.
 """
 from __future__ import annotations
 
@@ -63,9 +56,7 @@ def phoenix_surface_flux(nu_grid: np.ndarray, teff: float, logg: float,
             "dataset the noise side uses -- run 'jwst-tool data' for status "
             "and the data README for the download.")
     # Pin the tool's OWN cdbs root unconditionally: an inherited shell
-    # PYSYN_CDBS (e.g. a stale picaso setup) must never redirect the grid --
-    # this subprocess-local env write is the same contract the pandeia
-    # worker uses (it passes cdbs explicitly per job).
+    # PYSYN_CDBS (e.g. a stale picaso setup) must never redirect the grid.
     os.environ["PYSYN_CDBS"] = ins.PYSYN_CDBS
     # local CALSPEC Vega so stsynphot never phones home (same file the
     # pandeia worker pins)

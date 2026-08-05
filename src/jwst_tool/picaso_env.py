@@ -5,23 +5,16 @@ Light module: stdlib-only at import time; picaso itself is imported lazily by
 
 Contracts (fail fast, no silent fallbacks):
 
-* The reference tree is selected ONLY by the ``JWST_TOOL_PICASO_REFDATA`` env
-  var -- there is no baked-in default path. Anything needing the tree raises
-  with the var name and a remedy when it is unset or wrong.
-* ``bootstrap()`` HARD-ASSIGNS ``picaso_refdata`` and ``PYSYN_CDBS`` in
-  ``os.environ`` (a stale shell value must never win) and must be called
-  before EVERY picaso import AND every climate run: picaso's own stellar
-  module re-pins ``PYSYN_CDBS`` per call, and the tool's ``stellar.py`` pins
-  its own cdbs root the same way -- both sides re-pin, so interleaved use
-  (climate solve, then emission-mode SED) stays correct in both directions.
-* Fingerprints are CONTENT hashes (never name/count-only): the chemistry-grid
-  fingerprint keys every cached spectrum a PICASO request produces, and the
-  climate fingerprint additionally covers every input the climate solver
-  consumes (selected CK table, continuum DBs, adiabat table, wavenumber grid,
-  config/version, stellar-grid manifest). Both are memoized in-process and
-  disk-cached keyed by a stat signature (paths, sizes, mtimes) so a
-  canonicalization does not re-read ~30 MB of tables each call; any file
-  change invalidates the cached hash via the signature.
+* The reference tree is selected ONLY by ``JWST_TOOL_PICASO_REFDATA`` -- no
+  baked-in default path; unset or wrong raises with the remedy.
+* ``bootstrap()`` HARD-ASSIGNS ``picaso_refdata`` and ``PYSYN_CDBS`` and must
+  run before EVERY picaso import and climate run: picaso re-pins PYSYN_CDBS
+  per call and the tool's stellar.py pins its own cdbs root -- both sides
+  re-pin, keep it that way.
+* Fingerprints are CONTENT hashes (never name/count-only), memoized
+  in-process and disk-cached keyed by a stat signature, so canonicalization
+  does not re-read ~30 MB of tables per call; any file change invalidates
+  via the signature.
 """
 from __future__ import annotations
 
@@ -67,10 +60,8 @@ def refdata_root() -> Path:
 def bootstrap() -> Path:
     """Pin picaso's env to the validated tree. Call before every picaso use.
 
-    HARD assignment, never ``setdefault``: shell values are routinely stale.
-    Re-pins the already-imported synphot config objects too (the same
-    belt-over-suspenders idiom the tool's stellar.py uses in the other
-    direction).
+    HARD assignment, never ``setdefault`` (shell values are routinely stale);
+    re-pins the already-imported synphot config objects too.
     """
     root = refdata_root()
     trds = root / STELLAR_TRDS_REL
@@ -184,9 +175,8 @@ def _cached_content_sha1(kind: str, paths: list[Path]) -> str:
     """
     import time as _time
     memo = _MEMO.get(kind)
-    # within one process, re-verify the stat signature at most once per
-    # minute: each verification stats every file, which is seconds per call
-    # on a remote Space volume (2026-07-21 hang report)
+    # re-verify the stat signature at most once per minute per process: each
+    # verification stats every file (seconds per call on a remote volume)
     if memo is not None and _time.time() - memo.get("checked_at", 0.0) < 60.0:
         return memo["sha1"]
     sig = _stat_signature(paths)
@@ -263,13 +253,10 @@ def climate_refdata_fingerprint(node: str, tio_vo: bool) -> str:
         raise RuntimeError(
             f"stellar grid missing: {ck04} (the climate star() irradiation "
             "reads the ck04models atlas).")
-    # name+size MANIFEST (not a content hash, and deliberately no mtime --
-    # mtimes change on every copy/re-upload; a swapped file changes its
-    # size-name pair in practice): documented as a manifest, never claimed
-    # as a content fingerprint (v18.1). Computed ONCE per process: the
-    # rglob is hundreds of stat calls, which on a remote Space volume costs
-    # seconds PER CALL -- and this runs inside canonical_params on every
-    # GUI rerun in climate mode (2026-07-21 hang report).
+    # name+size MANIFEST (deliberately no mtime -- mtimes change on every
+    # copy); documented as a manifest, never claimed as a content hash.
+    # Computed ONCE per process: the rglob is hundreds of stat calls and this
+    # runs inside canonical_params on every GUI rerun in climate mode.
     _st_key = str(ck04)
     stellar_manifest = _MEMO.get("stellar:" + _st_key)
     if stellar_manifest is None:

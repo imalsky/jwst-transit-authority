@@ -60,11 +60,8 @@ def test_pandeia_backend_present_reads_version(tmp_path):
 
 
 def test_pandeia_psf_release_mismatch_is_reported(tmp_path):
-    """Item 3: a PSF tree from a DIFFERENT release must not read as OK.
-
-    The worker refuses this set before calculating; the status panel has to
-    agree, or a user sees a green PSF row for a backend that cannot run.
-    """
+    """A PSF tree from a DIFFERENT release must not read as OK: the worker
+    refuses the set, and the status panel has to agree."""
     rel = _backend_release()
     other = "2026.2" if rel != "2026.2" else "2026.7"
     py = tmp_path / "env" / "bin" / "python"
@@ -95,11 +92,14 @@ def test_pandeia_psf_dir_without_version_file_is_missing(tmp_path):
     assert "VERSION_PSF" in by["pandeia:psf"].detail
 
 
-def test_pandeia_no_psf_dir_configured_yields_no_psf_item(tmp_path):
-    # legacy (3.0-era) backend: PSFs live inside refdata, psf_dir is empty
+def test_pandeia_empty_psf_dir_reports_missing(tmp_path):
+    # every supported backend uses the split-PSF layout: an empty psf_dir is
+    # a misconfiguration and must surface, never read as "embedded PSFs"
     items = datacheck.check_pandeia_backend(
         python=tmp_path / "python", refdata=tmp_path / "ref", psf_dir="")
-    assert not any(it.key == "pandeia:psf" for it in items)
+    by = {it.key: it for it in items}
+    assert by["pandeia:psf"].status == datacheck.MISSING
+    assert by["pandeia:psf"].required is True
 
 
 # ---------------------------------------------------------------------------
