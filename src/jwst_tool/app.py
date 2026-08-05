@@ -2076,14 +2076,11 @@ _spec_png = _fig_png(fig)
 plt.close(fig)
 st.caption(
     f"Model {_cpj.get('science_mode', 'transmission')} spectrum with the "
-    "binned depths and predicted uncertainties of each selected mode at "
-    f"R={meta['r_bin']}, for {meta['n_transits']} "
-    f"{_ev}{'s' if meta['n_transits'] > 1 else ''}. Each mode has a fixed "
-    f"color and marker shape. The model lines are smoothed to R = "
-    f"{_disp_R:.0f} for display only (at native sampling the unresolved "
-    "line forest reads as spikes); every score uses the exactly binned "
-    "model, and the un-smoothed native-resolution model is in the Native "
-    "model (CSV) download.")
+    "depths and predicted uncertainties of each selected mode binned to "
+    f"the shared analysis resolution R = λ/Δλ = {meta['r_bin']}, for "
+    f"{meta['n_transits']} {_ev}"
+    f"{'s' if meta['n_transits'] > 1 else ''}. Each mode is first "
+    "simulated at its instrument's native resolution, then binned.")
 
 # downloads: the figure + the plotted numbers (binned points, native model)
 _bin_df = pd.concat([
@@ -2167,10 +2164,6 @@ with col1:
     st.pyplot(fig2, width="stretch")
     _rank_png = _fig_png(fig2)
     plt.close(fig2)
-    st.caption("Every bar is labeled with its value; the dashed line marks "
-               "your target"
-               + (" (for σ_detect, higher is better)." if goal_r == "detect"
-                  else " (for an uncertainty, lower is better)."))
     _metric = (f"sigma_detect_{meta['target']}" if goal_r == "detect"
                else f"uncertainty_{gp}_at_{tsig:g}sigma")
     _rank_df = pd.DataFrame({"mode": names, _metric: vals})
@@ -2317,22 +2310,10 @@ st.download_button("Mode details (CSV)", _csv_bytes(pd.DataFrame(rows)),
                    key=K("dl_modes_csv"))
 if goal_r == "detect":
     st.caption(
-        "**σ_detect is a conditional matched-template S/N at the specified "
-        "atmospheric state**, not a retrieval detection: √Δχ² of "
-        "(full − without-molecule) over the mode's bins, with a constant depth "
-        "offset, plus one step per detector segment (NRS1/NRS2), profiled out. "
-        "**σ_detect (proj)** additionally projects out the temperature-structure "
-        "and reference-radius (lnR0) Jacobian directions (chemistry and clouds "
-        "stay fixed, still conditional); prefer it for narrow margins. σ per bin "
-        f"is the Pandeia photon+detector noise for in-{_ev} and out-of-{_ev} "
-        "integrations (× the optional multiplier, default 1.0), with "
-        "the minimum floor applied as a hard maximum on the final bins "
-        f"(PandExo convention). '{_tt_col}' averages down the random "
-        "term only; the floor is a lower bound at every count. Groups are "
-        "chosen and verified against Pandeia's predicted saturation limit. "
-        "The score is conditional on the selected atmosphere: if a retrieval "
-        "frees more atmospheric parameters under the same model and noise "
-        "assumptions, the detection significance will usually decrease."
+        "**σ_detect is a conditional matched-template S/N** for the selected "
+        "atmosphere, not a retrieval detection. A retrieval that frees more "
+        "atmospheric parameters under the same model and noise assumptions "
+        "will usually report a lower significance."
         + (f" σ_detect is scored under the **{meta.get('scenario')}** "
            "correlated-floor scenario (EXPERIMENTAL, a stated assumption, "
            "not a calibrated systematics model); the σ (…, exp.) columns "
@@ -2570,10 +2551,13 @@ with st.expander("Model quality and provenance"):
 # over EVERY layer. Analyzes the CACHED model's canonical params (_cpj),
 # never the live sidebar. Expert feature, kept out of the default flow; when
 # unavailable, one caption says so instead of a full panel.
-st.subheader("Advanced diagnostics")
-with st.expander("Adjoint sensitivities: which reactions and temperatures "
-                 "control a molecule?"):
-    if _cpj.get("chem_provider") == "picaso":
+# The full panel is hidden while the adjoint diagnostics are in development;
+# flip _ADJOINT_PANEL_IN_DEV to False to restore it unchanged.
+_ADJOINT_PANEL_IN_DEV = True
+with st.expander("Advanced diagnostics (in development)"):
+    if _ADJOINT_PANEL_IN_DEV:
+        st.caption("In development.")
+    elif _cpj.get("chem_provider") == "picaso":
         st.caption(
             "Unavailable for this run: adjoint diagnostics differentiate "
             "the VULCAN reaction network (reverse-mode AD through the "
@@ -2617,7 +2601,11 @@ with st.expander("Adjoint sensitivities: which reactions and temperatures "
                 "the solver's step-VJP, which can take hours on CPU; the "
                 "result lands in the persistent JAX compile cache, so later "
                 "runs skip straight to the solve.")
-            if st.button("Run adjoint diagnostics", key=K("adjrun")):
+            # temporarily disabled in the GUI (in development); a disabled
+            # button always returns False, so the run path below is unreachable
+            st.caption("In development. Temporarily disabled.")
+            if st.button("Run adjoint diagnostics", key=K("adjrun"),
+                         disabled=True, help="In development"):
                 _adj_slot = runlimit.acquire("adjoint")
                 if _adj_slot is None:
                     st.error(
