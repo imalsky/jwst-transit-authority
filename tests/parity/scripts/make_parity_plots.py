@@ -10,13 +10,13 @@ current PandExo on the same Pandeia 2026.7 engine -- the things that match
 extracted stellar flux. The depth-uncertainty difference (a noise-model
 difference, not a configuration one) is quantified in REPORT.md, not plotted.
 
-The committed historical summary does not pass the current gate and therefore
-cannot be plotted with current-release labels. The extracted-flux figure also
-reads the raw
-{star}_{ours,pandexo}.json that run_parity.py writes into this same directory
-(git-ignored); it is skipped with a notice if those are absent (a fresh clone
-has the committed figures already, and re-running run_parity.py regenerates
-the raw JSON).
+The summary is RE-VALIDATED through the shared gate (parity_gate.py) before
+any figure gets current-release labels; the persisted `gate.passed` boolean
+is never trusted. The extracted-flux figure also reads the raw
+{star}_{ours,pandexo}.json that run_parity.py writes into the outputs
+directory (git-ignored); it is skipped with a notice if those are absent (a
+fresh clone has the committed figures already, and re-running run_parity.py
+regenerates the raw JSON).
 
 Layout under tests/parity/: scripts/ (this + the harness), outputs/ (the
 committed parity_summary.json + REPORT.md and the git-ignored raw run JSON),
@@ -27,6 +27,7 @@ this tool, orange = PandExo; per-mode panels color by mode in the fixed
 palette order. One axis per panel, thin marks, recessive grid, PNG @ 200 dpi.
 """
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -38,6 +39,9 @@ from matplotlib.lines import Line2D
 HERE = Path(__file__).resolve().parent        # tests/parity/scripts
 OUTPUTS = HERE.parent / "outputs"             # parity_summary.json + raw JSON
 FIGS = HERE.parent / "figs"                   # committed PNG figures
+sys.path.insert(0, str(HERE))
+
+import parity_gate as pg                       # noqa: E402
 
 # --- validated categorical palette (light mode) ------------------------------
 TOOL = "#2a78d6"       # this tool (blue, slot 1)
@@ -82,23 +86,23 @@ def load_summary():
 
 
 def require_passing_summary(summary):
-    """Return the validated Pandeia release or refuse a stale/failed input."""
-    gate = summary.get("gate")
-    if not gate or not gate.get("passed"):
-        detail = (
-            "has no gate block (regenerate with run_parity.py)"
-            if gate is None else
-            f"failed its gate ({len(gate.get('problems', []))} problems)"
-        )
+    """Re-validate through the shared gate and return the Pandeia release.
+
+    Runs parity_gate.validate_artifact() rather than trusting the persisted
+    `gate.passed` boolean, so a hand-edited artifact cannot get
+    current-release labels."""
+    if summary.get("gate") is None:
         raise RuntimeError(
-            "make_parity_plots: parity_summary.json " + detail
-            + "; refusing to put current-release labels on an unvalidated "
-              "artifact")
-    release = gate.get("required_pandeia_release")
-    if not release:
+            "make_parity_plots: parity_summary.json has no gate block "
+            "(regenerate with run_parity.py); refusing to put "
+            "current-release labels on an unvalidated artifact")
+    problems = pg.validate_artifact(summary)
+    if problems:
         raise RuntimeError(
-            "make_parity_plots: passing gate lacks required_pandeia_release")
-    return str(release)
+            "make_parity_plots: parity_summary.json failed its gate "
+            f"({len(problems)} problems; first: {problems[0]}); refusing to "
+            "put current-release labels on an unvalidated artifact")
+    return str(pg.REQUIRED_PANDEIA_RELEASE)
 
 
 def ok_rows(summary, star):
@@ -162,10 +166,11 @@ def fig_config_parity(summary, release):
     fig.suptitle("Configuration & timing parity: this tool vs pinned PandExo "
                  f"on the same Pandeia {release} engine", fontsize=11.5,
                  y=0.99)
-    fig.text(0.5, 0.91, "Valid configurations only (saturated/unusable configs "
-             "are excluded). Config + wavelength grid are bit-identical "
-             "(max |Δλ| = 0); groups are independently optimized and agree to "
-             "≤1 (integer rounding of the same 80% saturation target); "
+    fig.text(0.5, 0.91, "Unsaturated configurations only (saturated rows are "
+             "excluded). The submitted configuration is pinned identically on "
+             "both sides; wavelength grids match pixel-for-pixel at rtol "
+             "1e-9; groups are independently optimized against the same 80% "
+             "saturation target (integer rounding is the residual); "
              "integration time and count follow.", ha="center", fontsize=8.2,
              color=INK2, wrap=True)
     fig.tight_layout(rect=[0, 0.15, 1, 0.87])
@@ -221,7 +226,7 @@ def fig_extracted_flux(summary, out_root, mode="nirspec_g395h",
     ax.set_ylabel("extracted stellar\ncount rate  (e$^-$/s)")
     ax.set_title(f"Extracted stellar flux parity, {LABEL[mode]} on a "
                  f"{STAR_LABEL[star]} star\n(the ETC engine product, "
-                 f"Pandeia {release} both sides; wavelength grid bit-identical)")
+                 f"Pandeia {release} both sides; grids matched at rtol 1e-9)")
     ax.legend(frameon=False, fontsize=9.5)
     ax.annotate("narrow dips = stellar absorption lines in this tool's\n"
                 "PHOENIX spectrum (e.g. Br-α 4.05, Pf-δ 3.30 μm); PandExo's\n"

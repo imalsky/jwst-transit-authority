@@ -4,9 +4,10 @@ Each ``MODES`` entry carries the Pandeia configuration used by
 ``pandeia_worker.py`` (running in the selected backend's conda env), display
 metadata, and an illustrative systematic noise floor.
 
-Mode tokens are the canonical (pinned-3.0) Pandeia names; ``engine_mode()``
-resolves each to the token the ACTIVE backend accepts, and both the production
-path (``noise.noise_job``) and the parity harness go through it.
+Mode tokens are the engine mode names of the supported (2026-era) releases;
+``engine_mode()`` applies any per-backend renames (none at present -- the
+3.0-era ``ssgrism`` token retired with the legacy backend), and both the
+production path (``noise.noise_job``) and the parity harness go through it.
 
 Noise floors (``floor_ppm_suggested``) are ILLUSTRATIVE planning values, never
 defaults: ``detect.evaluate_mode`` and ``noise.depth_error_bins`` require
@@ -113,15 +114,17 @@ BACKEND_STATUS = _BE["status"]
 BACKEND_RELEASE = _BE["release"]
 BACKEND_IS_SUPPORTED = _BE["supported"]
 
-# Machine-specific, no portable default; require_pandeia_python() turns a
-# missing setting into one actionable message.
-PICASO_PYTHON = os.environ.get("JWST_TOOL_PANDEIA_PYTHON", _BE["python"])
+# The PANDEIA backend interpreter (machine-specific, no portable default;
+# require_pandeia_python() turns a missing setting into one actionable
+# message). Named PICASO_PYTHON until 2026-08-05, from before the repo had a
+# real PICASO provider; the PICASO env is JWST_TOOL_PICASO_REFDATA.
+PANDEIA_PYTHON = os.environ.get("JWST_TOOL_PANDEIA_PYTHON", _BE["python"])
 
 
 def require_pandeia_python() -> str:
     """Return the backend interpreter path, or raise one actionable error."""
-    if PICASO_PYTHON:
-        return PICASO_PYTHON
+    if PANDEIA_PYTHON:
+        return PANDEIA_PYTHON
     raise RuntimeError(
         "No Pandeia backend interpreter configured. The engine runs in its own "
         "environment (heavy dependencies), and its path is machine-specific, so "
@@ -148,17 +151,20 @@ PANDEIA_PSF_DIR = os.environ.get("JWST_TOOL_PANDEIA_PSF_DIR", _BE["psf"])
 # Ks). `jwst-tool data` reports each piece.
 PYSYN_CDBS = str(DATA_DIR / "cdbs")
 
-# Engine-generation mode-name renames. MODES stores the historical canonical
-# token; a 2026-era engine hard-rejects an unknown token (ValueError: Invalid
-# mode), so this is keyed by backend and every path resolves through
-# engine_mode() -- one source of truth.
-#   current / archival_2026_2: NIRCam "ssgrism" -> "lw_tsgrism".
+# Engine-generation mode-name renames, keyed by backend; every path resolves
+# through engine_mode() -- one source of truth, never a parity-only rename.
+# Both supported backends speak the same 2026-era tokens, so the maps are
+# empty since the 3.0 "legacy" backend was removed (MODES stored the 3.0
+# "ssgrism" token until then; it is now "lw_tsgrism" directly -- cache-safe,
+# because job dicts always carried the RESOLVED token). The machinery stays:
+# the next engine generation that renames a mode gets one entry here, and the
+# assert below forces a decision for every backend.
 _MODE_RENAMES = {
-    "current": {"nircam": {"ssgrism": "lw_tsgrism"}},
-    "archival_2026_2": {"nircam": {"ssgrism": "lw_tsgrism"}},
+    "current": {},
+    "archival_2026_2": {},
 }
-# Every backend token MUST appear above: a missing entry would submit the
-# canonical 3.0 name to a 2026 engine, which hard-rejects it mid-run.
+# Every backend token MUST appear above: a missing entry would submit an
+# unresolved token to an engine that may hard-reject it mid-run.
 assert set(_MODE_RENAMES) == set(_BACKENDS), (
     f"mode-rename map {sorted(_MODE_RENAMES)} does not cover the backend "
     f"tokens {sorted(_BACKENDS)}")
@@ -261,7 +267,7 @@ MODES = {
     ),
     "nircam_f322w2": dict(
         label="NIRCam F322W2",
-        instrument="nircam", mode="ssgrism",
+        instrument="nircam", mode="lw_tsgrism",
         config=dict(instrument=dict(filter="f322w2", disperser="grismr"),
                     detector=dict(subarray="subgrism64", readout_pattern="rapid")),
         strategy=dict(aperture_size=0.4, sky_annulus=[0.5, 1.5]),
@@ -271,7 +277,7 @@ MODES = {
     ),
     "nircam_f444w": dict(
         label="NIRCam F444W",
-        instrument="nircam", mode="ssgrism",
+        instrument="nircam", mode="lw_tsgrism",
         config=dict(instrument=dict(filter="f444w", disperser="grismr"),
                     detector=dict(subarray="subgrism64", readout_pattern="rapid")),
         strategy=dict(aperture_size=0.4, sky_annulus=[0.5, 1.5]),

@@ -3,9 +3,9 @@
   "w39_like": {
    "provenance_ours": {
     "engine_version": "2026.7",
-    "refdata_path": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_data-2026.7-jwst",
+    "refdata_path": "pandeia_data-2026.7-jwst",
     "refdata_name": "pandeia_data-2026.7-jwst",
-    "psf_path": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_psfs-2026.7-jwst",
+    "psf_path": "pandeia_psfs-2026.7-jwst",
     "psf_name": "pandeia_psfs-2026.7-jwst",
     "refdata_version": "2026.7",
     "refdata_version_source": "VERSION_DATA",
@@ -19,10 +19,10 @@
     "pandeia_engine_version": "2026.7",
     "pandexo_version": "2026.7",
     "pandexo_commit": "34e42d81f782c8358bb30fc6e8cdf4b87e488263",
-    "pandexo_path": "/opt/homebrew/Caskroom/miniforge/base/envs/pandeia_2026_7/lib/python3.12/site-packages/pandexo",
-    "refdata": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_data-2026.7-jwst",
+    "pandexo_path": "pandexo",
+    "refdata": "pandeia_data-2026.7-jwst",
     "refdata_version": "2026.7",
-    "psf_dir": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_psfs-2026.7-jwst",
+    "psf_dir": "pandeia_psfs-2026.7-jwst",
     "psf_version": "2026.7",
     "python": "3.12.13",
     "numpy": "2.5.1"
@@ -464,9 +464,9 @@
   "bright_hot": {
    "provenance_ours": {
     "engine_version": "2026.7",
-    "refdata_path": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_data-2026.7-jwst",
+    "refdata_path": "pandeia_data-2026.7-jwst",
     "refdata_name": "pandeia_data-2026.7-jwst",
-    "psf_path": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_psfs-2026.7-jwst",
+    "psf_path": "pandeia_psfs-2026.7-jwst",
     "psf_name": "pandeia_psfs-2026.7-jwst",
     "refdata_version": "2026.7",
     "refdata_version_source": "VERSION_DATA",
@@ -480,10 +480,10 @@
     "pandeia_engine_version": "2026.7",
     "pandexo_version": "2026.7",
     "pandexo_commit": "34e42d81f782c8358bb30fc6e8cdf4b87e488263",
-    "pandexo_path": "/opt/homebrew/Caskroom/miniforge/base/envs/pandeia_2026_7/lib/python3.12/site-packages/pandexo",
-    "refdata": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_data-2026.7-jwst",
+    "pandexo_path": "pandexo",
+    "refdata": "pandeia_data-2026.7-jwst",
     "refdata_version": "2026.7",
-    "psf_dir": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_psfs-2026.7-jwst",
+    "psf_dir": "pandeia_psfs-2026.7-jwst",
     "psf_version": "2026.7",
     "python": "3.12.13",
     "numpy": "2.5.1"
@@ -925,9 +925,9 @@
   "faint_k": {
    "provenance_ours": {
     "engine_version": "2026.7",
-    "refdata_path": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_data-2026.7-jwst",
+    "refdata_path": "pandeia_data-2026.7-jwst",
     "refdata_name": "pandeia_data-2026.7-jwst",
-    "psf_path": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_psfs-2026.7-jwst",
+    "psf_path": "pandeia_psfs-2026.7-jwst",
     "psf_name": "pandeia_psfs-2026.7-jwst",
     "refdata_version": "2026.7",
     "refdata_version_source": "VERSION_DATA",
@@ -941,10 +941,10 @@
     "pandeia_engine_version": "2026.7",
     "pandexo_version": "2026.7",
     "pandexo_commit": "34e42d81f782c8358bb30fc6e8cdf4b87e488263",
-    "pandexo_path": "/opt/homebrew/Caskroom/miniforge/base/envs/pandeia_2026_7/lib/python3.12/site-packages/pandexo",
-    "refdata": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_data-2026.7-jwst",
+    "pandexo_path": "pandexo",
+    "refdata": "pandeia_data-2026.7-jwst",
     "refdata_version": "2026.7",
-    "psf_dir": "/Users/imalsky/Documents/Emulators/VULCAN_Project/vulcan-jwst-tool/data/pandeia_psfs-2026.7-jwst",
+    "psf_dir": "pandeia_psfs-2026.7-jwst",
     "psf_version": "2026.7",
     "python": "3.12.13",
     "numpy": "2.5.1"

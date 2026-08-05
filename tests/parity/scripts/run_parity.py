@@ -9,13 +9,17 @@ SAME Pandeia backend and compares them mode by mode:
 
 Running both sides on one engine/refdata generation isolates ESTIMATOR
 differences (timing policy, in/out propagation, saturation handling) from
-engine-calibration differences -- the point of the audit's parity gate. The
-tool's pinned legacy 3.0 backend is unaffected; this harness points the
-worker at the backend under test explicitly via environment variables.
-The gate (validate(), below) refuses the run unless BOTH sides are on the
-same SUPPORTED engine/refdata/PSF triple.
+engine-calibration differences -- the point of the audit's parity gate.
+This is a FIXED-CONFIGURATION estimator gate: the submitted instrument
+configuration is pinned identically on both sides (PANDEXO_MODES below
+overrides PandExo's templates to this tool's registry), so it deliberately
+does NOT test PandExo's own configuration-selection policy. The harness
+points the worker at the backend under test explicitly via environment
+variables. The gate (parity_gate.validate) refuses the run unless BOTH
+sides are on the same SUPPORTED engine/refdata/PSF triple.
 
-Required environment (all loud, no defaults -- machine paths stay out of git):
+Required environment (all loud, no defaults -- machine paths stay out of git;
+main() scrubs absolute paths from the provenance before writing the summary):
   JWST_TOOL_PANDEIA_PYTHON   python of a conda env with pandeia.engine 2026.7
                              AND pandexo (master) installed
   JWST_TOOL_PANDEIA_REFDATA  extracted pandeia_data-2026.7-jwst tree
@@ -44,6 +48,7 @@ HERE = Path(__file__).resolve().parent        # tests/parity/scripts
 OUTPUTS = HERE.parent / "outputs"             # raw JSON + parity_summary.json
 REPO = HERE.parents[2]                         # scripts -> parity -> tests -> repo
 sys.path.insert(0, str(REPO / "src"))
+sys.path.insert(0, str(HERE))
 
 for var in ("JWST_TOOL_PANDEIA_PYTHON", "JWST_TOOL_PANDEIA_REFDATA",
             "JWST_TOOL_PANDEIA_PSF_DIR", "JWST_TOOL_DATA_DIR",
@@ -53,21 +58,15 @@ for var in ("JWST_TOOL_PANDEIA_PYTHON", "JWST_TOOL_PANDEIA_REFDATA",
 
 from jwst_tool import instruments as ins            # noqa: E402
 from jwst_tool import noise                          # noqa: E402
+import parity_gate as pg                             # noqa: E402
 
-# One transit's worth of time on each side of the transit (baseline
-# fraction 1.0 in PandExo terms); WASP-39 b duration.
-T_TRANSIT_S = 2.8036 * 3600.0
-DEPTH = 0.01            # constant-depth planet (rp^2/r*^2)
-SAT_LIMIT = 0.80
-
-STARS = {
-    "w39_like": dict(teff=5400.0, log_g=4.45, metallicity=0.0, ks_mag=10.663),
-    "bright_hot": dict(teff=6250.0, log_g=4.30, metallicity=0.0, ks_mag=8.5),
-    # a faint K dwarf so NIRSpec PRISM is UNSATURATED and gets a valid parity
-    # point (it saturates on the two brighter stars -- there both tools flag
-    # it and only the unusable-regime ngroup floor differs, ngroup 2 vs 1)
-    "faint_k": dict(teff=4500.0, log_g=4.60, metallicity=0.0, ks_mag=13.0),
-}
+# The declared experiment (stars, run constants, thresholds, validate) lives
+# in parity_gate.py -- one import-safe module shared with the unit tests and
+# the renderers.
+T_TRANSIT_S = pg.T_TRANSIT_S
+DEPTH = pg.DEPTH
+SAT_LIMIT = pg.SAT_LIMIT
+STARS = pg.STARS
 
 # PandExo template name + the overrides that pin BOTH sides to one
 # configuration (subarray / readout / filter), per mode key. PandExo's SOSS
@@ -90,23 +89,26 @@ PANDEXO_MODES = {
                     {"detector": {"subarray": "substrip256",
                                   "readout_pattern": "nisrapid",
                                   "readmode": "nisrapid"}}),
-    # NIRCam and MIRI were pinned only PARTIALLY until 2026-08-04: NIRCam got
-    # a filter and no detector block, MIRI got a readout and no subarray. Both
-    # sides therefore submitted different hardware, so the comparison was not
-    # the matched-configuration one this harness claims to run. Same rule as
-    # the SOSS/MIRI overrides above -- pin to what is actually FLOWN, which is
-    # also what this tool's registry uses -- and the 2026.7 refdata backs both
-    # choices:
+    # NIRCam and MIRI were pinned only PARTIALLY until 2026-08-04 (NIRCam got
+    # a filter and no detector block, MIRI got a readout and no subarray).
+    # The parent 2026.2 artifact shows both sides still EXECUTED identical
+    # hardware (subgrism64/rapid, slitlessprism) -- PandExo's choices matched
+    # at that PandExo revision -- so the old artifact was a matched-config
+    # comparison in fact, just not by construction. Current PandExo defaults
+    # moved (MIRI's template default is now slitlessprism_ip; NIRCam's
+    # readout is template policy, "optimize"), so the pins are now explicit
+    # to keep the submitted hardware fixed on both sides:
     #   * NIRCam: 'rapid' and 'bright1' are BOTH valid for lw_tsgrism and the
-    #     engine declares NO default, so PandExo's bright1 is its template's
-    #     choice, not the engine's. Grism TSO flies SUBGRISM64 + RAPID.
-    #   * MIRI: 'slitlessprism' is 72 x 416 with tframe 0.15904 s -- the
-    #     subarray LRS slitless TSO actually flies. PandExo's 'slitlessprism_ip'
-    #     is a cropped 68 x 384 variant (and '_ips' 52 x 256), which is why its
-    #     ngroup optimizer landed elsewhere.
-    # Nothing about the 2026.7 upgrade caused this: both releases define all
-    # three slitless subarrays, and the earlier 2026.2 artifact predates the
-    # gate that checks submitted configuration, so it never surfaced.
+    #     engine declares NO default. SUBGRISM64 + RAPID is a flight-capable
+    #     grism-TSO choice (this tool's registry), not the unique flown one;
+    #     under RAPID PandExo reports a data-volume excess warning, recorded
+    #     per row and surfaced in REPORT.md, not adjudicated by this gate.
+    #   * MIRI: 'slitlessprism' is 72 x 416 with tframe 0.15904 s (this
+    #     tool's registry choice). PandExo's current default
+    #     'slitlessprism_ip' is a cropped 68 x 384 variant; all three
+    #     slitless subarrays are real modes.
+    # Comparing configuration POLICY (what each tool would choose on its own)
+    # is a separate, unbuilt harness; this one holds hardware fixed.
     "nircam_f322w2": ("NIRCam F322W2",
                       {"instrument": {"filter": "f322w2"},
                        "detector": {"subarray": "subgrism64",
@@ -122,21 +124,25 @@ PANDEXO_MODES = {
                                "readout_pattern": "fastr1",
                                "readmode": "fastr1"}}),
 }
+assert set(PANDEXO_MODES) == set(pg.MODE_KEYS), (
+    "PANDEXO_MODES does not match the declared experiment in parity_gate.py")
+
 
 def run_ours(star: dict, keys: list[str]) -> dict:
-    # noise_job now resolves engine-generation mode renames (NIRCam
-    # ssgrism->lw_tsgrism on the 2026 engine) via instruments.engine_mode(), so
-    # parity exercises the SAME production path as a normal run -- no separate
-    # rename here (that was the bug: the old parity-only patch let NIRCam pass
-    # the gate while the production path silently sent the rejected token).
+    # noise_job resolves any engine-generation mode renames via
+    # instruments.engine_mode(), so parity exercises the SAME production path
+    # as a normal run -- never a parity-only rename (that was the bug: a
+    # parity-only patch let NIRCam pass the gate while the production path
+    # silently sent a rejected token).
     job = noise.noise_job(star, keys, sat_limit=SAT_LIMIT)
     eng = noise.backend_fingerprint()["engine_version"]
-    if _release_of(eng) != REQUIRED_PANDEIA_RELEASE:
+    if pg._release_of(eng) != pg.REQUIRED_PANDEIA_RELEASE:
         raise SystemExit(
             f"run_parity: JWST_TOOL_PANDEIA_PYTHON resolves engine {eng!r}; "
-            f"the release gate requires the supported {REQUIRED_PANDEIA_RELEASE} "
-            "engine. Point it at a matching environment (see the module "
-            "docstring), or run the harness knowing the gate will fail.")
+            f"the release gate requires the supported "
+            f"{pg.REQUIRED_PANDEIA_RELEASE} engine. Point it at a matching "
+            "environment (see the module docstring), or run the harness "
+            "knowing the gate will fail.")
     return noise.run_pandeia(job, progress=lambda s: print("  " + s, flush=True))
 
 
@@ -168,7 +174,7 @@ def run_pandexo(star: dict, keys: list[str], workdir: Path,
         print("  [pandexo] job changed; re-running despite "
               "PARITY_REUSE_PANDEXO=1", flush=True)
     jf.write_text(json.dumps(job))
-    r = subprocess.run([ins.PICASO_PYTHON, str(HERE / "pandexo_worker.py"),
+    r = subprocess.run([ins.PANDEIA_PYTHON, str(HERE / "pandexo_worker.py"),
                         str(jf), str(rf)], text=True, capture_output=True)
     print(r.stdout)
     if r.returncode != 0 or not rf.exists():
@@ -185,6 +191,20 @@ def _stats(ratio: np.ndarray) -> dict:
                 p05=float(np.percentile(r, 5)),
                 p95=float(np.percentile(r, 95)),
                 max_abs_dev=float(np.max(np.abs(r - 1.0))))
+
+
+def _scrub_paths(d: dict) -> dict:
+    """Machine-absolute paths stay out of the committed artifact: keep only
+    the basename (release/name identity is preserved by the version fields)."""
+    out = {}
+    for k, v in d.items():
+        if isinstance(v, dict):
+            out[k] = _scrub_paths(v)
+        elif isinstance(v, str) and os.path.isabs(v):
+            out[k] = os.path.basename(os.path.normpath(v))
+        else:
+            out[k] = v
+    return out
 
 
 def compare_mode(key: str, ours: dict, px: dict) -> dict:
@@ -282,230 +302,6 @@ def compare_mode(key: str, ours: dict, px: dict) -> dict:
     return out
 
 
-# ---------------------------------------------------------------------------
-# Release gate.
-#
-# The harness used to write a summary and exit 0 unconditionally, which made
-# every artifact it produced look like a pass. These constants encode the
-# NARROW claims the report actually makes, so a regression fails the gate
-# instead of quietly widening the claim. Relaxing any of them belongs in the
-# report with a reason, never in a silent edit to make a run go green.
-# ---------------------------------------------------------------------------
-
-# The production worker version. A parity artifact generated by a different
-# worker does not describe the code that ships.
-PRODUCTION_WORKER_VERSION = 7
-# The supported Pandeia release; both sides must be on this exact triple.
-REQUIRED_PANDEIA_RELEASE = "2026.7"
-# PandExo is consumed from master, so the release artifact must be tied to the
-# exact reviewed tree rather than merely recording whichever commit happened
-# to be installed on the machine that ran the gate.
-REQUIRED_PANDEXO_COMMIT = "34e42d81f782c8358bb30fc6e8cdf4b87e488263"
-
-# Wavelength match tolerance already used by compare_mode.
-WL_MATCH_RTOL = 1e-9
-# At least this fraction of usable PandExo pixels must find an exact-wavelength
-# partner on our side.
-MIN_MATCHED_PIXEL_FRAC = 0.99
-# Group-count agreement, encoding REPORT.md's claim verbatim: "Groups agree to
-# <=1 on the moderate/bright stars, to ~1% relative (up to 5 groups absolute)
-# on the faint Ks=13 star". The faint rule is a disjunction on purpose -- at
-# ngroup ~500-1000 a 5-group difference is 1.0% and rounding to an integer is
-# the only freedom left, so a pure 1% test fails on rounding alone (the
-# 2026-07 artifact has 497-vs-492 = 1.006% and 195-vs-193 = 1.03%).
-MAX_NGROUP_ABS_DIFF = 1
-MAX_NGROUP_REL_DIFF = 0.01
-MAX_NGROUP_ABS_DIFF_FAINT = 5
-FAINT_STARS = {"faint_k"}
-# Extracted flux is a true 1:1 comparison (same engine, same configuration).
-MAX_FLUX_RATIO_DEV = 0.03
-# Modes that MUST produce a valid unsaturated comparison somewhere in the
-# matrix; a silently missing row would otherwise shrink the claim.
-REQUIRED_UNSATURATED_MODES = set(PANDEXO_MODES)
-
-# NOTE: sigma ratios are REPORTED but deliberately NOT gated to unity. Pandeia's
-# full extracted noise and PandExo's analytic `fml` estimator are different
-# noise models on purpose; the measured envelope is ~2-24% (NIR) and ~33-56%
-# (MIRI LRS). Requiring unity there would be requiring the two tools to stop
-# disagreeing about something they disagree about by design.
-
-
-def _release_of(version):
-    """Leading dotted-numeric release segment ("2026.7.1" -> "2026.7")."""
-    import re
-    m = re.match(r"(\d+(?:\.\d+)*)", str(version or "").strip())
-    return m.group(1) if m else None
-
-
-def validate(summary: dict) -> list[str]:
-    """Return a list of gate failures; empty means the artifact is a PASS.
-
-    Every check answers "would a reader of this artifact be misled?", not
-    "did the code run?".
-    """
-    problems = []
-
-    for sname, star in summary.get("stars", {}).items():
-        po = star.get("provenance_ours") or {}
-        pp = star.get("provenance_pandexo") or {}
-
-        # --- worker version -------------------------------------------------
-        wv = po.get("worker_version")
-        if wv != PRODUCTION_WORKER_VERSION:
-            problems.append(
-                f"{sname}: artifact worker_version={wv!r} but production runs "
-                f"worker v{PRODUCTION_WORKER_VERSION}; this artifact does not "
-                "describe the shipping code")
-
-        # --- engine / refdata / PSF on BOTH sides ---------------------------
-        ours_triple = {
-            "engine": _release_of(po.get("engine_version")),
-            "refdata": _release_of(po.get("refdata_version")),
-            "psf": _release_of(po.get("psf_version")),
-        }
-        px_triple = {
-            "engine": _release_of(pp.get("pandeia_engine_version")),
-            "refdata": _release_of(pp.get("refdata_version")),
-            "psf": _release_of(pp.get("psf_version")),
-        }
-        for comp in ("engine", "refdata", "psf"):
-            a, b = ours_triple[comp], px_triple[comp]
-            if a is None or b is None:
-                problems.append(
-                    f"{sname}: {comp} release unknown on "
-                    f"{'our' if a is None else 'the PandExo'} side "
-                    f"(ours={a!r}, pandexo={b!r}); an unattributable "
-                    "comparison cannot gate a release")
-            elif a != b:
-                problems.append(
-                    f"{sname}: {comp} release differs across the two sides "
-                    f"(ours={a}, pandexo={b}); this compares two engines, not "
-                    "two estimators")
-            elif a != REQUIRED_PANDEIA_RELEASE:
-                problems.append(
-                    f"{sname}: {comp} release {a} is not the supported "
-                    f"{REQUIRED_PANDEIA_RELEASE}")
-
-        # --- PandExo identity -----------------------------------------------
-        pandexo_commit = pp.get("pandexo_commit")
-        if not pandexo_commit:
-            problems.append(
-                f"{sname}: PandExo git commit not recorded. PandExo is used "
-                "from master, whose behavior moves without a version bump, so "
-                "the version string alone does not identify what ran")
-        elif pandexo_commit != REQUIRED_PANDEXO_COMMIT:
-            problems.append(
-                f"{sname}: PandExo commit {pandexo_commit!r} is not the "
-                f"reviewed {REQUIRED_PANDEXO_COMMIT}; a different or dirty "
-                "master tree cannot satisfy this release gate")
-        if str(pp.get("pandexo_version", "unknown")).lower() in (
-                "unknown", "none", ""):
-            problems.append(
-                f"{sname}: PandExo version is unknown in the provenance block")
-
-        # --- per-mode rows ---------------------------------------------------
-        for row in star.get("modes", []):
-            key = row.get("key")
-            tag = f"{sname}/{key}"
-            status = row.get("status")
-
-            if status == "ERROR":
-                problems.append(
-                    f"{tag}: error row "
-                    f"(ours={row.get('ours_error', '')[:120]!r})")
-                continue
-            if status != "OK":
-                continue                       # SATURATED rows: see below
-
-            # Saturation must be judged from the MEASURED fraction, not only
-            # the worker's `unusable` flag. The committed 2026-07 artifact had
-            # two OK rows above the limit, one at 7.31x full well.
-            sat = row.get("sat_frac_ours")
-            if sat is None:
-                problems.append(f"{tag}: OK row with no measured sat_frac")
-            elif float(sat) > SAT_LIMIT:
-                problems.append(
-                    f"{tag}: labeled OK with measured saturation "
-                    f"{float(sat):.4f} above the {SAT_LIMIT} limit; a "
-                    "saturated configuration may be reported but cannot "
-                    "contribute a validation row")
-
-            # pixel-grid identity
-            npix_p, matched = row.get("npix_pandexo"), row.get("npix_matched")
-            if not npix_p or matched is None:
-                problems.append(f"{tag}: missing pixel-match counts")
-            elif matched < MIN_MATCHED_PIXEL_FRAC * npix_p:
-                problems.append(
-                    f"{tag}: only {matched}/{npix_p} usable pixels matched at "
-                    f"rtol {WL_MATCH_RTOL:g} "
-                    f"(< {MIN_MATCHED_PIXEL_FRAC:.0%})")
-
-            # Submitted instrument configuration must be identical. The one
-            # reviewed representation exception is MIRI LRS: our registry
-            # leaves its sole p750l disperser implicit while PandExo reports it.
-            # A blanket "ignore whenever either side is None" rule would also
-            # hide a genuinely missing subarray/readout/filter on every mode.
-            co, cp = row.get("config_ours") or {}, row.get("config_pandexo") or {}
-            for field in ("subarray", "readout", "filter", "disperser"):
-                a, b = co.get(field), cp.get(field)
-                implicit_miri_disperser = (
-                    key == "miri_lrs" and field == "disperser"
-                    and a is None and b == "p750l")
-                if not implicit_miri_disperser and a != b:
-                    problems.append(
-                        f"{tag}: submitted {field} differs "
-                        f"(ours={a!r}, pandexo={b!r})")
-
-            # group counts (see the constants block for REPORT.md's wording)
-            go, gp = row.get("ngroup_ours"), row.get("ngroup_pandexo")
-            if go is None or gp is None:
-                problems.append(f"{tag}: missing ngroup on one side")
-            elif sname in FAINT_STARS:
-                diff = abs(go - gp)
-                if (diff > MAX_NGROUP_ABS_DIFF_FAINT
-                        and diff > MAX_NGROUP_REL_DIFF * max(go, gp)):
-                    problems.append(
-                        f"{tag}: ngroup {go} vs {gp} differs by {diff}, beyond "
-                        f"both {MAX_NGROUP_ABS_DIFF_FAINT} groups absolute and "
-                        f"{MAX_NGROUP_REL_DIFF:.0%} relative")
-            elif abs(go - gp) > MAX_NGROUP_ABS_DIFF:
-                problems.append(
-                    f"{tag}: ngroup {go} vs {gp} differs by more than "
-                    f"{MAX_NGROUP_ABS_DIFF}")
-
-            # extracted flux
-            fr = row.get("flux_ratio") or {}
-            dev = fr.get("max_abs_dev")
-            med = fr.get("median")
-            if med is None:
-                problems.append(f"{tag}: no extracted-flux ratio recorded")
-            elif abs(med - 1.0) > MAX_FLUX_RATIO_DEV:
-                problems.append(
-                    f"{tag}: extracted-flux median ratio {med:.4f} is more "
-                    f"than {MAX_FLUX_RATIO_DEV:.0%} from unity "
-                    f"(max|dev| {dev})")
-
-    # --- coverage: every mode needs at least one valid unsaturated row -------
-    validated = {
-        row.get("key")
-        for star in summary.get("stars", {}).values()
-        for row in star.get("modes", [])
-        if row.get("status") == "OK"
-        and row.get("sat_frac_ours") is not None
-        and float(row["sat_frac_ours"]) <= SAT_LIMIT
-    }
-    missing = sorted(REQUIRED_UNSATURATED_MODES - validated)
-    if missing:
-        problems.append(
-            "no valid unsaturated comparison for: " + ", ".join(missing)
-            + " -- the artifact does not cover the modes it claims to")
-
-    if not summary.get("stars"):
-        problems.append("summary contains no stars")
-
-    return problems
-
-
 def main():
     # raw per-run JSON goes in tests/parity/outputs/ (git-ignored there,
     # alongside the committed parity_summary.json and REPORT.md)
@@ -525,8 +321,8 @@ def main():
         rows = [compare_mode(k, ours.get(k, {"error": "missing"}),
                              px.get(k, {"error": "missing"})) for k in keys]
         summary["stars"][sname] = {
-            "provenance_ours": ours.get("__provenance__"),
-            "provenance_pandexo": px.get("__provenance__"),
+            "provenance_ours": _scrub_paths(ours.get("__provenance__") or {}),
+            "provenance_pandexo": _scrub_paths(px.get("__provenance__") or {}),
             "modes": rows,
         }
         (OUTPUTS / "parity_summary.json").write_text(
@@ -536,21 +332,8 @@ def main():
     # FAIL CLOSED. Previously this wrote the summary and returned None (exit
     # 0), so a stale, saturated, or version-mismatched artifact still looked
     # like a passing release gate.
-    problems = validate(summary)
-    summary["gate"] = {
-        "passed": not problems,
-        "problems": problems,
-        "required_worker_version": PRODUCTION_WORKER_VERSION,
-        "required_pandeia_release": REQUIRED_PANDEIA_RELEASE,
-        "thresholds": {
-            "min_matched_pixel_frac": MIN_MATCHED_PIXEL_FRAC,
-            "max_ngroup_abs_diff": MAX_NGROUP_ABS_DIFF,
-            "max_ngroup_rel_diff": MAX_NGROUP_REL_DIFF,
-            "max_flux_ratio_dev": MAX_FLUX_RATIO_DEV,
-            "sat_limit": SAT_LIMIT,
-            "wl_match_rtol": WL_MATCH_RTOL,
-        },
-    }
+    problems = pg.validate(summary)
+    summary["gate"] = pg.gate_block(problems)
     (OUTPUTS / "parity_summary.json").write_text(json.dumps(summary, indent=1))
     print(f"summary -> {OUTPUTS / 'parity_summary.json'}")
 
@@ -560,8 +343,8 @@ def main():
         for p in problems:
             print(f"  - {p}", file=sys.stderr)
         print("\nDo NOT commit this artifact as a passing gate. Fix the cause; "
-              "if a threshold is genuinely wrong, change it in the report with "
-              "a reason, not silently here.", file=sys.stderr)
+              "if a threshold is genuinely wrong, change it in parity_gate.py "
+              "AND the report with a reason, not silently.", file=sys.stderr)
         return 1
     print("\nPARITY GATE: PASS")
     return 0

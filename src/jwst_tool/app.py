@@ -1599,7 +1599,7 @@ if not floor_choice_made:
                         "(step 4 · Observation, Noise model)")
 if _still_needs:
     st.error("This run still needs: " + "; ".join(_still_needs) + ".")
-col_btn, col_note = st.columns([1, 3])
+col_btn, _ = st.columns([1, 3])
 run_clicked = col_btn.button("Run", type="primary", width="stretch",
                              disabled=(bool(params_error) or not mode_keys
                                        or not floor_choice_made))

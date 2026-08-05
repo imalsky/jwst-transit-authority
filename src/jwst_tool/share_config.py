@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import math
-from pathlib import Path
+import os
 
 from jwst_tool import forward, planets
 
@@ -60,6 +60,14 @@ def widget_state(cfg: dict, key) -> tuple[dict, list[str]]:
     """
     if not isinstance(cfg, dict):
         raise ValueError("the configuration file must contain a JSON object")
+    # Format gate: the marker this tool writes must be one it can read. A
+    # bare canonical dict (older download, no marker) stays a supported path.
+    if "jwst_tool_config" in cfg and cfg["jwst_tool_config"] != SHARE_FORMAT:
+        raise ValueError(
+            f"configuration format {cfg['jwst_tool_config']!r} is not "
+            f"supported by this tool version (it reads format "
+            f"{SHARE_FORMAT}); re-download the configuration from a "
+            "matching tool version")
     if "canonical_params" in cfg:
         cp = cfg["canonical_params"]
         goal = cfg.get("goal") or {}
@@ -90,8 +98,13 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
         return key(f"{planet}_{name}")
 
     # -- restore an embedded uploaded T-P table BEFORE validation, so the
-    #    canonical re-resolution by content sha can find it
+    #    canonical re-resolution by content sha can find it. The table is
+    #    validated from a TEMP file and moved into the content-addressed
+    #    archive only after canonical_params accepts the whole mapping, so an
+    #    invalid configuration leaves nothing on disk -- all-or-nothing at
+    #    the filesystem, not just in session state.
     restored_tp = None
+    pending_tp = None                  # (tmp, final) promoted on success
     validate = dict(cp)
     if tp_mode == "file" and str(cp.get("tp_file", "")) == forward.TP_FILE_UPLOAD:
         text = cfg.get("tp_table_text")
@@ -100,9 +113,13 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
             sha = hashlib.sha1(raw).hexdigest()[:16]
             dst = forward._uploads_dir() / f"{sha}.txt"
             dst.parent.mkdir(parents=True, exist_ok=True)
-            if not dst.exists():
-                dst.write_bytes(raw)
-            restored_tp = str(dst)
+            if dst.exists():
+                restored_tp = str(dst)
+            else:
+                tmp = dst.with_name(f".{sha}.{os.getpid()}.tmp")
+                tmp.write_bytes(raw)
+                pending_tp = (tmp, dst)
+                restored_tp = str(tmp)
         else:
             sha = str(cp.get("tp_file_sha1", ""))
             cand = forward._uploads_dir() / f"{sha}.txt" if sha else None
@@ -116,7 +133,15 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
                     "loading")
         validate["tp_file_path"] = restored_tp
     # the loud gate: an invalid file must fail HERE, before anything applies
-    forward.canonical_params(validate)
+    try:
+        forward.canonical_params(validate)
+    except Exception:
+        if pending_tp is not None:
+            pending_tp[0].unlink(missing_ok=True)
+        raise
+    if pending_tp is not None:
+        os.replace(pending_tp[0], pending_tp[1])   # atomic same-dir promote
+        restored_tp = str(pending_tp[1])
 
     state: dict = {}
     state[key("planet")] = planet

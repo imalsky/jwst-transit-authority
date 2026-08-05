@@ -65,8 +65,8 @@ def main() -> int:
         return 2
 
     from jwst_tool import instruments as ins
-    if not (ins.PICASO_PYTHON and Path(ins.PICASO_PYTHON).exists()):
-        print(f"jwst-tool: Pandeia backend python not found at {ins.PICASO_PYTHON} "
+    if not (ins.PANDEIA_PYTHON and Path(ins.PANDEIA_PYTHON).exists()):
+        print(f"jwst-tool: Pandeia backend python not found at {ins.PANDEIA_PYTHON} "
               f"(backend '{ins.JWST_TOOL_BACKEND}': {ins.BACKEND_STATUS}).\n"
               "Point JWST_TOOL_PANDEIA_PYTHON at a python with the matching "
               "pandeia.engine (and JWST_TOOL_PANDEIA_REFDATA at the matching refdata). "

@@ -1,47 +1,31 @@
 """The PandExo parity harness must FAIL CLOSED.
 
 `run_parity.py` used to write a summary and exit 0 no matter what, so stale
-or saturated artifacts looked like passing release gates. Each test breaks
-one thing in a synthetic passing summary and proves `validate()` fails.
-
-`run_parity.py` refuses to import without five machine-specific env vars, so
-it is loaded with the env preamble and tool imports stripped; only
-`validate()` and the constants are exercised. Nothing runs an engine.
+or saturated artifacts looked like passing release gates. The gate now lives
+in the import-safe `tests/parity/scripts/parity_gate.py`, shared by the
+runner, the renderers, and these tests -- no exec tricks, no duplicated
+constants. Each test breaks one thing in a synthetic full-matrix passing
+summary and proves `validate()` (or `validate_artifact()`) fails; the last
+tests require the COMMITTED artifact to re-validate as a current pass.
 """
 from __future__ import annotations
 
 import copy
+import importlib
+import sys
 from pathlib import Path
 
 import pytest
 
-PARITY = (Path(__file__).resolve().parents[1] / "parity" / "scripts"
-          / "run_parity.py")
-PLOTS = PARITY.with_name("make_parity_plots.py")
+SCRIPTS = Path(__file__).resolve().parents[1] / "parity" / "scripts"
+PLOTS = SCRIPTS / "make_parity_plots.py"
 
 
 @pytest.fixture(scope="module")
 def gate():
-    """`validate` + constants from run_parity.py, without its env preamble."""
-    import numpy as np
-
-    src = PARITY.read_text()
-    head, _, _ = src.partition("def main():")
-    keep, skip = [], False
-    for ln in head.splitlines():
-        if ln.startswith("for var in (") or ln.startswith("from jwst_tool"):
-            skip = True                      # env guard + tool imports
-        if skip and ln.startswith("T_TRANSIT_S"):
-            skip = False
-        if skip:
-            continue
-        if (ln.startswith(("HERE =", "OUTPUTS =", "REPO ="))
-                or "sys.path.insert" in ln):
-            continue
-        keep.append(ln)
-    ns = {"np": np, "__name__": "parity_gate_probe"}
-    exec(compile("\n".join(keep), str(PARITY), "exec"), ns)
-    return ns
+    """The shared gate module (parity_gate.py), imported -- never exec'd."""
+    sys.path.insert(0, str(SCRIPTS))
+    return vars(importlib.import_module("parity_gate"))
 
 
 @pytest.fixture(scope="module")
@@ -71,23 +55,37 @@ def _ok_row(key, ngroup=100, sat=0.5):
 
 @pytest.fixture
 def passing(gate):
-    """A minimal summary that satisfies every gate check."""
+    """A full-matrix summary that satisfies every gate check."""
     rel = gate["REQUIRED_PANDEIA_RELEASE"]
-    star = {
-        "provenance_ours": {
-            "worker_version": gate["PRODUCTION_WORKER_VERSION"],
-            "engine_version": rel, "refdata_version": rel, "psf_version": rel,
+
+    def star_block():
+        return {
+            "provenance_ours": {
+                "worker_version": gate["PRODUCTION_WORKER_VERSION"],
+                "engine_version": rel, "refdata_version": rel,
+                "psf_version": rel,
+            },
+            "provenance_pandexo": {
+                "pandeia_engine_version": rel, "refdata_version": rel,
+                "psf_version": rel, "pandexo_version": "2026.7",
+                "pandexo_commit": gate["REQUIRED_PANDEXO_COMMIT"],
+            },
+            # sorted(): REQUIRED_UNSATURATED_MODES is a set; unsorted
+            # iteration made 4 tests hash-seed-flaky (which mode lands at
+            # index 0 varies).
+            "modes": [_ok_row(k)
+                      for k in sorted(gate["REQUIRED_UNSATURATED_MODES"])],
+        }
+
+    return {
+        "stars": {name: star_block() for name in gate["STARS"]},
+        "config": {
+            "transit_duration_s": gate["T_TRANSIT_S"],
+            "depth": gate["DEPTH"],
+            "sat_limit": gate["SAT_LIMIT"],
+            "stars": copy.deepcopy(gate["STARS"]),
         },
-        "provenance_pandexo": {
-            "pandeia_engine_version": rel, "refdata_version": rel,
-            "psf_version": rel, "pandexo_version": "2026.7",
-            "pandexo_commit": gate["REQUIRED_PANDEXO_COMMIT"],
-        },
-        # sorted(): REQUIRED_UNSATURATED_MODES is a set; unsorted iteration
-        # made 4 tests hash-seed-flaky (which mode lands at index 0 varies).
-        "modes": [_ok_row(k) for k in sorted(gate["REQUIRED_UNSATURATED_MODES"])],
     }
-    return {"stars": {"w39_like": star}}
 
 
 def test_a_clean_artifact_passes(gate, passing):
@@ -161,19 +159,82 @@ def test_saturated_row_labeled_ok_fails(gate, passing):
 
 def test_error_row_fails(gate, passing):
     s = copy.deepcopy(passing)
+    row = s["stars"]["w39_like"]["modes"][0]
+    key = row["key"]
     s["stars"]["w39_like"]["modes"][0] = {
-        "key": "nirspec_prism", "status": "ERROR", "ours_error": "boom"}
+        "key": key, "status": "ERROR", "ours_error": "boom"}
     problems = gate["validate"](s)
     assert any("error row" in p for p in problems), problems
-    # ...and the mode it covered is now missing from the validated set
-    assert any("no valid unsaturated comparison" in p for p in problems)
 
 
 def test_missing_required_mode_fails(gate, passing):
+    """One star losing a mode fails the matrix even though the coverage set
+    is still satisfied by the other stars."""
     s = copy.deepcopy(passing)
-    s["stars"]["w39_like"]["modes"].pop()
+    dropped = s["stars"]["w39_like"]["modes"].pop()
     problems = gate["validate"](s)
-    assert any("no valid unsaturated comparison" in p for p in problems), problems
+    assert any(f"declared mode {dropped['key']!r} has no row" in p
+               for p in problems), problems
+
+
+def test_missing_star_fails(gate, passing):
+    """Deleting a whole star must fail: the reviewer demonstrated the old
+    coverage-only check passed with two of three stars removed."""
+    s = copy.deepcopy(passing)
+    del s["stars"]["bright_hot"]
+    del s["stars"]["faint_k"]
+    problems = gate["validate"](s)
+    assert any("missing from the artifact" in p for p in problems), problems
+
+
+def test_undeclared_star_fails(gate, passing):
+    s = copy.deepcopy(passing)
+    s["stars"]["mystery"] = copy.deepcopy(s["stars"]["w39_like"])
+    problems = gate["validate"](s)
+    assert any("not part of the declared experiment" in p
+               for p in problems), problems
+
+
+def test_duplicate_row_fails(gate, passing):
+    s = copy.deepcopy(passing)
+    s["stars"]["w39_like"]["modes"].append(
+        copy.deepcopy(s["stars"]["w39_like"]["modes"][0]))
+    problems = gate["validate"](s)
+    assert any("appears 2 times" in p for p in problems), problems
+
+
+def test_undeclared_mode_key_fails(gate, passing):
+    s = copy.deepcopy(passing)
+    s["stars"]["w39_like"]["modes"].append(_ok_row("nirspec_g140h"))
+    problems = gate["validate"](s)
+    assert any("'nirspec_g140h' is not part of the declared" in p
+               for p in problems), problems
+
+
+def test_unknown_status_fails_instead_of_skipping(gate, passing):
+    """The old validator silently skipped any non-OK/ERROR status; that hole
+    hid a 65.9%-pixel-match row behind SATURATED_ABOVE_LIMIT."""
+    s = copy.deepcopy(passing)
+    s["stars"]["w39_like"]["modes"][0]["status"] = "SATURATED_ISH"
+    problems = gate["validate"](s)
+    assert any("unknown status" in p for p in problems), problems
+
+
+def test_saturated_above_limit_label_must_match_measurement(gate, passing):
+    s = copy.deepcopy(passing)
+    s["stars"]["w39_like"]["modes"][0]["status"] = "SATURATED_ABOVE_LIMIT"
+    # sat_frac is still 0.5, BELOW the limit -> mislabeled
+    problems = gate["validate"](s)
+    assert any("label must come from the measurement" in p
+               for p in problems), problems
+
+
+def test_config_block_drift_fails(gate, passing):
+    s = copy.deepcopy(passing)
+    s["config"]["depth"] = 0.02
+    problems = gate["validate"](s)
+    assert any("does not match the declared experiment" in p
+               for p in problems), problems
 
 
 def test_pixel_grid_mismatch_fails(gate, passing):
@@ -222,13 +283,10 @@ def test_missing_config_value_fails_outside_exact_miri_exception(gate, passing,
 def test_faint_star_group_rounding_is_allowed(gate, passing):
     """At ngroup ~500 a 5-group rounding difference is 1.006%, so a pure 1%
     gate would fail the real, matched artifact."""
-    rel = gate["REQUIRED_PANDEIA_RELEASE"]
-    star = copy.deepcopy(passing["stars"]["w39_like"])
-    star["modes"] = [_ok_row(k)
-                     for k in sorted(gate["REQUIRED_UNSATURATED_MODES"])]
+    s = copy.deepcopy(passing)
+    star = s["stars"]["faint_k"]
     star["modes"][0].update(ngroup_ours=497, ngroup_pandexo=492)   # 1.006%
     star["modes"][1].update(ngroup_ours=195, ngroup_pandexo=193)   # 1.03%
-    s = {"stars": {"faint_k": star}}
     assert not [p for p in gate["validate"](s) if "ngroup" in p]
 
     # a real optimizer divergence still fails
@@ -244,27 +302,66 @@ def test_bright_star_group_difference_of_two_fails(gate, passing):
     assert any("ngroup 20 vs 18" in p for p in problems), problems
 
 
+def test_validate_artifact_rejects_a_forged_passed_bit(gate, passing):
+    """The renderers call validate_artifact(); a hand-edited artifact whose
+    gate block says PASS must still be refused."""
+    s = copy.deepcopy(passing)
+    s["gate"] = gate["gate_block"]([])
+    assert gate["validate_artifact"](s) == []
+
+    broken = copy.deepcopy(s)
+    del broken["stars"]["faint_k"]              # break it, keep "passed": true
+    problems = gate["validate_artifact"](broken)
+    assert any("does not match a fresh validate" in p for p in problems), \
+        problems
+
+
+def test_validate_artifact_rejects_tampered_thresholds(gate, passing):
+    s = copy.deepcopy(passing)
+    s["gate"] = gate["gate_block"]([])
+    s["gate"]["thresholds"]["max_flux_ratio_dev"] = 0.5
+    problems = gate["validate_artifact"](s)
+    assert any("does not match the current gate" in p for p in problems), \
+        problems
+
+
+def test_validate_artifact_requires_a_gate_block(gate, passing):
+    problems = gate["validate_artifact"](copy.deepcopy(passing))
+    assert any("no gate block" in p for p in problems), problems
+
+
+def test_gate_identity_is_single_sourced(gate):
+    """Worker version and supported release come from production code and the
+    deploy pin -- typed once, cross-checked here so they cannot drift."""
+    from jwst_tool import instruments as ins
+    from jwst_tool import noise
+
+    assert gate["PRODUCTION_WORKER_VERSION"] == noise.WORKER_VERSION
+    assert gate["REQUIRED_PANDEIA_RELEASE"] == ins._SUPPORTED_PANDEIA_RELEASE
+    req = (Path(__file__).resolve().parents[2] / "deploy"
+           / "requirements-pandeia.txt").read_text()
+    assert f"pandeia.engine=={ins._SUPPORTED_PANDEIA_RELEASE}" in req, (
+        "deploy/requirements-pandeia.txt does not pin the supported release")
+
+
 def test_committed_artifact_passes_the_gate_on_the_supported_release(gate):
     """The committed artifact must BE a current pass, and stay one.
 
-    validate() on what is committed must come back clean, on the supported
-    release, at the required worker version. A backend bump that lands
-    without a fresh parity run fails here.
+    validate_artifact() on what is committed must come back clean: fresh
+    validation AND the persisted gate block agreeing with today's constants.
+    A backend bump that lands without a fresh parity run fails here.
     """
     import json
 
-    path = (PARITY.parents[1] / "outputs" / "parity_summary.json")
+    path = (SCRIPTS.parents[1] / "parity" / "outputs"
+            / "parity_summary.json")
     if not path.is_file():                              # pragma: no cover
         pytest.skip("committed parity_summary.json not present")
     summary = json.loads(path.read_text())
 
-    problems = gate["validate"](summary)
+    problems = gate["validate_artifact"](summary)
     assert not problems, f"the committed artifact no longer passes: {problems}"
 
-    # ... and it is a pass on the SUPPORTED release, not just any release
-    assert summary["gate"]["passed"] is True
-    assert summary["gate"]["required_pandeia_release"] == \
-        gate["REQUIRED_PANDEIA_RELEASE"]
     # the two sides name the engine field differently ("engine_version" ours,
     # "pandeia_engine_version" PandExo's); both record all three releases
     want = gate["REQUIRED_PANDEIA_RELEASE"]
@@ -279,16 +376,34 @@ def test_committed_artifact_passes_the_gate_on_the_supported_release(gate):
                     f"supported {want}")
 
 
-def test_plots_refuse_a_summary_without_a_passing_gate(plots):
-    with pytest.raises(RuntimeError, match="refusing to put current-release"):
+def test_committed_artifact_has_no_machine_paths(gate):
+    """Provenance identity is names/releases/hashes, never workstation
+    layout: run_parity scrubs absolute paths before writing the summary."""
+    path = (SCRIPTS.parents[1] / "parity" / "outputs"
+            / "parity_summary.json")
+    if not path.is_file():                              # pragma: no cover
+        pytest.skip("committed parity_summary.json not present")
+    text = path.read_text()
+    assert "/Users/" not in text and "/opt/" not in text and \
+        "/home/" not in text, "machine-absolute paths leaked into the artifact"
+
+
+def test_plots_refuse_a_summary_without_a_gate_block(plots):
+    with pytest.raises(RuntimeError, match="no gate block"):
         plots.require_passing_summary({"stars": {}})
+
+
+def test_plots_revalidate_instead_of_trusting_the_passed_bit(plots, gate,
+                                                             passing):
+    s = copy.deepcopy(passing)
+    s["gate"] = gate["gate_block"]([])
+    del s["stars"]["faint_k"]              # break it, keep "passed": true
     with pytest.raises(RuntimeError, match="failed its gate"):
-        plots.require_passing_summary({
-            "gate": {"passed": False, "problems": ["stale"]},
-        })
+        plots.require_passing_summary(s)
 
 
-def test_plots_derive_release_label_from_validated_json(plots):
-    assert plots.require_passing_summary({
-        "gate": {"passed": True, "required_pandeia_release": "2026.7"},
-    }) == "2026.7"
+def test_plots_accept_a_revalidated_pass(plots, gate, passing):
+    s = copy.deepcopy(passing)
+    s["gate"] = gate["gate_block"]([])
+    assert plots.require_passing_summary(s) == \
+        gate["REQUIRED_PANDEIA_RELEASE"]

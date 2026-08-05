@@ -303,7 +303,7 @@ def check_pandeia_backend(python: str | Path = None,
                           psf_dir: str | Path | None = None) -> list[Item]:
     """The ACTIVE backend's three path roots (mirrors the worker preflight)."""
     # an unset backend python is a MISSING item, never a crash: this reports
-    _py = python if python is not None else ins.PICASO_PYTHON
+    _py = python if python is not None else ins.PANDEIA_PYTHON
     python = Path(_py) if _py else None
     refdata = Path(refdata if refdata is not None else ins.PANDEIA_REFDATA)
     psf_dir = (ins.PANDEIA_PSF_DIR if psf_dir is None else psf_dir) or ""
@@ -388,7 +388,7 @@ def probe_pandeia_engine(python: str | Path = None,
     Returns the version string, or an 'unavailable (...)' explanation.
     Never raises -- this is a report, the run path has its own loud gate.
     """
-    _py = python if python is not None else ins.PICASO_PYTHON
+    _py = python if python is not None else ins.PANDEIA_PYTHON
     if not _py:
         return ("unavailable (JWST_TOOL_PANDEIA_PYTHON is not set; the backend "
                 "environment is machine-specific and has no default)")

@@ -62,15 +62,18 @@ def test_refdata_version_prefers_version_file(tmp_path):
     assert (ver, src) == ("2026.2", "VERSION")
 
 
-def test_refdata_version_falls_back_to_psf_then_dirname(tmp_path):
-    # the 3.0rc3 tree ships VERSION_PSF only
-    tree = tmp_path / "pandeia_data-3.0rc3"
+def test_refdata_version_never_reads_a_misplaced_psf_marker(tmp_path):
+    # A VERSION_PSF file names a PSF library, never a data tree: with every
+    # supported backend on the split layout, a misplaced PSF marker must not
+    # authenticate refdata (the retired 3.0-era fallback allowed that). The
+    # dir-name convention still applies.
+    tree = tmp_path / "pandeia_data-2026.7-jwst"
     tree.mkdir()
-    (tree / "VERSION_PSF").write_text("3.0\n\nPSF provenance text\n")
-    assert pw._refdata_version(str(tree)) == ("3.0", "VERSION_PSF")
-    os.remove(tree / "VERSION_PSF")
+    (tree / "VERSION_PSF").write_text("2026.7\n\nPSF provenance text\n")
     ver, src = pw._refdata_version(str(tree))
-    assert (ver, src) == ("3.0rc3", "directory name")
+    assert (ver, src) == ("2026.7-jwst", "directory name")
+    (tree / "VERSION_DATA").write_text("2026.7\n")
+    assert pw._refdata_version(str(tree)) == ("2026.7", "VERSION_DATA")
 
 
 def test_refdata_version_undeterminable(tmp_path):
@@ -214,10 +217,10 @@ def test_no_backend_carries_a_personal_absolute_path():
 
 
 def test_missing_backend_python_gives_one_actionable_error(monkeypatch):
-    monkeypatch.setattr(ins, "PICASO_PYTHON", None)
+    monkeypatch.setattr(ins, "PANDEIA_PYTHON", None)
     with pytest.raises(RuntimeError, match="JWST_TOOL_PANDEIA_PYTHON"):
         ins.require_pandeia_python()
-    monkeypatch.setattr(ins, "PICASO_PYTHON", "/some/env/bin/python")
+    monkeypatch.setattr(ins, "PANDEIA_PYTHON", "/some/env/bin/python")
     assert ins.require_pandeia_python() == "/some/env/bin/python"
 
 
@@ -241,8 +244,6 @@ def _stub_report(sat_frac, wl, flux, noise, n_full, n_part, t_exp=100.0):
 
 def _run_one_mode(wl, flux, noise, n_full, n_part, sat_frac=0.5):
     """Drive `_one_mode` with stub pandeia callables (no engine involved)."""
-    import numpy as np
-
     mode = {"key": "stub", "instrument": "nirspec", "mode": "prism",
             "ngroup_min": 2, "ngroup_max": 10}
     star = {"teff": 5400.0, "log_g": 4.45, "metallicity": 0.0, "ks_mag": 10.0}

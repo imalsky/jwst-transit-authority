@@ -164,18 +164,19 @@ package dependency.
 **The default backend (`current`) is the Pandeia 2026.7 matched triple**
 (`pandeia.engine` 2026.7 + `pandeia_data-2026.7-jwst` +
 `pandeia_psfs-2026.7-jwst`), the STScI-supported release; the worker refuses a
-mismatched triple. **No PandExo parity artifact exists yet for 2026.7**: the
-fail-closed gate in `tests/parity/` marks the committed report NOT EVALUATED,
-so treat 2026.7 output as unvalidated against PandExo until the suite is rerun
-and its report passes the gate.
+mismatched triple. **The committed PandExo parity artifact is a gate-evaluated
+PASS on 2026.7** (`tests/parity/outputs/REPORT.md`, worker v7, both sides on
+the same triple, PandExo master at the pinned commit): a fixed-configuration
+estimator comparison in which configuration, timing, wavelength grids, and
+extracted flux matched, and the remaining sigma difference is the noise model,
+with this tool conservative. The public Space runs this backend.
 
 `JWST_TOOL_BACKEND=archival_2026_2` selects the previous 2026.2 tuple under its
-honest archival name. That is the backend the per-mode PandExo parity was
-measured on (configuration, timing, wavelength grids, and extracted flux
-matched; the sigma difference is the noise model, with this tool conservative),
-and it is what the public Space pins for reproducibility. STScI labels 2026.2
-archival and unsuitable for planning new proposals. See
-[`audit_decisions_2026-07-21.md`](audit_decisions_2026-07-21.md).
+honest archival name, for reproducing older results only. Its own parity
+artifact predates the fail-closed gate and was never gate-evaluated. STScI
+labels 2026.2 archival and unsuitable for planning new proposals. See
+[`audit_decisions_2026-07-21.md`](audit_decisions_2026-07-21.md) (its S2-04
+"stay on 2026.2" decision is superseded by the 2026.7 migration).
 
 The pinned pandeia 3.0 / `pandeia_data-3.0rc3` `legacy` backend was removed.
 Reproducing a pre-2026.2 (3.0-era) run now requires checking out a commit

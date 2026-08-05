@@ -83,7 +83,7 @@ campaign. The committed guidance (raise nz / tighten yconv for final mid-IR
 numbers) is the intended mitigation; weak-MIRI numbers are quoted from the
 high tier, not the default.
 
-### S2-04 -- Pandeia 2026.2 labeled "current" while STScI ships 2026.7  [WORDING FIXED; UPGRADE NOT PLANNED]
+### S2-04 -- Pandeia 2026.2 labeled "current" while STScI ships 2026.7  [WORDING FIXED; UPGRADE NOT PLANNED -- SUPERSEDED 2026-08-04: upgraded to the 2026.7 triple, parity regenerated and gate-PASSED; "current" now IS 2026.7 and 2026.2 is the archival_2026_2 backend]
 
 TRUE. The label was written 2026-07-13 when 2026.2 was the supported release;
 STScI's news page moved to 2026.7 (Cycle 6) on ~2026-07-16 and now lists
@@ -252,8 +252,8 @@ enabled-branch hazards, both verified:
 
 ## Open items (accepted, no committed plan)
 
-- Pandeia 2026.7 tuple upgrade + parity regeneration (S2-04): revisit before
-  real proposal submission.
+- ~~Pandeia 2026.7 tuple upgrade + parity regeneration (S2-04)~~ DONE
+  2026-08-04: upgraded, parity regenerated, gate PASS.
 - MIRI LRS SO2 three-point convergence plateau (S2-03): the high-tier
   guidance stands in for it.
 - LSF column-width division and datacheck dispersion inventory (S2-09):

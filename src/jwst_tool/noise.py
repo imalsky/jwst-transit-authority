@@ -52,6 +52,12 @@ from . import proc as proc_mod
 
 _BACKEND_FINGERPRINT = None
 
+# The production Pandeia-worker version: part of every noise-cache key AND the
+# identity the parity gate (tests/parity/scripts/parity_gate.py) requires of a
+# committed artifact. Bump whenever pandeia_worker.py output changes (history:
+# notes.md); a bump without a fresh parity run fails the gate test.
+WORKER_VERSION = 7
+
 
 def backend_fingerprint() -> dict:
     """Pandeia backend identity baked into every cache key (queried once per
@@ -64,7 +70,7 @@ def backend_fingerprint() -> dict:
     engine = "unavailable"
     # a missing backend keeps the fingerprint "unavailable" (stable cache
     # key); the failure belongs at RUN time, not while building a key
-    py = Path(ins.PICASO_PYTHON) if ins.PICASO_PYTHON else None
+    py = Path(ins.PANDEIA_PYTHON) if ins.PANDEIA_PYTHON else None
     if py is not None and py.exists():
         try:
             r = subprocess.run(
@@ -76,8 +82,11 @@ def backend_fingerprint() -> dict:
         except Exception:
             pass
     refver = []
+    # refdata identifies itself via VERSION/VERSION_DATA; a VERSION_PSF file
+    # inside a refdata tree is a misplaced PSF marker, never a data version
+    # (the retired 3.0-era fallback let one authenticate the tree)
     for root, names in ((Path(ins.PANDEIA_REFDATA),
-                         ("VERSION", "VERSION_DATA", "VERSION_PSF")),
+                         ("VERSION", "VERSION_DATA")),
                         (Path(ins.PANDEIA_PSF_DIR) if ins.PANDEIA_PSF_DIR
                          else None, ("VERSION_PSF",))):
         if root is None:
@@ -122,9 +131,8 @@ def noise_job(star: dict, mode_keys: list[str], sat_limit: float = 0.80) -> dict
     for key in mode_keys:
         m = dict(ins.MODES[key])
         modes.append({
-            # engine_mode() maps the registry's canonical token to the name
-            # the ACTIVE backend accepts (NIRCam ssgrism->lw_tsgrism on 2026
-            # engines). The parity harness relies on the same resolution --
+            # engine_mode() applies any per-backend mode renames (none at
+            # present). The parity harness relies on the same resolution --
             # never a parity-only rename.
             "key": key, "instrument": m["instrument"],
             "mode": ins.engine_mode(m["instrument"], m["mode"]),
@@ -135,8 +143,8 @@ def noise_job(star: dict, mode_keys: list[str], sat_limit: float = 0.80) -> dict
         })
     job_extra = {}
     if ins.PANDEIA_PSF_DIR:
-        # split-layout PSF library: part of the cache key; absent under the
-        # 3.0-era combined layout so existing keys are untouched
+        # split-layout PSF library: part of the cache key (every supported
+        # backend uses the split layout; the worker refuses an empty psf_dir)
         job_extra["psf_dir"] = ins.PANDEIA_PSF_DIR
     return {
         "refdata": ins.PANDEIA_REFDATA, "cdbs": ins.PYSYN_CDBS,
@@ -145,9 +153,7 @@ def noise_job(star: dict, mode_keys: list[str], sat_limit: float = 0.80) -> dict
         "star": {k: float(star[k]) for k in ("teff", "log_g", "metallicity", "ks_mag")},
         "sat_limit": float(sat_limit),
         "modes": modes,
-        # cache-buster: bump whenever pandeia_worker.py output changes
-        # (history: notes.md)
-        "worker_version": 7,
+        "worker_version": WORKER_VERSION,   # cache-buster; see the constant
     }
 
 

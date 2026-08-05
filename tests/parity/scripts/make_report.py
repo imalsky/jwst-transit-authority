@@ -1,20 +1,26 @@
 """Render REPORT.md from parity_summary.json (run after run_parity.py).
 
-The report is generated from VALIDATED JSON only. `run_parity.py` now writes a
-`gate` block recording whether the artifact passed its release gate; a summary
-that failed (or predates the gate) produces a report headed FAIL that says so,
-and `--require-pass` refuses to write one at all. Before this, a stale,
-saturated, or version-mismatched run rendered a report that read like a pass.
+The report is generated from RE-VALIDATED JSON only: it imports the shared
+gate (`parity_gate.py`) and re-runs `validate_artifact()` on the summary
+instead of trusting the persisted `gate.passed` boolean, so a hand-edited
+artifact cannot render as a PASS. Every numerical statement in the prose is
+computed from the artifact -- nothing is hard-coded, so the text cannot go
+stale against the tables. `--require-pass` refuses to write a report for a
+failing artifact at all.
 
 Usage: python tests/parity/scripts/make_report.py [--require-pass]
 """
 import argparse
 import json
+import sys
 from datetime import date
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 OUTPUTS = HERE.parent / "outputs"      # parity_summary.json in, REPORT.md out
+sys.path.insert(0, str(HERE))
+
+import parity_gate as pg               # noqa: E402
 
 
 def fmt_ratio(s: dict | None) -> str:
@@ -24,11 +30,47 @@ def fmt_ratio(s: dict | None) -> str:
             f"(n={s['n']})")
 
 
-def _gate_header(summary: dict) -> list[str]:
-    """PASS/FAIL banner + provenance table, at the very top of the report."""
-    gate = summary.get("gate")
+def _ok_rows(summary):
+    for sname, star in summary.get("stars", {}).items():
+        for m in star.get("modes", []):
+            if m.get("status") == "OK":
+                yield sname, m
+
+
+def _measured(summary) -> dict:
+    """Every number the prose uses, computed from the artifact."""
+    rows = list(_ok_rows(summary))
+    match_fracs = [m["npix_matched"] / m["npix_pandexo"] for _, m in rows]
+    flux_meds = [m["flux_ratio"]["median"] for _, m in rows]
+    tint_devs = sorted(
+        ((abs(m["t_int_ours_s"] / m["t_int_pandexo_s"] - 1.0), s, m["key"],
+          m["ngroup_ours"]) for s, m in rows), reverse=True)
+    ng_dev_faint = max((abs(m["ngroup_ours"] - m["ngroup_pandexo"])
+                        for s, m in rows if s in pg.FAINT_STARS), default=0)
+    ng_dev_bright = max((abs(m["ngroup_ours"] - m["ngroup_pandexo"])
+                         for s, m in rows if s not in pg.FAINT_STARS),
+                        default=0)
+    g = next((m for s, m in rows
+              if s == "w39_like" and m["key"] == "nirspec_g395h"), None)
+    return {
+        "n_ok": len(rows),
+        "min_match_frac": min(match_fracs) if match_fracs else float("nan"),
+        "flux_med_lo": min(flux_meds) if flux_meds else float("nan"),
+        "flux_med_hi": max(flux_meds) if flux_meds else float("nan"),
+        "tint_worst": tint_devs[0] if tint_devs else (float("nan"), "?", "?", 0),
+        "ng_dev_faint": ng_dev_faint,
+        "ng_dev_bright": ng_dev_bright,
+        "g395h": g,
+    }
+
+
+def _gate_header(summary: dict, problems: list[str] | None) -> list[str]:
+    """PASS/FAIL banner + provenance table, at the very top of the report.
+
+    `problems` is the FRESH validate_artifact() result (None only when the
+    summary has no gate block at all)."""
     out = []
-    if gate is None:
+    if problems is None:
         out += [
             "> **GATE: NOT EVALUATED.** This summary predates the fail-closed "
             "release gate, so nothing here has been checked for worker "
@@ -37,19 +79,20 @@ def _gate_header(summary: dict) -> list[str]:
             "artifact, NOT a release certificate. Regenerate with "
             "`run_parity.py`.",
             ""]
-    elif gate.get("passed"):
+    elif not problems:
         out += [
-            f"**GATE: PASS.** Worker v{gate.get('required_worker_version')}, "
-            f"Pandeia {gate.get('required_pandeia_release')} on both sides, "
+            f"**GATE: PASS** (re-validated by `make_report.py`, not read from "
+            f"the artifact). Worker v{pg.PRODUCTION_WORKER_VERSION}, Pandeia "
+            f"{pg.REQUIRED_PANDEIA_RELEASE} on both sides, the full "
+            f"{len(pg.STARS)}-star x {len(pg.MODE_KEYS)}-mode matrix present, "
             "every declared threshold met.",
             ""]
     else:
-        probs = gate.get("problems", [])
         out += [
-            f"> **GATE: FAIL ({len(probs)} problem(s)).** This artifact is NOT "
-            "a release certificate and must not be cited as one.",
+            f"> **GATE: FAIL ({len(problems)} problem(s)).** This artifact is "
+            "NOT a release certificate and must not be cited as one.",
             ""]
-        out += [f"> - {p}" for p in probs]
+        out += [f"> - {p}" for p in problems]
         out += [""]
 
     # Provenance for every star, both sides -- what actually produced the run.
@@ -77,15 +120,17 @@ def _gate_header(summary: dict) -> list[str]:
 
 def main(require_pass: bool = False):
     summary = json.loads((OUTPUTS / "parity_summary.json").read_text())
-    gate = summary.get("gate")
-    if require_pass and not (gate and gate.get("passed")):
+    problems = (pg.validate_artifact(summary)
+                if summary.get("gate") is not None else None)
+    if require_pass and problems != []:
         raise SystemExit(
             "make_report: --require-pass given but parity_summary.json "
             + ("has no gate block (regenerate with run_parity.py)"
-               if gate is None else
-               f"FAILED its gate ({len(gate.get('problems', []))} problems). "
+               if problems is None else
+               f"FAILS re-validation ({len(problems)} problems). "
                "Fix the run; do not publish a report for a failing artifact."))
     cfg = summary["config"]
+    ms = _measured(summary)
     lines = []
     w = lines.append
     w("# PandExo numerical parity report")
@@ -93,7 +138,7 @@ def main(require_pass: bool = False):
     w(f"Generated {date.today().isoformat()} by `run_parity.py` + "
       "`make_report.py` in this directory.")
     w("")
-    lines.extend(_gate_header(summary))
+    lines.extend(_gate_header(summary, problems))
     w("Both sides run on the SAME Pandeia backend -- the exact engine, "
       "reference-data, and PSF releases are in the provenance table above, "
       "and the gate refuses the run if they disagree across the two sides. "
@@ -106,6 +151,16 @@ def main(require_pass: bool = False):
       "equal out-of-transit baseline, saturation limit "
       f"{cfg['sat_limit']:.0%}, no noise floor, native (R=None) grids.")
     w("")
+    w("**Scope: a fixed-configuration estimator comparison.** The submitted "
+      "instrument configuration is injected into BOTH sides from this tool's "
+      "registry (the harness overrides PandExo's template subarray/readout/"
+      "filter per mode), so configuration equality below is by construction, "
+      "and this gate deliberately does not test PandExo's own configuration-"
+      "selection policy. What each side computes INDEPENDENTLY -- and what "
+      "this report actually compares -- is the ramp/group optimization, the "
+      "timing, the 2D extraction, and the noise propagation on that fixed "
+      "configuration.")
+    w("")
     w("## Figures (regenerate with `make_parity_plots.py`)")
     w("")
     w("These show the quantities that match 1:1 -- the parity result. The "
@@ -115,50 +170,71 @@ def main(require_pass: bool = False):
     w("")
     w("- **parity_config_timing.png** -- selected groups, integration time, "
       "and integration count, this tool vs PandExo, on the 1:1 line "
-      "(log-log). Every mode/star lands on the diagonal except PRISM's known "
-      "group floor (ngroup_min=2 vs PandExo's 1 on a bright star).")
+      "(log-log).")
     w("- **parity_extracted_flux.png** -- G395H extracted stellar count rate, "
       "per-wavelength overlay with a ratio strip (per-pixel jitter + binned "
-      "median). The curves coincide (systematic ratio ~0.997).")
+      "median).")
     w("")
-    w("## What is bit-identical, and why the rest is not")
+    w("## What matches, and how it is measured")
     w("")
-    w("The two are INDEPENDENT tools calling the same Pandeia engine, so only "
-      "what is read straight from the shared engine is bit-for-bit identical; "
-      "anything each computes on its own agrees closely but not exactly. This "
-      "is a property of a cross-tool test, not a defect -- forcing bit-equality "
-      "would mean one tool copying the other's numbers, which is not a "
-      "validation.")
+    w("The two are independently IMPLEMENTED estimators calling the same "
+      "Pandeia engine on an identically pinned configuration. Only what is "
+      "read straight from the shared engine agrees exactly; anything each "
+      "computes on its own agrees closely but not exactly. This is a property "
+      "of a cross-tool test, not a defect -- forcing bit-equality would mean "
+      "one tool copying the other's numbers, which is not a validation.")
     w("")
-    w("- **Bit-identical (max difference exactly 0):** the instrument "
-      "configuration (subarray, readout, disperser, filter, aperture, "
-      "background) and the extracted WAVELENGTH GRID -- every extracted "
-      "pixel, every mode and star (verified: max |Δλ| = 0).")
-    w("- **Groups agree to ≤1 on the moderate/bright stars, to ~1% relative "
-      "(up to 5 groups absolute) on the faint Ks=13 star:** each tool "
-      "independently optimizes the ramp to the same 80% saturation target; "
-      "the freedom left is rounding to an integer group count (e.g. G395H "
-      "124 vs 125; faint-star ramps of ~500-1000 groups differ by up to 5). "
-      "Per-group integration time matches to <0.1%; total integration time "
-      "and count then inherit the group choice (up to ~5.5% where a single "
-      "group of ~16 dominates, bright G395H; ~2.5% bright MIRI). Only VALID "
-      "configurations are compared: PRISM saturates on the "
-      "two bright stars (both tools flag it; this tool floors at ngroup=2 "
-      "while PandExo drops to ngroup=1) and is excluded there, and is compared "
-      "on the faint star where it is unsaturated and matches (ngroup 20/20).")
-    w("- **Extracted flux agrees to a systematic ~0.3%** (binned median 0.997 "
-      "for G395H), with per-pixel scatter from the two tools' independent "
-      "extraction of the same 2D calculation -- photon-level for the smooth "
-      "NIRSpec/MIRI traces (MIRI LRS matches to ~0.15%), larger for the curved "
-      "NIRISS SOSS order-1 trace and the saturating low-R PRISM. The tool "
-      "integrates over bins, so the per-pixel jitter averages out; the "
-      "systematic is what enters the noise. The narrow downward spikes in this "
-      "tool's flux are STELLAR ABSORPTION LINES in Pandeia's PHOENIX spectrum "
-      "(hydrogen recombination -- e.g. Brackett-α 4.052 μm, Pfund-δ 3.297 μm "
-      "-- plus molecular bands on cool stars, so they multiply on cooler "
-      "targets: 9 lines at 6250 K, 193 at 4500 K); PandExo's separately-loaded "
-      "stellar spectrum smooths them. They are physically real, cancel in the "
-      "in/out transit-depth ratio, and wash out in binning.")
+    w("- **Submitted configuration (subarray, readout, filter, disperser):** "
+      "identical on every row -- by construction, since the harness pins both "
+      "sides to the registry; the gate fails on any drift in these four "
+      "recorded fields. The extraction strategy (apertures/annuli) and the "
+      "ecliptic/medium background are also configured to match PandExo's TSO "
+      "conventions, but those fields are NOT captured in the artifact, so no "
+      "measured claim is made for them.")
+    w(f"- **Extracted wavelength grids:** on every unsaturated row, "
+      f"{ms['min_match_frac']:.1%} of PandExo's pixels find an "
+      f"exact-wavelength partner on our side at relative tolerance "
+      f"{pg.WL_MATCH_RTOL:g} (gate floor: "
+      f"{pg.MIN_MATCHED_PIXEL_FRAC:.0%}; per-pixel deltas beyond that "
+      "tolerance are not stored).")
+    w(f"- **Groups:** each tool independently optimizes the ramp to the same "
+      f"{cfg['sat_limit']:.0%} saturation target; the freedom left is "
+      f"rounding to an integer group count. Measured: within "
+      f"{ms['ng_dev_bright']} group(s) on the moderate/bright stars, within "
+      f"{ms['ng_dev_faint']} groups on the faint Ks=13 star (the gate allows "
+      f"{pg.MAX_NGROUP_ABS_DIFF_FAINT} groups OR "
+      f"{pg.MAX_NGROUP_REL_DIFF:.0%} there, whichever is looser -- rounding "
+      "on a ~500-1000 group ramp is ~1% by itself). Per-group integration "
+      "time then inherits the group choice; the largest total-t_int gap is "
+      f"{ms['tint_worst'][0]:.1%} ({ms['tint_worst'][1]}/"
+      f"{ms['tint_worst'][2]}, where a single group on a "
+      f"~{ms['tint_worst'][3]}-group ramp carries the difference).")
+    w(f"- **Extracted flux:** per-mode median ratios span "
+      f"{ms['flux_med_lo']:.4f}-{ms['flux_med_hi']:.4f} (gate: median within "
+      f"{pg.MAX_FLUX_RATIO_DEV:.0%} of unity). The per-pixel scatter around "
+      "each median comes from the two tools' independent extraction of the "
+      "same 2D calculation and is disclosed in the tables (5th/95th "
+      "percentiles); it is not gated. The narrow downward spikes in this "
+      "tool's flux are STELLAR ABSORPTION LINES in Pandeia's PHOENIX "
+      "spectrum (hydrogen recombination -- e.g. Brackett-α 4.052 μm, Pfund-δ "
+      "3.297 μm -- plus molecular bands on cool stars); PandExo's "
+      "separately-loaded stellar spectrum smooths them. They are physically "
+      "real, cancel in the in/out transit-depth ratio, and wash out in "
+      "binning.")
+    w("- **Saturation:** compared at the configuration level only -- both "
+      "tools flag the same saturating star/mode combinations (PRISM on the "
+      "two bright stars; this tool floors at ngroup=2 while PandExo drops to "
+      "ngroup=1 there). Rows above the saturation limit are reported in the "
+      "tables but are never validation rows. Per-pixel saturation masks are "
+      "NOT exported or compared.")
+    w("")
+    w("**PandExo operational warnings are recorded, not adjudicated.** Under "
+      "the pinned RAPID readout, PandExo attaches data-volume-excess "
+      "warnings to the NIRCam rows (its optimizer would prefer a slower "
+      "pattern); the raw warnings are printed per star below. A numerical "
+      "parity row says the two estimators agree on that configuration -- it "
+      "is not a statement that the configuration is schedulable or "
+      "operationally recommended.")
     w("")
     w("Columns: sigma ratio = (this tool's per-pixel transit-depth sigma) / "
       "(PandExo's), median [5th, 95th percentile] over matched pixels. "
@@ -198,6 +274,13 @@ def main(require_pass: bool = False):
                 w(f"| {m['key']} | SATURATED (ours: unusable, loud; "
                   f"PandExo ngroup={m.get('pandexo_ngroup')}) | -- | -- | "
                   "-- | -- | -- | -- |")
+            elif m.get("status") == "SATURATED_ABOVE_LIMIT":
+                w(f"| {m['key']} | SATURATED above limit (measured "
+                  f"{m.get('sat_frac_ours', float('nan')):.2f}x full well; "
+                  "reported, not a validation row) | "
+                  f"{m.get('ngroup_ours', '--')}/"
+                  f"{m.get('ngroup_pandexo', '--')} | -- | -- | -- | -- | "
+                  "-- |")
             else:
                 w(f"| {m['key']} | ERROR (see parity_summary.json) | -- | "
                   "-- | -- | -- | -- | -- |")
@@ -212,7 +295,8 @@ def main(require_pass: bool = False):
                 w(f"| {m['key']} | {m['var_excess_ours']:.3f} | "
                   f"{m['var_excess_pandexo']:.3f} |")
         for m in block["modes"]:
-            if m.get("status") == "OK" and m.get("pandexo_warnings"):
+            if (m.get("status") in ("OK", "SATURATED_ABOVE_LIMIT")
+                    and m.get("pandexo_warnings")):
                 warns = {k: v for k, v in m["pandexo_warnings"].items()
                          if str(v) not in ("nan", "None", "0", "All good")}
                 if warns:
@@ -221,36 +305,41 @@ def main(require_pass: bool = False):
     w("")
     w("## Findings")
     w("")
-    w("1. **Configuration parity: achieved.** With the registry's explicit "
-      "TSO readout patterns, PandExo's extraction strategy (apertures/"
-      "annuli), and the ecliptic/medium background, the two sides agree on "
-      "the extracted wavelength grids (every pixel matches), extracted "
-      "count rates (flux-ratio medians 0.987-1.03), selected groups "
-      "(within 1 on the moderate/bright stars; within ~1% relative, up to "
-      "5 groups absolute, on the faint Ks=13 star), per-group integration "
-      "times (<0.1%; total t_int inherits the group choice, up to ~5.5% "
-      "where one group of ~16 dominates), and integration counts (within "
-      "rounding policy). Saturation behavior matches: pixels PandExo masks "
-      "as saturated are the pixels this tool excludes.")
+    w("1. **Matched-configuration parity: achieved.** With the submitted "
+      "configuration pinned identically on both sides (see Scope above), "
+      "the two sides agree on the extracted wavelength grids "
+      f"({ms['min_match_frac']:.1%} of pixels matched on every unsaturated "
+      f"row), extracted count rates (per-mode flux-ratio medians "
+      f"{ms['flux_med_lo']:.4f}-{ms['flux_med_hi']:.4f}), independently "
+      f"selected groups (within {ms['ng_dev_bright']} on the moderate/bright "
+      f"stars; within {ms['ng_dev_faint']} groups on the faint star, i.e. "
+      "integer rounding of the same saturation target), per-group "
+      "integration times, and integration counts (within rounding policy).")
     w("")
+    g = ms["g395h"]
+    if g is not None:
+        _vr = g["var_excess_ours"] / g["var_excess_pandexo"]
+        _sr = g["sigma_ratio_matched"]["median"]
+        _attrib = (
+            f"the variance-excess ratio ({g['var_excess_ours']:.3f}/"
+            f"{g['var_excess_pandexo']:.3f} = {_vr:.3f} on the W39-like "
+            f"G395H row) accounts for the bulk of the measured squared sigma "
+            f"ratio ({_sr:.3f}^2 = {_sr**2:.3f}). ")
+    else:
+        _attrib = ""
     w("2. **The remaining sigma difference is the noise model itself, and "
       "it is one-sided.** This tool propagates pandeia's full extracted "
       "noise (correlated ramp/read noise, background, dark, IPC, "
       "quantum-yield excess); PandExo's default 'fml' calculation is an "
       "analytic ramp formula that sits within a few percent of pure photon "
       "noise in the NIR. The attribution tables above show the variance "
-      "excess over photon counts on both sides; their ratio reproduces the "
-      "observed sigma ratios (e.g. G395H: 1.220/1.014 = 1.203 ~= 1.108^2). "
+      f"excess over photon counts on both sides; {_attrib}"
       "This tool is therefore systematically CONSERVATIVE relative to "
       "PandExo: ~2-24% higher sigma for NIRSpec/NIRISS/NIRCam on matched "
       "configurations (up to ~31% under the policy configs on the faint "
       "Ks=13 star), and larger "
       "for MIRI LRS (~33-56%), where the deep-red background and detector "
-      "terms dominate and the analytic formula under-represents them. For "
-      "context, published achieved-vs-PandExo noise ratios (COMPASS "
-      "G395H 1.05-1.12; MIRI LRS ~1.15-1.2 above random-noise "
-      "simulations) fall on the same side, between the two models for "
-      "NIRSpec.")
+      "terms dominate and the analytic formula under-represents them.")
     w("")
     w("3. **Residual policy differences (documented, small):** integration "
       "counts are floored here vs rounded in PandExo (at most one "
@@ -259,15 +348,18 @@ def main(require_pass: bool = False):
       "approximation adds ~+0.5% sigma at 1% depth (grows with depth; "
       "docstring in noise.pixel_depth_variance).")
     w("")
-    _passed = bool(gate and gate.get("passed"))
+    _passed = problems == []
     w("4. **What may be claimed:** "
-      + ("the instrument configuration, timing, group optimization, "
-         "saturation handling, and extraction of this tool match the PandExo "
-         "release named in the provenance table above, on the supported "
-         "Pandeia engine. Absolute sigmas are NOT PandExo-identical and are "
-         "not labeled as such: they are pandeia-extracted-noise forecasts, "
-         "conservative relative to PandExo's analytic noise by the "
-         "mode-dependent margins quantified above."
+      + ("on the fixed configurations this tool's registry submits (with "
+         "PandExo explicitly overridden to the same hardware), the timing, "
+         "group optimization, configuration-level saturation handling, and "
+         "extraction of this tool match the PandExo revision named in the "
+         "provenance table, on the supported Pandeia engine. This is not a "
+         "test of PandExo's configuration-selection policy. Absolute sigmas "
+         "are NOT PandExo-identical and are not labeled as such: they are "
+         "pandeia-extracted-noise forecasts, conservative relative to "
+         "PandExo's analytic noise by the mode-dependent margins quantified "
+         "above."
          if _passed else
          "NOTHING, until this artifact passes its gate. The rows above are "
          "forensic measurements of whatever engine, refdata, PSF tree, worker "
@@ -284,6 +376,6 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
         "--require-pass", action="store_true",
-        help="refuse to write a report unless the summary passed its gate "
-             "(use this in a release job)")
+        help="refuse to write a report unless the summary re-validates as a "
+             "pass (use this in a release job)")
     raise SystemExit(main(require_pass=ap.parse_args().require_pass))

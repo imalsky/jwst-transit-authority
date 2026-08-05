@@ -267,10 +267,14 @@ def _release(version):
 
 
 def _refdata_version(refdata):
-    """Best-available refdata version: VERSION, VERSION_DATA, or VERSION_PSF
-    first line, else the pandeia_data-<ver> directory name.
-    Returns (version|None, source)."""
-    for name in ("VERSION", "VERSION_DATA", "VERSION_PSF"):
+    """Best-available refdata version: VERSION or VERSION_DATA first line,
+    else the pandeia_data-<ver> directory name. Returns (version|None, source).
+
+    A VERSION_PSF file is deliberately NOT accepted here: it names a PSF
+    library, and with every supported backend on the split layout a misplaced
+    PSF marker must not authenticate a data tree (the retired 3.0-era
+    fallback allowed exactly that)."""
+    for name in ("VERSION", "VERSION_DATA"):
         p = os.path.join(refdata, name)
         if os.path.isfile(p):
             with open(p) as f:
@@ -280,7 +284,7 @@ def _refdata_version(refdata):
     base = os.path.basename(os.path.normpath(refdata))
     if base.startswith("pandeia_data-"):
         return base[len("pandeia_data-"):], "directory name"
-    return None, "no VERSION/VERSION_PSF file or pandeia_data-<ver> dir name"
+    return None, "no VERSION/VERSION_DATA file or pandeia_data-<ver> dir name"
 
 
 def _psf_version(psf_dir):
@@ -303,9 +307,10 @@ def _check_backend_match(engine_version, refdata, psf_dir=None):
     calculation: engine release == refdata release == PSF-library release.
 
     A mismatched pair runs with wrong calibrations; the PSF library is the
-    same hazard, so its RELEASE is checked, not just existence.
-    `psf_dir=None`/"" means the backend carries its PSFs inside the refdata
-    tree (3.0-era layout) -- the only case with nothing separate to match.
+    same hazard, so its RELEASE is checked, not just existence. Every
+    supported backend uses the split-PSF layout, so an empty ``psf_dir`` is
+    always refused (the embedded 3.0-era layout retired with the legacy
+    backend).
 
     Returns the provenance fields; raises RuntimeError naming the offending
     component on any mismatch or undeterminable version.

@@ -111,13 +111,13 @@ noise `worker_version`, engine/refdata fingerprints are all in the keys).
 
 ## Known limitations of this deployment
 
-- **No run queue yet.** Each browser session can launch a forward run
-  (minutes of CPU); nothing caps concurrent runs. Fine for a handful of
-  invited users; a semaphore in `app.py` is the first thing to add before
-  widening access.
-- **"legacy" Pandeia 3.0 backend is not in the image** (it needs the
-  separate pinned env + an external refdata tree). `JWST_TOOL_BACKEND` is
-  fixed to `current`.
+- **Concurrent heavy runs are capped at 2** (`runlimit.MAX_CONCURRENT`):
+  excess runs are declined with a message rather than queued. Fine for a
+  handful of invited users; a real queue is the next step before widening
+  access.
+- **The Pandeia 3.0 "legacy" backend was removed from the product**
+  (0.22.0); the image ships `current` (2026.7) with `archival_2026_2`
+  selectable via `JWST_TOOL_BACKEND` when its data trees are present.
 - The env-gated slow FD-closure test and the pytest suite have not been run
   inside the image; the suite (`python -m pytest tests -q`, numpy-only,
   fast) can be run in the container as an extra check:

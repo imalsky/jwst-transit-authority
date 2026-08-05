@@ -55,21 +55,34 @@ def _pandexo_commit(pandexo_dir):
     Two sources, in order of authority:
 
     1. pip's own record of a `pip install git+...` -- ``direct_url.json`` in
-       the dist-info -- which names the commit pip actually resolved.
-    2. a real git checkout, but ONLY when the discovered work tree actually
-       contains this package.
+       the dist-info -- accepted only when the imported package lives under
+       that distribution's install root (a shadowed second install must not
+       pair one package's code with another's commit) and the recorded value
+       is a full 40-hex commit.
+    2. a real git checkout, accepted only when the IMPORTED package file is
+       TRACKED by that repository and the repository ships PandExo's engine
+       (``engine/justdoit.py``).
 
-    That containment check is load-bearing. `git rev-parse` walks UP from its
-    -C directory, so for a pip-installed package under site-packages it finds
-    whatever repository happens to enclose the environment and reports ITS
-    head. Measured 2026-08-04: a conda env under /opt/homebrew returned
-    Homebrew's own HEAD as "the PandExo commit". This function is supposed to
-    fail closed by returning None; instead it silently attributed an unrelated
-    repository's commit, and on a machine where that commit happened to match
-    the gate would have PASSED having verified nothing.
+    The tracking proof is load-bearing. `git rev-parse` walks UP from its
+    -C directory, so for a pip-installed package it finds whatever repository
+    happens to enclose the environment and reports ITS head: measured
+    2026-08-04, a conda env under /opt/homebrew returned Homebrew's own HEAD
+    as "the PandExo commit", and any enclosing Python repo passed the old
+    ancestor/marker checks. `git ls-files --error-unmatch` on the imported
+    ``__init__.py`` cannot be satisfied by an enclosing repository that does
+    not actually version this package. Worktrees are fine (no `.git`-is-a-dir
+    requirement); everything unattributable returns None, and the gate then
+    fails loudly on the missing commit.
     """
     import json
     import subprocess
+
+    def _git(*args):
+        return subprocess.run(["git", "-C", pandexo_dir, *args],
+                              capture_output=True, text=True, timeout=10)
+
+    def _is_commit(s):
+        return len(s) == 40 and all(c in "0123456789abcdef" for c in s.lower())
 
     # 1. pip's record of the resolved commit (authoritative, no git needed)
     try:
@@ -77,37 +90,27 @@ def _pandexo_commit(pandexo_dir):
         dist = distribution("pandexo.engine")
         raw = dist.read_text("direct_url.json")
         if raw:
-            commit = (json.loads(raw).get("vcs_info") or {}).get("commit_id")
-            if commit:
-                return str(commit)
+            commit = str((json.loads(raw).get("vcs_info") or {})
+                         .get("commit_id") or "")
+            root = os.path.realpath(str(dist.locate_file("")))
+            pkg = os.path.realpath(pandexo_dir)
+            if (_is_commit(commit)
+                    and (pkg == root or pkg.startswith(root + os.sep))):
+                return commit
     except Exception:
         pass
 
-    # 2. a genuine checkout of THIS package
+    # 2. a genuine checkout that versions THIS package
     try:
-        top = subprocess.run(
-            ["git", "-C", pandexo_dir, "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=10)
-        if top.returncode != 0:
+        tracked = _git("ls-files", "--error-unmatch", "__init__.py")
+        engine = _git("ls-files", "--error-unmatch", "engine/justdoit.py")
+        if tracked.returncode != 0 or engine.returncode != 0:
             return None
-        root = os.path.realpath(top.stdout.strip())
-        pkg = os.path.realpath(pandexo_dir)
-        if not (pkg == root or pkg.startswith(root + os.sep)):
-            return None                     # unrelated enclosing repository
-        if not os.path.isdir(os.path.join(root, ".git")):
-            return None
-        # the work tree must really be PandExo, not a parent that contains it
-        if not any(os.path.exists(os.path.join(root, n))
-                   for n in ("pandexo", "setup.py", "pyproject.toml")):
-            return None
-        r = subprocess.run(["git", "-C", pandexo_dir, "rev-parse", "HEAD"],
-                           capture_output=True, text=True, timeout=10)
+        r = _git("rev-parse", "HEAD")
         head = r.stdout.strip()
-        if r.returncode != 0 or not head:
+        if r.returncode != 0 or not _is_commit(head):
             return None
-        dirty = subprocess.run(
-            ["git", "-C", pandexo_dir, "status", "--porcelain"],
-            capture_output=True, text=True, timeout=10).stdout.strip()
+        dirty = _git("status", "--porcelain").stdout.strip()
         return head + ("-dirty" if dirty else "")
     except Exception:
         return None

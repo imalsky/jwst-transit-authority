@@ -112,3 +112,44 @@ def test_missing_uploaded_tp_table_is_a_loud_error():
         tp_file_sha1="0000000000000000")}
     with pytest.raises(ValueError, match="upload the table again"):
         share_config.widget_state(cfg, _key)
+
+
+def test_unsupported_format_version_is_refused():
+    share = share_config.build_share(_canon(), goal={}, observation={})
+    share["jwst_tool_config"] = 999
+    with pytest.raises(ValueError, match="format 999"):
+        share_config.widget_state(share, _key)
+    # the marker this tool writes is the one it reads
+    assert share_config.build_share(_canon(), {}, {})["jwst_tool_config"] \
+        == share_config.SHARE_FORMAT
+
+
+def test_invalid_embedded_tp_table_leaves_no_file_behind():
+    """All-or-nothing includes the filesystem: a config that fails
+    validation must not deposit its embedded table in the uploads archive."""
+    up = forward._uploads_dir()
+    before = set(up.glob("*")) if up.exists() else set()
+    cfg = {"canonical_params": dict(planet="wasp39b", tp_mode="file",
+                                    tp_file=forward.TP_FILE_UPLOAD),
+           "tp_table_text": "this is not a T-P table\n"}
+    with pytest.raises((ValueError, RuntimeError)):
+        share_config.widget_state(cfg, _key)
+    after = set(up.glob("*")) if up.exists() else set()
+    assert after == before, "invalid config left files in the uploads archive"
+
+
+def test_valid_embedded_tp_table_is_archived_and_restored(tmp_path):
+    from pathlib import Path
+
+    text = forward._shipped_tp_file("wasp39b").read_text()
+    src = tmp_path / "table.txt"
+    src.write_text(text)
+    canon = forward.canonical_params(dict(
+        planet="wasp39b", tp_mode="file", tp_file=forward.TP_FILE_UPLOAD,
+        tp_file_path=str(src)))
+    cfg = {"canonical_params": canon, "tp_table_text": text}
+    state, _notes = share_config.widget_state(cfg, _key)
+    p = Path(state["restored_tp_path"])
+    assert p.parent == forward._uploads_dir()
+    assert p.suffix == ".txt" and p.exists()
+    assert p.read_text() == text

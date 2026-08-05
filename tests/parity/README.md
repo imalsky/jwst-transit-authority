@@ -6,7 +6,9 @@ directory is that gate, organized as:
 
 ```
 tests/parity/
-  scripts/   run_parity.py, pandexo_worker.py, make_report.py, make_parity_plots.py
+  scripts/   run_parity.py, pandexo_worker.py, parity_gate.py (the shared
+             gate: experiment declaration + validate), make_report.py,
+             make_parity_plots.py
   outputs/   parity_summary.json + REPORT.md (committed); raw run JSON (git-ignored)
   figs/      parity_config_timing.png, parity_extracted_flux.png (committed)
 ```
@@ -24,7 +26,9 @@ through
 both on the SAME engine/refdata/PSF release (the gate requires the supported
 2026.7 triple on both sides and records all three). Differences are
 therefore estimator and policy differences, never engine calibration
-differences. The tool's default pinned 3.0 backend is untouched.
+differences. This is a FIXED-CONFIGURATION comparison: the harness overrides
+PandExo's templates to this tool's registry hardware, so it does not test
+PandExo's own configuration-selection policy.
 
 Per mode it compares: detector configuration (subarray, readout pattern,
 filter, disperser), the extracted wavelength grid, selected group count,
@@ -62,8 +66,11 @@ python tests/parity/scripts/make_report.py
 python tests/parity/scripts/make_parity_plots.py
 ```
 
-The plotting command refuses a summary without a passing gate, so an archival
-or failed run cannot be regenerated with current-release labels.
+Both renderers re-run the shared gate (`scripts/parity_gate.py`) on the
+summary instead of trusting its persisted `gate.passed` boolean, so an
+archival, failed, or hand-edited run cannot be rendered with current-release
+labels. The same module backs `tests/unit/test_parity_gate.py`, which also
+requires the COMMITTED artifact to re-validate as a pass.
 
 All five environment variables are required and fail loudly; no machine
 paths are baked into the repository. `JWST_TOOL_OUTPUT_DIR` is only the

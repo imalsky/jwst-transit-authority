@@ -20,10 +20,15 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 STAGE = Path(os.environ.get("STAGE_DIR", Path.home() / "Desktop" / "hf_data_stage"))
+# Pandeia markers are the load-bearing VERSION FILES, not directories: an
+# empty or truncated tree must not count as staged. The "current" backend
+# needs the 2026.7 pair; the 2026.2 pair keeps archival_2026_2 selectable.
 STAGE_MARKERS = [
     STAGE / "jwst-data" / "cdbs" / "grid" / "phoenix" / "catalog.fits",
-    STAGE / "jwst-data" / "pandeia_data-2026.2-jwst",
-    STAGE / "jwst-data" / "pandeia_psfs-2026.2-jwst",
+    STAGE / "jwst-data" / "pandeia_data-2026.7-jwst" / "VERSION_DATA",
+    STAGE / "jwst-data" / "pandeia_psfs-2026.7-jwst" / "VERSION_PSF",
+    STAGE / "jwst-data" / "pandeia_data-2026.2-jwst" / "VERSION_DATA",
+    STAGE / "jwst-data" / "pandeia_psfs-2026.2-jwst" / "VERSION_PSF",
     STAGE / "retrieval-data" / "cm24_wasp39b",
     STAGE / "retrieval-data" / "exojax_linelists",
     STAGE / "retrieval-data" / "opacity_cache",

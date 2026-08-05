@@ -171,8 +171,10 @@ of unchanged code).
 
 ## Known limitations
 
-- Same as the VM deployment: no concurrent-run queue yet; the "legacy"
-  Pandeia 3.0 backend is not deployed.
-- The image has never been built (no Docker on the Mac) -- the first Space
-  build is the real test; read the Build logs on failure.
+- Same as the VM deployment: concurrent heavy runs are capped at 2
+  (`runlimit.MAX_CONCURRENT`, declined not queued); the Pandeia 3.0
+  "legacy" backend was removed from the product in 0.22.0.
+- The image builds ONLY on the Space (no Docker on the Mac): every rebuild
+  is exercised live -- read the Build logs on failure. The Space has been
+  built and running publicly since 2026-07-20 (on 2026.7 since 2026-08-04).
 - Sleep wake-up takes 1-3 min before the GUI responds.
