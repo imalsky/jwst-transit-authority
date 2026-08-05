@@ -16,8 +16,11 @@ result only through a recorded explicit choice. The floor uses PandExo
 semantics (sigma_final = max(sigma_random, floor) on the final bins), so a
 15-40 ppm floor DOMINATES any well-observed target, while zero claims a
 precision nobody has demonstrated -- neither is a neutral default, so the tool
-refuses to pick one. The numbers follow the Greene et al. 2016 planning
-convention; no value here is a measured end-to-end floor.
+refuses to pick one. The values are per-mode planning suggestions INFORMED BY
+the Greene et al. 2016 convention (20/30/50 ppm for NIRISS/NIRCam/MIRI), not
+that convention verbatim (here: NIRSpec 15-20, NIRISS 20, NIRCam 25, MIRI 40);
+no value here is a measured end-to-end floor. Any caption describing the
+prefills must describe THESE values, not Greene's.
 
 Noise sensitivity factor (``noise_infl``): optional multiplier on the Pandeia
 random sigma, DEFAULT 1.0 for every mode. Published achieved-vs-predicted
@@ -217,6 +220,23 @@ PANDEXO_UNBOUNDED_NGROUP = 65535
 # readout_pattern is pinned EXPLICITLY on every mode (NRSRAPID/NISRAPID/RAPID/
 # FASTR1, PandExo's TSO choices): engine defaults are non-TSO patterns and
 # drift between releases. Never leave readout_pattern implicit on a new mode.
+#
+# SCOPE (deliberate, reviewers keep re-finding it): each entry is ONE fixed
+# detector configuration (subarray + readout pattern), not the whole
+# instrument mode. The tool ranks these fixed configurations; it does NOT
+# search alternate subarrays (PRISM multistripe, other SOSS substrips) or
+# optimize the readout pattern. The GUI says so and shows each mode's
+# configuration in the details table.
+#
+# ngroup_min is a TOOL POLICY bound, not the physical minimum ramp: STScI
+# permits 1-group NRSRAPID (NIRSpec BOTS) and 1-group NISRAPID (SOSS, with a
+# calibration warning), and MIRI FASTR1 ramps below 5 groups with warnings or
+# limited access. The worker never tries ramps below ngroup_min, so a very
+# bright target can be reported "saturated at the shortest ramp" where
+# PandExo would drop to 1 group and pass (documented policy delta:
+# tests/parity/outputs/REPORT.md, "Residual policy differences"). Searching
+# the full permitted ramp space and classifying warning/limited-access
+# configurations is recorded as an open change, not an oversight.
 MODES = {
     "nirspec_prism": dict(
         label="NIRSpec PRISM",

@@ -10,7 +10,7 @@ Two faces:
 
 Every planet in ``planets.PLANETS`` (plus "custom") runs the same
 W39b-validated SNCHO machinery -- one shared code path, not per-planet
-validation (see docs/audit_decisions_2026-07-21.md). The planet identity
+validation (see docs/decision_records.md). The planet identity
 enters via cfg_overrides (chemistry) and profile rp_cm/gs_cgs/rstar_cm (RT).
 A GCM profile is never silently substituted.
 
@@ -87,6 +87,14 @@ MOLECULES = ["H2O", "CO2", "CO", "CH4", "SO2"]   # always-on WIDE-profile set
 EXTRA_MOLECULES = ["C2H2", "C2H4", "C2H6", "CS2", "H2S", "HCN", "NH3", "OCS"]
 _VERSION = 25  # model_cache buster: bump whenever the physics or the canonical
                # key set changes. Per-version history lives in notes.md.
+               # DELIBERATE (reviews keep re-finding it): the cache identity
+               # is canonical params + this hand-bumped version, NOT content
+               # hashes or commit pins of vulcan-forward/vulcan-jax/exojax or
+               # the line lists. That trade (maintainer discipline over
+               # content addressing, for a single-maintainer research tool)
+               # is recorded as S2-05 in docs/decision_records.md;
+               # the PICASO subsystem is the exception and DOES fingerprint
+               # its reference tables.
 
 # Baseline C/O of the shipped network: the number ratio N_C/N_O (not
 # [C/H]/[O/H], not a log). Basis is the W39b cfg's elemental set
@@ -658,7 +666,7 @@ def canonical_params(params: dict) -> dict:
             "its T(P) comes from the Guillot profile or the climate solve. "
             "Use tp_mode='guillot' or 'picaso_climate', or "
             "chem_provider='vulcan' for tabulated profiles "
-            "(docs/picaso_roadmap.md).")
+            "(docs/physics_and_conventions.md, PICASO section).")
     # tp_mode="file": resolve + validate the table NOW (numpy parse + content
     # hash, no engine imports) so a bad upload fails at the API and the cache
     # key is content-addressed, never path-addressed. tp_table is reused by
@@ -901,7 +909,7 @@ def canonical_params(params: dict) -> dict:
                 "the PICASO equilibrium tables are numpy/numba, not "
                 "differentiable. Use jac_method='fd' -- the composition rows "
                 "are symmetric two-cell interpolant secants with a one-sided "
-                "kink gate (see docs/picaso_roadmap.md).")
+                "kink gate (see docs/physics_and_conventions.md, PICASO section).")
         if cp["use_condense"]:
             raise ValueError(
                 "use_condense is a VULCAN kinetics feature (the certified S8 "
@@ -920,7 +928,7 @@ def canonical_params(params: dict) -> dict:
                 "lnKzz has no effect in equilibrium chemistry (no transport), "
                 "so a Fisher row for it would be identically zero. The "
                 "quench-approximation lnKzz row is a deferred feature -- see "
-                "docs/picaso_roadmap.md. Drop lnKzz from fisher_params.")
+                "docs/physics_and_conventions.md, PICASO section. Drop lnKzz from fisher_params.")
         for _knob, _label in (("use_photo", "photochemistry"),
                               ("use_moldiff", "molecular diffusion"),
                               ("use_vm_mol", "upwind molecular-diffusion "
@@ -936,7 +944,7 @@ def canonical_params(params: dict) -> dict:
             raise ValueError(
                 f"kzz_mode={params['kzz_mode']!r} requests a mixing profile, "
                 "which equilibrium chemistry cannot consume (no transport; "
-                "the quench machinery is deferred -- docs/picaso_roadmap.md). "
+                "the quench machinery is deferred -- docs/physics_and_conventions.md, PICASO section). "
                 "Leave kzz_mode unset or 'const'.")
         cp["kzz_mode"] = "const"
         cp["kzz_x"] = 1.0

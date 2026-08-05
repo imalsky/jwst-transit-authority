@@ -103,6 +103,25 @@ def _has_floor(r: dict) -> bool:
     return bool(np.any(np.asarray(r["floor"]) > 0.0))
 
 
+def _mode_cfg(mode_key: str) -> str:
+    """The exact fixed detector configuration (subarray/readout) a registry
+    mode evaluates -- shown next to headline labels so a "mode" is never
+    mistaken for the whole instrument mode (2026-08-05 review)."""
+    det = ins.MODES[mode_key]["config"].get("detector", {})
+    return f"{det.get('subarray', '?')}/{det.get('readout_pattern', '?')}"
+
+
+def _op_status(r: dict) -> str:
+    """Honest operational-status cell for the mode table: this tool checks
+    saturation and relays Pandeia warnings, and checks nothing else -- every
+    usable row still needs APT verification."""
+    if r["saturated"]:
+        return "saturated at the shortest ramp tried"
+    if r["warnings"]:
+        return "warnings (see notes); verify in APT"
+    return "verify in APT"
+
+
 def _transits_cell(tt: dict, scenario: str, val_never: str, floored: bool,
                    evw: str) -> str:
     """'events to target' table cell, window-aware for correlated scenarios.
@@ -1172,7 +1191,10 @@ with st.sidebar:
         options=list(ins.MODES),
         default=ins.DEFAULT_MODES, key=K("modes"),
         help="The noise engine computes every mode once per star, so adding "
-             "modes later is instant.",
+             "modes later is instant. Each mode is one fixed detector "
+             "configuration (subarray and readout pattern, listed in the "
+             "mode details table); the tool does not search alternative "
+             "subarrays.",
         format_func=lambda k: (f"{ins.MODES[k]['label']}  "
                                f"({ins.MODES[k]['wl_min']:g}-"
                                f"{ins.MODES[k]['wl_max']:g} µm)"))
@@ -1194,8 +1216,9 @@ with st.sidebar:
             "Analysis resolving power, R", 25, 500, 100, 25, key=K("rbin"),
             help="Width of the final analysis bins, shared by all modes "
                  "(R = 100 is the standard planning convention). This is "
-                 "not the instrument's resolving power: each mode's own "
-                 "native resolution is applied to the model separately. "
+                 "not the instrument's resolving power: the model is "
+                 "separately blurred with a Gaussian approximation of each "
+                 "mode's tabulated native resolution R(λ). "
                  "Not display-only: one binning operator at this R computes "
                  "the noise, the scores, the forecasts, and the plotted "
                  "spectrum. 50-200 is the usual range.")
@@ -1225,10 +1248,10 @@ with st.sidebar:
                 ins.MODES[k]["floor_ppm_suggested"], 5.0, key=K(f"floor_{k}"))
                 for k in mode_keys}
             st.caption(
-                "Prefilled from the Greene+2016 planning convention "
-                "(20/30/50 ppm for NIRISS/NIRCam/MIRI). These are "
-                "illustrative, not in-flight calibrations. Edit them for "
-                "your program.")
+                "Prefilled with per-mode planning values (15-40 ppm), "
+                "informed by the Greene+2016 convention but not identical "
+                "to it. These are illustrative, not in-flight calibrations. "
+                "Edit them for your program.")
         elif floor_mode == "file":
             up = st.file_uploader(
                 "Two columns: wavelength (µm), floor (ppm)",
@@ -1864,7 +1887,14 @@ for k, err in out["failed"]:
     with st.expander(f"{ins.MODES[k]['label']}: technical details"):
         st.code(str(err)[-2500:])
 for k, reason in out["unusable"]:
-    st.warning(f"**{ins.MODES[k]['label']}: unusable on this star**, {reason}.")
+    # "saturated" here means saturated at the tool's OWN shortest ramp
+    # (instruments.py ngroup_min), which is a policy bound above the physical
+    # minimum for some modes -- say so instead of implying a physical limit
+    st.warning(
+        f"**{ins.MODES[k]['label']}: unusable on this star**, {reason}. "
+        f"Note: this tool never tries ramps shorter than "
+        f"{ins.MODES[k]['ngroup_min']} groups; STScI permits shorter ramps "
+        "for some modes, and those are not searched.")
 
 if not results:
     st.stop()
@@ -1890,10 +1920,14 @@ if goal_r == "detect":
         best = ranked[0]
         bsig = best["sigma_detect"]
         verdict = (f"**Best mode for detecting {meta['target']} on "
-                   f"{meta.get('planet', '?')}: {best['label']}**, "
+                   f"{meta.get('planet', '?')}: {best['label']} "
+                   f"({_mode_cfg(best['mode_key'])})**, "
                    f"{bsig:.1f}σ in {ntr} {_ev}{'s' if ntr > 1 else ''} "
                    f"(target {tsig:g}σ; Δχ² = {bsig * bsig:.0f}; median precision "
                    f"{best['median_sigma_ppm']:.0f} ppm per R={meta['r_bin']} bin).")
+        if best["warnings"]:
+            verdict += (" This configuration has warnings (see the "
+                        "mode details table).")
         if bsig >= tsig:
             st.success(verdict + "  Meets the target.")
         elif bsig > 0:
@@ -1960,10 +1994,15 @@ else:
     bs = per_mode[bk]
     ntr = meta["n_transits"]
     verdict = (f"**Best mode for constraining {glabel} on "
-               f"{meta.get('planet', '?')}: {ins.MODES[bk]['label']}**, "
+               f"{meta.get('planet', '?')}: {ins.MODES[bk]['label']} "
+               f"({_mode_cfg(bk)})**, "
                f"±{bs:.3g}{usp} at {tsig:g}σ in {ntr} {_ev}"
                f"{'s' if ntr > 1 else ''} (target ±{target:g}{usp} "
                f"at {tsig:g}σ).")
+    _bw = next(r for r in usable_jac if r["mode_key"] == bk)["warnings"]
+    if _bw:
+        verdict += (" This configuration has warnings (see the "
+                    "mode details table).")
     if bs <= target:
         st.success(verdict + "  Meets the target.")
     elif np.isfinite(comb) and comb <= target:
@@ -1993,6 +2032,19 @@ else:
                 + _not_reached_reason(_scen, _lim, _fl, _ev) + ". "
                 + ("Lower the floor, combine modes, or relax the target."
                    if _fl else "Combine modes or relax the target."))
+
+# The ranking compares science information only. It does not check APT
+# feasibility (data volume, schedulability, calibration warnings), so the
+# verdict must carry that caveat -- an operationally unsupportable
+# configuration can otherwise be presented as "Best" (2026-08-05 review).
+if ok:
+    st.caption(
+        "Best-mode rankings compare expected science information under this "
+        "tool's fixed detector configurations; scores are conditional "
+        "statistics for the selected atmosphere, not retrieval results. "
+        "Operational feasibility (data volume, scheduling, calibration "
+        "warnings) is not checked; verify the chosen configuration in APT "
+        "before proposing.")
 
 # --- spectrum figure -------------------------------------------------------
 st.subheader("Simulated eclipse emission spectrum"
@@ -2260,7 +2312,7 @@ for r in sorted(results, key=key_order):
     # NOTE: this column must stay all-string -- mixing int and str values makes
     # streamlit's Arrow serialization fail (loud pyarrow tracebacks per render)
     if r.get("lsf_applied"):
-        notes.append("model blurred to native R (LSF)")
+        notes.append("model blurred to native R (Gaussian LSF approximation)")
     if r.get("n_segments", 1) > 1:
         notes.append(f"{r['n_segments']} detector segments (offset per segment)")
     if goal_r == "detect":
@@ -2299,7 +2351,12 @@ for r in sorted(results, key=key_order):
                 f"±{tsig * _tt['sig_inf']:.3g}" if _fl else "", _fl, _ev)
         else:
             row[_tt_col] = ""
-    row.update({"median σ (ppm)": round(r["median_sigma_ppm"]),
+    # the exact fixed detector configuration this row evaluated (each MODES
+    # entry is one subarray + readout pattern, never the whole instrument
+    # mode) plus its honest operational status
+    row.update({"configuration": _mode_cfg(r["mode_key"]),
+                "operational status": _op_status(r),
+                "median σ (ppm)": round(r["median_sigma_ppm"]),
                 "bins": r["n_bins"], "groups/integration": r["ngroup"],
                 "cadence (s)": round(r["t_cycle_s"], 1),
                 "notes": "; ".join(notes)})
@@ -2313,7 +2370,9 @@ if goal_r == "detect":
         "**σ_detect is a conditional matched-template S/N** for the selected "
         "atmosphere, not a retrieval detection. A retrieval that frees more "
         "atmospheric parameters under the same model and noise assumptions "
-        "will usually report a lower significance."
+        "will usually report a lower significance. σ_detect (proj) also "
+        "profiles out the available temperature-profile, reference-radius, "
+        "and cloud directions; prefer it for narrow margins."
         + (f" σ_detect is scored under the **{meta.get('scenario')}** "
            "correlated-floor scenario (EXPERIMENTAL, a stated assumption, "
            "not a calibrated systematics model); the σ (…, exp.) columns "
@@ -2483,11 +2542,11 @@ with st.expander("Model quality and provenance"):
                if _pcert.get("realized_gas_co_hotT") is not None else "")
             + (f". {len(_pcert['suspect_cells_in_span'])} known imperfect table "
                "cell(s) sit in this profile's range (details: "
-               "docs/picaso_roadmap.md)"
+               "docs/physics_and_conventions.md, PICASO section)"
                if _pcert.get("suspect_cells_in_span") else "")
             + (f". {len(_pcert['corrections_applied'])} catalogued table "
                "fix(es) were applied (only ever to defects vetted and listed "
-               "in docs/picaso_roadmap.md)"
+               "in docs/physics_and_conventions.md, PICASO section)"
                if _pcert.get("corrections_applied") else "")
             + ". Ions and electrons count toward the gas total; graphite is "
               "treated as a solid, not a gas.")

@@ -3,8 +3,13 @@
 The GUI's "Download configuration (JSON)" button writes the dict `build_share`
 assembles: the canonical model parameters (the same dictionary every result
 stores as provenance) plus the science-goal and observation settings, and --
-when the run uses uploaded tables -- the table content itself, so the file
-fully configures the run on any machine.
+when the run uses uploaded tables -- the table content itself. That is every
+INPUT the tool takes, so the same tool version reproduces the run from the
+file alone. It does NOT pin the software or science data: package versions
+are recorded in the file as information only (`software`, ignored on load),
+and reproducing a result exactly also requires the same vulcan-forward /
+vulcan-jax / exojax / line-list state (the cache-identity trade is S2-05 in
+docs/decision_records.md).
 
 `widget_state` is the inverse: it maps such a file (or a bare canonical-params
 dict from an older download) onto Streamlit session-state widget keys. It
@@ -25,6 +30,23 @@ from jwst_tool import forward, planets
 SHARE_FORMAT = 1
 
 
+def _software_versions() -> dict:
+    """Installed versions of the science-relevant packages, information only.
+
+    Never consumed by `widget_state` (a configuration must load on any tool
+    version); "not installed" is acceptable here because the field is a
+    provenance note, not an input.
+    """
+    import importlib.metadata as md
+    out = {}
+    for dist in ("vulcan-jwst-tool", "vulcan-forward", "vulcan-jax", "exojax"):
+        try:
+            out[dist] = md.version(dist)
+        except md.PackageNotFoundError:
+            out[dist] = "not installed"
+    return out
+
+
 def build_share(canon: dict, goal: dict, observation: dict,
                 tp_table_text: str | None = None,
                 floor_table: list | None = None) -> dict:
@@ -34,6 +56,10 @@ def build_share(canon: dict, goal: dict, observation: dict,
         "canonical_params": dict(canon),
         "goal": dict(goal),
         "observation": dict(observation),
+        # informational provenance: which software wrote this file. NOT a
+        # pin -- results depend on these versions, but the file loads on any
+        # tool version and widget_state never reads this key.
+        "software": _software_versions(),
     }
     if tp_table_text:
         share["tp_table_text"] = str(tp_table_text)

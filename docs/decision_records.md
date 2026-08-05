@@ -1,3 +1,27 @@
+# Decision records
+
+Every audit and review disposition plus the reportable upstream findings, in
+one file. Consolidated 2026-08-05 from `audit_decisions_2026-07-21.md`,
+`review_decisions_2026-08-05.md`, and `upstream_report_picaso.md` (those
+filenames are retired); content is verbatim apart from retargeted
+cross-references. Three parts, oldest first:
+
+1. the 2026-07-21 second-pass science audit (findings S2-01 to S2-11),
+2. the 2026-08-05 adversarial review (findings 1 to 11),
+3. the draft upstream PICASO report (never posted without explicit approval).
+
+Also retired the same day: `picaso_forward_model_plan.md` (2026-07-20,
+plan-only) was deleted as superseded -- the plan shipped as v18, its record
+lives in the PICASO section of `physics_and_conventions.md`, and its open
+decisions were all resolved by that implementation.
+
+This file records WHY each call was made and never changes retroactively.
+The LIVE list of open gaps and deferred work is `TODO.md` at the repo root;
+when an item below says "open" or "deferred", TODO.md is its current
+status.
+
+---
+
 # Decisions on the 2026-07-21 second-pass science audit
 
 Status: written 2026-07-21 against tool 0.14.2 / retrieval 0.11.1+ / vulcan-jax
@@ -195,7 +219,7 @@ warning says.
 
 TRUE and already recorded with the exact numbers (-2207 ppm offset; 688 ppm
 median / 1540 ppm p95 after offset removal; targets missed) in
-`tests/parity_picaso/outputs/REPORT.md`, `docs/picaso_roadmap.md`, and
+`tests/parity_picaso/outputs/REPORT.md`, `docs/physics_and_conventions.md` (PICASO section), and
 notes.md, with the correct framing: offline cross-model envelope, never a
 production path, residuals attributed to opacity sources + gravity
 conventions. Both chemistry providers run production RT through ExoJAX.
@@ -260,3 +284,230 @@ enabled-branch hazards, both verified:
   refinements, few-ppm stakes.
 - Scattering-aware cloudy emission (S2-02): refusal is the design; no solver
   planned.
+
+---
+
+# Decisions on the 2026-08-05 adversarial review
+
+Status: written 2026-08-05 against tool 0.23.2 (reviewed snapshot `1435920`,
+functional parent `20246fb`). The review confirmed no defect in the
+count-space, floor, matched-template, or Fisher mathematics. Its findings
+concern configuration scope, operational feasibility, provenance, and
+user-facing wording. This file records what changed in 0.23.3 and what did
+not, finding by finding. Companion record: the 2026-07-21
+audit decisions above (two findings restate decisions made there).
+
+## High severity
+
+### 1. ngroup_min excludes permitted bright-target ramps  [DISCLOSED; SEARCH CHANGE OPEN]
+
+TRUE as a limitation and previously documented as a policy delta
+(`tests/parity/outputs/REPORT.md`, "Residual policy differences": PandExo
+drops to 1 group on PRISM where this tool floors at 2). It was not disclosed
+in the registry or the GUI. Fixed in 0.23.3: `instruments.py` documents that
+`ngroup_min` is a tool policy bound, not the physical minimum ramp, and the
+GUI's "unusable on this star" warning now says shorter permitted ramps exist
+and are not searched.
+
+**Open, not fixed:** searching the full permitted group range (1-group
+NRSRAPID/NISRAPID, warned or limited-access MIRI ramps) and classifying
+physical saturation vs calibration warnings vs limited access. That is a
+worker + registry + verdict rework, invalidates the noise caches
+(worker_version bump), and requires a parity re-run. Deliberately deferred
+to a decision by the maintainer, not silently skipped.
+
+### 2. Modes presented generically while one fixed configuration is evaluated  [FIXED (disclosure path)]
+
+TRUE. The review offered two remedies; the labeling remedy was taken:
+the mode multiselect help now states each mode is one fixed subarray +
+readout configuration with no subarray search, the mode details table (and
+its CSV) gained a `configuration` column (e.g. `sub512/nrsrapid`), and the
+README lists the fixed-configuration scope as a headline limit. Ranking
+across alternate subarrays remains out of scope, now stated rather than
+implied.
+
+### 3. Cache/share identities do not pin forward-engine state  [PARTLY S2-05 (DELIBERATE); WORDING + INFO PROVENANCE FIXED]
+
+The cache-identity half restates the accepted S2-05 trade
+(above): identity is canonical params + a
+hand-bumped `_VERSION`, by maintainer discipline, not content addressing;
+the PICASO subsystem is the exception. A pointer comment now sits on
+`forward._VERSION` so this stops being re-found.
+
+The share-file half was a real overclaim: `share_config.py` said the file
+"fully configures the run on any machine". Fixed: the docstring now says the
+file captures every tool INPUT and does not pin software or science data,
+and `build_share` records the installed vulcan-jwst-tool / vulcan-forward /
+vulcan-jax / exojax versions as an informational `software` block (ignored
+on load; older files stay loadable). Full commit/line-list pinning in keys
+and share files remains NOT adopted (S2-05 stands).
+
+### 4. "Best mode" without operational feasibility  [DISCLOSED; MODELING OPEN]
+
+TRUE that the ranking is pure science information. Fixed in 0.23.3 with the
+review's labeling remedy: a caption under every verdict states that
+operational feasibility (data volume, scheduling, calibration warnings) is
+not checked and the configuration must be verified in APT; the README limit
+bullet says the same. Modeling the full integration sequence and data
+volume (the ~27.8 GB NIRCam excess in the parity artifact) is real work on
+the worker and is deferred to a maintainer decision.
+
+## Medium severity
+
+### 5. Short events scored on a ramp PandExo would restructure  [DELIBERATE, S2-10]
+
+Restates S2-10, decided 2026-07-21: the ramp is transit-independent by
+design (one noise cache per star), `detect` warns loudly below 3 in-event
+cycles, and `pixel_depth_variance` refuses below one cycle. No re-run with
+a shortened ramp is performed. A pointer comment now sits at the warning
+site. No change.
+
+### 6. LSF wording overstates the Gaussian approximation; README contradicts it  [FIXED]
+
+TRUE on both counts. `binning.py` was already honest. Fixed the other
+surfaces: the R help text now says the model is blurred with a Gaussian
+approximation of the tabulated native R(lambda); the per-mode note says
+"Gaussian LSF approximation"; the README describes the treatment and its
+pending impulse-response validation, and no longer lists instrumental
+broadening as absent (ExoJAX's own operator is what is not wired).
+
+### 7. Projected-detection caption says clouds are fixed  [FIXED]
+
+TRUE at the reviewed commit. The offending caption was already deleted in
+the 0.23.2 copy pass; 0.23.3 adds the honest replacement (the (proj) column
+profiles the available temperature-profile, reference-radius, and cloud
+directions) and fixes the stale `detect.py` docstring, which still said
+"T-P and lnR0" while `_NUISANCE_JAC` includes the cloud and Mie rows.
+
+### 8. README universal-bound language  [FIXED]
+
+TRUE. "Upper-bounds any real retrieval result" and "real posteriors can
+only be wider" replaced with the conditional statements (usually lower
+under the same model and noise assumptions; Fisher values are local
+likelihood-based bounds, and informative priors can narrow a posterior).
+Same fix in the `detect.py` docstring.
+
+## Low severity
+
+### 9. Parity benchmark generalized  [FIXED]
+
+TRUE. The README noise bullet now names the scope: a three-star,
+fixed-configuration, no-floor benchmark, ranges are benchmark results and
+not a guarantee.
+
+### 10. Floor-provenance caption mismatch  [FIXED]
+
+TRUE: the caption claimed Greene 20/30/50 while the prefills are 15-40 ppm
+per mode. The caption and the `instruments.py` docstring now describe the
+actual values as informed by, not identical to, the Greene et al. 2016
+convention.
+
+### 11. Stale pyproject metadata  [FIXED]
+
+TRUE. Header comment now states the 2026.7 matched triple, the
+archival_2026_2 backend, and the removed legacy backend; the description
+says "transmission and emission spectra".
+
+## Style opinions (the review's best-practice list)
+
+Adopted in 0.23.3, at small scale:
+
+1. **Caveats next to the headline verdict**: the caption under every Best
+   verdict names all three (fixed configuration, conditional statistic,
+   APT feasibility unchecked), and a verdict whose winning mode carries
+   warnings says so inline.
+2. **Exact configuration labels**: the verdict shows the winning mode's
+   subarray/readout (`app._mode_cfg`) and the mode table carries a
+   `configuration` column. NOT adopted in the spectrum-plot legend: the
+   short labels stay there to avoid clutter, and color + marker key each
+   series to the table row that holds its exact configuration.
+3. **Operational-status field**: the mode table gains an honest
+   three-value `operational status` column (`app._op_status`): saturated
+   at the shortest ramp tried / warnings, verify in APT / verify in APT.
+   The tool checks saturation and relays Pandeia warnings and checks
+   nothing else, so no row can ever read "recommended".
+4. **Separate science / feasibility / schedulability rankings**: not
+   adopted structurally (only the science ranking exists to sort by); the
+   caption and status column keep the three concerns verbally separate.
+
+## Review statements accepted without change
+
+The confirmed-clean components (count-space binning, floor semantics,
+saturation masking given the configuration, detection/Fisher algebra,
+chemistry/RT gating) match this repo's own validation records. The
+validation-gap notes (CI excludes the slow stack; the parity artifact
+validates the estimator, not configuration policy; the PICASO-native RT
+report is a FAIL and says so) were already documented where the review
+found them.
+
+---
+
+# Draft upstream report: PICASO 4.0.1 findings from the vulcan-jwst-tool integration
+
+Status: DRAFT for Isaac's review. Nothing here has been posted anywhere;
+posting (e.g. as GitHub issues on natashabatalha/picaso) requires explicit
+approval. Each item is self-contained so it can be filed separately. All
+measurements 2026-07-20/21 against picaso 4.0.1 and the v4.0 reference data
+release.
+
+## 1. Corrupted row in the Visscher 2121 chemistry grid (data)
+
+File: `chemistry/visscher_grid_2121/sonora_2121grid_feh1.0_co0.55.txt`,
+row at T = 900.0 K, log10 P = -5.523 (file row 925, counting data rows from
+0 after the two header lines).
+
+Anatomy: every reported species in the row is uniformly deflated by a
+factor ~0.747 relative to the interpolation of its T-neighbors (H2 0.7471,
+He 0.7471, H2O 0.7477, CO 0.7474, N2 0.7471, Na 0.7467, K 0.7466 ...), so
+the gas-phase sum is 0.746 where every neighboring row sums to >= 0.9987.
+Two species additionally carry junk residues: VO is ~9.9e6x too high
+(5.2e-12 vs ~5e-19 expected from neighbors) and CrH ~4.8e4x (9.2e-13).
+The same (T, P) cell is clean in the four neighboring composition files
+(feh0.7_co0.55, feh1.5_co0.55, feh1.0_co0.46, feh1.0_co0.82).
+
+The pattern suggests a spurious ~25% phantom abundance entered this row's
+normalization during generation (deflating every reported species), with
+corrupted VO/CrH values as residues of the same event.
+
+## 2. chemeq_visscher_2121 docstring says 20 pressures; the files carry 21
+
+The docstring block ("2020 data points: 20 pressures ... 101 temperatures")
+disagrees with the shipped files, which are 21 pressures x 101 temperatures
+= 2121 rows (log10 P from -6.0 to +4.0). Cosmetic, but the stated grid
+shape is load-bearing for anyone validating a re-implementation.
+
+## 3. Feature request: denser C/O sampling near the low-pressure CH4/H2O transition
+
+At low pressure the equilibrium CH4/H2O transition is sharp and sits inside
+the [0.55, 0.82] C/O cell: at 1 mbar / 1100 K the per-cell table slopes
+d log10 X / d ln(C/O) are CH4 +1.24 (cell 0.46-0.55) vs +9.56 (cell
+0.55-0.82), H2O -0.94 vs -9.31, CO2 -0.64 vs -9.07. Any interpolation
+across the existing nodes therefore cannot produce a trustworthy local
+composition derivative near C/O ~ 0.55-0.82 at low pressure (we evaluated
+monotone-cubic interpolation as an alternative to linear; its node
+derivatives are interpolant convention rather than data, and its
+leave-one-node-out error is worse near the transition). One or two extra
+nodes in (0.55, 0.82) would resolve this for derivative-based applications.
+
+## 4. Native transmission silently returns all-NaN when gravity() gets bare gravity (code)
+
+`case.gravity(gravity=..., gravity_unit=..., radius=...)` followed by
+`case.spectrum(opa, calculation='transmission')` returns transit_depth =
+all NaN: `atmsetup.get_altitude` computes g = G * planet.mass / z^2, and
+`planet.mass` is NaN when only gravity+radius were provided
+(constant_gravity is only forced when the RADIUS is NaN). Passing
+mass + radius works. Suggestion: raise loudly in the transmission branch
+when planet.mass is NaN instead of propagating NaN depths.
+
+## 5. Observation (no action needed): find_strat keeps the guessed radiative-convective boundary
+
+On a strongly irradiated planet (WASP-39b-like inputs, Tint 200 K,
+rfacv 0.5), rcb guesses of 60/65/70/75 (91-level grid, 1e-6..300 bar) all
+converge with the final convective zone starting exactly at the guess, all
+Schwarzschild-consistent against the shipped adiabat table, with deep
+temperatures differing by up to ~1000 K at 7.6 bar across the family
+(shallower guesses fail flux balance and are correctly reported
+unconverged). This appears to be the physical deep-adiabat degeneracy of
+static irradiated RCE rather than a bug; we note it because "converged"
+output can differ substantially at depth depending on the rcb guess, which
+users of the climate mode may not expect.

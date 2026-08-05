@@ -22,11 +22,15 @@ W is diagonal under the default "random" scenario or the inverse of the full
 scenario covariance C (noise.build_cov). The rows of U are one constant
 depth offset, one step per extra detector segment (NRS1|NRS2 -- real G395H
 fits float such offsets), and, when the scenario says so, one centered slope
-per segment. It is NOT a retrieval detection significance: temperature,
-clouds, and the other abundances are not re-fit, so it upper-bounds a full
-retrieval. When a Fisher Jacobian is available, ``sigma_detect_proj``
-additionally projects out the T-P and lnR0 derivative directions (still
-conditional) and is the number to prefer for narrow margins.
+per segment. It is NOT a retrieval detection significance: the atmosphere
+is held at the specified state, and a retrieval that frees more parameters
+under the same model and noise assumptions will usually report a lower
+significance (a best-case comparison under those conditions, not a universal
+bound). When a Fisher Jacobian is available, ``sigma_detect_proj``
+additionally projects out the available T-P, lnR0, AND cloud/Mie derivative
+directions (_NUISANCE_JAC below; still conditional) and is the number to
+prefer for narrow margins -- any caption describing it must include the
+cloud directions.
 
 Multi-transit extrapolation: the random term scales as 1/N; the minimum
 floor is a hard lower bound at every N, so "transits to target" saturates
@@ -453,7 +457,10 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
     # PandExo guarantees >= 3 in-transit integrations by restructuring the
     # ramp; this worker's ramp is deliberately transit-independent (one noise
     # cache per star), so warn loudly instead of silently accepting 1-2
-    # cycles
+    # cycles. DELIBERATE, decision recorded as S2-10 in
+    # docs/decision_records.md: the box-depth variance stays valid
+    # at 1-2 cycles; the result is NOT re-run with a shortened ramp, and
+    # reviews that flag this are re-finding an accepted trade, not a bug.
     warnings = dict(mode_result.get("warnings", {}))
     n_cyc_in = t_in_s / float(mode_result["t_cycle_s"])
     if n_cyc_in < 3.0:

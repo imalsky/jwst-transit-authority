@@ -13,9 +13,9 @@ package imports as `jwst_tool` and installs the `jwst-tool` console script.
 A second chemistry engine is available: PICASO 4 thermochemical equilibrium, plus a
 PICASO radiative-convective climate profile that either engine can use. Both
 engines feed the same radiative transfer, binning, noise, and Fisher machinery, so
-equilibrium and kinetics are directly comparable. See
-[`docs/picaso_roadmap.md`](docs/picaso_roadmap.md) for its scope and measured
-limits.
+equilibrium and kinetics are directly comparable. See the PICASO section of
+[`docs/physics_and_conventions.md`](docs/physics_and_conventions.md) for its
+scope and measured limits.
 
 ## Install
 
@@ -117,22 +117,32 @@ provenance are in the collapsed "Model quality and provenance" section.
 statistic is a conditional matched-template signal-to-noise ratio: the chi-square
 distance between the model and the same model without that molecule's opacity,
 with calibration nuisances profiled out. It is conditional on the assumed
-atmosphere being exactly right, so it upper-bounds any real retrieval result. It is
-never a retrieval detection.
+atmosphere being exactly right. A retrieval that frees more parameters under the
+same model and noise assumptions will usually report a lower significance, but
+this is a best-case comparison under those conditions, not a mathematical bound.
+It is never a retrieval detection.
 
 **Constraint** builds a Fisher-information forecast from the spectrum's parameter
 derivatives and reports local Cramer-Rao lower bounds. Those are not posterior
-widths.
+widths: they are local, likelihood-based approximations, and informative priors
+or external data can make a real posterior narrower.
 
 ## Scope and limits
 
 This is a planner, not a retrieval. Detection scores assume one fixed atmosphere,
-and the Fisher forecast is linear and local, so real posteriors can only be wider.
+and the Fisher forecast is linear and local.
 
-Four limits to keep in view:
+Five limits to keep in view:
 
-- **The noise model omits time-correlated systematics.** It is conservative
-  against PandExo by roughly 2-24% in the near infrared and 33-56% for MIRI LRS.
+- **Each instrument mode is one fixed detector configuration** (subarray and
+  readout pattern, shown in the mode details table). The tool does not search
+  alternative subarrays or readout patterns, never tries ramps shorter than each
+  mode's `ngroup_min`, and does not check APT feasibility (data volume,
+  scheduling). Verify the chosen configuration in APT before proposing.
+- **The noise model omits time-correlated systematics.** In a three-star,
+  fixed-configuration, no-floor parity benchmark (`tests/parity/`) it is
+  conservative against PandExo by roughly 2-24% in the near infrared and 33-56%
+  for MIRI LRS. Those ranges are benchmark results, not a general guarantee.
 - **Stellar contamination is not modeled.** Unocculted spots and faculae can
   dominate transit-depth systematics for active hosts, most strongly below about
   3 um (Rackham et al. 2018; Lim et al. 2023). Treat short-wavelength depths
@@ -143,9 +153,17 @@ Four limits to keep in view:
 - **The PICASO engine has no photochemistry**, and therefore no SO2 and no CS2.
   It is capped at C/O of 1.10 by its tables and is finite-difference only.
 
+Line-spread treatment: for modes whose analysis bins approach the native
+resolving power (PRISM, MIRI LRS, blue SOSS), the model is blurred with a
+flux-weighted Gaussian built from the tabulated R(λ), not with Pandeia's full
+wavelength-response matrix. This approximation has not yet been validated
+against mode-specific Pandeia impulse responses.
+
 ExoJAX capabilities that exist upstream but are not wired here: reflected-light
-spectra, scattering emission, correlated-k opacities, H-minus continuum, atomic and
-FeH line lists, rotational and instrumental broadening, and GP noise kernels.
+spectra, scattering emission, correlated-k opacities, H-minus continuum, atomic
+and FeH line lists, rotational broadening, ExoJAX's own instrumental-broadening
+operator (the tool applies its Gaussian R(λ) approximation instead), and GP
+noise kernels.
 
 Physics conventions, default structures, and the backend policy are in
 [`docs/physics_and_conventions.md`](docs/physics_and_conventions.md). Read the
@@ -184,9 +202,9 @@ tests/parity_picaso/   PICASO-native RT vs ExoJAX cross-model check, offline
 
 | File | Contents |
 |---|---|
-| [`docs/physics_and_conventions.md`](docs/physics_and_conventions.md) | Composition scaling, T-P and Kzz options, default structures, clouds, boundary conditions, backend policy |
-| [`docs/picaso_roadmap.md`](docs/picaso_roadmap.md) | PICASO engine scope, measured limits, deferred features |
-| [`docs/audit_decisions_2026-07-21.md`](docs/audit_decisions_2026-07-21.md) | Disposition of every science-audit finding |
+| [`docs/physics_and_conventions.md`](docs/physics_and_conventions.md) | Composition scaling, T-P and Kzz options, default structures, clouds, boundary conditions, backend policy, PICASO engine scope and limits, config deviations vs upstream VULCAN |
+| [`docs/decision_records.md`](docs/decision_records.md) | Disposition of every audit and review finding (2026-07-21 audit, 2026-08-05 review) plus the draft upstream PICASO report |
+| [`TODO.md`](TODO.md) | The live list of every known gap, shortcoming, deferred feature, and accepted limitation |
 
 ## License
 
