@@ -128,7 +128,6 @@ st.set_page_config(page_title="JWST Exoplanet Observation Planner",
 # ---------------------------------------------------------------------------
 st.title("JWST exoplanet observation planner")
 st.markdown(
-    "Compare JWST time-series instrument modes for an exoplanet target.\n\n"
     "0. **Configuration**: load a shared configuration file, or start "
     "fresh.\n"
     "1. **Target**: select the system and the observation type.\n"
@@ -138,8 +137,7 @@ st.markdown(
     "4. **Observation**: select instrument modes and noise assumptions.\n\n"
     "The tool computes a forward "
     "spectrum and a Pandeia noise forecast, ranks the selected modes, and "
-    "reports how many transits or eclipses reach your target. It is a "
-    "planning tool, not an atmospheric retrieval.")
+    "reports how many transits or eclipses reach your target.")
 
 with st.expander("How the model works, and its limits"):
     st.markdown(
@@ -148,11 +146,8 @@ Each run computes a spectrum live, for exactly the atmosphere you configure:
 
 1. **Chemistry**: the engine you select computes the abundances.
    **VULCAN** solves steady-state photochemical kinetics (run through its
-   JAX port, VULCAN-JAX): starlight photolysis, vertical transport, and
-   chemical reactions can move the atmosphere away from chemical
-   equilibrium, which is how molecules like SO2 appear. **PICASO** reads
-   chemical equilibrium from precomputed tables: much faster, but no
-   photochemistry and therefore no SO2.
+   JAX port, VULCAN-JAX); **PICASO** reads chemical equilibrium from
+   precomputed tables.
 2. **Temperature profile**: VULCAN supports a Guillot profile, an uploaded
    table, or a PICASO radiative-convective climate profile. PICASO
    equilibrium chemistry supports a Guillot profile or a PICASO climate
@@ -168,9 +163,7 @@ Each run computes a spectrum live, for exactly the atmosphere you configure:
    needed to reach your target.
 
 If a calculation does not pass its numerical quality checks, the tool stops
-and shows an error instead of returning an uncertified spectrum. A fresh
-configuration solves the chemistry from scratch and takes minutes; any
-configuration computed before loads instantly from the cache.
+and shows an error instead of returning an uncertified spectrum.
 
 **Read the results as optimistic.** The detection score is conditional on
 the selected atmosphere: if a retrieval frees more atmospheric parameters
@@ -182,12 +175,6 @@ The noise model omits time-correlated systematics (visit-long trends, 1/f
 residuals, detrending covariance, stellar heterogeneity), so achieved
 precision is usually poorer. Treat mode rankings as more robust than
 absolute ppm numbers.
-
-Condensation (S8 rainout) is offered for detection goals only and never
-combines with a derivative-based forecast.
-
-**Noise backend on this instance**: {ins.BACKEND_STATUS}. Every result
-records the exact engine + refdata versions in its provenance block.
         """)
 
 # ---------------------------------------------------------------------------
@@ -511,10 +498,7 @@ with st.sidebar:
     planet_key = st.selectbox(
         "Planet", list(planets.PLANETS) + ["custom"], key=K("planet"),
         format_func=lambda k: planets.PLANETS[k]["label"] if k in planets.PLANETS
-        else "Custom planet …",
-        help="Every planet runs the same chemistry and radiative-transfer "
-             "code, validated on WASP-39 b. Other planets swap in their "
-             "own system values, not their own validation.")
+        else "Custom planet …")
     pdef = planets.PLANETS.get(planet_key, planets.CUSTOM_DEFAULTS)
     st.caption(pdef["note"] if planet_key in planets.PLANETS
                else "Starts from WASP-39 b values. Edit everything below.")
@@ -945,8 +929,10 @@ with st.sidebar:
         nu_pts = st.number_input(
             "Native spectral grid points", *forward.NU_PTS_RANGE,
             forward.NU_PTS_DEFAULT, 500, key=K("nupts"),
-            help="Wavenumber grid points across 1-15 µm before binning. "
-                 "Native R is about nu_pts/2.7 (4000 = R 1500). Weak "
+            help="Wavelength sampling of the model spectrum across "
+                 "1-15 µm, shared by all instrument modes; not an "
+                 "instrument setting. Model R is about nu_pts/2.7 "
+                 "(4000 = R 1500), well above the analysis binning. Weak "
                  "mid-infrared features still gain at the 8000 cap, so "
                  "quote weak-band MIRI results as lower bounds.")
 
@@ -1206,7 +1192,11 @@ with st.sidebar:
                  "full-well fraction.")
         r_bin = st.number_input(
             "Analysis resolving power, R", 25, 500, 100, 25, key=K("rbin"),
-            help="Not display-only: one binning operator at this R computes "
+            help="Width of the final analysis bins, shared by all modes "
+                 "(R = 100 is the standard planning convention). This is "
+                 "not the instrument's resolving power: each mode's own "
+                 "native resolution is applied to the model separately. "
+                 "Not display-only: one binning operator at this R computes "
                  "the noise, the scores, the forecasts, and the plotted "
                  "spectrum. 50-200 is the usual range.")
 
@@ -1322,10 +1312,6 @@ with st.sidebar:
     # -----------------------------------------------------------------------
     st.divider()
     st.markdown("### More settings")
-    st.caption("Solver grid, condensation, boundary conditions, advanced "
-               "radiative transfer, and display controls. The defaults "
-               "are the validated baseline. Every setting is recorded in "
-               "the run's provenance.")
 
     with st.expander("Solver & vertical grid"):
         # The chemistry AND the ExoJAX RT share this one grid (art_nlayer is
