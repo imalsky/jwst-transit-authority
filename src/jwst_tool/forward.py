@@ -48,10 +48,12 @@ forecast use the differentiable ExoJax cloud deck, never condensation.
 
 Fisher machinery: with ``fisher_params`` set, the runner computes the
 spectrum Jacobian row by row; the method is recorded per row in the npz
-(``jac_row_method``). jac_method="fd" (default) is certified central finite
-differences: composition rows (lnZ, dlnCO) re-initialize the chemistry per
-FD point, lnKzz/T-P rows perturb theta on the baseline build, every row must
-pass the h-vs-2h consistency gate, lnR0 is RT-only. jac_method="ad" is one
+(``jac_row_method``). jac_method="fd" (the API default -- it works
+everywhere; the GUI defaults to "ad" since 2026-08-09) is certified central
+finite differences: composition rows (lnZ, dlnCO) re-initialize the
+chemistry per FD point, lnKzz/T-P rows perturb theta on the baseline build,
+every row must pass the h-vs-2h consistency gate, lnR0 is RT-only.
+jac_method="ad" is one
 warm-started forward-mode jvp per row (photo-on required, ~1.7-4x faster;
 cross-validated vs FD to 0.07-1.6% on the then-default W39b configuration --
 method validation, not a per-row guarantee). Two stated AD caveats: the lnZ
@@ -188,23 +190,21 @@ TP_FILE_UPLOAD = "upload"         # user-supplied table; content-addressed copy
 # cross-checks these constants against the LIVE cfg, CO_BASELINE-style.
 CHEM_P_SPAN_DYN = (0.1, 7.6e6)
 
-# Structure defaults: where vulcan_jax bundles a MEASURED T-P/Kzz table for a
-# planet, that table (and its Kzz column) is the default structure -- an
-# analytic stand-in fitted to nothing is the weaker choice. Measured on W39b,
-# the old Guillot + constant-Kzz default ran ~100 K hot through the SO2
-# formation zone with Kzz 4-33x low, suppressing the headline SO2 science;
-# the bias is systematic (a constant Kzz cannot follow a rising profile).
-# Which planets have a table is data: planets.PLANETS[...]["tp_table"]. The
-# picaso provider keeps the analytic default (its composition defaults are
-# pinned to equilibrium-grid nodes).
+# Structure default (2026-08-09 maintainer decision): the analytic Guillot
+# profile, for EVERY planet and provider. It is the differentiable choice --
+# file mode has no T-P Fisher row and pairs poorly with the AD-first GUI
+# defaults set the same day. A planet's bundled MEASURED T-P/Kzz table stays
+# SELECTABLE (tp_mode="file" resolves to that planet's own table and its Kzz
+# column), and shipped_tp_table_is_default still records which tables are
+# verified end-to-end. Stated trade-off, measured on W39b 2026-07-21 (when
+# the verified table WAS the default): Guillot + constant Kzz ran ~100 K hot
+# through the SO2 formation zone with Kzz 4-33x low, suppressing the headline
+# SO2 science (2.0 vs 4.5 sigma) -- select the shipped table for W39b SO2
+# work. Which planets have a table is data: planets.PLANETS[...]["tp_table"].
 def _default_tp_mode(params: dict) -> str:
-    """tp_mode default: the planet's measured table where a default run on it
-    is VERIFIED, else the analytic Guillot profile. Having a table is not
-    enough -- see shipped_tp_table_is_default."""
-    planet = str(params.get("planet", "wasp39b"))
-    if (shipped_tp_table_is_default(planet)
-            and str(params.get("chem_provider", "vulcan")) == "vulcan"):
-        return "file"
+    """tp_mode default: the analytic Guillot profile everywhere (2026-08-09;
+    previously the planet's verified measured table where one shipped).
+    ``params`` is kept for signature stability with canonical_params/the GUI."""
     return "guillot"
 
 
@@ -360,13 +360,13 @@ def shipped_tp_table_name(planet: str) -> str:
 
 
 def shipped_tp_table_is_default(planet: str) -> bool:
-    """Whether ``planet``'s bundled table is its DEFAULT structure.
-
-    Separate from merely having one: a table only becomes the default once a
-    default run on it has been verified end-to-end here. HD 189733 b ships a
-    good profile the solver will not certify at default settings, so it stays
-    selectable-but-not-default rather than making that planet error on
-    arrival (planets.PLANETS[...]["tp_table_note"] carries the measurement)."""
+    """Whether ``planet``'s bundled table is VERIFIED end-to-end at default
+    settings. Since 2026-08-09 this no longer selects the default structure
+    (that is Guillot everywhere -- see _default_tp_mode); it remains the
+    verification record distinguishing a certified table from a merely
+    bundled one. HD 189733 b ships a good profile the solver will not certify
+    at default settings (planets.PLANETS[...]["tp_table_note"] carries the
+    measurement)."""
     entry = planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS)
     return bool(entry.get("tp_table") and entry.get("tp_table_default"))
 

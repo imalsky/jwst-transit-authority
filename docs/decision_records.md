@@ -442,6 +442,40 @@ found them.
 
 ---
 
+# Decision 2026-08-09: speed-first GUI defaults (AD method, Guillot structure, no lnKzz row)
+
+Maintainer decision (Isaac), motivated by default constraint runs taking
+~30+ minutes, almost all of it FD Jacobian rows. Four changes:
+
+1. **Differentiation method defaults to AD in the GUI** (`jac_method="ad"`,
+   the warm-jvp path; ~2 min per row vs ~4-7 min FD). The API default stays
+   `"fd"`: it works everywhere, while an `"ad"` API default would turn
+   photo-off or PICASO Fisher calls into hard errors. The GUI already forces
+   `fd` under PICASO and locks photochemistry ON while AD is effective; the
+   photo-lock's session-state fallback now mirrors the new widget default.
+2. **Default structure is the analytic Guillot profile for every planet**
+   (`_default_tp_mode` returns `"guillot"` unconditionally). WASP-39 b
+   previously defaulted to its verified measured table
+   (`atm_W39b_evening_TP_Kzz.txt`). The table stays selectable and
+   `shipped_tp_table_is_default` remains as the verification record.
+   Stated trade-off (measured 2026-07-21, unchanged): Guillot + constant
+   Kzz runs ~100 K hot through the SO2 formation zone with Kzz 4-33x low,
+   so the published-detection agreement (G395H SO2 4.16 sigma) belongs to
+   the shipped table. The W39B_REFERENCE test guard was re-anchored from
+   "the default" to the explicit `tp_mode="file"` configuration; its cache
+   key (`f14f4d10512552ea`) is unchanged, proving the validated atmosphere
+   is bit-identical to the old default.
+3. **lnKzz is out of the default free-parameter set** (now lnZ + dlnCO).
+   Still selectable; dropping it tightens the remaining sigmas toward the
+   conditional bound, which the results table discloses (marginalized and
+   conditional shown side by side).
+4. **VULCAN as default engine**: already the case; no change needed.
+
+No `forward._VERSION` bump: a given canonical parameter set means the same
+physics as before; only which set the defaults resolve to changed.
+
+---
+
 # Draft upstream report: PICASO 4.0.1 findings from the vulcan-jwst-tool integration
 
 Status: DRAFT for Isaac's review. Nothing here has been posted anywhere;

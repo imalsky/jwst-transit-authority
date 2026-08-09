@@ -73,27 +73,28 @@ assumed in Moses et al. (2016) and `Pfunc` as the one in Tsai (2020). `JM16` is
 `Kzz = max(K_deep, 1e5 (300 mbar/P)^0.5)`; `Pfunc` is
 `max(K_max, K_max (K_p_lev/P)^0.4)`.
 
-## Defaults are the measured structure where one exists
+## Default structure is the analytic Guillot profile
 
-Under the VULCAN kinetics engine, a planet defaults to the temperature-pressure and
-`Kzz` table that VULCAN bundles for **that** planet, used for both `T(P)` and
-`Kzz(P)`.
+Every planet, under both engines, defaults to a Guillot (2010) `T(P)` with
+constant `Kzz` (2026-08-09 decision; before that WASP-39 b defaulted to its
+bundled measured table). The analytic profile is the differentiable choice: it
+carries T-P Fisher rows and works with the AD-default differentiation method,
+while a tabulated `T(P)` has no temperature parameter at all. Bundled measured
+tables stay **selectable** (`tp_mode="file"` resolves to that planet's own
+table, and its `Kzz` column then supplies the mixing profile too).
 
-| Planet | Default structure | Bundled table |
-|---|---|---|
-| WASP-39 b | `atm_W39b_evening_TP_Kzz.txt` (Tsai et al. 2023 evening terminator) | Default |
-| HD 189733 b | Guillot plus constant `Kzz` | `atm_HD189_Kzz.txt` is selectable but not the default: the solver does not certify a steady state on it at default settings, while the analytic default converges in about 36 s |
-| HD 209458 b | Guillot plus constant `Kzz` | Refused. It is a full thermosphere model reaching 2997 K inside the chemistry grid, above the 2980 K opacity ceiling, and it is never clipped |
-| WASP-107 b | Guillot plus constant `Kzz` | None bundled |
+| Planet | Bundled table (selectable) |
+|---|---|
+| WASP-39 b | `atm_W39b_evening_TP_Kzz.txt` (Tsai et al. 2023 evening terminator), verified end to end |
+| HD 189733 b | `atm_HD189_Kzz.txt` — selectable but not verified: the solver does not certify a steady state on it at default settings, while the analytic profile converges in about 36 s |
+| HD 209458 b | Refused. It is a full thermosphere model reaching 2997 K inside the chemistry grid, above the 2980 K opacity ceiling, and it is never clipped |
+| WASP-107 b | None bundled |
 
 Two facts are kept separate on purpose: whether a table **exists** for a planet,
-and whether a default run on it has been **verified end to end**. A table becomes
-the default only once it has been verified, so enabling one can never turn a
-working planet into one that errors on arrival. Tables are per-planet and never
-substituted; selecting a planet without a usable one tells you why. The PICASO
-equilibrium provider keeps the analytic default in every case.
+and whether a run on it has been **verified end to end**. Tables are per-planet
+and never substituted; selecting a planet without a usable one tells you why.
 
-**This matters because the analytic defaults are biased in a systematic
+**Stated trade-off: the analytic defaults are biased in a systematic
 direction.** A constant `Kzz` cannot follow a profile that climbs orders of
 magnitude with altitude, and it is the photochemically active upper atmosphere
 that pays. Measured against the bundled tables over the chemistry grid at
@@ -101,7 +102,10 @@ p < 1 mbar, the constant 1e9 cm²/s default runs 3.8-48x low for WASP-39 b
 (`atm_W39b_evening_TP_Kzz.txt`) and 10-17x low for HD 189733 b
 (`atm_HD189_Kzz.txt`), always suppressing photochemical products. The factor is
 pressure-cut dependent — deeper than ~10 mbar the table falls *below* 1e9 for
-WASP-39 b — so quote it with the cut.
+WASP-39 b — so quote it with the cut. On WASP-39 b the Guillot default also ran
+about 100 K hot through the SO2 formation zone when this was measured
+(2026-07-21); the published-detection agreement (G395H SO2 4.16 sigma) belongs
+to the **shipped table**, so select `tp_mode="file"` for W39b SO2 work.
 
 ## Boundary conditions
 

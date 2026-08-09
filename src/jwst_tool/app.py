@@ -830,7 +830,10 @@ with st.sidebar:
     else:
         _goal_ss = st.session_state.get(K("goal"), "detect")
         _dofish_ss = bool(st.session_state.get(K("dofish"), False))
-        _jac_hint = (st.session_state.get(K("jacm"), "fd")
+        # fallback "ad" mirrors the method widget's default (index=1), so
+        # the photo-lock is right on the FIRST constrain render, before the
+        # selectbox has seeded session state (picaso forces "fd" above).
+        _jac_hint = (st.session_state.get(K("jacm"), "ad")
                      if (_goal_ss == "constrain" or _dofish_ss)
                      and not bool(st.session_state.get(K("conden"), False))
                      else "fd")
@@ -1114,7 +1117,10 @@ with st.sidebar:
                 # options (e.g. lnKzz under picaso).
                 fisher_extra = st.multiselect(
                     "Jointly free parameters", avail_free,
-                    default=[p for p in ("lnZ", "dlnCO", "lnKzz")
+                    # lnKzz dropped from the defaults 2026-08-09 (speed);
+                    # still selectable, and dropping it tightens the
+                    # remaining sigmas toward the conditional bound.
+                    default=[p for p in ("lnZ", "dlnCO")
                              if p in avail_free],
                     key=K(f"fx_{chem_provider}_{tp_mode}_{int(cloud_on)}_"
                           f"{int(bool(mie_condensate))}"),
@@ -1134,22 +1140,23 @@ with st.sidebar:
                     "Free parameters", avail_free,
                     key=K(f"fp_{chem_provider}_{tp_mode}_{int(cloud_on)}_"
                           f"{int(bool(mie_condensate))}"),
-                    default=[p for p in ("lnZ", "dlnCO", "lnKzz")
+                    default=[p for p in ("lnZ", "dlnCO")
                              if p in avail_free],
                     format_func=lambda n: forward.PARAM_LABELS[n])
             jac_method = st.selectbox(
-                "Differentiation method", ["fd", "ad"], index=0,
+                "Differentiation method", ["fd", "ad"], index=1,
                 key=K("jacm"), disabled=_pic,
-                format_func={"fd": "Finite differences (default)",
-                             "ad": "Automatic differentiation (forward-mode)"}.get,
-                help="Finite differences re-run the model at shifted "
-                     "parameter values and check two step sizes against "
-                     "each other. They work everywhere. AD differentiates "
-                     "the numerical model directly. It is about 1.7-4x "
-                     "faster per row, needs photochemistry on, and stops "
-                     "with an error on the C/O row for carbon-rich "
-                     "compositions. Every result row is labeled with the "
-                     "method that produced it.")
+                format_func={"fd": "Finite differences",
+                             "ad": "Automatic differentiation "
+                                   "(forward-mode, default)"}.get,
+                help="AD (the default) differentiates the numerical model "
+                     "directly: about 1.7-4x faster per row, needs "
+                     "photochemistry on, and stops with an error on the "
+                     "C/O row for carbon-rich compositions. Finite "
+                     "differences re-run the model at shifted parameter "
+                     "values and check two step sizes against each other; "
+                     "they work everywhere. Every result row is labeled "
+                     "with the method that produced it.")
             if _pic:
                 st.caption("Locked to finite differences: PICASO's "
                            "chemistry is table interpolation, with no "
