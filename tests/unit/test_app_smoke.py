@@ -352,3 +352,39 @@ def test_picaso_detect_fisher_checkbox_renders():
     at.checkbox(key="n0_dofish").check()
     at.run()
     assert not at.exception, at.exception
+
+
+def test_custom_archive_fill_updates_the_form():
+    """The archive Fill button writes the snapshot row into the custom form
+    via the pending-then-apply-before-widgets path, with a success message."""
+    at = _run_app()
+    at.selectbox(key="n0_planet").set_value("custom").run()
+    assert not at.exception, at.exception
+    at.selectbox(key="n0_custom_arch_name").set_value("HD 189733 b")
+    at.button(key="n0_custom_arch_fill").click().run()
+    assert not at.exception, at.exception
+    from jwst_tool import archive
+    values, _ = archive.custom_fill(archive.lookup("HD 189733 b"))
+    assert at.number_input(key="n0_custom_teff").value == values["teff"]
+    assert at.number_input(key="n0_custom_g").value == \
+        pytest.approx(values["g"])
+    assert at.selectbox(key="n0_custom_sflux").value == values["sflux"]
+    assert any("archive snapshot" in s.value for s in at.success)
+
+
+def test_custom_sflux_nearest_caption_discloses_and_never_flips():
+    """The nearest-type caption tracks a typed Teff; the MENU does not move
+    (only the fill path applies the nearest-type default)."""
+    at = _run_app()
+    at.selectbox(key="n0_planet").set_value("custom").run()
+    assert not at.exception, at.exception
+    caps = " | ".join(c.value for c in at.caption)
+    assert "Nearest shipped UV spectrum" in caps and "WASP-39" in caps
+    at.number_input(key="n0_custom_teff").set_value(3100.0).run()
+    assert not at.exception, at.exception
+    caps = " | ".join(c.value for c in at.caption)
+    assert "GJ 1214" in caps
+    assert "A different spectrum is currently selected" in caps
+    # the menu itself stayed on the WASP-39 default
+    assert at.selectbox(key="n0_custom_sflux").value == \
+        "sflux-W39b_Tsai2023.txt"

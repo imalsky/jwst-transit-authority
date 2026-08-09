@@ -13,7 +13,7 @@
     "psf_version_source": "VERSION_PSF",
     "python": "3.12.13",
     "numpy": "2.5.1",
-    "worker_version": 7
+    "worker_version": 8
    },
    "provenance_pandexo": {
     "pandeia_engine_version": "2026.7",
@@ -30,17 +30,17 @@
    "modes": [
     {
      "key": "nirspec_prism",
-     "status": "SATURATED_ABOVE_LIMIT",
+     "status": "OK",
      "npix_ours": 403,
      "npix_pandexo": 403,
      "npix_matched": 403,
-     "ngroup_ours": 2,
+     "ngroup_ours": 1,
      "ngroup_pandexo": 1,
-     "sat_frac_ours": 0.8342846140961538,
-     "t_int_ours_s": 0.69896,
+     "sat_frac_ours": 0.4171423070480769,
+     "t_int_ours_s": 0.4728,
      "t_int_pandexo_s": 0.45232,
      "t_frame_pandexo_s": 0.22616,
-     "n_int_ours": 14439,
+     "n_int_ours": 21347,
      "n_int_pandexo_in": 22314.0,
      "n_int_pandexo_out": 22314.0,
      "config_ours": {
@@ -65,19 +65,19 @@
      },
      "sigma_ratio_matched": {
       "n": 403,
-      "median": 1.2041222850584463,
-      "p05": 1.058701292610334,
-      "p95": 1.5089417399878844,
-      "max_abs_dev": 0.5633076096096321
+      "median": 1.310870418985655,
+      "p05": 1.0761035193850272,
+      "p95": 1.7532030904360503,
+      "max_abs_dev": 0.8270497780473101
      },
      "sigma_ratio_policy": {
       "n": 403,
-      "median": 1.4968929751310185,
-      "p05": 1.3161142745511232,
-      "p95": 1.8758263330042135,
-      "max_abs_dev": 0.9434107381211181
+      "median": 1.3402322144825154,
+      "p05": 1.100206841126076,
+      "p95": 1.792472563497834,
+      "max_abs_dev": 0.8679733210372569
      },
-     "var_excess_ours": 1.9111377202202957,
+     "var_excess_ours": 2.1673955947122647,
      "var_excess_pandexo": 1.2220115580237085,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good. Ngroups=1 is a new mode since Cycle 4 and has not been rigorously tested. Proceed with caution.",
@@ -474,7 +474,7 @@
     "psf_version_source": "VERSION_PSF",
     "python": "3.12.13",
     "numpy": "2.5.1",
-    "worker_version": 7
+    "worker_version": 8
    },
    "provenance_pandexo": {
     "pandeia_engine_version": "2026.7",
@@ -492,16 +492,16 @@
     {
      "key": "nirspec_prism",
      "status": "SATURATED_ABOVE_LIMIT",
-     "npix_ours": 265,
+     "npix_ours": 303,
      "npix_pandexo": 402,
-     "npix_matched": 265,
-     "ngroup_ours": 2,
+     "npix_matched": 303,
+     "ngroup_ours": 1,
      "ngroup_pandexo": 1,
-     "sat_frac_ours": 7.125190806461538,
-     "t_int_ours_s": 0.69896,
+     "sat_frac_ours": 3.562595403230769,
+     "t_int_ours_s": 0.4728,
      "t_int_pandexo_s": 0.45232,
      "t_frame_pandexo_s": 0.22616,
-     "n_int_ours": 14439,
+     "n_int_ours": 21347,
      "n_int_pandexo_in": 22314.0,
      "n_int_pandexo_out": 22314.0,
      "config_ours": {
@@ -518,28 +518,28 @@
       "disperser": "prism"
      },
      "flux_ratio": {
-      "n": 265,
-      "median": 1.0002017458278338,
-      "p05": 0.9857873911944572,
-      "p95": 1.0198054371245333,
-      "max_abs_dev": 0.05117465339948235
+      "n": 303,
+      "median": 1.0001873779203503,
+      "p05": 0.9868345922472507,
+      "p95": 1.0249886224043319,
+      "max_abs_dev": 0.7886029547001374
      },
      "sigma_ratio_matched": {
-      "n": 265,
-      "median": 1.075331815092542,
-      "p05": 1.0339785494454286,
-      "p95": 1.1655845685128978,
-      "max_abs_dev": 0.17552139169261038
+      "n": 303,
+      "median": 1.0919945904544601,
+      "p05": 1.0218726823079702,
+      "p95": 1.2430537097782222,
+      "max_abs_dev": 0.2596591687885259
      },
      "sigma_ratio_policy": {
-      "n": 265,
-      "median": 1.33678834776219,
-      "p05": 1.2853804354479632,
-      "p95": 1.4489851854567974,
-      "max_abs_dev": 0.46133805110624393
+      "n": 303,
+      "median": 1.116453851556264,
+      "p05": 1.0447613037057826,
+      "p95": 1.2708964990345115,
+      "max_abs_dev": 0.2878738987679643
      },
-     "var_excess_ours": 1.221520439890035,
-     "var_excess_pandexo": 1.0686069868513912,
+     "var_excess_ours": 1.2604273814068263,
+     "var_excess_pandexo": 1.055929664768263,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good. Ngroups=1 is a new mode since Cycle 4 and has not been rigorously tested. Proceed with caution.",
       "Group Number Too High?": "All good",
@@ -678,13 +678,13 @@
      "npix_ours": 2040,
      "npix_pandexo": 2040,
      "npix_matched": 2040,
-     "ngroup_ours": 2,
+     "ngroup_ours": 1,
      "ngroup_pandexo": 2,
-     "sat_frac_ours": 0.7840312374131944,
-     "t_int_ours_s": 16.50248,
+     "sat_frac_ours": 0.3920156187065972,
+     "t_int_ours_s": 11.008479999999999,
      "t_int_pandexo_s": 16.482,
      "t_frame_pandexo_s": 5.494,
-     "n_int_ours": 611,
+     "n_int_ours": 916,
      "n_int_pandexo_in": 613.0,
      "n_int_pandexo_out": 613.0,
      "config_ours": {
@@ -709,19 +709,19 @@
      },
      "sigma_ratio_matched": {
       "n": 2040,
-      "median": 1.0642831819219674,
-      "p05": 1.0278215104760196,
-      "p95": 1.1158867116992204,
-      "max_abs_dev": 0.19542554578418203
+      "median": 7.0799878519738675,
+      "p05": 3.2761756899953465,
+      "p95": 14.475048259115063,
+      "max_abs_dev": 16.40427344424518
      },
      "sigma_ratio_policy": {
       "n": 2040,
-      "median": 1.0660236298253032,
-      "p05": 1.0295023317304537,
-      "p95": 1.1177115480968318,
-      "max_abs_dev": 0.1973804539515711
+      "median": 5.791819422323083,
+      "p05": 2.6800918856050906,
+      "p95": 11.841385521986911,
+      "max_abs_dev": 13.237652814290897
      },
-     "var_excess_ours": 1.3093611116137633,
+     "var_excess_ours": 53.77165092011006,
      "var_excess_pandexo": 1.0746478295725284,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
@@ -935,7 +935,7 @@
     "psf_version_source": "VERSION_PSF",
     "python": "3.12.13",
     "numpy": "2.5.1",
-    "worker_version": 7
+    "worker_version": 8
    },
    "provenance_pandexo": {
     "pandeia_engine_version": "2026.7",
@@ -1412,7 +1412,7 @@
  "gate": {
   "passed": true,
   "problems": [],
-  "required_worker_version": 7,
+  "required_worker_version": 8,
   "required_pandeia_release": "2026.7",
   "thresholds": {
    "min_matched_pixel_frac": 0.99,

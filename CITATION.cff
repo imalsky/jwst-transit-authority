@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use vulcan-jwst-tool in published work, please cite it as below, along with the underlying codes listed in the README's How to cite section."
+type: software
+title: "vulcan-jwst-tool: a JWST exoplanet observation planner with a live photochemical forward model"
+authors:
+  - family-names: Malsky
+    given-names: Isaac
+version: 0.25.0
+license: GPL-3.0-only
+repository-code: "https://github.com/imalsky/vulcan-jwst-tool"
+url: "https://github.com/imalsky/vulcan-jwst-tool"
+keywords:
+  - JWST
+  - exoplanets
+  - transmission spectroscopy
+  - photochemistry
+  - observation planning

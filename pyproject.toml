@@ -78,8 +78,9 @@ include-package-data = false
 where = ["src"]
 
 [tool.setuptools.package-data]
-# the vendored house figure style app.py loads at startup
-jwst_tool = ["science.mplstyle"]
+# the vendored house figure style app.py loads at startup + the per-release
+# NASA Exoplanet Archive snapshot behind the custom-planet fill
+jwst_tool = ["science.mplstyle", "exoplanet_archive_pscomppars.csv"]
 
 [tool.setuptools.dynamic]
 version = { attr = "jwst_tool._version.__version__" }

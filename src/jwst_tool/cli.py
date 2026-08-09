@@ -6,6 +6,8 @@
                            downloads + the Pandeia conda environment)
 ``jwst-tool data``         print the full data-availability report + remedies
 ``jwst-tool data --deep``  also probe the Pandeia env for its engine version
+``jwst-tool archive-refresh``  refresh the shipped NASA Exoplanet Archive
+                           snapshot (maintainer/release step; network)
 
 The GUI launch is equivalent to ``streamlit run src/jwst_tool/app.py``, but
 works from anywhere once the package is installed. Preflight checks catch the
@@ -42,6 +44,9 @@ def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] == "fetch":
         from jwst_tool import fetch
         return fetch.run_fetch()
+    if len(sys.argv) > 1 and sys.argv[1] == "archive-refresh":
+        from jwst_tool import archive
+        return archive.run_refresh(sys.argv[2:])
 
     try:
         import streamlit  # noqa: F401

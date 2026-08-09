@@ -228,15 +228,22 @@ PANDEXO_UNBOUNDED_NGROUP = 65535
 # optimize the readout pattern. The GUI says so and shows each mode's
 # configuration in the details table.
 #
-# ngroup_min is a TOOL POLICY bound, not the physical minimum ramp: STScI
-# permits 1-group NRSRAPID (NIRSpec BOTS) and 1-group NISRAPID (SOSS, with a
-# calibration warning), and MIRI FASTR1 ramps below 5 groups with warnings or
-# limited access. The worker never tries ramps below ngroup_min, so a very
-# bright target can be reported "saturated at the shortest ramp" where
-# PandExo would drop to 1 group and pass (documented policy delta:
-# tests/parity/outputs/REPORT.md, "Residual policy differences"). Searching
-# the full permitted ramp space and classifying warning/limited-access
-# configurations is recorded as an open change, not an oversight.
+# ngroup_min equals pandeia 2026.7 `mingroups` for each mode's detector
+# (pandeia_data-2026.7-jwst/jwst/<instrument>/config.json detector_config:
+# nirspec/niriss/nircam 1, miri 2). PandExo reads the same field
+# (timing_det_pars['mingroups'] at the pinned parity commit 34e42d81, no
+# instrument branching), so both tools search the same ramp space. Verified
+# against jwst-docs 2026-08-09: NIRSpec BOTS permits 1-group NRSRAPID for
+# very bright targets (2 recommended); NIRISS SOSS permits 1-group NISRAPID
+# (APT warns at 1); MIRI FASTR1 permits 2 groups with 5+ recommended for
+# calibration accuracy.
+# ngroup_warn_below is a DISCLOSURE threshold, not a bound: a selected ramp
+# below it still ranks, with a "below the STScI-recommended minimum" warning
+# from detect (1-group NIR ramps are new since Cycle 4 and lightly tested;
+# MIRI ramps below 5 groups calibrate significantly worse). History: through
+# 0.24.0 the tool floored NIR at 2 / MIRI at 5 and reported bright targets
+# "saturated at the shortest ramp" where PandExo passed at 1 group (closed
+# 2026-08-09; see docs/decision_records.md).
 MODES = {
     "nirspec_prism": dict(
         label="NIRSpec PRISM",
@@ -247,8 +254,8 @@ MODES = {
         strategy=dict(aperture_size=0.7, sky_annulus=[0.75, 1.5]),
         background="ecliptic", background_level="medium",
         wl_min=0.6, wl_max=5.25,
-        floor_ppm_suggested=20.0, noise_infl=1.0, ngroup_min=2,
-        ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
+        floor_ppm_suggested=20.0, noise_infl=1.0, ngroup_min=1,
+        ngroup_warn_below=2, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     "nirspec_g395h": dict(
         label="NIRSpec G395H",
@@ -259,8 +266,8 @@ MODES = {
         strategy=dict(aperture_size=0.7, sky_annulus=[0.75, 1.5]),
         background="ecliptic", background_level="medium",
         wl_min=2.87, wl_max=5.18,
-        floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=2,
-        ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
+        floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=1,
+        ngroup_warn_below=2, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     "nirspec_g235h": dict(
         label="NIRSpec G235H",
@@ -271,8 +278,8 @@ MODES = {
         strategy=dict(aperture_size=0.7, sky_annulus=[0.75, 1.5]),
         background="ecliptic", background_level="medium",
         wl_min=1.66, wl_max=3.07,
-        floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=2,
-        ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
+        floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=1,
+        ngroup_warn_below=2, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     "niriss_soss": dict(
         label="NIRISS SOSS (ord 1)",
@@ -283,7 +290,8 @@ MODES = {
         strategy=dict(order=1),
         background="ecliptic", background_level="medium",
         wl_min=0.85, wl_max=2.8,
-        floor_ppm_suggested=20.0, noise_infl=1.0, ngroup_min=2, ngroup_max=30,
+        floor_ppm_suggested=20.0, noise_infl=1.0, ngroup_min=1,
+        ngroup_warn_below=2, ngroup_max=30,
     ),
     "nircam_f322w2": dict(
         label="NIRCam F322W2",
@@ -293,7 +301,8 @@ MODES = {
         strategy=dict(aperture_size=0.4, sky_annulus=[0.5, 1.5]),
         background="ecliptic", background_level="medium",
         wl_min=2.45, wl_max=3.95,
-        floor_ppm_suggested=25.0, noise_infl=1.0, ngroup_min=2, ngroup_max=100,
+        floor_ppm_suggested=25.0, noise_infl=1.0, ngroup_min=1,
+        ngroup_warn_below=2, ngroup_max=100,
     ),
     "nircam_f444w": dict(
         label="NIRCam F444W",
@@ -303,7 +312,8 @@ MODES = {
         strategy=dict(aperture_size=0.4, sky_annulus=[0.5, 1.5]),
         background="ecliptic", background_level="medium",
         wl_min=3.9, wl_max=4.95,
-        floor_ppm_suggested=25.0, noise_infl=1.0, ngroup_min=2, ngroup_max=100,
+        floor_ppm_suggested=25.0, noise_infl=1.0, ngroup_min=1,
+        ngroup_warn_below=2, ngroup_max=100,
     ),
     "miri_lrs": dict(
         label="MIRI LRS (slitless)",
@@ -313,8 +323,8 @@ MODES = {
         strategy=dict(aperture_size=0.6, sky_annulus=[1.0, 2.8]),
         background="ecliptic", background_level="medium",
         wl_min=5.0, wl_max=12.0,
-        floor_ppm_suggested=40.0, noise_infl=1.0, ngroup_min=5,
-        ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
+        floor_ppm_suggested=40.0, noise_infl=1.0, ngroup_min=2,
+        ngroup_warn_below=5, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
 }
 
@@ -343,6 +353,13 @@ for _key, _m in MODES.items():
             f"PandExo-compatible maximum {_cap} for {_m['instrument']}; the "
             "optimizer would select an unsupported group count on faint "
             "targets (2026-07-12 audit item 5).")
+    if not (1 <= _m["ngroup_min"] <= _m["ngroup_warn_below"]
+            <= _m["ngroup_max"]):
+        raise RuntimeError(
+            f"mode {_key!r} breaks 1 <= ngroup_min={_m['ngroup_min']} <= "
+            f"ngroup_warn_below={_m['ngroup_warn_below']} <= "
+            f"ngroup_max={_m['ngroup_max']}; the ramp search and the "
+            "below-recommended-ramp warning both assume this ordering.")
 
 MODE_COLOR = {key: _COLORS[i % len(_COLORS)] for i, key in enumerate(MODES)}
 MODE_MARKER = {key: _MARKERS[i % len(_MARKERS)] for i, key in enumerate(MODES)}

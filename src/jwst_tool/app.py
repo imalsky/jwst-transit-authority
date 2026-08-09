@@ -43,6 +43,7 @@ TOOL_DIR = Path(__file__).resolve().parent   # forward.py subprocess lives here
 
 from jwst_tool import adjoint_diag, binning, datacheck, detect, \
     fisher as fisher_mod, forward
+from jwst_tool import archive
 from jwst_tool import noise as noise_mod
 from jwst_tool import proc as proc_mod
 from jwst_tool import share_config
@@ -483,6 +484,41 @@ def _apply_pending_config() -> None:
 
 _apply_pending_config()
 
+
+def _apply_pending_archive_fill() -> None:
+    """Fill the custom planet's widgets from a queued archive lookup.
+
+    Same ordering contract as _apply_pending_config: widget keys can only be
+    written BEFORE the widgets instantiate, so the Fill button's callback
+    just stashes the planet name (un-namespaced on purpose -- a reset's
+    session_state.clear() must kill a queued fill) and this applies it at
+    the top of the next run. Out-of-range/missing fields are never written
+    (Streamlit would crash at widget instantiation); archive.custom_fill
+    reports them by name instead."""
+    name = st.session_state.pop("_archive_fill_pending", None)
+    if not name:
+        return
+    try:
+        values, notes = archive.custom_fill(archive.lookup(name))
+    except (KeyError, archive.SnapshotError) as e:
+        st.session_state["_archive_fill_notes"] = [("error", str(e))]
+        return
+    for suffix, v in values.items():
+        st.session_state[K(f"custom_{suffix}")] = v
+    st.session_state["_archive_fill_notes"] = (
+        [("success", f"Custom planet filled from the archive snapshot row "
+                     f"for {name}. Review every field; all stay editable.")]
+        + [("warning", n) for n in notes])
+
+
+_apply_pending_archive_fill()
+
+
+def _queue_archive_fill() -> None:
+    st.session_state["_archive_fill_pending"] = \
+        st.session_state.get(K("custom_arch_name"))
+
+
 # Chemistry-engine choice, read EARLY from session state so widgets that
 # render before the engine selectbox can adapt; on the very first render it
 # is the default (VULCAN).
@@ -534,31 +570,59 @@ with st.sidebar:
         return K(f"{planet_key}_{name}")
 
     with st.expander("System parameters", expanded=(planet_key == "custom")):
+        if planet_key == "custom":
+            # Optional archive fill: values come from the SHIPPED PSCompPars
+            # snapshot (date disclosed), never a live query. The button's
+            # callback only queues the name; _apply_pending_archive_fill
+            # wrote the widget keys at the top of this run.
+            try:
+                _snap = archive.load_snapshot()
+            except archive.SnapshotError as e:
+                _snap = None
+                st.error(f"Archive lookup unavailable: {e}")
+            if _snap is not None:
+                _arch_sel = st.selectbox(
+                    "Fill from the NASA Exoplanet Archive (optional)",
+                    _snap.names, index=None,
+                    placeholder="Search by planet name ...",
+                    key=K("custom_arch_name"))
+                st.button("Fill the system parameters",
+                          disabled=(_arch_sel is None),
+                          on_click=_queue_archive_fill,
+                          key=K("custom_arch_fill"))
+                st.caption(
+                    "Values come from a NASA Exoplanet Archive PSCompPars "
+                    f"snapshot fetched {_snap.fetched_utc[:10]}, shipped "
+                    "with this tool release (not a live query).")
+            for _kind, _msg in st.session_state.get(
+                    "_archive_fill_notes") or []:
+                getattr(st, _kind)(_msg)
+        _R = planets.CUSTOM_FIELD_RANGES   # single source with archive fill
         teff = st.number_input(
-            "Stellar effective temperature, Teff (K)", 3000.0, 7000.0,
+            "Stellar effective temperature, Teff (K)", *_R["teff"],
             pdef["star"]["teff"], 50.0, key=_k("teff"))
         logg = st.number_input(
-            "Stellar surface gravity, log10(g) (g in cm s^-2)", 3.5, 5.5,
+            "Stellar surface gravity, log10(g) (g in cm s^-2)", *_R["logg"],
             pdef["star"]["log_g"], 0.1, key=_k("logg"))
-        feh = st.number_input("Stellar metallicity, [Fe/H] (dex)", -2.0, 0.5,
+        feh = st.number_input("Stellar metallicity, [Fe/H] (dex)", *_R["feh"],
                               pdef["star"]["metallicity"], 0.1, key=_k("feh"))
         ks_mag = st.number_input(
-            "2MASS Ks magnitude", 4.0, 16.0,
+            "2MASS Ks magnitude", *_R["ks"],
             pdef["star"]["ks_mag"], 0.1, key=_k("ks"))
         rstar = st.number_input(
-            "Stellar radius (solar radii)", 0.2, 3.0, pdef["rstar_rsun"],
+            "Stellar radius (solar radii)", *_R["rstar"], pdef["rstar_rsun"],
             0.01, key=_k("rstar"), format="%.3f")
-        rp = st.number_input("Planet radius (Jupiter radii)", 0.1, 2.5,
+        rp = st.number_input("Planet radius (Jupiter radii)", *_R["rp"],
                              pdef["rp_rjup"], 0.01,
                              key=_k("rp"), format="%.3f")
         g_ms2 = st.number_input(
-            "Planet surface gravity (m s^-2)", 1.0, 100.0,
+            "Planet surface gravity (m s^-2)", *_R["g"],
             pdef["gs_cgs"] / 100.0, 0.5, key=_k("g"))
         orbit_au = st.number_input(
-            "Semi-major axis (AU)", 0.005, 1.0,
+            "Semi-major axis (AU)", *_R["a"],
             pdef["orbit_au"], 0.001, key=_k("a"), format="%.4f")
         t14 = st.number_input(
-            "Event duration, T14 (hours)", 0.5, 10.0,
+            "Event duration, T14 (hours)", *_R["t14"],
             pdef["t14_hr"], 0.1, key=_k("t14"))
         _uv_ok = datacheck.uv_spectra_status()
         sflux = st.selectbox(
@@ -572,6 +636,15 @@ with st.sidebar:
         if _pic_hint:
             st.caption("UV spectrum unused: the PICASO engine has no "
                        "photolysis, so this selection has no effect there.")
+        elif planet_key == "custom":
+            # Disclosure only: a typed Teff never flips the menu (the fill
+            # path is the one place the nearest-type default is APPLIED).
+            _near = planets.nearest_sflux(teff)
+            st.caption(
+                f"Nearest shipped UV spectrum for Teff {teff:.0f} K: "
+                f"{planets.SFLUX_CHOICES[_near]}."
+                + ("" if _near == sflux
+                   else " A different spectrum is currently selected."))
 
     # Registry planets carry a literature T_eq; the CUSTOM planet derives it
     # from the entered star and orbit so it does not inherit WASP-39 b's
@@ -1894,14 +1967,14 @@ for k, err in out["failed"]:
     with st.expander(f"{ins.MODES[k]['label']}: technical details"):
         st.code(str(err)[-2500:])
 for k, reason in out["unusable"]:
-    # "saturated" here means saturated at the tool's OWN shortest ramp
-    # (instruments.py ngroup_min), which is a policy bound above the physical
-    # minimum for some modes -- say so instead of implying a physical limit
+    # Since 0.25.0 ngroup_min equals pandeia's permitted minimum ramp for the
+    # mode (the same floor PandExo searches to), so "saturated at the shortest
+    # ramp" is a real brightness limit, not a tool policy bound.
     st.warning(
         f"**{ins.MODES[k]['label']}: unusable on this star**, {reason}. "
-        f"Note: this tool never tries ramps shorter than "
-        f"{ins.MODES[k]['ngroup_min']} groups; STScI permits shorter ramps "
-        "for some modes, and those are not searched.")
+        f"The shortest ramp tried ({ins.MODES[k]['ngroup_min']} "
+        "group(s)/integration) is the shortest the instrument supports for "
+        "this mode.")
 
 if not results:
     st.stop()
@@ -2293,7 +2366,8 @@ key_order = (lambda r: -r["sigma_detect"]) if goal_r == "detect" else (
 for r in sorted(results, key=key_order):
     notes = []
     if r["saturated"]:
-        notes.append(f"saturates (full-well {r['sat_frac']:.2f} at min groups)")
+        notes.append(f"saturates (full-well {r['sat_frac']:.2f} at the "
+                     "shortest permitted ramp)")
     n_part = int(np.sum(np.asarray(r.get("n_pix_partial_sat", 0)) > 0))
     # Quote the NATIVE-grid count: a fully saturated channel has non-finite
     # extracted noise, so the worker's own filter drops it and the
@@ -2304,7 +2378,7 @@ for r in sorted(results, key=key_order):
         if r.get("n_pix_full_sat_dropped"):
             notes.append(f"at least {r['n_pix_full_sat_dropped']} fully "
                          "saturated pixels excluded (native count unmeasured; "
-                         "re-run for a worker v7 census)")
+                         "re-run for a worker v7+ census)")
     elif _n_full_native:
         notes.append(f"{_n_full_native} fully saturated pixels excluded")
     if r.get("n_pix_degenerate_dropped"):

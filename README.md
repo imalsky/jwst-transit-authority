@@ -111,6 +111,17 @@ on WASP-39 b: <mode>, <score> in 1 transit", followed by the spectrum, the
 mode ranking, and per-mode details. Quality certificates and backend
 provenance are in the collapsed "Model quality and provenance" section.
 
+### Any transiting planet
+
+Step 1's "Custom planet" mode plans any target. Its form can auto-fill by
+planet name from a NASA Exoplanet Archive PSCompPars snapshot shipped with
+each release (~4400 transiting planets; the fetch date is shown in the GUI,
+and it is never a live query). Values outside the tool's supported ranges or
+missing from the archive are reported by name and left unchanged, never
+clamped. The stellar UV spectrum for photochemistry defaults to the nearest
+shipped spectral type by host Teff, always disclosed and overridable.
+Maintainers refresh the snapshot with `jwst-tool archive-refresh`.
+
 ## Science goals
 
 **Detection** scores how strongly one molecule imprints on the spectrum. The
@@ -136,9 +147,11 @@ Five limits to keep in view:
 
 - **Each instrument mode is one fixed detector configuration** (subarray and
   readout pattern, shown in the mode details table). The tool does not search
-  alternative subarrays or readout patterns, never tries ramps shorter than each
-  mode's `ngroup_min`, and does not check APT feasibility (data volume,
-  scheduling). Verify the chosen configuration in APT before proposing.
+  alternative subarrays or readout patterns, and does not check APT feasibility
+  (data volume, scheduling). The ramp search reaches the instrument's shortest
+  permitted ramp (pandeia's per-detector minimum: 1 group in the near infrared,
+  2 for MIRI); ramps below the STScI-recommended minimum are flagged with a
+  warning. Verify the chosen configuration in APT before proposing.
 - **The noise model omits time-correlated systematics.** In a three-star,
   fixed-configuration, no-floor parity benchmark (`tests/parity/`) it is
   conservative against PandExo by roughly 2-24% in the near infrared and 33-56%
@@ -205,6 +218,29 @@ tests/parity_picaso/   PICASO-native RT vs ExoJAX cross-model check, offline
 | [`docs/physics_and_conventions.md`](docs/physics_and_conventions.md) | Composition scaling, T-P and Kzz options, default structures, clouds, boundary conditions, backend policy, PICASO engine scope and limits, config deviations vs upstream VULCAN |
 | [`docs/decision_records.md`](docs/decision_records.md) | Disposition of every audit and review finding (2026-07-21 audit, 2026-08-05 review) plus the draft upstream PICASO report |
 | [`TODO.md`](TODO.md) | The live list of every known gap, shortcoming, deferred feature, and accepted limitation |
+
+## How to cite
+
+Cite the software itself using the metadata in [`CITATION.cff`](CITATION.cff)
+(GitHub's "Cite this repository" button renders it as BibTeX or APA).
+
+The tool runs other groups' codes; published results should also cite the
+components a run actually used:
+
+- VULCAN (the chemistry this tool's solver reimplements):
+  Tsai, S.-M., et al. 2017, ApJS, 228, 20 and Tsai, S.-M., et al. 2021,
+  ApJ, 923, 264
+- FastChem (equilibrium initialization): Stock, J. W., et al. 2018,
+  MNRAS, 479, 865
+- ExoJAX (radiative transfer and opacities): Kawahara, H., et al. 2022,
+  ApJS, 258, 31
+- Pandeia (instrument noise): Pontoppidan, K. M., et al. 2016,
+  Proc. SPIE, 9910, 991016
+- PICASO, only when the PICASO engine or climate mode is used:
+  Batalha, N. E., et al. 2019, ApJ, 878, 70
+- Cloud runs use the virga condensate database via ExoJAX; virga asks that
+  each condensate's optical-constants source be cited individually (see
+  `docs/physics_and_conventions.md`, Clouds section)
 
 ## License
 

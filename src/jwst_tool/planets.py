@@ -35,11 +35,13 @@ from __future__ import annotations
 
 import math
 
-# IAU 2015 Resolution B3 nominal values (R_jup equatorial, R_sun) and
-# CODATA 2018 G -- identical to astropy.constants to the digits printed.
+# IAU 2015 Resolution B3 nominal values (R_jup equatorial, R_sun, and
+# M_jup = nominal GM_J / CODATA G) and CODATA 2018 G -- identical to
+# astropy.constants to the digits printed.
 R_JUP_CM = 7.1492e9
 R_SUN_CM = 6.957e10
 G_CGS = 6.67430e-8  # gravitational constant (cm^3 g^-1 s^-2); for gs_cgs -> Mp
+M_JUP_G = 1.89813e30  # Jupiter mass (g); for archive mass -> surface gravity
 
 # Shipped stellar UV spectra usable as photochemistry input (VULCAN-JAX
 # atm/stellar_flux/, all same two-column surface-flux format), labeled by type.
@@ -51,6 +53,34 @@ SFLUX_CHOICES = {
     "sflux-GJ436.txt": "GJ 436 (M2.5V, MUSCLES)",
     "sflux-GJ1214.txt": "GJ 1214 (M4.5V, MUSCLES)",
 }
+
+# Host Teff per shipped UV spectrum, for the nearest-spectral-type DEFAULT on
+# custom/archive-filled planets ONLY (always disclosed in the GUI, never a
+# silent substitution; registry planets keep their curated sflux). Values:
+# WASP-39 / HD 189733 = this registry; Sun = IAU nominal; eps Eri ~5084 K
+# (interferometric, Baines & Armstrong 2012); GJ 436 ~3416 K (von Braun 2012);
+# GJ 1214 ~3026 K (Cloutier 2021). Only the ORDERING matters for
+# nearest-neighbor selection, so literature spread within ~100 K is harmless.
+SFLUX_TEFF_ANCHORS = {
+    "sflux-W39b_Tsai2023.txt": 5485.0,
+    "Gueymard_solar.txt": 5772.0,
+    "sflux-HD189_Moses11.txt": 5040.0,
+    "sflux-epseri.txt": 5084.0,
+    "sflux-GJ436.txt": 3416.0,
+    "sflux-GJ1214.txt": 3026.0,
+}
+if set(SFLUX_TEFF_ANCHORS) != set(SFLUX_CHOICES):
+    raise RuntimeError(
+        "SFLUX_TEFF_ANCHORS is out of sync with SFLUX_CHOICES: "
+        f"{sorted(set(SFLUX_TEFF_ANCHORS) ^ set(SFLUX_CHOICES))}; the "
+        "nearest-spectral-type default needs one Teff anchor per spectrum.")
+
+
+def nearest_sflux(teff_k: float) -> str:
+    """Filename of the shipped UV spectrum whose host Teff is closest to
+    ``teff_k`` (ties resolve by SFLUX_TEFF_ANCHORS insertion order)."""
+    t = float(teff_k)
+    return min(SFLUX_TEFF_ANCHORS, key=lambda f: abs(SFLUX_TEFF_ANCHORS[f] - t))
 
 # Per-planet MEASURED structure tables bundled with vulcan_jax (atm/).
 #
@@ -128,6 +158,25 @@ PLANETS = {
 
 # The "custom" planet starts from these (WASP-39b) values; everything editable.
 CUSTOM_DEFAULTS = PLANETS["wasp39b"]
+
+# Single source of truth for the custom-planet form bounds, in WIDGET units
+# (g in m s^-2 = gs_cgs / 100; everything else as displayed). app.py unpacks
+# these into its number_inputs and archive.custom_fill refuses values outside
+# them -- Streamlit hard-errors at widget instantiation on an out-of-range
+# session-state value, so the two consumers must never drift. Widening a range
+# is a physics decision (PHOENIX grid nodes, premodit opacity ceiling,
+# validated chemistry envelope), not a UI tweak.
+CUSTOM_FIELD_RANGES = {
+    "teff": (3000.0, 7000.0),   # K; PHOENIX + chemistry validity
+    "logg": (3.5, 5.5),         # log10 cm s^-2
+    "feh": (-2.0, 0.5),         # dex
+    "ks": (4.0, 16.0),          # 2MASS Ks vegamag
+    "rstar": (0.2, 3.0),        # R_sun
+    "rp": (0.1, 2.5),           # R_jup
+    "g": (1.0, 100.0),          # m s^-2 (widget unit; registry stores cgs)
+    "a": (0.005, 1.0),          # AU
+    "t14": (0.5, 10.0),         # hours
+}
 
 
 def system_fields(planet: dict) -> dict:

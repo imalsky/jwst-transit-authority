@@ -56,7 +56,11 @@ _BACKEND_FINGERPRINT = None
 # identity the parity gate (tests/parity/scripts/parity_gate.py) requires of a
 # committed artifact. Bump whenever pandeia_worker.py output changes (history:
 # notes.md); a bump without a fresh parity run fails the gate test.
-WORKER_VERSION = 7
+# v8 (2026-08-09): ramp-search floors adopt pandeia mingroups (NIR modes drop
+# 2 -> 1, MIRI LRS 5 -> 2), matching PandExo's search space; not required for
+# cache correctness (ngroup_min is in the job key) but the search-policy
+# change is part of the parity-artifact identity.
+WORKER_VERSION = 8
 
 
 def backend_fingerprint() -> dict:

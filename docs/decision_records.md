@@ -299,7 +299,7 @@ audit decisions above (two findings restate decisions made there).
 
 ## High severity
 
-### 1. ngroup_min excludes permitted bright-target ramps  [DISCLOSED; SEARCH CHANGE OPEN]
+### 1. ngroup_min excludes permitted bright-target ramps  [RESOLVED 2026-08-09, worker v8 -- see the "Decision 2026-08-09: ramp floors" section below]
 
 TRUE as a limitation and previously documented as a policy delta
 (`tests/parity/outputs/REPORT.md`, "Residual policy differences": PandExo
@@ -473,6 +473,76 @@ Maintainer decision (Isaac), motivated by default constraint runs taking
 
 No `forward._VERSION` bump: a given canonical parameter set means the same
 physics as before; only which set the defaults resolve to changed.
+
+---
+
+# Decision 2026-08-09: ramp floors adopt pandeia mingroups (worker v8, 0.25.0)
+
+Resolves the 2026-08-05 review's high-severity item 1 (bright-target false
+"unusable" verdicts) and TODO item 1. Maintainer decision (Isaac): match
+PandExo's minimum-group policy exactly, including MIRI.
+
+**What PandExo's policy actually is (verified, not assumed):** PandExo has no
+floors of its own -- at the pinned parity commit `34e42d81` it reads
+`timing_det_pars['mingroups']` from pandeia's per-detector configuration,
+resets a lower optimum to it ("Optimized NGROUPS below minimum"), and warns
+at 1 group ("new mode since Cycle 4"). Pandeia 2026.7 ships `mingroups` = 1
+for NIRSpec, NIRISS, and NIRCam, and **2 for MIRI** (all three MIRI
+detectors, including the imager LRS slitless uses) -- so "match PandExo"
+means MIRI drops 5 -> 2, contrary to the TODO's guess that it likely meant
+keeping 5.
+
+**jwst-docs verification (2026-08-09)** of the previously unverified
+instruments.py comment claims: NIRSpec BOTS permits 1-group NRSRAPID for
+very bright targets with 2 recommended (NIRSpec Detector Recommended
+Strategies); NIRISS SOSS NISRAPID permits ngroups 1-800 and APT warns at 1
+(SOSS Recommended Strategies); MIRI permits 2 with 5+ recommended and
+"calibration accuracy worsens significantly" below 5 (MIRI TSO Recommended
+Strategies); NIRCam grism bright limits are quoted at RAPID ngroups=2 and
+pandeia permits 1.
+
+**Changes:** registry `ngroup_min` NIR modes 2 -> 1, miri_lrs 5 -> 2; new
+per-mode `ngroup_warn_below` (2 NIR / 5 MIRI) drives a below-recommended
+disclosure warning in `detect.evaluate_mode` (the row still ranks; the
+existing warnings channel and `_op_status` render it); import-time guard
+`1 <= ngroup_min <= ngroup_warn_below <= ngroup_max`; WORKER_VERSION 7 -> 8
+(parity-artifact identity; the noise cache already self-invalidates via
+ngroup_min in the job key); the GUI's "unusable" disclosure, README scope
+bullet, and parity-report policy text no longer describe a floor above the
+permitted minimum.
+
+**Measured outcome (parity re-run 2026-08-09, PandExo side reused --
+byte-identical job):** the w39_like NIRSpec PRISM row flips from
+"SATURATED above limit at 2 groups (0.83 full well)" to OK at ngroup=1,
+0.42 full well -- matching PandExo's 1 group at 42% on the same star, the
+exact false-negative the review flagged. bright_hot PRISM stays saturated
+in both tools (3.56x full well at 1 group). MIRI floors: no behavior change
+on the three parity stars (their optimal MIRI ramps are far above 2).
+
+---
+
+# Decision 2026-08-09: custom-planet archive fill is a shipped snapshot, never a live query (0.25.0)
+
+Maintainer decision (Isaac): the custom form's "Fill from the NASA Exoplanet
+Archive" feature reads a committed PSCompPars snapshot
+(`src/jwst_tool/exoplanet_archive_pscomppars.csv`, ~4400 transiting planets
+with the four fill-critical fields non-null), refreshed per release with
+`jwst-tool archive-refresh` (stdlib urllib TAP query, deterministic output,
+reviewable diff). Rationale: works offline and on the Space, no runtime
+network failure mode, no new dependencies, and the light CI stays
+pandas/astropy-free. A live TAP option is deferred (TODO).
+
+Fill policy (standing loud-errors rule): out-of-range and missing values are
+NEVER clamped or guessed -- the field is left unchanged and the refusal is
+named per field. `planets.CUSTOM_FIELD_RANGES` is the single source for both
+the widget bounds and the fill's checks because Streamlit crashes at widget
+instantiation on an out-of-range session-state value. Gravity derives from
+the archive best mass + radius (provenance disclosed when not a true mass);
+metallicity fills the real archive value for custom targets (the registry's
+deliberate 0.0 stays for shipped planets); the UV spectrum defaults to the
+nearest shipped spectral type by Teff anchor (`planets.SFLUX_TEFF_ANCHORS`),
+applied only through the fill path and always disclosed -- a typed Teff
+updates the disclosure caption but never flips the menu.
 
 ---
 

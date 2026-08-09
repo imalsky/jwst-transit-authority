@@ -222,11 +222,11 @@ def main(require_pass: bool = False):
       "real, cancel in the in/out transit-depth ratio, and wash out in "
       "binning.")
     w("- **Saturation:** compared at the configuration level only -- both "
-      "tools flag the same saturating star/mode combinations (PRISM on the "
-      "two bright stars; this tool floors at ngroup=2 while PandExo drops to "
-      "ngroup=1 there). Rows above the saturation limit are reported in the "
-      "tables but are never validation rows. Per-pixel saturation masks are "
-      "NOT exported or compared.")
+      "tools search down to the same pandeia per-detector minimum ramp "
+      "(worker v8: NIR 1 group, MIRI 2), so they flag the same saturating "
+      "star/mode combinations. Rows above the saturation limit are reported "
+      "in the tables but are never validation rows. Per-pixel saturation "
+      "masks are NOT exported or compared.")
     w("")
     w("**PandExo operational warnings are recorded, not adjudicated.** Under "
       "the pinned RAPID readout, PandExo attaches data-volume-excess "
@@ -343,10 +343,12 @@ def main(require_pass: bool = False):
     w("")
     w("3. **Residual policy differences (documented, small):** integration "
       "counts are floored here vs rounded in PandExo (at most one "
-      "integration per window); ngroup_min is 2 here while PandExo will "
-      "select 1 group (PRISM on a bright star); the symmetric in/out "
+      "integration per window); the symmetric in/out "
       "approximation adds ~+0.5% sigma at 1% depth (grows with depth; "
-      "docstring in noise.pixel_depth_variance).")
+      "docstring in noise.pixel_depth_variance). Since worker v8 the ramp "
+      "floors equal pandeia's per-detector mingroups (NIR 1, MIRI 2), the "
+      "same field PandExo reads, so the old ngroup-floor delta (ours 2 vs "
+      "PandExo 1 on bright-star PRISM) no longer exists.")
     w("")
     _passed = problems == []
     w("4. **What may be claimed:** "

@@ -40,6 +40,23 @@ def test_optimizer_clamp_never_exceeds_ngroup_max():
             got = pw._clamp_ngroup(cand, lo, hi)
             assert lo <= got <= hi, (key, cand, got)
 
+
+def test_ramp_floors_equal_pandeia_mingroups():
+    """Since worker v8 the search floor is pandeia 2026.7's per-detector
+    mingroups (jwst/<instrument>/config.json: nirspec 1, niriss 1,
+    nircam 1, miri 2) -- the same field PandExo reads, so both tools search
+    the same ramp space. The warn threshold is the STScI-recommended
+    minimum (jwst-docs, verified 2026-08-09): 2 for the NIR modes (1-group
+    ramps are new since Cycle 4), 5 for MIRI."""
+    expected = {"nirspec": (1, 2), "niriss": (1, 2),
+                "nircam": (1, 2), "miri": (2, 5)}
+    for key, m in ins.MODES.items():
+        floor, warn = expected[m["instrument"]]
+        assert m["ngroup_min"] == floor, key
+        assert m["ngroup_warn_below"] == warn, key
+        assert 1 <= m["ngroup_min"] <= m["ngroup_warn_below"] \
+            <= m["ngroup_max"], key
+
 @pytest.mark.parametrize("raw, expected", [
     ("3.0", "3.0"),
     ("3.0rc3", "3.0"),

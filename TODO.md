@@ -1,28 +1,21 @@
 # TODO: open gaps and shortcomings
 
 The one live list of everything known to be missing, approximate, or
-deferred in this tool. Updated 2026-08-05 (after the adversarial-review
-response, tool 0.23.3). Keep this file current: close items here when they
+deferred in this tool. Updated 2026-08-09 (ramp-floor fix + archive fill,
+tool 0.25.0). Keep this file current: close items here when they
 land, add new ones as they are found. The reasoning behind every decision
 lives in `docs/decision_records.md`; scope and conventions live in
 `docs/physics_and_conventions.md`.
 
 ## Correctness-affecting: fix next, in this order
 
-1. **ngroup_min ramp search (bright-target false "unusable" verdicts).**
-   The registry floors NIRSpec/NIRISS ramps at 2 groups and MIRI at 5; the
-   worker never tries shorter permitted ramps. Proven consequence
-   (tests/parity/outputs/REPORT.md): a WASP-39-like star gets "saturated"
-   on NIRSpec PRISM at 2 groups where PandExo drops to 1 group and passes
-   at 42% full well. The GUI now discloses the bound; the verdict is still
-   wrong in substance for bright targets. Fix: adopt PandExo's
-   minimum-group policy exactly (verify against the pinned PandExo commit
-   first, and verify the STScI 1-group claims in the instruments.py comment
-   against jwst-docs; they came from the review, unverified). Registry
-   change + a below-recommended-ramp warning + parity re-run. The noise
-   cache self-invalidates (ngroup_min is in the job key). Roughly one day;
-   decision needed on whether MIRI ever goes below 5 (recommendation:
-   match PandExo, which likely means no).
+1. **CLOSED 2026-08-09 (worker v8, 0.25.0): ngroup_min ramp search.**
+   Floors now equal pandeia 2026.7 per-detector `mingroups` (NIR 1, MIRI 2
+   -- the field PandExo reads), with a below-recommended-ramp warning
+   (`ngroup_warn_below`: 2 NIR / 5 MIRI, jwst-docs-verified). Parity re-run
+   confirms the w39_like PRISM false negative is gone (OK at 1 group, 0.42
+   full well, matching PandExo). Record: docs/decision_records.md,
+   "Decision 2026-08-09: ramp floors".
 
 2. **NIRCam data-volume estimate.** A mode can rank "Best" while its full
    visit implies ~28 GB of data excess (seen as PandExo warnings in the
@@ -93,6 +86,10 @@ lives in `docs/decision_records.md`; scope and conventions live in
 - `jwst-tool fetch` for the PICASO reference tree (user-supplied Zenodo
   data; datacheck reports it).
 - AD through climate mode (uncertified combination).
+- Live TAP lookup as an opt-in alternative to the shipped archive snapshot
+  (0.25.0 ships snapshot-only by decision; `archive.py` is shaped for a
+  `lookup_live` provider returning the same row schema, failures shown,
+  never a silent fallback between sources).
 
 ## Accepted limitations (deliberate; reasoning in docs/decision_records.md)
 
