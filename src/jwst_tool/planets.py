@@ -54,9 +54,11 @@ SFLUX_CHOICES = {
     "sflux-GJ1214.txt": "GJ 1214 (M4.5V, MUSCLES)",
 }
 
-# Host Teff per shipped UV spectrum, for the nearest-spectral-type DEFAULT on
-# custom/archive-filled planets ONLY (always disclosed in the GUI, never a
-# silent substitution; registry planets keep their curated sflux). Values:
+# Host Teff per shipped UV spectrum, powering a SUGGESTION caption on custom
+# planets only ("nearest-Teff shipped template: ..."). It is never applied:
+# neither the GUI nor the archive fill selects a UV spectrum for the user
+# (maintainer rule 2026-08-09; registry planets keep their curated sflux).
+# Values:
 # WASP-39 / HD 189733 = this registry; Sun = IAU nominal; eps Eri ~5084 K
 # (interferometric, Baines & Armstrong 2012); GJ 436 ~3416 K (von Braun 2012);
 # GJ 1214 ~3026 K (Cloutier 2021). Only the ORDERING matters for

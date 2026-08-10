@@ -184,6 +184,12 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
     state[pk("a")] = float(cp["orbit_au"])
     if str(cp.get("sflux", "")) in planets.SFLUX_CHOICES:
         state[pk("sflux")] = str(cp["sflux"])
+    else:
+        # unreachable for a config that passed the canonical_params gate
+        # unless sflux is absent (older file) -- say so, never silently keep
+        # whatever the menu happens to show
+        notes.append("the configuration names no stellar UV spectrum; the "
+                     "menu keeps its current selection")
 
     # -- temperature-pressure profile (step 2)
     state[pk("tp")] = tp_mode
@@ -197,9 +203,11 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
         state[pk("lg")] = float(cp["log_gamma"])
     elif tp_mode == "picaso_climate":
         state[pk("tintcl")] = float(cp["tint_cl"])
-        rf = float(cp["rfacv"])
-        state[pk("rfacv")] = min(forward.RFACV_CHOICES,
-                                 key=lambda c: abs(c - rf))
+        # exact assignment, no nearest-choice snapping: canonical_params
+        # (the loud gate above) already refused any off-menu rfacv, and a
+        # silent snap here would be a magic substitution if that gate ever
+        # weakened -- better to crash the selectbox loudly
+        state[pk("rfacv")] = float(cp["rfacv"])
         state[pk("tiovo")] = bool(cp["tio_vo"])
         state[pk("rcb")] = int(cp["climate_rcb"])
     elif tp_mode == "file":

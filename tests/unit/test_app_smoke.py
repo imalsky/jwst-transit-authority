@@ -368,7 +368,10 @@ def test_custom_archive_fill_updates_the_form():
     assert at.number_input(key="n0_custom_teff").value == values["teff"]
     assert at.number_input(key="n0_custom_g").value == \
         pytest.approx(values["g"])
-    assert at.selectbox(key="n0_custom_sflux").value == values["sflux"]
+    # the UV menu is NEVER written by the fill (no substitute spectra):
+    # it stays at the custom default even though HD 189733 b was filled
+    assert at.selectbox(key="n0_custom_sflux").value == \
+        "sflux-W39b_Tsai2023.txt"
     assert any("archive snapshot" in s.value for s in at.success)
 
 

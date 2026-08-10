@@ -49,13 +49,23 @@ def test_custom_fill_maps_and_derives_gravity():
     g_expect = (planets.G_CGS * 0.281 * planets.M_JUP_G
                 / (1.279 * planets.R_JUP_CM) ** 2) / 100.0
     assert values["g"] == pytest.approx(g_expect, rel=1e-12)
-    assert values["sflux"] == planets.nearest_sflux(5485.0)
     # true mass + [Fe/H] basis: exactly two disclosures -- gravity is a
-    # nominal composite value, and the nearest-Teff UV template
+    # nominal composite value, and the UV-menu-untouched suggestion
     assert len(notes) == 2
     assert any("nominal composite planning value" in n for n in notes)
-    uv = [n for n in notes if "nearest-Teff shipped UV template" in n]
+    uv = [n for n in notes if "Nearest-Teff shipped template" in n]
     assert len(uv) == 1 and "G8 V" in uv[0]
+
+
+def test_fill_never_selects_a_uv_spectrum():
+    """Maintainer rule (2026-08-09): the fill NEVER writes the UV menu --
+    the archive carries no UV spectra and no substitute is ever selected
+    for the user. The note names the nearest-Teff shipped template as a
+    suggestion only."""
+    values, notes = archive.custom_fill(_row())
+    assert "sflux" not in values
+    assert any("was NOT changed" in n and "never substitutes" in n
+               for n in notes)
 
 
 def test_custom_fill_refuses_out_of_range_loudly():
@@ -64,9 +74,9 @@ def test_custom_fill_refuses_out_of_range_loudly():
     hits = [n for n in notes if "8850" in n and "3000" in n and "7000" in n
             and "left unchanged" in n]
     assert len(hits) == 1
-    # no Teff filled -> no UV spectrum default either
+    # no Teff filled -> not even a nearest-template suggestion
     assert "sflux" not in values
-    assert any("UV spectrum menu was left unchanged" in n for n in notes)
+    assert any("UV spectrum menu was not changed" in n for n in notes)
     # in-range fields still fill (partial fill, disclosed)
     assert values["rp"] == 1.279
 
@@ -131,15 +141,17 @@ def test_archive_fill_feeds_canonical_params():
     from jwst_tool import forward
 
     values, _ = archive.custom_fill(archive.lookup("HD 189733 b"))
+    assert "sflux" not in values          # the fill never selects one
     cp = forward.canonical_params(dict(
         planet="custom", tp_mode="guillot",
         star_teff=values["teff"], star_logg=values["logg"],
         star_feh=values["feh"], rstar_rsun=values["rstar"],
         orbit_au=values["a"], rp_rjup=values["rp"],
-        gs_cgs=values["g"] * 100.0, sflux=values["sflux"]))
+        gs_cgs=values["g"] * 100.0,
+        sflux="sflux-HD189_Moses11.txt"))   # the USER's explicit choice
     # canonical_params quantizes gs_cgs; the mapping must survive the round
     assert cp["gs_cgs"] == pytest.approx(values["g"] * 100.0, rel=1e-4)
-    assert cp["sflux"] == values["sflux"] == "sflux-HD189_Moses11.txt"
+    assert cp["sflux"] == "sflux-HD189_Moses11.txt"
     teq = planets.system_teq(values["teff"], values["rstar"], values["a"])
     expect_tirr = min(max(round(teq * 2.0 ** 0.5 / 10.0) * 10.0, 800.0),
                       2500.0)

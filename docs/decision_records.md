@@ -541,10 +541,25 @@ the widget bounds and the fill's checks because Streamlit crashes at widget
 instantiation on an out-of-range session-state value. Gravity derives from
 the archive best mass + radius (provenance disclosed when not a true mass);
 metallicity fills the real archive value for custom targets (the registry's
-deliberate 0.0 stays for shipped planets); the UV spectrum defaults to the
-nearest shipped spectral type by Teff anchor (`planets.SFLUX_TEFF_ANCHORS`),
-applied only through the fill path and always disclosed -- a typed Teff
-updates the disclosure caption but never flips the menu.
+deliberate 0.0 stays for shipped planets).
+
+**Amended 2026-08-09 (0.25.2, maintainer rule):** the UV-spectrum menu is
+NEVER written by the fill. The 0.25.0/0.25.1 behavior (auto-select the
+nearest-Teff shipped template, disclosed) was rejected as a magic
+substitution: the archive carries no UV spectra, and a proxy standing in
+for the actual star is exactly the class of unexpected behavior this tool
+refuses elsewhere. `planets.SFLUX_TEFF_ANCHORS`/`nearest_sflux` now power
+only a SUGGESTION (a GUI caption and a fill note naming the nearest-Teff
+shipped template); the user selects it deliberately or not at all. Swept
+for the same class in the fill/restore path: the config-restore
+nearest-choice rfacv snap was replaced with exact assignment (the
+canonical_params gate already refuses off-menu values; a snap would hide a
+gate weakening), and a configuration naming no UV spectrum now produces a
+"not restored" note instead of silently keeping the menu's current
+selection. Kept, judged defaults-not-substitutions: the custom planet's
+derived T_irr (follows the entered system until the user edits it,
+identical to manual entry, disclosed in the step-1 caption) and the
+structure-dependent Kzz default.
 
 ---
 

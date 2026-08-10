@@ -118,9 +118,11 @@ planet name from a NASA Exoplanet Archive PSCompPars snapshot shipped with
 each release (~4400 transiting planets; the fetch date is shown in the GUI,
 and it is never a live query). Values outside the tool's supported ranges or
 missing from the archive are reported by name and left unchanged, never
-clamped. The stellar UV spectrum for photochemistry defaults to the nearest
-shipped spectral type by host Teff, always disclosed and overridable.
-Maintainers refresh the snapshot with `jwst-tool archive-refresh`.
+clamped. The stellar UV spectrum for photochemistry is never selected for
+you: the archive carries no UV spectra, so the fill leaves the menu alone
+and the GUI only shows which shipped template is nearest in Teff to the
+entered star, as a suggestion. Maintainers refresh the snapshot with
+`jwst-tool archive-refresh`.
 
 ## Science goals
 

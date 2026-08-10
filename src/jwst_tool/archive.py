@@ -243,19 +243,24 @@ def custom_fill(row: dict) -> tuple[dict, list[str]]:
                          "derived from the archive best mass and radius, "
                          f"which may come from different publications{extra}.")
 
+    # The UV-spectrum menu is NEVER touched by the fill (maintainer rule,
+    # 2026-08-09: no substitute value stands in for the actual star). The
+    # archive carries no UV spectra; the note below only points at the
+    # nearest-Teff shipped template so the user can choose it deliberately,
+    # and the GUI caption shows the same suggestion live.
     if "teff" in values:
         sflux = planets.nearest_sflux(values["teff"])
-        values["sflux"] = sflux
         spectype = str(row.get("st_spectype", "")).strip()
         stype = f"; archive spectral type {spectype}" if spectype else ""
         notes.append(
-            f"UV spectrum set to {planets.SFLUX_CHOICES[sflux]}, the "
-            f"nearest-Teff shipped UV template for Teff "
-            f"{values['teff']:.0f} K{stype}. The archive carries no UV "
-            "spectra; override freely.")
+            "the UV spectrum menu was NOT changed (the archive carries no "
+            "UV spectra, and this tool never substitutes one). Nearest-Teff "
+            f"shipped template for Teff {values['teff']:.0f} K{stype}: "
+            f"{planets.SFLUX_CHOICES[sflux]} -- select it yourself if it "
+            "fits your star.")
     else:
-        notes.append("stellar Teff was not filled, so the UV spectrum menu "
-                     "was left unchanged.")
+        notes.append("the UV spectrum menu was not changed (this tool never "
+                     "substitutes one).")
     return values, notes
 
 

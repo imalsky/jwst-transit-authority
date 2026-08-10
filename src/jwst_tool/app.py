@@ -653,8 +653,10 @@ with st.sidebar:
             st.caption("UV spectrum unused: the PICASO engine has no "
                        "photolysis, so this selection has no effect there.")
         elif planet_key == "custom":
-            # Disclosure only: a typed Teff never flips the menu (the fill
-            # path is the one place the nearest-type default is APPLIED).
+            # Suggestion only, NEVER applied anywhere: neither a typed Teff
+            # nor the archive fill moves this menu (maintainer rule
+            # 2026-08-09 -- no substitute UV spectrum is ever selected for
+            # the user).
             _near = planets.nearest_sflux(teff)
             st.caption(
                 f"Nearest-Teff shipped UV template for Teff {teff:.0f} K: "
