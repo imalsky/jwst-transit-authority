@@ -381,11 +381,14 @@ for _key, _m in MODES.items():
 MODE_COLOR = {key: _COLORS[i % len(_COLORS)] for i, key in enumerate(MODES)}
 MODE_MARKER = {key: _MARKERS[i % len(_MARKERS)] for i, key in enumerate(MODES)}
 
-# GUI default selection: the modes WASP-39b was actually observed in (the four
-# ERS 1366 transits + the MIRI SO2 transit), which is also blue-to-red
-# coverage. G235H and F444W stay selectable. (The ETC computes ALL modes per
-# star, so changing the selection is free.)
-DEFAULT_MODES = ["niriss_soss", "nirspec_prism", "nirspec_g395h",
-                 "nircam_f322w2", "miri_lrs"]
+# GUI default selection (speed-first trio, 2026-08-10 maintainer decision):
+# PRISM + G395H cover 0.6-5.25 um including the 4.05 um SO2 band (G395H is
+# the default detect-SO2 goal's workhorse), MIRI LRS keeps the mid-IR
+# 7-8.5 um SO2 band. All seven modes stay selectable. Since 0.27.0 the ETC
+# computes ONLY the selected modes and caches each mode separately, so the
+# default run costs three modes and adding a mode later costs exactly that
+# mode (the old design computed all seven every first run; the five-mode
+# observed-planet default made that ~2.5x slower than needed).
+DEFAULT_MODES = ["nirspec_prism", "nirspec_g395h", "miri_lrs"]
 
 # Per-planet system defaults (star, geometry, T14, UV spectrum) live in planets.py.

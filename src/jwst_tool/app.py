@@ -1854,12 +1854,14 @@ def _compute_locked():
                      "file. Re-run; if this repeats, report it as a bug.")
             return None
 
-    # ETC: always ALL modes (one cache per star; selection changes stay instant)
-    all_modes = list(ins.MODES)
-    job = noise_mod.noise_job(star, all_modes, sat_limit=sat_limit)
-    have_cache = (ins.NOISE_CACHE / f"{noise_mod.job_key(job)}.json").exists()
-    if have_cache:
-        etc = noise_mod.run_pandeia(job)
+    # ETC: ONLY the selected modes, cached per mode (0.27.0) -- a later
+    # selection change computes exactly the newly added modes. The old
+    # always-all-seven design made every first run ~2.5x slower than a
+    # three-mode selection required.
+    etc_missing = noise_mod.missing_modes(star, list(mode_keys),
+                                          sat_limit=sat_limit)
+    if not etc_missing:
+        etc = noise_mod.run_modes(star, list(mode_keys), sat_limit=sat_limit)
     else:
         with st.status(f"Running Pandeia ETC ({ins.BACKEND_STATUS.split(' /')[0]}) …",
                        expanded=True) as status:
@@ -1872,17 +1874,18 @@ def _compute_locked():
 
             def _cb(s):
                 if s.startswith("[pandeia] ") and s.endswith("..."):
-                    bar.update(n_started[0] / len(all_modes),
+                    bar.update(n_started[0] / len(etc_missing),
                                s.removeprefix("[pandeia] ")
                                .removesuffix("...")
-                               + f" ({n_started[0] + 1}/{len(all_modes)})")
+                               + f" ({n_started[0] + 1}/{len(etc_missing)})")
                     n_started[0] += 1
                 else:
                     lines.append(s)
                     box.code("\n".join(lines[-8:]))
                     bar.tick()
 
-            etc = noise_mod.run_pandeia(job, progress=_cb)
+            etc = noise_mod.run_modes(star, list(mode_keys),
+                                      sat_limit=sat_limit, progress=_cb)
             bar.done()
             status.update(label="Pandeia ETC done", state="complete")
 

@@ -99,12 +99,17 @@ def test_gui_structure_defaults_match_canonical_params():
         at.selectbox(key=f"n0_{key}_tp").set_value(cp["tp_mode"]).run()
 
 
-def test_default_instrument_modes_are_the_observed_ones():
+def test_default_instrument_modes_are_the_speed_first_trio():
+    """0.27.0 default: PRISM + G395H + MIRI LRS (full span + both SO2
+    bands); the ETC computes only the selected modes, so the trio is what a
+    default run pays for."""
     from jwst_tool import instruments as ins
 
     at = _run_app()
     assert not at.exception, at.exception
     assert set(at.multiselect(key="n0_modes").value) == set(ins.DEFAULT_MODES)
+    assert set(ins.DEFAULT_MODES) == {"nirspec_prism", "nirspec_g395h",
+                                      "miri_lrs"}
 
 
 def test_data_status_panel_present():

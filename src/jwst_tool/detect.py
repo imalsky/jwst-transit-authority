@@ -455,9 +455,9 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         d_wo_b, sigma_detect, sigma_detect_proj = None, float("nan"), float("nan")
 
     # PandExo guarantees >= 3 in-transit integrations by restructuring the
-    # ramp; this worker's ramp is deliberately transit-independent (one noise
-    # cache per star), so warn loudly instead of silently accepting 1-2
-    # cycles. DELIBERATE, decision recorded as S2-10 in
+    # ramp; this worker's ramp is deliberately transit-independent (the noise
+    # cache is per star+mode, never per event), so warn loudly instead of
+    # silently accepting 1-2 cycles. DELIBERATE, decision recorded as S2-10 in
     # docs/decision_records.md: the box-depth variance stays valid
     # at 1-2 cycles; the result is NOT re-run with a shortened ramp, and
     # reviews that flag this are re-finding an accepted trade, not a bug.

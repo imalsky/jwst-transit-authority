@@ -523,6 +523,32 @@ on the three parity stars (their optimal MIRI ramps are far above 2).
 
 ---
 
+# Decision 2026-08-10: speed-first default modes + per-mode ETC cache (0.27.0)
+
+Maintainer decision (Isaac): a default run spent ~5 minutes in the ETC
+because the worker always computed all seven registry modes per star (the
+old design's rationale: one whole-star cache made later selection changes
+free). Two changes together:
+
+1. **The ETC computes ONLY the selected modes**, and the noise cache is
+   per star+mode (`noise.run_modes`: each mode cached under its own
+   single-mode job key, all misses batched into ONE worker subprocess).
+   Selection changes stay cheap -- adding a mode later computes exactly
+   that mode. The parity harness keeps the whole-job `run_pandeia` path
+   (its artifact identity is the complete job).
+2. **DEFAULT_MODES is the trio PRISM + G395H + MIRI LRS** (was the
+   five-mode observed-WASP-39b set): full 0.6-12 um span, both SO2 bands,
+   G395H the default detect-SO2 workhorse. SOSS and the NIRCam grisms stay
+   selectable; SOSS contributes nothing to the default SO2 goal (band ends
+   at 2.8 um).
+
+Net: a default first run pays for three modes instead of seven, roughly a
+2.5x ETC speedup with no science removed, only deferred until selected.
+No WORKER_VERSION bump: worker output is unchanged; the cache keys are new
+by construction (single-mode job dicts).
+
+---
+
 # Decisions on the 2026-08-09 review, round 2 (0.26.0, worker v10)
 
 The reviewer re-examined 0.25.1 and accepted the SOSS fix, the gate

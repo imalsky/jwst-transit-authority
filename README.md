@@ -101,10 +101,11 @@ or CSV. Deselecting extra molecules makes a new run faster.
 1. Keep the defaults in step 1 (WASP-39 b, transmission).
 2. Keep the default VULCAN chemistry in step 2.
 3. In step 3, keep the goal "Detect a molecule" with SO2 at 3 sigma.
-4. In step 4, keep the default instrument modes and one transit.
+4. In step 4, keep the default instrument modes (PRISM, G395H, MIRI LRS;
+   all seven are selectable) and one transit.
 5. Press Run. The first run solves the chemistry and takes a few minutes;
-   the noise forecast per star is cached, so later runs on the same star are
-   much faster.
+   the noise forecast is cached per star and per mode, so later runs on the
+   same star are much faster and adding a mode only computes that mode.
 
 The result page leads with a verdict of the form "Best mode for detecting SO2
 on WASP-39 b: <mode>, <score> in 1 transit", followed by the spectrum, the

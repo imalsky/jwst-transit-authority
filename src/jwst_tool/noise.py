@@ -176,9 +176,65 @@ def job_key(job: dict) -> str:
     return hashlib.sha1(json.dumps(job, sort_keys=True).encode()).hexdigest()[:16]
 
 
-def run_pandeia(job: dict, progress=None, force: bool = False) -> dict:
-    """Run the worker in the selected backend's env (or return the cached result).
+def _mode_key(star: dict, mode_key: str, sat_limit: float) -> str:
+    """Per-mode cache identity: the single-mode job's key, so it embeds the
+    star, the mode's full submitted configuration, sat_limit, the backend
+    fingerprint, and WORKER_VERSION -- everything that changes the result."""
+    return job_key(noise_job(star, [mode_key], sat_limit=sat_limit))
 
+
+def missing_modes(star: dict, mode_keys: list[str],
+                  sat_limit: float = 0.80) -> list[str]:
+    """The subset of ``mode_keys`` with no per-mode cache entry (in order)."""
+    return [k for k in mode_keys
+            if not (ins.NOISE_CACHE
+                    / f"{_mode_key(star, k, sat_limit)}.json").exists()]
+
+
+def run_modes(star: dict, mode_keys: list[str], sat_limit: float = 0.80,
+              progress=None, force: bool = False) -> dict:
+    """The production ETC path (0.27.0): per-mode cache, one worker batch.
+
+    Each mode is cached under its own single-mode job key, so a run computes
+    ONLY the modes it needs and a later selection change costs exactly the
+    newly added modes -- the pre-0.27.0 design computed all seven registry
+    modes on every first run so that selection changes were free, which made
+    the default run ~2.5x slower than its three-mode selection required.
+    All cache misses go to the worker in ONE batch job (one subprocess, one
+    pandeia import), and the result is split back into per-mode files.
+    Returns {mode_key: payload, "__provenance__": {...}} like the worker.
+    """
+    ins.NOISE_CACHE.mkdir(parents=True, exist_ok=True)
+    out: dict = {}
+    todo = list(mode_keys) if force else missing_modes(star, mode_keys,
+                                                       sat_limit)
+    for k in mode_keys:
+        if k in todo:
+            continue
+        cached = json.loads(
+            (ins.NOISE_CACHE
+             / f"{_mode_key(star, k, sat_limit)}.json").read_text())
+        out[k] = cached[k]
+        out.setdefault("__provenance__", cached.get("__provenance__"))
+    if todo:
+        result = _run_worker(noise_job(star, todo, sat_limit=sat_limit),
+                             progress)
+        prov = result.get("__provenance__")
+        for k in todo:
+            single = {k: result[k], "__provenance__": prov}
+            (ins.NOISE_CACHE
+             / f"{_mode_key(star, k, sat_limit)}.json").write_text(
+                json.dumps(single))
+            out[k] = result[k]
+        out["__provenance__"] = prov
+    return out
+
+
+def run_pandeia(job: dict, progress=None, force: bool = False) -> dict:
+    """Run the worker on a whole job (or return the whole-job cached result).
+
+    The parity harness's path: its artifact identity is the complete job.
+    The GUI uses ``run_modes`` (per-mode cache) instead.
     ``progress``: optional callable(str) receiving worker stdout lines live.
     Raises RuntimeError (loudly, with stderr) if the worker process itself dies;
     per-mode pandeia failures come back as {"error": traceback} entries.
@@ -187,7 +243,14 @@ def run_pandeia(job: dict, progress=None, force: bool = False) -> dict:
     cache = ins.NOISE_CACHE / f"{job_key(job)}.json"
     if cache.exists() and not force:
         return json.loads(cache.read_text())
+    result = _run_worker(job, progress)
+    cache.write_text(json.dumps(result))
+    return result
 
+
+def _run_worker(job: dict, progress=None) -> dict:
+    """Run pandeia_worker.py on ``job`` in the backend env; no caching."""
+    ins.NOISE_CACHE.mkdir(parents=True, exist_ok=True)
     py = Path(ins.require_pandeia_python())
     if not py.exists():
         raise RuntimeError(
@@ -222,9 +285,7 @@ def run_pandeia(job: dict, progress=None, force: bool = False) -> dict:
         err = err_buf.getvalue()
         raise RuntimeError(f"pandeia worker failed (rc={proc.returncode}):\n{err[-3000:]}")
 
-    result = json.loads(out_json.read_text())
-    cache.write_text(json.dumps(result))
-    return result
+    return json.loads(out_json.read_text())
 
 
 def make_bins(wl_lo: float, wl_hi: float, R: float) -> np.ndarray:
