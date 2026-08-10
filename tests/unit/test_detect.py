@@ -298,3 +298,52 @@ def test_no_floor_unreachable_target_still_reports_inf_limit():
     r = _result("random", 0.0, signal_ppm=2.0)
     tt = detect.transits_to_target(r, 5.0)
     assert not tt["reachable"] and tt["sig_inf"] == float("inf")
+
+
+def test_incomplete_ramp_search_is_disclosed():
+    """A worker payload with ramp_search_complete=False must carry a
+    warning; absent field (older payloads) stays silent."""
+    kw = dict(target_mol=None, R_bin=200.0, t_in_s=3600.0, t_out_s=3600.0,
+              n_transits=1, floor_spec=None)
+    mr, model = _lsf_mode_inputs(lambda wl: np.zeros(wl.size))
+    mr["ramp_search_complete"] = False
+    r = detect.evaluate_mode("nirspec_prism", mr, model, **kw)
+    assert any("calculation budget" in w for w in r["warnings"])
+    mr2, model2 = _lsf_mode_inputs(lambda wl: np.zeros(wl.size))
+    r2 = detect.evaluate_mode("nirspec_prism", mr2, model2, **kw)
+    assert not any("calculation budget" in w for w in r2["warnings"])
+
+
+def _miri_mode_inputs(ngroup):
+    """Minimal evaluate_mode inputs inside the MIRI LRS band (5-12 um)."""
+    wl_pix = np.linspace(5.0, 7.0, 300)
+    mode_result = dict(
+        wl=wl_pix.tolist(), flux=np.full(wl_pix.size, 1e6).tolist(),
+        noise_1int=np.full(wl_pix.size, 1e3).tolist(),
+        t_cycle_s=10.0, r_native=None,
+        n_full_sat=np.zeros(wl_pix.size).tolist(),
+        n_part_sat=np.zeros(wl_pix.size).tolist(),
+        ngroup=ngroup, sat_frac=0.5, saturated=False)
+    wl_model = np.linspace(4.9, 7.1, 2000)
+    model = dict(wl_um=wl_model, depth=np.zeros(wl_model.size),
+                 mols=["H2O"], jac=[np.zeros(wl_model.size)],
+                 jac_names=["p0"])
+    return mode_result, model
+
+
+def test_miri_floor_ramp_gets_a_distinct_operational_warning():
+    """A 2-group MIRI selection is MIRI's shortest permitted ramp: the user
+    must be told to confirm approval requirements in APT (distinct from the
+    generic short-ramp warning)."""
+    kw = dict(target_mol=None, R_bin=100.0, t_in_s=3600.0, t_out_s=3600.0,
+              n_transits=1, floor_spec=None)
+    mr, model = _miri_mode_inputs(ngroup=2)
+    r = detect.evaluate_mode("miri_lrs", mr, model, **kw)
+    hits = [w for w in r["warnings"] if w.startswith("MIRI floor ramp")]
+    assert len(hits) == 1 and "approval" in hits[0]
+    # 3 groups: still below the recommended 6, but NOT the floor warning
+    mr2, model2 = _miri_mode_inputs(ngroup=3)
+    r2 = detect.evaluate_mode("miri_lrs", mr2, model2, **kw)
+    assert not [w for w in r2["warnings"] if w.startswith("MIRI floor ramp")]
+    assert any("below this mode's STScI-recommended ramp" in w
+               for w in r2["warnings"])

@@ -450,3 +450,70 @@ def test_sigma_ratio_anomaly_fails(gate, passing):
         "median": 7.08}
     problems = gate["validate"](s)
     assert any("anomaly band" in p for p in problems), problems
+
+
+# --- review round 2: no fail-open paths --------------------------------------
+
+def test_ok_row_missing_timing_fails(gate, passing):
+    """An OK row without per-integration times must FAIL, not skip the
+    timing gate."""
+    s = copy.deepcopy(passing)
+    del s["stars"]["w39_like"]["modes"][0]["t_int_ours_s"]
+    problems = gate["validate"](s)
+    assert any("timing gate cannot run" in p for p in problems), problems
+
+
+def test_ok_row_missing_sigma_median_fails(gate, passing):
+    s = copy.deepcopy(passing)
+    s["stars"]["w39_like"]["modes"][0]["sigma_ratio_matched"] = {}
+    problems = gate["validate"](s)
+    assert any("anomaly gate cannot run" in p for p in problems), problems
+
+
+def _saturated_row(key, fw="% full well>80% (360% > 80%)"):
+    return {"key": key, "status": "SATURATED",
+            "ours_reason": "no unsaturated pixels at the shortest ramp",
+            "ngroup_ours": 1, "sat_frac_ours": 3.56,
+            "ngroup_pandexo": 1,
+            "pandexo_warnings": {"% full well high?": fw}}
+
+
+def test_saturated_row_claims_are_gated(gate, passing):
+    """A SATURATED row must carry the measured fraction and PandExo's
+    full-well verdict; a PandExo 'All good' on the same configuration is a
+    saturation-status disagreement."""
+    s = copy.deepcopy(passing)
+    key = s["stars"]["bright_hot"]["modes"][0]["key"]
+    s["stars"]["bright_hot"]["modes"][0] = _saturated_row(key)
+    assert gate["validate"](s) == []          # honest saturated row passes
+
+    s2 = copy.deepcopy(passing)
+    row = _saturated_row(key, fw="All good (42% < 80%)")
+    s2["stars"]["bright_hot"]["modes"][0] = row
+    problems = gate["validate"](s2)
+    assert any("saturation-status disagreement" in p for p in problems), problems
+
+    s3 = copy.deepcopy(passing)
+    row = _saturated_row(key)
+    del row["pandexo_warnings"]
+    s3["stars"]["bright_hot"]["modes"][0] = row
+    problems = gate["validate"](s3)
+    assert any("no PandExo full-well verdict" in p for p in problems), problems
+
+    s4 = copy.deepcopy(passing)
+    row = _saturated_row(key)
+    row["sat_frac_ours"] = 0.5                 # claim without measurement
+    s4["stars"]["bright_hot"]["modes"][0] = row
+    problems = gate["validate"](s4)
+    assert any("must come from the measurement" in p for p in problems), problems
+
+
+def test_saturated_row_short_ramp_floor_mismatch_fails(gate, passing):
+    s = copy.deepcopy(passing)
+    key = s["stars"]["bright_hot"]["modes"][0]["key"]
+    row = _saturated_row(key)
+    row["ngroup_pandexo"] = 2                  # different floors saturated
+    s["stars"]["bright_hot"]["modes"][0] = row
+    problems = gate["validate"](s)
+    assert any("floors the two tools saturate at" in p for p in problems), \
+        problems

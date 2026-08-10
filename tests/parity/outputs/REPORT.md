@@ -2,17 +2,17 @@
 
 Generated 2026-08-09 by `run_parity.py` + `make_report.py` in this directory.
 
-**GATE: PASS** (re-validated by `make_report.py`, not read from the artifact). Worker v9, Pandeia 2026.7 on both sides, the full 3-star x 7-mode matrix present, every declared threshold met.
+**GATE: PASS** (re-validated by `make_report.py`, not read from the artifact). Worker v10, Pandeia 2026.7 on both sides, the full 3-star x 7-mode matrix present, every declared threshold met.
 
 ## Provenance
 
 | star | side | engine | refdata | PSFs | worker / PandExo |
 |---|---|---|---|---|---|
-| w39_like | this tool | 2026.7 | 2026.7 | 2026.7 | worker v9 |
+| w39_like | this tool | 2026.7 | 2026.7 | 2026.7 | worker v10 |
 | w39_like | PandExo | 2026.7 | 2026.7 | 2026.7 | 2026.7 @ 34e42d81f782 |
-| bright_hot | this tool | 2026.7 | 2026.7 | 2026.7 | worker v9 |
+| bright_hot | this tool | 2026.7 | 2026.7 | 2026.7 | worker v10 |
 | bright_hot | PandExo | 2026.7 | 2026.7 | 2026.7 | 2026.7 @ 34e42d81f782 |
-| faint_k | this tool | 2026.7 | 2026.7 | 2026.7 | worker v9 |
+| faint_k | this tool | 2026.7 | 2026.7 | 2026.7 | worker v10 |
 | faint_k | PandExo | 2026.7 | 2026.7 | 2026.7 | 2026.7 @ 34e42d81f782 |
 
 Both sides run on the SAME Pandeia backend -- the exact engine, reference-data, and PSF releases are in the provenance table above, and the gate refuses the run if they disagree across the two sides. Every difference below is therefore an ESTIMATOR/policy difference, not an engine calibration difference. (This says nothing about whether that release is the SUPPORTED one; the gate banner does.) PandExo is used from master at the commit recorded above. Configuration: constant transit depth 0.01, transit duration 2.8036 h, equal out-of-transit baseline, saturation limit 80%, no noise floor, native (R=None) grids.
@@ -42,7 +42,7 @@ Columns: sigma ratio = (this tool's per-pixel transit-depth sigma) / (PandExo's)
 
 ## Star `w39_like` (Teff 5400 K, logg 4.45, [Fe/H] 0.0, Ks 10.663)
 
-Backend: engine 2026.7 + pandeia_data-2026.7-jwst (worker v9); PandExo 2026.7 on engine 2026.7.
+Backend: engine 2026.7 + pandeia_data-2026.7-jwst (worker v10); PandExo 2026.7 on engine 2026.7.
 
 | mode | status | ngroup ours/PX | t_int s ours/PX | n_int ours/PX(in) | flux ratio | sigma ratio (matched) | sigma ratio (policy) |
 |---|---|---|---|---|---|---|---|
@@ -82,7 +82,7 @@ PandExo warnings for miri_lrs: {'% full well high?': 'All good (80% < 80%)'}
 
 ## Star `bright_hot` (Teff 6250 K, logg 4.3, [Fe/H] 0.0, Ks 8.5)
 
-Backend: engine 2026.7 + pandeia_data-2026.7-jwst (worker v9); PandExo 2026.7 on engine 2026.7.
+Backend: engine 2026.7 + pandeia_data-2026.7-jwst (worker v10); PandExo 2026.7 on engine 2026.7.
 
 | mode | status | ngroup ours/PX | t_int s ours/PX | n_int ours/PX(in) | flux ratio | sigma ratio (matched) | sigma ratio (policy) |
 |---|---|---|---|---|---|---|---|
@@ -121,7 +121,7 @@ PandExo warnings for miri_lrs: {'% full well high?': 'All good (78% < 80%)'}
 
 ## Star `faint_k` (Teff 4500 K, logg 4.6, [Fe/H] 0.0, Ks 13.0)
 
-Backend: engine 2026.7 + pandeia_data-2026.7-jwst (worker v9); PandExo 2026.7 on engine 2026.7.
+Backend: engine 2026.7 + pandeia_data-2026.7-jwst (worker v10); PandExo 2026.7 on engine 2026.7.
 
 | mode | status | ngroup ours/PX | t_int s ours/PX | n_int ours/PX(in) | flux ratio | sigma ratio (matched) | sigma ratio (policy) |
 |---|---|---|---|---|---|---|---|

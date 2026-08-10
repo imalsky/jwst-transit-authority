@@ -118,6 +118,8 @@ def _op_status(r: dict) -> str:
     usable row still needs APT verification."""
     if r["saturated"]:
         return "saturated at the shortest ramp tried"
+    if any(str(w).startswith("MIRI floor ramp") for w in r["warnings"]):
+        return "MIRI floor ramp; confirm approval requirements in APT"
     if r["warnings"]:
         return "warnings (see notes); verify in APT"
     return "verify in APT"

@@ -40,14 +40,15 @@ local synphot vega_file pin is only an offline guard (the two agree to
 0.08 mmag in Ks).
 
 Group selection: probe at ngroup_min; "saturated" means the MEASURED probe
-exceeds sat_limit, never a prediction. Otherwise the PandExo-style linear
-full-well extrapolation and pandeia's sat_ngroups estimate only seed a
-measured search that walks up while safe and down while not, returning the
-LARGEST measured-safe group count (the measured-safe probe is the fallback,
-so search exhaustion cannot declare saturation). A mode saturated at
-ngroup_min is kept, flagged, with its degraded numbers so the GUI can say
-why. Channel-level saturation comes from the report's 1d curves so the host
-can exclude or flag per pixel.
+exceeds sat_limit, never a prediction. Otherwise a bracket search returns
+the largest measured-safe group count with maximality PROVEN (complete only
+when the count equals ngroup_max or the next integer measured unsafe); the
+analytic formulas pick the first candidate only. A budget-exhausted search
+returns the measured-safe best with ramp_search_complete=False -- reported,
+never presented as maximal. A mode saturated at ngroup_min is kept,
+flagged, with its degraded numbers so the GUI can say why. Channel-level
+saturation comes from the report's 1d curves so the host can exclude or
+flag per pixel.
 """
 import copy
 import glob
@@ -171,50 +172,45 @@ def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
     # measured floor is unsafe.)
     saturated = sat_probe > sat_limit
     ng_best, rpt = ng_min, probe
-
+    # Maximality is PROVEN, not extrapolated (2026-08-09 review round 2: the
+    # earlier predictor-stall exit could stop one integer below the true
+    # optimum on ramps with a per-integration time offset). Bracket
+    # invariant: ng_best is the largest MEASURED-safe count, hi the smallest
+    # MEASURED-unsafe one; the search is complete only when ng_best == ng_max
+    # or hi == ng_best + 1. Every candidate is strictly inside the bracket,
+    # so each measurement shrinks it and the loop terminates. The analytic
+    # formulas (linear extrapolation of the probe; pandeia's sat_ngroups)
+    # only pick the FIRST candidate. If the calculation budget runs out
+    # first, the measured-safe ng_best is returned with
+    # ramp_search_complete=False -- reported, never presented as maximal.
+    search_complete = True          # a measured-saturated floor is a proof
     if not saturated:
-        # Find the LARGEST measured-safe group count. The two formulas below
-        # (linear extrapolation of the probe's full-well fraction; pandeia's
-        # groups-to-saturation estimate) only seed the search; every accepted
-        # step is measured. The search walks BOTH directions -- the old
-        # down-only verifier could not recover from a conservative seed, and
-        # with a floor of 1 that forced a needless 1-group SOSS ramp with ~7x
-        # the noise of the safe 2-group ramp (2026-08-09 review, the
-        # committed bright_hot row). The measured-safe probe is the fallback,
-        # so search exhaustion can never turn a safe mode "saturated".
-        up_pred = (int(math.floor(ng_min * sat_limit / sat_probe))
-                   if sat_probe > 0 else ng_max)
-        cands = [up_pred]
+        hi = None
+        seeds = []
+        if sat_probe > 0:
+            seeds.append(int(math.floor(ng_min * sat_limit / sat_probe)))
         if sat_ng is not None and np.isfinite(sat_ng) and sat_ng > 0:
-            cands.append(int(math.floor(sat_limit * float(sat_ng))))
-        ng = _clamp_ngroup(min(cands), ng_min, ng_max)
-        if ng <= ng_min:
-            # the floor MEASURED safe, so a predictor at/below it is merely
-            # conservative -- follow the measured extrapolation upward
-            ng = _clamp_ngroup(up_pred, ng_min, ng_max)
-        tried = {ng_min}
-        for _ in range(6):
-            if ng in tried:
-                break
-            tried.add(ng)
-            r = _run(perform_calculation, calc, ng)
+            seeds.append(int(math.floor(sat_limit * float(sat_ng))))
+        first = True
+        for _ in range(12):                       # calculation budget
+            if ng_best >= ng_max or (hi is not None and hi <= ng_best + 1):
+                break                             # maximality proven
+            frac_lo = float(rpt["scalar"]["fraction_saturation"])
+            pred = (int(math.floor(ng_best * sat_limit / frac_lo))
+                    if frac_lo > 0 else ng_max)
+            guess = min(seeds) if (first and seeds) else pred
+            first = False
+            lo_bound, hi_bound = ng_best + 1, (ng_max if hi is None
+                                               else hi - 1)
+            guess = max(lo_bound, min(hi_bound, guess))
+            r = _run(perform_calculation, calc, guess)
             frac = float(r["scalar"]["fraction_saturation"])
             if frac <= sat_limit:
-                if ng > ng_best:
-                    ng_best, rpt = ng, r
-                if frac <= 0 or ng >= ng_max:
-                    break
-                nxt = _clamp_ngroup(int(math.floor(ng * sat_limit / frac)),
-                                    ng_min, ng_max)
-                if nxt <= ng:
-                    break
-                ng = nxt
+                ng_best, rpt = guess, r
             else:
-                nxt = max(ng_best,
-                          min(ng - 1, int(math.floor(ng * sat_limit / frac))))
-                if nxt <= ng_best:
-                    break
-                ng = nxt
+                hi = guess
+        search_complete = (ng_best >= ng_max
+                           or (hi is not None and hi <= ng_best + 1))
 
     wl, _sn = rpt["1d"]["sn"]
     flux = np.asarray(rpt["1d"]["extracted_flux"][1], dtype=float)
@@ -247,6 +243,7 @@ def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
             "ngroup": int(ng_best),
             "sat_frac": float(rpt["scalar"]["fraction_saturation"]),
             "saturated": True,
+            "ramp_search_complete": bool(search_complete),
             **native_counts,
             "warnings": {k: str(v) for k, v in rpt["warnings"].items()},
         }
@@ -282,6 +279,7 @@ def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
         "sat_ngroups": (float(sat_ng) if sat_ng is not None
                         and np.isfinite(sat_ng) else None),
         "saturated": bool(saturated),
+        "ramp_search_complete": bool(search_complete),
         **native_counts,
         "engine_version": str(getattr(pandeia.engine, "__version__", "unknown")),
         "warnings": {k: str(v) for k, v in rpt["warnings"].items()},

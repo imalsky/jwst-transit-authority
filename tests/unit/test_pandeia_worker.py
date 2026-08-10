@@ -459,3 +459,39 @@ def test_group_cap_is_respected_by_the_upward_search():
     assert out["ngroup"] == 30
     assert out["saturated"] is False
     assert max(log) <= 30
+
+
+def test_affine_offset_curve_reaches_the_true_maximum():
+    """Review round 2 counterexample: f(n) = 0.1n + 0.1 with limit 0.8. The
+    v9 predictor stalled at 6 (floor(6*0.8/0.7) == 6) although 7 is safe;
+    the bracket search must PROVE 7 by measuring 8 unsafe."""
+    out = _run_one_mode(**_CLEAN, sat_by_ngroup=lambda ng: 0.1 * ng + 0.1,
+                        sat_ngroups=None, ngroup_min=1, ngroup_max=30)
+    assert out["ngroup"] == 7
+    assert out["saturated"] is False
+    assert out["ramp_search_complete"] is True
+
+
+def test_maximality_is_proven_by_measuring_the_next_integer():
+    """A complete search must have measured either ngroup_max or
+    ngroup+1-unsafe; here the boundary neighbor (3) must appear in the
+    call log even though the predictor already sits at 2."""
+    log = []
+    out = _run_one_mode(**_CLEAN, sat_by_ngroup=lambda ng: 0.392 * ng,
+                        sat_ngroups=2.04, ngroup_min=1, ngroup_max=30,
+                        call_log=log)
+    assert out["ngroup"] == 2
+    assert out["ramp_search_complete"] is True
+    assert 3 in log                     # the disproof measurement happened
+
+
+def test_budget_exhaustion_is_reported_not_hidden():
+    """f(n) = 0.8*n/(n+1) climbs one group per iteration forever; the
+    budget runs out with no unsafe neighbor measured, so the result is the
+    measured-safe best WITH ramp_search_complete=False."""
+    out = _run_one_mode(**_CLEAN,
+                        sat_by_ngroup=lambda ng: 0.8 * ng / (ng + 1.0),
+                        sat_ngroups=None, ngroup_min=1, ngroup_max=10_000)
+    assert out["saturated"] is False
+    assert out["ramp_search_complete"] is False
+    assert out["ngroup"] >= 10          # it climbed, measured-safe

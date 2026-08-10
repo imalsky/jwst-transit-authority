@@ -12,6 +12,7 @@ Import-safe on purpose: no machine-environment guard, no engine access. It
 imports jwst_tool so the production worker version and the supported Pandeia
 release are defined ONCE, in production code, not re-typed here.
 """
+import math
 import re
 import sys
 from pathlib import Path
@@ -273,17 +274,42 @@ def validate(summary: dict) -> list[str]:
                     f"{tag}: error row "
                     f"(ours={row.get('ours_error', '')[:120]!r})")
                 continue
-            if status == "SATURATED":
-                # the worker declared the configuration unusable; reported,
-                # never a validation row (coverage handles the claim side)
-                continue
-            if status == "SATURATED_ABOVE_LIMIT":
+            if status in ("SATURATED", "SATURATED_ABOVE_LIMIT"):
+                # Never a numerical validation row, but the saturation CLAIM
+                # itself is gated (2026-08-09 review round 2: these rows
+                # used to bypass every check, so a future false-saturated
+                # result could pass while an unsaturated row elsewhere kept
+                # coverage green).
                 sat = row.get("sat_frac_ours")
                 if sat is None or float(sat) <= SAT_LIMIT:
                     problems.append(
-                        f"{tag}: labeled SATURATED_ABOVE_LIMIT but the "
-                        f"measured sat_frac is {sat!r}; the label must come "
-                        "from the measurement")
+                        f"{tag}: labeled {status} but the measured sat_frac "
+                        f"is {sat!r}; the label must come from the "
+                        "measurement")
+                fw = str((row.get("pandexo_warnings") or {})
+                         .get("% full well high?", ""))
+                if not fw:
+                    problems.append(
+                        f"{tag}: {status} row carries no PandExo full-well "
+                        "verdict; saturation-status agreement cannot be "
+                        "checked")
+                elif fw.startswith("All good"):
+                    gp = row.get("ngroup_pandexo", row.get("pandexo_ngroup"))
+                    problems.append(
+                        f"{tag}: this tool reports the configuration "
+                        f"saturated but PandExo reports {fw!r} at ngroup "
+                        f"{gp} -- saturation-status disagreement")
+                # both-saturated rows sit at their floors: when both group
+                # counts exist and are low, they must agree exactly
+                go = row.get("ngroup_ours")
+                gp = row.get("ngroup_pandexo", row.get("pandexo_ngroup"))
+                if (go is not None and gp is not None
+                        and (go <= LOW_NGROUP_EXACT or gp <= LOW_NGROUP_EXACT)
+                        and go != gp):
+                    problems.append(
+                        f"{tag}: {status} row ngroup {go} vs {gp} on a "
+                        "short ramp; the floors the two tools saturate at "
+                        "must agree exactly")
                 continue
 
             # Saturation must be judged from the MEASURED fraction, not only
@@ -352,10 +378,19 @@ def validate(summary: dict) -> list[str]:
                     f"{tag}: ngroup {go} vs {gp} differs by more than "
                     f"{MAX_NGROUP_ABS_DIFF}")
 
-            # per-integration time inherits the group choice; a passing group
-            # diff must not hide a large timing gap
+            # Per-integration time inherits the group choice; a passing group
+            # diff must not hide a large timing gap. Missing/non-finite
+            # fields on an OK row are a FAILURE, never a skipped check
+            # (2026-08-09 review round 2: absent data used to fail open).
             to, tp = row.get("t_int_ours_s"), row.get("t_int_pandexo_s")
-            if to is not None and tp is not None and max(to, tp) > 0:
+            if (to is None or tp is None
+                    or not (math.isfinite(float(to)) and float(to) > 0)
+                    or not (math.isfinite(float(tp)) and float(tp) > 0)):
+                problems.append(
+                    f"{tag}: OK row with missing or non-positive "
+                    f"per-integration times (ours={to!r}, pandexo={tp!r}); "
+                    "the timing gate cannot run, which is a failure")
+            else:
                 rel = abs(float(to) - float(tp)) / max(float(to), float(tp))
                 if rel > MAX_TINT_REL_DIFF:
                     problems.append(
@@ -363,9 +398,16 @@ def validate(summary: dict) -> list[str]:
                         f"differs by {rel:.0%} (> {MAX_TINT_REL_DIFF:.0%})")
 
             # sigma-ratio ANOMALY ceiling (not a parity-to-unity requirement;
-            # see the SIGMA_RATIO_MEDIAN_BAND comment)
+            # see the SIGMA_RATIO_MEDIAN_BAND comment); a missing median on
+            # an OK row is likewise a failure, not a skipped check
             sr = (row.get("sigma_ratio_matched") or {}).get("median")
-            if sr is not None:
+            if (sr is None or not math.isfinite(float(sr))
+                    or float(sr) <= 0):
+                problems.append(
+                    f"{tag}: OK row with missing or non-positive matched "
+                    f"sigma-ratio median ({sr!r}); the anomaly gate cannot "
+                    "run, which is a failure")
+            else:
                 lo_b, hi_b = SIGMA_RATIO_MEDIAN_BAND
                 if not (lo_b <= float(sr) <= hi_b):
                     problems.append(

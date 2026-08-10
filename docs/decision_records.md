@@ -523,6 +523,75 @@ on the three parity stars (their optimal MIRI ramps are far above 2).
 
 ---
 
+# Decisions on the 2026-08-09 review, round 2 (0.26.0, worker v10)
+
+The reviewer re-examined 0.25.1 and accepted the SOSS fix, the gate
+tightening, and the deploy pinning, but found the closure claims premature
+on six points. Verdicts:
+
+## 1. CONFIRMED (high): v9's search did not PROVE maximality
+
+The predictor-stall exit (`floor(ng*limit/frac) <= ng -> break`) could stop
+one integer below the true optimum on ramps whose saturation fraction has a
+per-integration offset (f(n) = 0.1n + 0.1 stalls at 6 although 7 is safe).
+Fixed (worker v10): a bracket search -- ng_best = largest MEASURED-safe,
+hi = smallest MEASURED-unsafe, complete only when ng_best == ngroup_max or
+hi == ng_best + 1, every candidate strictly inside the bracket so the loop
+terminates. The calculation budget (12) no longer silently caps
+correctness: exhaustion returns the measured-safe best with
+`ramp_search_complete=False` in the payload, and detect adds a warning.
+Regression tests pin the affine counterexample, the measured-disproof
+requirement, and the reported-incomplete path.
+
+## 2. PARTLY ADOPTED (high): MIRI 2-group operational status
+
+The review asserts the current APT LRS template makes 2-group FASTR1 a
+limited-access (permission-required) configuration. Three targeted
+jwst-docs searches (LRS TSOs, TSO Recommended Strategies, LRS template
+parameters) retrieved "minimum 2, 2-5 very difficult to calibrate" and NO
+access restriction, so the tool does not assert one. Adopted instead: a
+DISTINCT "MIRI floor ramp" warning at exactly 2 groups telling the user to
+confirm approval requirements in APT, with its own operational-status
+string ("MIRI floor ramp; confirm approval requirements in APT") -- the
+user is directed to the authority rather than assured either way. If the
+APT table is confirmed, only the wording needs strengthening.
+
+## 3. CONFIRMED (medium): gate fail-open paths closed
+
+Missing timing or sigma fields on an OK row are now gate FAILURES, not
+skipped checks. Saturated rows are no longer exempt: the runner records
+the measured fraction, both group counts, and PandExo's full-well verdict
+on SATURATED rows, and the gate fails on a missing verdict, a PandExo
+"All good" (saturation-status disagreement), an unmeasured claim, or
+mismatched short-ramp floors.
+
+## 4. CONFIRMED (medium): archive loose ends
+
+`_is_limit` now routes through `_cell` (SnapshotError, never a raw
+ValueError); the refresh validates every response row's column count
+BEFORE replacing a valid snapshot. The per-field references/uncertainties
+and field-level provenance tracking remain deliberately deferred
+(TODO.md) -- the review is right that the original archive finding is
+therefore PARTLY resolved, and this record says so explicitly.
+
+## 5. CONFIRMED (low): citations completed
+
+Christiansen et al. 2025, PSJ, 6, 186 added (the Archive's requested
+reference, replacing Akeson et al. 2013); the virga refractive-index
+dataset record (Zenodo 10.5281/zenodo.15886530) added next to the
+software DOI; CI now runs `cffconvert --validate` (verified locally
+against schema 1.2.0 before enabling).
+
+## 6. CONFIRMED (low): CI and deploy now share one pin manifest
+
+`deploy/pins.env` holds the sibling SHAs; CI installs the siblings at
+exactly those commits (the stale "matches how the Space deploys" comment
+is gone), the Dockerfile ARG defaults must equal the manifest
+(tests/unit/test_deploy_pins.py fails on drift), and the release step
+updates pins.env + the Dockerfile together.
+
+---
+
 # Decision 2026-08-09: custom-planet archive fill is a shipped snapshot, never a live query (0.25.0)
 
 Maintainer decision (Isaac): the custom form's "Fill from the NASA Exoplanet

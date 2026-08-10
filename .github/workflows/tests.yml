@@ -38,13 +38,19 @@ jobs:
         #                  atm/*.txt T-P tables; the package is never executed
         #   vulcan-forward `from vulcan_forward import constants`, pure
         #                  constants, no jax/exojax imports
-        # Tracking their main is deliberate: it matches how the HF Space
-        # deploys (fresh clones of main) and catches cross-repo breaks here
-        # rather than in a rebuild.
+        # Installed at the PINNED commits from deploy/pins.env -- the same
+        # manifest the Space Dockerfile enforces (tests/unit/test_deploy_pins
+        # keeps the two in lock-step), so CI validates the sibling code that
+        # actually deploys, not whatever main points to at run time.
         run: |
           pip install "jax>=0.6" numpy scipy matplotlib pytest
-          pip install --no-deps "vulcan-jax @ git+https://github.com/imalsky/jax-vulcan.git"
-          pip install --no-deps "vulcan-forward @ git+https://github.com/imalsky/vulcan-forward.git"
+          source deploy/pins.env
+          pip install --no-deps "vulcan-jax @ git+https://github.com/imalsky/jax-vulcan.git@${VULCAN_JAX_SHA}"
+          pip install --no-deps "vulcan-forward @ git+https://github.com/imalsky/vulcan-forward.git@${VULCAN_FORWARD_SHA}"
           pip install --no-deps -e .
+      - name: Validate CITATION.cff against the CFF schema
+        run: |
+          pip install cffconvert
+          cffconvert --validate
       - name: Run unit tests
         run: python -m pytest tests -q -ra

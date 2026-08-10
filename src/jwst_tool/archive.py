@@ -162,9 +162,10 @@ def _cell(row: dict, col: str) -> float | None:
 
 
 def _is_limit(row: dict, col: str) -> bool:
-    """True when the archive marks the value a one-sided limit (+1/-1)."""
-    v = str(row.get(col, "")).strip()
-    return bool(v) and float(v) != 0.0
+    """True when the archive marks the value a one-sided limit (+1/-1);
+    malformed cells raise SnapshotError via _cell, never a raw ValueError."""
+    v = _cell(row, col)
+    return v is not None and v != 0.0
 
 
 def custom_fill(row: dict) -> tuple[dict, list[str]]:
@@ -296,6 +297,12 @@ def refresh_snapshot(dest: Path | None = None, url: str = TAP_SYNC_URL) -> tuple
         raise SnapshotError(
             f"TAP response has only {len(body)} rows (expected >= "
             f"{_MIN_ROWS}); refusing to write a truncated snapshot.")
+    for r in body:
+        if len(r) != len(SNAPSHOT_COLUMNS):
+            raise SnapshotError(
+                f"TAP response row starting {r[0]!r} has {len(r)} cells, "
+                f"expected {len(SNAPSHOT_COLUMNS)}; refusing to replace a "
+                "valid snapshot with a malformed one.")
     seen: dict = {}
     for r in body:
         key = normalize_name(r[0])

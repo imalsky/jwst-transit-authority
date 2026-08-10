@@ -66,7 +66,12 @@ _BACKEND_FINGERPRINT = None
 # search under-selected (a needless 1-group SOSS ramp with ~7x the noise);
 # v8 cached results are wrong on short ramps, so the version bump is
 # REQUIRED for cache correctness here, not just artifact identity.
-WORKER_VERSION = 9
+# v10 (2026-08-09, review round 2): maximality is PROVEN by a bracket
+# search (complete only when the next integer measured unsafe or the cap is
+# reached; v9's predictor-stall exit could sit one integer low on offset
+# ramps), and the payload gains ramp_search_complete (budget exhaustion is
+# reported, never presented as maximal).
+WORKER_VERSION = 10
 
 
 def backend_fingerprint() -> dict:

@@ -175,16 +175,21 @@ package dependency.
 (`pandeia.engine` 2026.7 + `pandeia_data-2026.7-jwst` +
 `pandeia_psfs-2026.7-jwst`), the STScI-supported release; the worker refuses a
 mismatched triple. **The committed PandExo parity artifact is a gate-evaluated
-PASS on 2026.7** (`tests/parity/outputs/REPORT.md`, worker v9, both sides on
+PASS on 2026.7** (`tests/parity/outputs/REPORT.md`, worker v10, both sides on
 the same triple, PandExo master at the pinned commit): a fixed-configuration
 estimator comparison in which configuration, timing, wavelength grids, and
 extracted flux matched, and the remaining sigma difference is the noise model,
 with this tool conservative. Since 2026-08-09 the gate also requires exact
 group agreement on short ramps (either side at 3 groups or fewer), bounds the
-per-integration-time gap, and fails any matched sigma ratio outside an
-anomaly band -- a same-day review showed the earlier +-1-group tolerance
-passing a wrong 1-vs-2-group SOSS selection with a 7x sigma discrepancy.
-The public Space runs this backend.
+per-integration-time gap, fails any matched sigma ratio outside an anomaly
+band, treats missing timing/sigma fields on validation rows as failures, and
+gates the saturation claim itself on saturated rows (measured fraction +
+PandExo's full-well verdict) -- a same-day review showed the earlier
++-1-group tolerance passing a wrong 1-vs-2-group SOSS selection with a 7x
+sigma discrepancy. The worker's group search proves maximality (complete
+only when the next integer measured unsafe or the cap is reached); a
+budget-exhausted search is disclosed in the results, never presented as
+optimal. The public Space runs this backend.
 
 `JWST_TOOL_BACKEND=archival_2026_2` selects the previous 2026.2 tuple under its
 honest archival name, for reproducing older results only. Its own parity

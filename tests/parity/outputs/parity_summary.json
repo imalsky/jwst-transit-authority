@@ -13,7 +13,7 @@
     "psf_version_source": "VERSION_PSF",
     "python": "3.12.13",
     "numpy": "2.5.1",
-    "worker_version": 9
+    "worker_version": 10
    },
    "provenance_pandexo": {
     "pandeia_engine_version": "2026.7",
@@ -474,7 +474,7 @@
     "psf_version_source": "VERSION_PSF",
     "python": "3.12.13",
     "numpy": "2.5.1",
-    "worker_version": 9
+    "worker_version": 10
    },
    "provenance_pandexo": {
     "pandeia_engine_version": "2026.7",
@@ -935,7 +935,7 @@
     "psf_version_source": "VERSION_PSF",
     "python": "3.12.13",
     "numpy": "2.5.1",
-    "worker_version": 9
+    "worker_version": 10
    },
    "provenance_pandexo": {
     "pandeia_engine_version": "2026.7",
@@ -1412,7 +1412,7 @@
  "gate": {
   "passed": true,
   "problems": [],
-  "required_worker_version": 9,
+  "required_worker_version": 10,
   "required_pandeia_release": "2026.7",
   "thresholds": {
    "min_matched_pixel_frac": 0.99,

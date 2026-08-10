@@ -220,7 +220,13 @@ def compare_mode(key: str, ours: dict, px: dict) -> dict:
     if ours.get("unusable"):
         out["status"] = "SATURATED"
         out["ours_reason"] = ours["reason"]
-        out["pandexo_ngroup"] = px.get("ngroup")
+        # the gate needs the MEASURED evidence on saturated rows too: our
+        # probe fraction + both ngroups + PandExo's full-well verdict, so a
+        # false "unusable" cannot hide behind the status label
+        out["ngroup_ours"] = int(ours["ngroup"])
+        out["sat_frac_ours"] = float(ours["sat_frac"])
+        out["ngroup_pandexo"] = px.get("ngroup")
+        out["pandexo_ngroup"] = px.get("ngroup")   # legacy alias
         out["pandexo_warnings"] = px.get("warnings")
         return out
 

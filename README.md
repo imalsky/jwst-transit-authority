@@ -244,12 +244,15 @@ components a run actually used:
   Mukherjee, S., et al. 2023, ApJ, 942, 71
 - Cloud runs use the virga condensate database via ExoJAX: cite virga
   (Batalha, N., Rooney, C. M., and Mukherjee, S. 2020, Zenodo,
-  doi:10.5281/zenodo.3759888) and Ackerman, A. S., and Marley, M. S. 2001,
-  ApJ, 556, 872; virga also asks that each condensate's optical-constants
-  source be cited individually (see `docs/physics_and_conventions.md`,
-  Clouds section)
+  doi:10.5281/zenodo.3759888), the refractive-index dataset actually
+  supplying the condensate optics ("Refractive Indices For Virga Exoplanet
+  Cloud Model", Zenodo, doi:10.5281/zenodo.15886530), and Ackerman, A. S.,
+  and Marley, M. S. 2001, ApJ, 556, 872; that dataset also asks that each
+  condensate's optical-constants source be cited individually (see
+  `docs/physics_and_conventions.md`, Clouds section)
 - The custom-planet fill ships a NASA Exoplanet Archive PSCompPars
-  snapshot. Work using it should carry the Archive's acknowledgment:
+  snapshot. Work using it should cite Christiansen, J. L., et al. 2025,
+  PSJ, 6, 186 and carry the Archive's acknowledgment:
   "This research has made use of the NASA Exoplanet Archive, which is
   operated by the California Institute of Technology, under contract with
   the National Aeronautics and Space Administration under the Exoplanet

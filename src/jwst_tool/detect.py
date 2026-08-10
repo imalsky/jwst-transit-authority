@@ -478,6 +478,26 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         warnings[f"ramp uses {int(mode_result['ngroup'])} group(s) per "
                  "integration, below this mode's STScI-recommended ramp "
                  f"({_reason}); verify in APT"] = True
+    # A budget-exhausted group search is disclosed, never presented as
+    # optimal (worker v10 field; older payloads without it made no such
+    # claim, so absence stays silent).
+    if mode_result.get("ramp_search_complete") is False:
+        warnings["the group search hit its calculation budget; the reported "
+                 "ramp is measured-safe but may not be the longest possible "
+                 "(costs sensitivity, never validity)"] = True
+    # The MIRI floor (2 groups) gets a DISTINCT operational warning: STScI
+    # calls 2-5 group MIRI ramps very difficult to calibrate, and a
+    # 2026-08-09 review reported (unconfirmed on retrievable jwst-docs
+    # pages; see decision_records) that APT treats 2-group FASTR1 as a
+    # limited-access configuration -- so the user is told to confirm
+    # approval requirements rather than assured either way.
+    if (m["instrument"] == "miri"
+            and int(mode_result["ngroup"]) == int(m["ngroup_min"])
+            and not bool(mode_result.get("saturated", False))):
+        warnings["MIRI floor ramp: 2 groups/integration is MIRI's shortest "
+                 "permitted ramp and is very difficult to calibrate "
+                 "accurately; confirm in APT whether this configuration "
+                 "needs special approval before proposing"] = True
 
     keep = op["keep"]
     return dict(
