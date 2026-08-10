@@ -495,11 +495,13 @@ keeping 5.
 **jwst-docs verification (2026-08-09)** of the previously unverified
 instruments.py comment claims: NIRSpec BOTS permits 1-group NRSRAPID for
 very bright targets with 2 recommended (NIRSpec Detector Recommended
-Strategies); NIRISS SOSS NISRAPID permits ngroups 1-800 and APT warns at 1
-(SOSS Recommended Strategies); MIRI permits 2 with 5+ recommended and
-"calibration accuracy worsens significantly" below 5 (MIRI TSO Recommended
-Strategies); NIRCam grism bright limits are quoted at RAPID ngroups=2 and
-pandeia permits 1.
+Strategies); NIRISS SOSS permits 1-group NISRAPID and APT warns at 1 (SOSS
+Recommended Strategies; the 1-800 range quoted in an earlier draft of this
+record is the generic NISRAPID template -- the SOSS TSO APT limit is 30
+groups, which the registry enforces as ngroup_max); MIRI permits 2 with 5+
+recommended and "calibration accuracy worsens significantly" below 5 (MIRI
+TSO Recommended Strategies); NIRCam grism bright limits are quoted at RAPID
+ngroups=2 and pandeia permits 1.
 
 **Changes:** registry `ngroup_min` NIR modes 2 -> 1, miri_lrs 5 -> 2; new
 per-mode `ngroup_warn_below` (2 NIR / 5 MIRI) drives a below-recommended
@@ -543,6 +545,95 @@ deliberate 0.0 stays for shipped planets); the UV spectrum defaults to the
 nearest shipped spectral type by Teff anchor (`planets.SFLUX_TEFF_ANCHORS`),
 applied only through the fill path and always disclosed -- a typed Teff
 updates the disclosure caption but never flips the menu.
+
+---
+
+# Decisions on the 2026-08-09 external review of 0.25.0 (fixed same day in 0.25.1, worker v9)
+
+An external review of the 0.25.0 release found one real blocker and several
+substantiated secondary findings. Verdicts and dispositions:
+
+## 1. BLOCKER, CONFIRMED: the ramp search under-selected groups
+
+The 0.25.0 search took min() of two predicted candidates and verified only
+downward, so a conservative candidate could force a shorter ramp than the
+measured optimum and nothing could recover. The committed artifact proved
+it: bright_hot/niriss_soss chose 1 group (PandExo: 2; 0.24.0: 2 at 0.784
+full well), with a 7.08x matched sigma ratio (variance excess 53.8x photon
+-- pandeia's extracted noise is pathological at 1 group). The old
+`saturated = predicted_candidate < ng_min` also classified saturation from
+a prediction, and the down-only verifier could mark a mode saturated on
+exhaustion even when the measured floor was safe.
+
+Fixed (worker v9): saturation is the MEASURED probe exceeding the limit;
+the two formulas only seed a bidirectional measured search; the result is
+the largest measured-safe group count; the measured-safe floor is the
+exhaustion fallback. Six stub regression tests pin the algorithm, including
+the exact SOSS case. Parity re-run: bright_hot SOSS selects 2/2 groups
+again. v8 cached noise results are wrong on short ramps -- the v9 bump
+busts them.
+
+## 2. CONFIRMED: the parity gate permitted the regression
+
+The +-1-group tolerance passed 1-vs-2 (a 100% group difference on a short
+ramp) and sigma ratios were entirely ungated. Added: exact group agreement
+whenever either side is at <= 3 groups; a per-integration-time gap gate
+(15%); a matched-sigma-ratio anomaly band [0.8, 2.0] (the documented
+noise-model envelope tops out well under 2x -- this is an anomaly ceiling,
+not a parity-to-unity requirement). All three new gates fail the regressed
+artifact and pass the fixed one.
+
+## 3. CONFIRMED: the Space deploy did not pin the deployed source
+
+SRC_STAMP only busted the Docker cache; the clones took whatever the
+default branches pointed to at build time. The Dockerfile now pins all
+three repos by full 40-character SHA (init/fetch/checkout, build FAILS on a
+rev-parse mismatch); BUILD_INFO records enforced pins. Release step:
+update the three *_SHA args.
+
+## 4. PARTLY CONFIRMED: warning thresholds revised per instrument
+
+NIRCam TSO guidance says avoid data saturating in fewer than 4 groups
+(linearity-correction reliance) -> warn threshold 4, was 2. MIRI guidance
+calls 2-5 group ramps very difficult to calibrate -> warn threshold 6
+(inclusive 5), was 5. Warning text is now instrument-specific
+(instruments.NGROUP_WARN_REASON). NOT adopted: the review's claim that
+2-group MIRI ramps require special permission -- jwst-docs states a
+minimum of 2 with degraded calibration, no access restriction found, so
+the tool cautions rather than gates. The review's claim that the
+decision-record SOSS range "1-800" was wrong is CONFIRMED (that is the
+generic NISRAPID template; the SOSS TSO APT limit is 30, which ngroup_max
+already enforced) -- corrected above.
+
+## 5. CONFIRMED (archive fill), fixed as policy
+
+- Non-[Fe/H] metallicity is never entered (was: entered with a note); the
+  unsupported "sub-percent" impact clause is gone.
+- The archive transit duration is not applied in emission mode (secondary
+  -eclipse duration can differ); noted to the user.
+- New pl_radjlim/pl_bmassjlim snapshot columns: no gravity or radius is
+  derived from a one-sided limit; derived gravity is disclosed as a
+  nominal composite planning value (PSCompPars can adopt mass and radius
+  from different publications).
+- A loaded configuration clears any queued fill and its banner; the banner
+  says "Initial values" and that later edits are not from the archive.
+- Parser hardening: exact row width, unreadable/non-finite cells raise
+  SnapshotError, refresh creates the destination directory.
+- DEFERRED (TODO.md): per-field references and uncertainties in the
+  snapshot, field-level provenance tracking in the GUI, uncertainty
+  propagation for derived gravity.
+
+## 6. Citations added
+
+NASA Exoplanet Archive acknowledgment + PSCompPars table DOI (the release
+ships an Archive-derived dataset); ExoJAX2 (Kawahara et al. 2025, ApJ 985,
+263 -- the pinned exojax 2.2.3 is that generation); PICASO climate
+(Mukherjee et al. 2023, ApJ 942, 71); virga software (Batalha et al. 2020,
+Zenodo 10.5281/zenodo.3759888) + Ackerman & Marley 2001; PandExo (Batalha
+et al. 2017, PASP 129, 064501) in the parity context; CITATION.cff gained
+date-released. NOT adopted: a CFF schema validator in CI (a new CI
+dependency for a two-field file; the version-sync test pins the field that
+can actually drift).
 
 ---
 

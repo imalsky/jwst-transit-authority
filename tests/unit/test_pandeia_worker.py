@@ -45,11 +45,13 @@ def test_ramp_floors_equal_pandeia_mingroups():
     """Since worker v8 the search floor is pandeia 2026.7's per-detector
     mingroups (jwst/<instrument>/config.json: nirspec 1, niriss 1,
     nircam 1, miri 2) -- the same field PandExo reads, so both tools search
-    the same ramp space. The warn threshold is the STScI-recommended
-    minimum (jwst-docs, verified 2026-08-09): 2 for the NIR modes (1-group
-    ramps are new since Cycle 4), 5 for MIRI."""
+    the same ramp space. The warn thresholds are instrument-specific
+    (jwst-docs, verified 2026-08-09): NIRSpec/NIRISS warn at 1 group;
+    NIRCam TSO guidance says avoid saturating in fewer than 4 groups
+    (linearity-correction reliance); MIRI calls 2-5 group ramps very
+    difficult to calibrate (5+ recommended)."""
     expected = {"nirspec": (1, 2), "niriss": (1, 2),
-                "nircam": (1, 2), "miri": (2, 5)}
+                "nircam": (1, 4), "miri": (2, 6)}
     for key, m in ins.MODES.items():
         floor, warn = expected[m["instrument"]]
         assert m["ngroup_min"] == floor, key
@@ -243,10 +245,11 @@ def test_missing_backend_python_gives_one_actionable_error(monkeypatch):
 
 # --- native-grid saturation census -------------------------------------------
 
-def _stub_report(sat_frac, wl, flux, noise, n_full, n_part, t_exp=100.0):
+def _stub_report(sat_frac, wl, flux, noise, n_full, n_part, t_exp=100.0,
+                 sat_ngroups=50.0):
     """Minimal pandeia report shaped the way `_one_mode` reads it."""
     return {
-        "scalar": {"fraction_saturation": sat_frac, "sat_ngroups": 50.0,
+        "scalar": {"fraction_saturation": sat_frac, "sat_ngroups": sat_ngroups,
                    "total_exposure_time": t_exp},
         "1d": {
             "sn": (list(wl), [0.0] * len(wl)),
@@ -259,10 +262,18 @@ def _stub_report(sat_frac, wl, flux, noise, n_full, n_part, t_exp=100.0):
     }
 
 
-def _run_one_mode(wl, flux, noise, n_full, n_part, sat_frac=0.5):
-    """Drive `_one_mode` with stub pandeia callables (no engine involved)."""
+def _run_one_mode(wl, flux, noise, n_full, n_part, sat_frac=0.5,
+                  sat_by_ngroup=None, sat_ngroups=50.0,
+                  ngroup_min=2, ngroup_max=10, call_log=None):
+    """Drive `_one_mode` with stub pandeia callables (no engine involved).
+
+    ``sat_by_ngroup`` (ngroup -> measured full-well fraction) makes
+    saturation depend on the requested ramp, which the group-search
+    regression tests need; the default constant ``sat_frac`` keeps the
+    older census tests unchanged. ``call_log`` collects the ngroup of every
+    nint=1 stub calculation, in order."""
     mode = {"key": "stub", "instrument": "nirspec", "mode": "prism",
-            "ngroup_min": 2, "ngroup_max": 10}
+            "ngroup_min": ngroup_min, "ngroup_max": ngroup_max}
     star = {"teff": 5400.0, "log_g": 4.45, "metallicity": 0.0, "ks_mag": 10.0}
 
     def build_default_calc(_tel, _inst, _mode):
@@ -274,8 +285,14 @@ def _run_one_mode(wl, flux, noise, n_full, n_part, sat_frac=0.5):
     def perform_calculation(calc):
         # nint=2 costs one extra frame, so t_cycle_s comes out positive
         calls["n"] += 1
-        t = 100.0 + 10.0 * (calc["configuration"]["detector"].get("nint", 1) - 1)
-        return _stub_report(sat_frac, wl, flux, noise, n_full, n_part, t_exp=t)
+        det = calc["configuration"]["detector"]
+        ng = int(det.get("ngroup", ngroup_min))
+        frac = float(sat_by_ngroup(ng)) if sat_by_ngroup else sat_frac
+        if call_log is not None and det.get("nint", 1) == 1:
+            call_log.append(ng)
+        t = 100.0 + 10.0 * (det.get("nint", 1) - 1)
+        return _stub_report(frac, wl, flux, noise, n_full, n_part, t_exp=t,
+                            sat_ngroups=sat_ngroups)
 
     # The usable-pixel return path records pandeia.engine.__version__. Stub it
     # so this suite stays engine-free (the rest of the file's contract).
@@ -366,3 +383,79 @@ def test_sat_curve_is_loud_on_missing_or_misaligned_keys():
         pw._sat_curve(rpt, "n_partial_saturated", 3)
     with pytest.raises(RuntimeError, match="misaligned"):
         pw._sat_curve(rpt, "n_full_saturated", 4)
+
+
+# --- group search selects the largest MEASURED-safe ramp (2026-08-09 review) --
+
+_CLEAN = dict(wl=[1.0, 2.0], flux=[1.0e6, 5.0e5], noise=[1.0e3, 2.0e3],
+              n_full=[0.0, 0.0], n_part=[0.0, 0.0])
+
+
+def test_soss_regression_selects_two_groups_not_one():
+    """The committed bright_hot/niriss_soss regression: measured sat is 0.392
+    at 1 group and 0.784 at 2 (both safe at the 0.80 limit; 3 is not), while
+    pandeia's sat_ngroups estimate (2.04) seeds a conservative 1-group
+    candidate. The old min-then-verify-down search returned 1 group (~7x the
+    noise); the fixed search must return the largest measured-safe count, 2,
+    which is also PandExo's choice on this star."""
+    log = []
+    out = _run_one_mode(**_CLEAN, sat_by_ngroup=lambda ng: 0.392 * ng,
+                        sat_ngroups=2.04, ngroup_min=1, ngroup_max=30,
+                        call_log=log)
+    assert out["ngroup"] == 2
+    assert out["saturated"] is False
+    assert 2 in log                          # the choice was MEASURED
+
+
+def test_predictor_below_floor_with_safe_measured_floor_is_not_saturated():
+    """A predictor falling below ngroup_min does not prove the floor is
+    saturated: with the floor MEASURED at 0.79 (safe), a sat_ngroups of 0.9
+    (candidate 0) must not flag saturation. The old code did."""
+    out = _run_one_mode(**_CLEAN, sat_by_ngroup=lambda ng: 0.79 * ng,
+                        sat_ngroups=0.9, ngroup_min=1, ngroup_max=30)
+    assert out["saturated"] is False
+    assert out["ngroup"] == 1
+
+
+def test_overshooting_seed_converges_to_largest_measured_safe():
+    """A nonlinear saturation curve where the linear seed overshoots: probe
+    0.10 at 1 group predicts 8, which measures unsafe (0.90); the search must
+    come back down and land on the largest measured-safe count (7)."""
+    frac = {1: 0.10, 7: 0.79, 8: 0.90}
+    out = _run_one_mode(**_CLEAN,
+                        sat_by_ngroup=lambda ng: frac.get(ng, 0.90),
+                        sat_ngroups=None, ngroup_min=1, ngroup_max=30)
+    assert out["ngroup"] == 7
+    assert out["saturated"] is False
+
+
+def test_bracket_collapse_falls_back_to_measured_safe_floor():
+    """Everything above the floor measures unsafe: the search must fall back
+    to the measured-safe floor, never declare saturation (the old verifier
+    marked the mode saturated on exhaustion even with a safe measured
+    minimum)."""
+    out = _run_one_mode(**_CLEAN,
+                        sat_by_ngroup=lambda ng: 0.40 if ng == 1 else 0.90,
+                        sat_ngroups=None, ngroup_min=1, ngroup_max=30)
+    assert out["ngroup"] == 1
+    assert out["saturated"] is False
+
+
+def test_saturated_only_when_the_measured_floor_exceeds_the_limit():
+    """Saturation is a measurement of the shortest permitted ramp."""
+    out = _run_one_mode(**_CLEAN, sat_by_ngroup=lambda ng: 0.85 * ng,
+                        sat_ngroups=None, ngroup_min=1, ngroup_max=30)
+    assert out["saturated"] is True
+    assert out["ngroup"] == 1
+
+
+def test_group_cap_is_respected_by_the_upward_search():
+    """An upward search on a barely-saturating star must stop at ngroup_max
+    (the APT/PandExo cap), not run past it."""
+    log = []
+    out = _run_one_mode(**_CLEAN, sat_by_ngroup=lambda ng: 0.005 * ng,
+                        sat_ngroups=None, ngroup_min=1, ngroup_max=30,
+                        call_log=log)
+    assert out["ngroup"] == 30
+    assert out["saturated"] is False
+    assert max(log) <= 30

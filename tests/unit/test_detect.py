@@ -146,16 +146,17 @@ def test_short_ramp_below_recommended_minimum_is_flagged_not_demoted():
     mr["ngroup"] = 1
     r = detect.evaluate_mode("nirspec_prism", mr, model, **kw)
     hits = [w for w in r["warnings"]
-            if "below the STScI-recommended minimum" in w]
+            if "below this mode's STScI-recommended ramp" in w]
     assert len(hits) == 1
-    assert "1 groups per integration" in hits[0] and "of 2" in hits[0]
+    assert "1 group(s) per integration" in hits[0]
+    assert "Cycle 4" in hits[0]              # the NIRSpec-specific reason
     assert r["saturated"] is False
 
     mr2, model2 = _lsf_mode_inputs(lambda wl: np.zeros(wl.size))
     mr2["ngroup"] = 2
     r2 = detect.evaluate_mode("nirspec_prism", mr2, model2, **kw)
     assert not [w for w in r2["warnings"]
-                if "below the STScI-recommended minimum" in w]
+                if "below this mode's STScI-recommended ramp" in w]
 
 
 # --- fail-fast input validation ----------------------------------------------

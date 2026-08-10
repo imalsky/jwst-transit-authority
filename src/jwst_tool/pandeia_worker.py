@@ -39,10 +39,12 @@ spectral type. Vega reference: the engine uses its OWN refdata Vega; the
 local synphot vega_file pin is only an offline guard (the two agree to
 0.08 mmag in Ks).
 
-Group selection: probe at ngroup_min, take the smaller of the PandExo-style
-linear full-well extrapolation and pandeia's sat_ngroups scaled by
-sat_limit, then VERIFY: run the chosen ngroup and step down until the
-measured saturation fraction is under sat_limit. A mode saturated even at
+Group selection: probe at ngroup_min; "saturated" means the MEASURED probe
+exceeds sat_limit, never a prediction. Otherwise the PandExo-style linear
+full-well extrapolation and pandeia's sat_ngroups estimate only seed a
+measured search that walks up while safe and down while not, returning the
+LARGEST measured-safe group count (the measured-safe probe is the fallback,
+so search exhaustion cannot declare saturation). A mode saturated at
 ngroup_min is kept, flagged, with its degraded numbers so the GUI can say
 why. Channel-level saturation comes from the report's 1d curves so the host
 can exclude or flag per pixel.
@@ -162,29 +164,57 @@ def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
     sat_probe = float(probe["scalar"]["fraction_saturation"])
     sat_ng = probe["scalar"].get("sat_ngroups")
 
-    # candidates: linear extrapolation of the probe's full-well fraction and
-    # pandeia's groups-to-saturation estimate; take the smaller, verify below
-    cands = []
-    if sat_probe > 0:
-        cands.append(int(math.floor(ng_min * sat_limit / sat_probe)))
-    if sat_ng is not None and np.isfinite(sat_ng) and sat_ng > 0:
-        cands.append(int(math.floor(sat_limit * float(sat_ng))))
-    ng_best = min(cands) if cands else ng_max
-    saturated = ng_best < ng_min      # even the shortest ramp busts the limit
-    ng_best = _clamp_ngroup(ng_best, ng_min, ng_max)
+    # Saturation is a MEASUREMENT, never a prediction: the mode is saturated
+    # exactly when the shortest permitted ramp measures above the limit. (The
+    # old `predicted candidate < ng_min` test classified saturation from an
+    # estimate; a predictor falling below the floor does not prove the
+    # measured floor is unsafe.)
+    saturated = sat_probe > sat_limit
+    ng_best, rpt = ng_min, probe
 
-    rpt = probe if ng_best == ng_min else _run(perform_calculation, calc, ng_best)
-    # verify the CHOSEN ramp: the linear full-well model can overshoot, so step
-    # down until the measured saturation fraction actually respects the limit
-    for _ in range(4):
-        frac = float(rpt["scalar"]["fraction_saturation"])
-        if frac <= sat_limit or ng_best <= ng_min:
-            break
-        ng_best = max(ng_min, min(ng_best - 1,
-                                  int(math.floor(ng_best * sat_limit / frac))))
-        rpt = _run(perform_calculation, calc, ng_best)
-    if float(rpt["scalar"]["fraction_saturation"]) > sat_limit:
-        saturated = True
+    if not saturated:
+        # Find the LARGEST measured-safe group count. The two formulas below
+        # (linear extrapolation of the probe's full-well fraction; pandeia's
+        # groups-to-saturation estimate) only seed the search; every accepted
+        # step is measured. The search walks BOTH directions -- the old
+        # down-only verifier could not recover from a conservative seed, and
+        # with a floor of 1 that forced a needless 1-group SOSS ramp with ~7x
+        # the noise of the safe 2-group ramp (2026-08-09 review, the
+        # committed bright_hot row). The measured-safe probe is the fallback,
+        # so search exhaustion can never turn a safe mode "saturated".
+        up_pred = (int(math.floor(ng_min * sat_limit / sat_probe))
+                   if sat_probe > 0 else ng_max)
+        cands = [up_pred]
+        if sat_ng is not None and np.isfinite(sat_ng) and sat_ng > 0:
+            cands.append(int(math.floor(sat_limit * float(sat_ng))))
+        ng = _clamp_ngroup(min(cands), ng_min, ng_max)
+        if ng <= ng_min:
+            # the floor MEASURED safe, so a predictor at/below it is merely
+            # conservative -- follow the measured extrapolation upward
+            ng = _clamp_ngroup(up_pred, ng_min, ng_max)
+        tried = {ng_min}
+        for _ in range(6):
+            if ng in tried:
+                break
+            tried.add(ng)
+            r = _run(perform_calculation, calc, ng)
+            frac = float(r["scalar"]["fraction_saturation"])
+            if frac <= sat_limit:
+                if ng > ng_best:
+                    ng_best, rpt = ng, r
+                if frac <= 0 or ng >= ng_max:
+                    break
+                nxt = _clamp_ngroup(int(math.floor(ng * sat_limit / frac)),
+                                    ng_min, ng_max)
+                if nxt <= ng:
+                    break
+                ng = nxt
+            else:
+                nxt = max(ng_best,
+                          min(ng - 1, int(math.floor(ng * sat_limit / frac))))
+                if nxt <= ng_best:
+                    break
+                ng = nxt
 
     wl, _sn = rpt["1d"]["sn"]
     flux = np.asarray(rpt["1d"]["extracted_flux"][1], dtype=float)

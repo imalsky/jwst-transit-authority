@@ -91,17 +91,31 @@ MIN_MATCHED_PIXEL_FRAC = 0.99
 MAX_NGROUP_ABS_DIFF = 1
 MAX_NGROUP_REL_DIFF = 0.01
 MAX_NGROUP_ABS_DIFF_FAINT = 5
+# On a SHORT ramp every group is a large fraction of the integration, so the
+# +-1 tolerance above is meaningless there: 1 vs 2 groups is a 100% group
+# difference and ~33% of the integration time, and pandeia's extracted noise
+# is pathologically worse at 1 group. Whenever EITHER side selects at or
+# below this count, the two optimizers must agree EXACTLY (2026-08-09
+# review: a conservative seed once picked 1 group where PandExo's 2 was
+# measured safe, and the +-1 rule passed it).
+LOW_NGROUP_EXACT = 3
+# Per-integration time inherits the group choice; gate the relative gap so a
+# ramp-policy divergence cannot hide behind a passing group diff.
+MAX_TINT_REL_DIFF = 0.15
 # Extracted flux is a true 1:1 comparison (same engine, same configuration).
 # This gates the MEDIAN ratio only; per-pixel extraction jitter (p05/p95 and
 # max_abs_dev are recorded in every row) is a disclosed property of the two
 # independent extractions, not a gated quantity.
 MAX_FLUX_RATIO_DEV = 0.03
 
-# NOTE: sigma ratios are REPORTED but deliberately NOT gated to unity. Pandeia's
-# full extracted noise and PandExo's analytic `fml` estimator are different
-# noise models on purpose; the measured envelope is ~2-24% (NIR) and ~33-56%
-# (MIRI LRS). Requiring unity there would be requiring the two tools to stop
-# disagreeing about something they disagree about by design.
+# Sigma ratios are deliberately NOT gated to unity: pandeia's full extracted
+# noise and PandExo's analytic `fml` estimator are different noise models on
+# purpose, with a measured envelope of ~2-24% (NIR) and ~33-56% (MIRI LRS).
+# But "different by design" has a ceiling: a median ratio outside this band
+# is an ANOMALY (the 2026-08-09 regression measured 7.08x from an
+# unnecessary 1-group ramp and the ungated sigma let it pass silently).
+# Widening the band requires a decision record, not a threshold edit.
+SIGMA_RATIO_MEDIAN_BAND = (0.8, 2.0)
 
 # NOTE: PandExo operational warnings (e.g. the NIRCam data-volume excess under
 # the pinned RAPID readout) are recorded per row (`pandexo_warnings`) and
@@ -122,6 +136,9 @@ def gate_thresholds() -> dict:
         "min_matched_pixel_frac": MIN_MATCHED_PIXEL_FRAC,
         "max_ngroup_abs_diff": MAX_NGROUP_ABS_DIFF,
         "max_ngroup_rel_diff": MAX_NGROUP_REL_DIFF,
+        "low_ngroup_exact": LOW_NGROUP_EXACT,
+        "max_tint_rel_diff": MAX_TINT_REL_DIFF,
+        "sigma_ratio_median_band": list(SIGMA_RATIO_MEDIAN_BAND),
         "max_flux_ratio_dev": MAX_FLUX_RATIO_DEV,
         "sat_limit": SAT_LIMIT,
         "wl_match_rtol": WL_MATCH_RTOL,
@@ -312,6 +329,16 @@ def validate(summary: dict) -> list[str]:
             go, gp = row.get("ngroup_ours"), row.get("ngroup_pandexo")
             if go is None or gp is None:
                 problems.append(f"{tag}: missing ngroup on one side")
+            elif (go <= LOW_NGROUP_EXACT or gp <= LOW_NGROUP_EXACT):
+                # short-ramp regime: every group is a large slice of the
+                # integration, so the optimizers must agree exactly
+                if go != gp:
+                    problems.append(
+                        f"{tag}: ngroup {go} vs {gp} on a short ramp "
+                        f"(either side <= {LOW_NGROUP_EXACT}); short-ramp "
+                        "group choices must agree exactly -- a one-group "
+                        "difference here is a ramp-policy divergence, not "
+                        "rounding")
             elif sname in FAINT_STARS:
                 diff = abs(go - gp)
                 if (diff > MAX_NGROUP_ABS_DIFF_FAINT
@@ -324,6 +351,28 @@ def validate(summary: dict) -> list[str]:
                 problems.append(
                     f"{tag}: ngroup {go} vs {gp} differs by more than "
                     f"{MAX_NGROUP_ABS_DIFF}")
+
+            # per-integration time inherits the group choice; a passing group
+            # diff must not hide a large timing gap
+            to, tp = row.get("t_int_ours_s"), row.get("t_int_pandexo_s")
+            if to is not None and tp is not None and max(to, tp) > 0:
+                rel = abs(float(to) - float(tp)) / max(float(to), float(tp))
+                if rel > MAX_TINT_REL_DIFF:
+                    problems.append(
+                        f"{tag}: per-integration time {to:.3f}s vs {tp:.3f}s "
+                        f"differs by {rel:.0%} (> {MAX_TINT_REL_DIFF:.0%})")
+
+            # sigma-ratio ANOMALY ceiling (not a parity-to-unity requirement;
+            # see the SIGMA_RATIO_MEDIAN_BAND comment)
+            sr = (row.get("sigma_ratio_matched") or {}).get("median")
+            if sr is not None:
+                lo_b, hi_b = SIGMA_RATIO_MEDIAN_BAND
+                if not (lo_b <= float(sr) <= hi_b):
+                    problems.append(
+                        f"{tag}: matched sigma-ratio median {float(sr):.3f} "
+                        f"is outside the anomaly band [{lo_b}, {hi_b}]; the "
+                        "documented noise-model envelope cannot explain "
+                        "this -- investigate before shipping the artifact")
 
             # extracted flux (median-gated; see the threshold comment)
             fr = row.get("flux_ratio") or {}

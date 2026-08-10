@@ -379,7 +379,7 @@ def test_custom_sflux_nearest_caption_discloses_and_never_flips():
     at.selectbox(key="n0_planet").set_value("custom").run()
     assert not at.exception, at.exception
     caps = " | ".join(c.value for c in at.caption)
-    assert "Nearest shipped UV spectrum" in caps and "WASP-39" in caps
+    assert "Nearest-Teff shipped UV template" in caps and "WASP-39" in caps
     at.number_input(key="n0_custom_teff").set_value(3100.0).run()
     assert not at.exception, at.exception
     caps = " | ".join(c.value for c in at.caption)
@@ -388,3 +388,21 @@ def test_custom_sflux_nearest_caption_discloses_and_never_flips():
     # the menu itself stayed on the WASP-39 default
     assert at.selectbox(key="n0_custom_sflux").value == \
         "sflux-W39b_Tsai2023.txt"
+
+
+def test_emission_mode_archive_fill_skips_transit_duration():
+    """The archive duration is the PRIMARY-TRANSIT duration; in emission
+    mode the fill must leave the event-duration widget alone and say why."""
+    at = _run_app()
+    at.selectbox(key="n0_planet").set_value("custom").run()
+    at.radio(key="n0_scimode").set_value("emission").run()
+    t14_before = at.number_input(key="n0_custom_t14").value
+    at.selectbox(key="n0_custom_arch_name").set_value("HD 189733 b")
+    at.button(key="n0_custom_arch_fill").click().run()
+    assert not at.exception, at.exception
+    from jwst_tool import archive
+    values, _ = archive.custom_fill(archive.lookup("HD 189733 b"))
+    assert at.number_input(key="n0_custom_t14").value == t14_before
+    assert at.number_input(key="n0_custom_teff").value == values["teff"]
+    warns = " | ".join(w.value for w in at.warning)
+    assert "secondary-eclipse duration can differ" in warns

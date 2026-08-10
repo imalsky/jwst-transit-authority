@@ -232,15 +232,28 @@ components a run actually used:
   ApJ, 923, 264
 - FastChem (equilibrium initialization): Stock, J. W., et al. 2018,
   MNRAS, 479, 865
-- ExoJAX (radiative transfer and opacities): Kawahara, H., et al. 2022,
-  ApJS, 258, 31
+- ExoJAX (radiative transfer and opacities; this tool runs the ExoJAX 2
+  generation): Kawahara, H., et al. 2022, ApJS, 258, 31 and
+  Kawahara, H., et al. 2025, ApJ, 985, 263
 - Pandeia (instrument noise): Pontoppidan, K. M., et al. 2016,
   Proc. SPIE, 9910, 991016
 - PICASO, only when the PICASO engine or climate mode is used:
-  Batalha, N. E., et al. 2019, ApJ, 878, 70
-- Cloud runs use the virga condensate database via ExoJAX; virga asks that
-  each condensate's optical-constants source be cited individually (see
-  `docs/physics_and_conventions.md`, Clouds section)
+  Batalha, N. E., et al. 2019, ApJ, 878, 70, and for the climate mode
+  Mukherjee, S., et al. 2023, ApJ, 942, 71
+- Cloud runs use the virga condensate database via ExoJAX: cite virga
+  (Batalha, N., Rooney, C. M., and Mukherjee, S. 2020, Zenodo,
+  doi:10.5281/zenodo.3759888) and Ackerman, A. S., and Marley, M. S. 2001,
+  ApJ, 556, 872; virga also asks that each condensate's optical-constants
+  source be cited individually (see `docs/physics_and_conventions.md`,
+  Clouds section)
+- The custom-planet fill ships a NASA Exoplanet Archive PSCompPars
+  snapshot. Work using it should carry the Archive's acknowledgment:
+  "This research has made use of the NASA Exoplanet Archive, which is
+  operated by the California Institute of Technology, under contract with
+  the National Aeronautics and Space Administration under the Exoplanet
+  Exploration Program." (table DOI: 10.26133/NEA13)
+- The noise-model validation is benchmarked against PandExo
+  (`tests/parity/`): Batalha, N. E., et al. 2017, PASP, 129, 064501
 
 ## License
 

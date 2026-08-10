@@ -60,7 +60,13 @@ _BACKEND_FINGERPRINT = None
 # 2 -> 1, MIRI LRS 5 -> 2), matching PandExo's search space; not required for
 # cache correctness (ngroup_min is in the job key) but the search-policy
 # change is part of the parity-artifact identity.
-WORKER_VERSION = 8
+# v9 (2026-08-09, same-day review fix): group selection returns the LARGEST
+# measured-safe count via a bidirectional measured search, and "saturated"
+# means the measured floor exceeds the limit. v8's min-then-verify-down
+# search under-selected (a needless 1-group SOSS ramp with ~7x the noise);
+# v8 cached results are wrong on short ramps, so the version bump is
+# REQUIRED for cache correctness here, not just artifact identity.
+WORKER_VERSION = 9
 
 
 def backend_fingerprint() -> dict:

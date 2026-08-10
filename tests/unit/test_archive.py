@@ -34,7 +34,8 @@ def _row(**over):
             "st_teff": "5485.0", "st_logg": "4.50", "st_met": "0.10",
             "st_metratio": "[Fe/H]", "st_rad": "0.932", "sy_kmag": "10.20",
             "pl_radj": "1.279", "pl_bmassj": "0.281", "pl_bmassprov": "Mass",
-            "pl_orbsmax": "0.04828", "pl_trandur": "2.80"}
+            "pl_orbsmax": "0.04828", "pl_trandur": "2.80",
+            "pl_radjlim": "0", "pl_bmassjlim": "0"}
     base.update(over)
     return base
 
@@ -49,9 +50,12 @@ def test_custom_fill_maps_and_derives_gravity():
                 / (1.279 * planets.R_JUP_CM) ** 2) / 100.0
     assert values["g"] == pytest.approx(g_expect, rel=1e-12)
     assert values["sflux"] == planets.nearest_sflux(5485.0)
-    # true mass + [Fe/H] basis: no provenance disclosures, only the UV note
-    assert len(notes) == 1 and "nearest shipped spectral type" in notes[0]
-    assert "G8 V" in notes[0]
+    # true mass + [Fe/H] basis: exactly two disclosures -- gravity is a
+    # nominal composite value, and the nearest-Teff UV template
+    assert len(notes) == 2
+    assert any("nominal composite planning value" in n for n in notes)
+    uv = [n for n in notes if "nearest-Teff shipped UV template" in n]
+    assert len(uv) == 1 and "G8 V" in uv[0]
 
 
 def test_custom_fill_refuses_out_of_range_loudly():
@@ -74,14 +78,41 @@ def test_custom_fill_missing_values_are_named():
         assert absent not in values
     assert any("no Ks magnitude" in n for n in notes)
     assert any("no mass and radius pair" in n for n in notes)
+    assert any("no stellar metallicity" in n for n in notes)
     # Msini-provenance disclosure when the mass is present but not a true mass
     v2, n2 = archive.custom_fill(_row(pl_bmassprov="Msini"))
     assert "g" in v2
-    assert any("provenance 'Msini'" in n for n in n2)
-    # [M/H]-basis disclosure
-    v3, n3 = archive.custom_fill(_row(st_metratio="[M/H]"))
-    assert "feh" in v3
-    assert any("[M/H]" in n and "[Fe/H]" in n for n in n3)
+    assert any("mass provenance 'Msini'" in n for n in n2)
+
+
+def test_non_feh_metallicity_is_never_entered():
+    """[M/H] and [Fe/H] are different archive quantities; a value on any
+    basis other than [Fe/H] is refused with a note, never re-based into the
+    [Fe/H]-labeled widget (the never-guess rule)."""
+    v, n = archive.custom_fill(_row(st_metratio="[M/H]"))
+    assert "feh" not in v
+    assert any("[M/H]" in x and "not [Fe/H]" in x for x in n)
+    v2, n2 = archive.custom_fill(_row(st_metratio=""))
+    assert "feh" not in v2
+    assert any("unstated" in x for x in n2)
+
+
+def test_one_sided_limits_never_become_values():
+    """A limit-flagged mass or radius must not produce a gravity, and a
+    limit-flagged radius must not fill the radius field."""
+    v, n = archive.custom_fill(_row(pl_bmassjlim="1"))
+    assert "g" not in v and "rp" in v
+    assert any("one-sided limit" in x and "gravity" in x for x in n)
+    v2, n2 = archive.custom_fill(_row(pl_radjlim="-1"))
+    assert "rp" not in v2 and "g" not in v2
+    assert any("planet radius" in x and "one-sided limit" in x for x in n2)
+
+
+def test_malformed_cells_raise_snapshot_error():
+    with pytest.raises(archive.SnapshotError, match="unreadable"):
+        archive.custom_fill(_row(st_teff="five thousand"))
+    with pytest.raises(archive.SnapshotError, match="non-finite"):
+        archive.custom_fill(_row(st_teff="nan"))
 
 
 def test_nearest_sflux_anchors():
@@ -126,3 +157,9 @@ def test_snapshot_error_paths_are_loud(tmp_path):
     q.write_text("# fetched: 2026-08-09T00:00:00Z\npl_name,bogus\n")
     with pytest.raises(archive.SnapshotError, match="header"):
         archive.load_snapshot(str(q))
+    r = tmp_path / "short_row.csv"
+    r.write_text("# fetched: 2026-08-09T00:00:00Z\n"
+                 + ",".join(archive.SNAPSHOT_COLUMNS) + "\n"
+                 + "Only-Two b,G8 V\n")
+    with pytest.raises(archive.SnapshotError, match="cells"):
+        archive.load_snapshot(str(r))

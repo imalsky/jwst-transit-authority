@@ -13,7 +13,7 @@
     "psf_version_source": "VERSION_PSF",
     "python": "3.12.13",
     "numpy": "2.5.1",
-    "worker_version": 8
+    "worker_version": 9
    },
    "provenance_pandexo": {
     "pandeia_engine_version": "2026.7",
@@ -474,7 +474,7 @@
     "psf_version_source": "VERSION_PSF",
     "python": "3.12.13",
     "numpy": "2.5.1",
-    "worker_version": 8
+    "worker_version": 9
    },
    "provenance_pandexo": {
     "pandeia_engine_version": "2026.7",
@@ -556,13 +556,13 @@
      "npix_ours": 3330,
      "npix_pandexo": 3330,
      "npix_matched": 3330,
-     "ngroup_ours": 16,
+     "ngroup_ours": 17,
      "ngroup_pandexo": 17,
-     "sat_frac_ours": 0.7346011049278847,
-     "t_int_ours_s": 15.354479999999999,
+     "sat_frac_ours": 0.7805136739858775,
+     "t_int_ours_s": 16.25648,
      "t_int_pandexo_s": 16.236,
      "t_frame_pandexo_s": 0.902,
-     "n_int_ours": 657,
+     "n_int_ours": 620,
      "n_int_pandexo_in": 622.0,
      "n_int_pandexo_out": 622.0,
      "config_ours": {
@@ -587,19 +587,19 @@
      },
      "sigma_ratio_matched": {
       "n": 3330,
-      "median": 1.1098265272854695,
-      "p05": 1.0963653994386786,
-      "p95": 1.1221410034720947,
-      "max_abs_dev": 0.18753061013923178
+      "median": 1.0751616968275628,
+      "p05": 1.0610413143989144,
+      "p95": 1.0860554519009193,
+      "max_abs_dev": 0.15028928046065282
      },
      "sigma_ratio_policy": {
       "n": 3330,
-      "median": 1.0798603837926912,
-      "p05": 1.0667627164315838,
-      "p95": 1.0918423599431626,
-      "max_abs_dev": 0.15546639848938226
+      "median": 1.0768944323543743,
+      "p05": 1.0627512934525751,
+      "p95": 1.0878057438534217,
+      "max_abs_dev": 0.15214309194616749
      },
-     "var_excess_ours": 1.2335408821857037,
+     "var_excess_ours": 1.157562880134869,
      "var_excess_pandexo": 1.0151465325272762,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
@@ -678,13 +678,13 @@
      "npix_ours": 2040,
      "npix_pandexo": 2040,
      "npix_matched": 2040,
-     "ngroup_ours": 1,
+     "ngroup_ours": 2,
      "ngroup_pandexo": 2,
-     "sat_frac_ours": 0.3920156187065972,
-     "t_int_ours_s": 11.008479999999999,
+     "sat_frac_ours": 0.7840312374131944,
+     "t_int_ours_s": 16.50248,
      "t_int_pandexo_s": 16.482,
      "t_frame_pandexo_s": 5.494,
-     "n_int_ours": 916,
+     "n_int_ours": 611,
      "n_int_pandexo_in": 613.0,
      "n_int_pandexo_out": 613.0,
      "config_ours": {
@@ -709,19 +709,19 @@
      },
      "sigma_ratio_matched": {
       "n": 2040,
-      "median": 7.0799878519738675,
-      "p05": 3.2761756899953465,
-      "p95": 14.475048259115063,
-      "max_abs_dev": 16.40427344424518
+      "median": 1.0642831819219674,
+      "p05": 1.0278215104760196,
+      "p95": 1.1158867116992204,
+      "max_abs_dev": 0.19542554578418203
      },
      "sigma_ratio_policy": {
       "n": 2040,
-      "median": 5.791819422323083,
-      "p05": 2.6800918856050906,
-      "p95": 11.841385521986911,
-      "max_abs_dev": 13.237652814290897
+      "median": 1.0660236298253032,
+      "p05": 1.0295023317304537,
+      "p95": 1.1177115480968318,
+      "max_abs_dev": 0.1973804539515711
      },
-     "var_excess_ours": 53.77165092011006,
+     "var_excess_ours": 1.3093611116137633,
      "var_excess_pandexo": 1.0746478295725284,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
@@ -935,7 +935,7 @@
     "psf_version_source": "VERSION_PSF",
     "python": "3.12.13",
     "numpy": "2.5.1",
-    "worker_version": 8
+    "worker_version": 9
    },
    "provenance_pandexo": {
     "pandeia_engine_version": "2026.7",
@@ -1412,12 +1412,18 @@
  "gate": {
   "passed": true,
   "problems": [],
-  "required_worker_version": 8,
+  "required_worker_version": 9,
   "required_pandeia_release": "2026.7",
   "thresholds": {
    "min_matched_pixel_frac": 0.99,
    "max_ngroup_abs_diff": 1,
    "max_ngroup_rel_diff": 0.01,
+   "low_ngroup_exact": 3,
+   "max_tint_rel_diff": 0.15,
+   "sigma_ratio_median_band": [
+    0.8,
+    2.0
+   ],
    "max_flux_ratio_dev": 0.03,
    "sat_limit": 0.8,
    "wl_match_rtol": 1e-09

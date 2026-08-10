@@ -45,6 +45,8 @@ def _ok_row(key, ngroup=100, sat=0.5):
         "sat_frac_ours": sat,
         "npix_pandexo": 1000, "npix_matched": 1000,
         "ngroup_ours": ngroup, "ngroup_pandexo": ngroup,
+        "t_int_ours_s": 100.0, "t_int_pandexo_s": 100.0,
+        "sigma_ratio_matched": {"median": 1.10},
         "config_ours": {"subarray": "sub", "readout": "RAPID",
                         "filter": "f", "disperser": "d"},
         "config_pandexo": {"subarray": "sub", "readout": "RAPID",
@@ -407,3 +409,44 @@ def test_plots_accept_a_revalidated_pass(plots, gate, passing):
     s["gate"] = gate["gate_block"]([])
     assert plots.require_passing_summary(s) == \
         gate["REQUIRED_PANDEIA_RELEASE"]
+
+
+# --- 2026-08-09 review gates: short ramps, timing, sigma anomaly -------------
+
+def test_short_ramp_group_mismatch_fails(gate, passing):
+    """1 vs 2 groups is a ramp-policy divergence, not rounding: whenever
+    either side is at or below LOW_NGROUP_EXACT the counts must be equal.
+    This is the committed bright_hot/niriss_soss regression."""
+    s = copy.deepcopy(passing)
+    s["stars"]["bright_hot"]["modes"][0].update(
+        ngroup_ours=1, ngroup_pandexo=2)
+    problems = gate["validate"](s)
+    assert any("short ramp" in p for p in problems), problems
+
+
+def test_short_ramp_exact_agreement_passes(gate, passing):
+    s = copy.deepcopy(passing)
+    s["stars"]["bright_hot"]["modes"][0].update(
+        ngroup_ours=2, ngroup_pandexo=2)
+    assert gate["validate"](s) == []
+
+
+def test_integration_time_gap_fails(gate, passing):
+    """A 33% per-integration-time gap must fail even if the group diff
+    passes its own tolerance."""
+    s = copy.deepcopy(passing)
+    s["stars"]["bright_hot"]["modes"][0].update(
+        t_int_ours_s=11.008, t_int_pandexo_s=16.482)
+    problems = gate["validate"](s)
+    assert any("per-integration time" in p for p in problems), problems
+
+
+def test_sigma_ratio_anomaly_fails(gate, passing):
+    """The documented noise-model envelope tops out well under 2x; a 7x
+    median sigma ratio is an anomaly and must fail, not pass as a
+    'noise-model difference'."""
+    s = copy.deepcopy(passing)
+    s["stars"]["bright_hot"]["modes"][0]["sigma_ratio_matched"] = {
+        "median": 7.08}
+    problems = gate["validate"](s)
+    assert any("anomaly band" in p for p in problems), problems

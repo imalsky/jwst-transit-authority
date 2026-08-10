@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import csv
 import functools
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,12 +33,17 @@ TAP_SYNC_URL = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
 
 # Column order is the file format; the loader and the refresh both refuse any
 # drift (schema drift means the mapping below needs review, never a silent
-# reinterpretation). st_metratio / pl_bmassprov ride along purely for honest
-# disclosure ([M/H] vs [Fe/H]; Msini vs true mass behind the derived gravity).
+# reinterpretation). st_metratio / pl_bmassprov ride along for honest
+# disclosure ([M/H] vs [Fe/H]; Msini vs true mass behind the derived
+# gravity); the *lim flags mark one-sided limits (+1 upper / -1 lower), from
+# which no gravity or radius is ever derived. PSCompPars values can combine
+# different publications, so derived quantities are nominal composite
+# planning values, disclosed as such -- per-field references and
+# uncertainties are NOT snapshot columns yet (recorded in TODO.md).
 SNAPSHOT_COLUMNS = (
     "pl_name", "st_spectype", "st_teff", "st_logg", "st_met", "st_metratio",
     "st_rad", "sy_kmag", "pl_radj", "pl_bmassj", "pl_bmassprov",
-    "pl_orbsmax", "pl_trandur",
+    "pl_orbsmax", "pl_trandur", "pl_radjlim", "pl_bmassjlim",
 )
 
 # Transiting planets with the four fields without which a fill is meaningless;
@@ -104,6 +110,11 @@ def load_snapshot(path: str | None = None) -> Snapshot:
     for cells in reader:
         if not cells:
             continue
+        if len(cells) != len(SNAPSHOT_COLUMNS):
+            raise SnapshotError(
+                f"{p}: row starting {cells[0]!r} has {len(cells)} cells, "
+                f"expected {len(SNAPSHOT_COLUMNS)}; the snapshot is "
+                "malformed -- regenerate it.")
         row = dict(zip(SNAPSHOT_COLUMNS, cells))
         key = normalize_name(row["pl_name"])
         if key in rows:
@@ -135,7 +146,25 @@ def _cell(row: dict, col: str) -> float | None:
     v = str(row.get(col, "")).strip()
     if not v:
         return None
-    return float(v)
+    try:
+        x = float(v)
+    except ValueError as e:
+        raise SnapshotError(
+            f"unreadable numeric value {v!r} in column {col} for "
+            f"{row.get('pl_name', 'unknown planet')!r}; the snapshot is "
+            "malformed -- regenerate it.") from e
+    if not math.isfinite(x):
+        raise SnapshotError(
+            f"non-finite value {v!r} in column {col} for "
+            f"{row.get('pl_name', 'unknown planet')!r}; the snapshot is "
+            "malformed -- regenerate it.")
+    return x
+
+
+def _is_limit(row: dict, col: str) -> bool:
+    """True when the archive marks the value a one-sided limit (+1/-1)."""
+    v = str(row.get(col, "")).strip()
+    return bool(v) and float(v) != 0.0
 
 
 def custom_fill(row: dict) -> tuple[dict, list[str]]:
@@ -149,12 +178,10 @@ def custom_fill(row: dict) -> tuple[dict, list[str]]:
     name = row.get("pl_name", "this planet")
     direct = [("teff", "st_teff", "stellar Teff (K)"),
               ("logg", "st_logg", "stellar log g"),
-              ("feh", "st_met", "stellar metallicity (dex)"),
               ("ks", "sy_kmag", "Ks magnitude"),
               ("rstar", "st_rad", "stellar radius (R_sun)"),
-              ("rp", "pl_radj", "planet radius (R_jup)"),
               ("a", "pl_orbsmax", "semi-major axis (AU)"),
-              ("t14", "pl_trandur", "transit duration (hours)")]
+              ("t14", "pl_trandur", "transit duration, T14 (hours)")]
     values: dict = {}
     notes: list[str] = []
 
@@ -173,26 +200,48 @@ def custom_fill(row: dict) -> tuple[dict, list[str]]:
     for field, col, label in direct:
         _take(field, _cell(row, col), label)
 
-    # gravity, derived from the archive best mass + radius in widget units
+    # planet radius: never adopted from a one-sided limit
+    if _is_limit(row, "pl_radjlim"):
+        notes.append(f"the archive planet radius for {name} is a one-sided "
+                     "limit, not a measurement; field left unchanged.")
+    else:
+        _take("rp", _cell(row, "pl_radj"), "planet radius (R_jup)")
+
+    # metallicity: entered ONLY on the [Fe/H] basis (never re-based)
+    met = _cell(row, "st_met")
+    ratio = str(row.get("st_metratio", "")).strip()
+    if met is None:
+        notes.append(f"the archive has no stellar metallicity for {name}; "
+                     "field left unchanged.")
+    elif ratio != "[Fe/H]":
+        notes.append(f"the archive metallicity basis is "
+                     f"{ratio or 'unstated'}, not [Fe/H]; field left "
+                     "unchanged rather than entered on a different basis.")
+    else:
+        _take("feh", met, "stellar metallicity (dex)")
+
+    # gravity, derived from the archive best mass + radius in widget units;
+    # a nominal COMPOSITE planning value (PSCompPars can adopt mass and
+    # radius from different publications), never derived from a limit
     mass = _cell(row, "pl_bmassj")
     radj = _cell(row, "pl_radj")
     if mass is None or radj is None or radj <= 0:
         notes.append(f"the archive has no mass and radius pair for {name}; "
                      "surface gravity left unchanged.")
+    elif _is_limit(row, "pl_bmassjlim") or _is_limit(row, "pl_radjlim"):
+        notes.append(f"the archive mass or radius for {name} is a one-sided "
+                     "limit; surface gravity was not derived from it.")
     else:
         g_ms2 = (planets.G_CGS * mass * planets.M_JUP_G
                  / (radj * planets.R_JUP_CM) ** 2) / 100.0
         _take("g", g_ms2, "surface gravity (m s^-2, from archive mass+radius)")
-        prov = str(row.get("pl_bmassprov", "")).strip()
-        if "g" in values and prov and prov.lower() != "mass":
-            notes.append(f"gravity uses the archive best mass, provenance "
-                         f"{prov!r} (not a directly measured true mass).")
-
-    if "feh" in values:
-        ratio = str(row.get("st_metratio", "")).strip()
-        if ratio and ratio != "[Fe/H]":
-            notes.append(f"archive metallicity is {ratio}, entered as [Fe/H] "
-                         "(PHOENIX-node selector only; sub-percent effect).")
+        if "g" in values:
+            prov = str(row.get("pl_bmassprov", "")).strip()
+            extra = (f"; mass provenance {prov!r}, not a directly measured "
+                     "true mass" if prov and prov.lower() != "mass" else "")
+            notes.append("gravity is a nominal composite planning value "
+                         "derived from the archive best mass and radius, "
+                         f"which may come from different publications{extra}.")
 
     if "teff" in values:
         sflux = planets.nearest_sflux(values["teff"])
@@ -200,9 +249,10 @@ def custom_fill(row: dict) -> tuple[dict, list[str]]:
         spectype = str(row.get("st_spectype", "")).strip()
         stype = f"; archive spectral type {spectype}" if spectype else ""
         notes.append(
-            f"UV spectrum set to {planets.SFLUX_CHOICES[sflux]}, the nearest "
-            f"shipped spectral type for Teff {values['teff']:.0f} K{stype}. "
-            "The archive carries no UV spectra; override freely.")
+            f"UV spectrum set to {planets.SFLUX_CHOICES[sflux]}, the "
+            f"nearest-Teff shipped UV template for Teff "
+            f"{values['teff']:.0f} K{stype}. The archive carries no UV "
+            "spectra; override freely.")
     else:
         notes.append("stellar Teff was not filled, so the UV spectrum menu "
                      "was left unchanged.")
@@ -223,6 +273,7 @@ def refresh_snapshot(dest: Path | None = None, url: str = TAP_SYNC_URL) -> tuple
     import urllib.request
 
     dest = Path(dest) if dest else SNAPSHOT_PATH
+    dest.parent.mkdir(parents=True, exist_ok=True)
     q = urllib.parse.urlencode({"query": SNAPSHOT_ADQL, "format": "csv"})
     req = urllib.request.Request(f"{url}?{q}",
                                  headers={"User-Agent":

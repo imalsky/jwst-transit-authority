@@ -238,12 +238,29 @@ PANDEXO_UNBOUNDED_NGROUP = 65535
 # (APT warns at 1); MIRI FASTR1 permits 2 groups with 5+ recommended for
 # calibration accuracy.
 # ngroup_warn_below is a DISCLOSURE threshold, not a bound: a selected ramp
-# below it still ranks, with a "below the STScI-recommended minimum" warning
-# from detect (1-group NIR ramps are new since Cycle 4 and lightly tested;
-# MIRI ramps below 5 groups calibrate significantly worse). History: through
-# 0.24.0 the tool floored NIR at 2 / MIRI at 5 and reported bright targets
-# "saturated at the shortest ramp" where PandExo passed at 1 group (closed
-# 2026-08-09; see docs/decision_records.md).
+# below it still ranks, with an instrument-specific warning from detect
+# (reasons in NGROUP_WARN_REASON; thresholds verified on jwst-docs
+# 2026-08-09: NIRSpec/NIRISS warn at 1 group; NIRCam TSO guidance says avoid
+# data saturating in fewer than 4 groups, to limit reliance on the linearity
+# correction; MIRI guidance calls 2-5 group ramps very difficult to
+# calibrate accurately, 5+ recommended). History: through 0.24.0 the tool
+# floored NIR at 2 / MIRI at 5 and reported bright targets "saturated at the
+# shortest ramp" where PandExo passed at 1 group (closed 2026-08-09; see
+# docs/decision_records.md).
+# Instrument-specific reason a short ramp is cautioned (composed into the
+# detect warning). Sources: jwst-docs, verified 2026-08-09 -- NIRSpec
+# Detector Recommended Strategies; NIRISS SOSS Recommended Strategies;
+# NIRCam TSO Recommended Strategies; MIRI TSO/LRS Recommended Strategies.
+NGROUP_WARN_REASON = {
+    "nirspec": ("1-group NRSRAPID ramps are permitted for very bright "
+                "targets but are new since Cycle 4 and lightly tested"),
+    "niriss": ("1-group NISRAPID ramps carry an APT calibration warning"),
+    "nircam": ("STScI advises avoiding data that saturate in fewer than 4 "
+               "groups, to limit reliance on the linearity correction"),
+    "miri": ("STScI reports 2-5 group MIRI ramps are very difficult to "
+             "calibrate accurately; 5+ groups recommended"),
+}
+
 MODES = {
     "nirspec_prism": dict(
         label="NIRSpec PRISM",
@@ -302,7 +319,7 @@ MODES = {
         background="ecliptic", background_level="medium",
         wl_min=2.45, wl_max=3.95,
         floor_ppm_suggested=25.0, noise_infl=1.0, ngroup_min=1,
-        ngroup_warn_below=2, ngroup_max=100,
+        ngroup_warn_below=4, ngroup_max=100,
     ),
     "nircam_f444w": dict(
         label="NIRCam F444W",
@@ -313,7 +330,7 @@ MODES = {
         background="ecliptic", background_level="medium",
         wl_min=3.9, wl_max=4.95,
         floor_ppm_suggested=25.0, noise_infl=1.0, ngroup_min=1,
-        ngroup_warn_below=2, ngroup_max=100,
+        ngroup_warn_below=4, ngroup_max=100,
     ),
     "miri_lrs": dict(
         label="MIRI LRS (slitless)",
@@ -324,7 +341,7 @@ MODES = {
         background="ecliptic", background_level="medium",
         wl_min=5.0, wl_max=12.0,
         floor_ppm_suggested=40.0, noise_infl=1.0, ngroup_min=2,
-        ngroup_warn_below=5, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
+        ngroup_warn_below=6, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
 }
 

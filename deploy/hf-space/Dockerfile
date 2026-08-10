@@ -19,11 +19,10 @@ RUN conda create -y -n app python=3.12 \
     && conda clean -afy
 
 # Clone name VULCAN-JAX is load-bearing for the engine's path contract.
-# BUILD_INFO records the exact SHAs baked into this image.
 # RESTART NONCE: 2 (2026-08-04). Any commit to the Space repo re-runs the
 # platform init steps, which is the only restart path an `hf auth login`
 # token has -- the /restart and hardware endpoints answer 401. Bump this
-# comment (leaving SRC_STAMP alone) to retry a transient platform failure:
+# comment (leaving the pins alone) to retry a transient platform failure:
 # comments do NOT bust the Docker cache, so every layer hits and the
 # container simply starts again. Used once for an `hf-mount` failure
 # ("Initialization step 'hf-mount' failed with exit code: 0", empty reason,
@@ -31,17 +30,33 @@ RUN conda create -y -n app python=3.12 \
 # verified intact -- if a mount source is ever genuinely missing, fix the
 # volume instead, since a restart cannot help.
 #
-# The SRC_STAMP echo busts the Docker layer cache so a rebuild re-clones:
-# bump it to the new jwst-tool commit SHA on EVERY code update (the API
-# factory-reboot endpoint refuses OAuth tokens, so cache-busting happens
-# here instead; a comment would be stripped by the parser and cache-hit).
-RUN echo "SRC_STAMP a6f870a" \
-    && git clone --depth 1 https://github.com/imalsky/jax-vulcan.git /srv/vulcan/VULCAN-JAX \
-    && git clone --depth 1 https://github.com/imalsky/vulcan-forward.git /srv/vulcan/vulcan-forward \
-    && git clone --depth 1 https://github.com/imalsky/vulcan-jwst-tool.git /srv/vulcan/vulcan-jwst-tool \
-    && for r in VULCAN-JAX vulcan-forward vulcan-jwst-tool; do \
-         echo "$r $(git -C /srv/vulcan/$r rev-parse HEAD)" >> /srv/vulcan/BUILD_INFO; done \
-    && cat /srv/vulcan/BUILD_INFO
+# Every deployed repository is pinned to an EXACT commit; update the three
+# *_SHA args on every release (jwst-tool = the validated content commit,
+# siblings = the heads CI validated against). The pre-0.25.1 SRC_STAMP echo
+# only busted the Docker cache and then cloned whatever each default branch
+# pointed to at build time -- BUILD_INFO recorded the drift instead of
+# preventing it (2026-08-09 review). Changing an ARG default busts the
+# cache of the layers that use it, so the pins are also the cache-bust.
+# The build FAILS on a pin/rev-parse mismatch; BUILD_INFO records the
+# enforced pins.
+ARG VULCAN_JAX_SHA=c847198c7c2fca10f4274fbb1eb8faf8d9831c3e
+ARG VULCAN_FORWARD_SHA=af304a1d5f6ec049a84ac11901cde7aaa7b74c5a
+ARG JWST_TOOL_SHA=7e48182703a76c4c43420a4708ca095572749c6e
+RUN set -e; \
+    for spec in \
+      "VULCAN-JAX https://github.com/imalsky/jax-vulcan.git ${VULCAN_JAX_SHA}" \
+      "vulcan-forward https://github.com/imalsky/vulcan-forward.git ${VULCAN_FORWARD_SHA}" \
+      "vulcan-jwst-tool https://github.com/imalsky/vulcan-jwst-tool.git ${JWST_TOOL_SHA}"; do \
+      set -- $spec; \
+      git init -q "/srv/vulcan/$1"; \
+      git -C "/srv/vulcan/$1" remote add origin "$2"; \
+      git -C "/srv/vulcan/$1" fetch -q --depth 1 origin "$3"; \
+      git -C "/srv/vulcan/$1" checkout -q --detach FETCH_HEAD; \
+      test "$(git -C "/srv/vulcan/$1" rev-parse HEAD)" = "$3" || \
+        { echo "PIN MISMATCH for $1: wanted $3, got $(git -C /srv/vulcan/$1 rev-parse HEAD)"; exit 1; }; \
+      echo "$1 $(git -C "/srv/vulcan/$1" rev-parse HEAD)" >> /srv/vulcan/BUILD_INFO; \
+    done; \
+    cat /srv/vulcan/BUILD_INFO
 
 # Pins live in the jwst-tool repo (deploy/) so the Space shim never drifts
 # from the validated versions. The app env installs the FULL LOCK with

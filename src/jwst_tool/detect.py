@@ -470,13 +470,14 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         warnings[_lsf_skip_note] = True
     # Disclosure, not a bound: since 0.25.0 the ramp search reaches pandeia's
     # permitted minimum (1 group NIR / 2 MIRI), so a very short selected ramp
-    # ranks normally but is flagged against the STScI-recommended minimum
-    # (instruments.MODES[...]["ngroup_warn_below"]; sources in instruments.py).
+    # ranks normally but is flagged against the mode's STScI-recommended ramp
+    # with the instrument's own reason (thresholds and sources in
+    # instruments.py: NGROUP_WARN_REASON + the ngroup_warn_below comment).
     if int(mode_result["ngroup"]) < int(m["ngroup_warn_below"]):
-        warnings[f"ramp uses {int(mode_result['ngroup'])} groups per "
-                 "integration, below the STScI-recommended minimum of "
-                 f"{int(m['ngroup_warn_below'])} for this mode (short ramps "
-                 "have reduced calibration accuracy); verify in APT"] = True
+        _reason = ins.NGROUP_WARN_REASON[m["instrument"]]
+        warnings[f"ramp uses {int(mode_result['ngroup'])} group(s) per "
+                 "integration, below this mode's STScI-recommended ramp "
+                 f"({_reason}); verify in APT"] = True
 
     keep = op["keep"]
     return dict(

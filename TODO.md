@@ -9,13 +9,18 @@ lives in `docs/decision_records.md`; scope and conventions live in
 
 ## Correctness-affecting: fix next, in this order
 
-1. **CLOSED 2026-08-09 (worker v8, 0.25.0): ngroup_min ramp search.**
-   Floors now equal pandeia 2026.7 per-detector `mingroups` (NIR 1, MIRI 2
-   -- the field PandExo reads), with a below-recommended-ramp warning
-   (`ngroup_warn_below`: 2 NIR / 5 MIRI, jwst-docs-verified). Parity re-run
-   confirms the w39_like PRISM false negative is gone (OK at 1 group, 0.42
-   full well, matching PandExo). Record: docs/decision_records.md,
-   "Decision 2026-08-09: ramp floors".
+1. **CLOSED 2026-08-09 (worker v9, 0.25.1): ngroup_min ramp search.**
+   Floors equal pandeia 2026.7 per-detector `mingroups` (NIR 1, MIRI 2 --
+   the field PandExo reads), with instrument-specific short-ramp warnings
+   (`ngroup_warn_below`: 2 NIRSpec/NIRISS, 4 NIRCam, 6 MIRI,
+   jwst-docs-verified). The first cut (0.25.0/worker v8) fixed the floors
+   but exposed an optimizer defect -- min-of-predictions with a down-only
+   verifier under-selected (1-group SOSS where 2 was measured safe, 7x
+   sigma) -- caught by external review the same day and fixed in v9: the
+   search now returns the largest MEASURED-safe count and the parity gate
+   requires exact group agreement on short ramps plus a sigma anomaly
+   band. Records: docs/decision_records.md, "ramp floors" + "2026-08-09
+   external review" sections.
 
 2. **NIRCam data-volume estimate.** A mode can rank "Best" while its full
    visit implies ~28 GB of data excess (seen as PandExo warnings in the
@@ -90,6 +95,11 @@ lives in `docs/decision_records.md`; scope and conventions live in
   (0.25.0 ships snapshot-only by decision; `archive.py` is shaped for a
   `lookup_live` provider returning the same row schema, failures shown,
   never a silent fallback between sources).
+- Archive-fill depth (2026-08-09 review): per-field references and
+  uncertainties in the snapshot, field-level provenance tracking in the
+  GUI (which widgets still hold archive values vs edits), and uncertainty
+  propagation for the derived surface gravity. The limit-flag refusals and
+  composite-value disclosure shipped in 0.25.1; these are the next layer.
 
 ## Accepted limitations (deliberate; reasoning in docs/decision_records.md)
 

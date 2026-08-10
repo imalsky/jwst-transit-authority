@@ -477,6 +477,11 @@ def _apply_pending_config() -> None:
         return
     st.session_state.pop("restored_tp_path", None)
     st.session_state.pop("restored_floor_table", None)
+    # A loaded configuration supersedes any queued archive fill AND its
+    # banner: the fill notes describe values the restore may have just
+    # replaced, so leaving them would misattribute the form to the archive.
+    st.session_state.pop("_archive_fill_pending", None)
+    st.session_state.pop("_archive_fill_notes", None)
     for k, v in state.items():
         st.session_state[k] = v
     st.session_state["_cfg_load_notes"] = notes
@@ -503,11 +508,22 @@ def _apply_pending_archive_fill() -> None:
     except (KeyError, archive.SnapshotError) as e:
         st.session_state["_archive_fill_notes"] = [("error", str(e))]
         return
+    # The archive duration is the PRIMARY-TRANSIT duration; in emission mode
+    # the event is the secondary eclipse, whose duration can differ (eccentric
+    # systems), so the field is left for the user to set.
+    if (st.session_state.get(K("scimode")) == "emission"
+            and "t14" in values):
+        values.pop("t14")
+        notes = list(notes) + [
+            "the archive transit duration was not applied: the observation "
+            "type is emission, and a secondary-eclipse duration can differ "
+            "from the transit duration; set the event duration yourself."]
     for suffix, v in values.items():
         st.session_state[K(f"custom_{suffix}")] = v
     st.session_state["_archive_fill_notes"] = (
-        [("success", f"Custom planet filled from the archive snapshot row "
-                     f"for {name}. Review every field; all stay editable.")]
+        [("success", f"Initial values filled from the archive snapshot row "
+                     f"for {name}. Later edits and loaded configurations "
+                     "are not from the archive; review every field.")]
         + [("warning", n) for n in notes])
 
 
@@ -641,7 +657,7 @@ with st.sidebar:
             # path is the one place the nearest-type default is APPLIED).
             _near = planets.nearest_sflux(teff)
             st.caption(
-                f"Nearest shipped UV spectrum for Teff {teff:.0f} K: "
+                f"Nearest-Teff shipped UV template for Teff {teff:.0f} K: "
                 f"{planets.SFLUX_CHOICES[_near]}."
                 + ("" if _near == sflux
                    else " A different spectrum is currently selected."))

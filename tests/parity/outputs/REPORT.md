@@ -2,17 +2,17 @@
 
 Generated 2026-08-09 by `run_parity.py` + `make_report.py` in this directory.
 
-**GATE: PASS** (re-validated by `make_report.py`, not read from the artifact). Worker v8, Pandeia 2026.7 on both sides, the full 3-star x 7-mode matrix present, every declared threshold met.
+**GATE: PASS** (re-validated by `make_report.py`, not read from the artifact). Worker v9, Pandeia 2026.7 on both sides, the full 3-star x 7-mode matrix present, every declared threshold met.
 
 ## Provenance
 
 | star | side | engine | refdata | PSFs | worker / PandExo |
 |---|---|---|---|---|---|
-| w39_like | this tool | 2026.7 | 2026.7 | 2026.7 | worker v8 |
+| w39_like | this tool | 2026.7 | 2026.7 | 2026.7 | worker v9 |
 | w39_like | PandExo | 2026.7 | 2026.7 | 2026.7 | 2026.7 @ 34e42d81f782 |
-| bright_hot | this tool | 2026.7 | 2026.7 | 2026.7 | worker v8 |
+| bright_hot | this tool | 2026.7 | 2026.7 | 2026.7 | worker v9 |
 | bright_hot | PandExo | 2026.7 | 2026.7 | 2026.7 | 2026.7 @ 34e42d81f782 |
-| faint_k | this tool | 2026.7 | 2026.7 | 2026.7 | worker v8 |
+| faint_k | this tool | 2026.7 | 2026.7 | 2026.7 | worker v9 |
 | faint_k | PandExo | 2026.7 | 2026.7 | 2026.7 | 2026.7 @ 34e42d81f782 |
 
 Both sides run on the SAME Pandeia backend -- the exact engine, reference-data, and PSF releases are in the provenance table above, and the gate refuses the run if they disagree across the two sides. Every difference below is therefore an ESTIMATOR/policy difference, not an engine calibration difference. (This says nothing about whether that release is the SUPPORTED one; the gate banner does.) PandExo is used from master at the commit recorded above. Configuration: constant transit depth 0.01, transit duration 2.8036 h, equal out-of-transit baseline, saturation limit 80%, no noise floor, native (R=None) grids.
@@ -32,7 +32,7 @@ The two are independently IMPLEMENTED estimators calling the same Pandeia engine
 
 - **Submitted configuration (subarray, readout, filter, disperser):** identical on every row -- by construction, since the harness pins both sides to the registry; the gate fails on any drift in these four recorded fields. The extraction strategy (apertures/annuli) and the ecliptic/medium background are also configured to match PandExo's TSO conventions, but those fields are NOT captured in the artifact, so no measured claim is made for them.
 - **Extracted wavelength grids:** on every unsaturated row, 100.0% of PandExo's pixels find an exact-wavelength partner on our side at relative tolerance 1e-09 (gate floor: 99%; per-pixel deltas beyond that tolerance are not stored).
-- **Groups:** each tool independently optimizes the ramp to the same 80% saturation target; the freedom left is rounding to an integer group count. Measured: within 1 group(s) on the moderate/bright stars, within 5 groups on the faint Ks=13 star (the gate allows 5 groups OR 1% there, whichever is looser -- rounding on a ~500-1000 group ramp is ~1% by itself). Per-group integration time then inherits the group choice; the largest total-t_int gap is 33.2% (bright_hot/niriss_soss, where a single group on a ~1-group ramp carries the difference).
+- **Groups:** each tool independently optimizes the ramp to the same 80% saturation target; the freedom left is rounding to an integer group count. Measured: within 1 group(s) on the moderate/bright stars, within 5 groups on the faint Ks=13 star (the gate allows 5 groups OR 1% there, whichever is looser -- rounding on a ~500-1000 group ramp is ~1% by itself). On SHORT ramps (either side at <= 3 groups) the gate requires EXACT agreement: one group there is a large slice of the integration and of the noise, not rounding. Per-group integration time then inherits the group choice (gated at 15% relative); the largest total-t_int gap is 4.5% (w39_like/nirspec_prism, on a ~1-group ramp). Matched sigma-ratio medians additionally sit inside the [0.8, 2.0] anomaly band (an outlier ceiling, not a parity-to-unity claim).
 - **Extracted flux:** per-mode median ratios span 0.9866-1.0297 (gate: median within 3% of unity). The per-pixel scatter around each median comes from the two tools' independent extraction of the same 2D calculation and is disclosed in the tables (5th/95th percentiles); it is not gated. The narrow downward spikes in this tool's flux are STELLAR ABSORPTION LINES in Pandeia's PHOENIX spectrum (hydrogen recombination -- e.g. Brackett-α 4.052 μm, Pfund-δ 3.297 μm -- plus molecular bands on cool stars); PandExo's separately-loaded stellar spectrum smooths them. They are physically real, cancel in the in/out transit-depth ratio, and wash out in binning.
 - **Saturation:** compared at the configuration level only -- both tools search down to the same pandeia per-detector minimum ramp (worker v8: NIR 1 group, MIRI 2), so they flag the same saturating star/mode combinations. Rows above the saturation limit are reported in the tables but are never validation rows. Per-pixel saturation masks are NOT exported or compared.
 
@@ -42,7 +42,7 @@ Columns: sigma ratio = (this tool's per-pixel transit-depth sigma) / (PandExo's)
 
 ## Star `w39_like` (Teff 5400 K, logg 4.45, [Fe/H] 0.0, Ks 10.663)
 
-Backend: engine 2026.7 + pandeia_data-2026.7-jwst (worker v8); PandExo 2026.7 on engine 2026.7.
+Backend: engine 2026.7 + pandeia_data-2026.7-jwst (worker v9); PandExo 2026.7 on engine 2026.7.
 
 | mode | status | ngroup ours/PX | t_int s ours/PX | n_int ours/PX(in) | flux ratio | sigma ratio (matched) | sigma ratio (policy) |
 |---|---|---|---|---|---|---|---|
@@ -82,14 +82,14 @@ PandExo warnings for miri_lrs: {'% full well high?': 'All good (80% < 80%)'}
 
 ## Star `bright_hot` (Teff 6250 K, logg 4.3, [Fe/H] 0.0, Ks 8.5)
 
-Backend: engine 2026.7 + pandeia_data-2026.7-jwst (worker v8); PandExo 2026.7 on engine 2026.7.
+Backend: engine 2026.7 + pandeia_data-2026.7-jwst (worker v9); PandExo 2026.7 on engine 2026.7.
 
 | mode | status | ngroup ours/PX | t_int s ours/PX | n_int ours/PX(in) | flux ratio | sigma ratio (matched) | sigma ratio (policy) |
 |---|---|---|---|---|---|---|---|
 | nirspec_prism | SATURATED above limit (measured 3.56x full well; reported, not a validation row) | 1/1 | -- | -- | -- | -- | -- |
-| nirspec_g395h | OK | 16/17 | 15.354/16.236 | 657/622 | 1.0013 [0.9803, 1.0254] (n=3330) | 1.1098 [1.0964, 1.1221] (n=3330) | 1.0799 [1.0668, 1.0918] (n=3330) |
+| nirspec_g395h | OK | 17/17 | 16.256/16.236 | 620/622 | 1.0013 [0.9803, 1.0254] (n=3330) | 1.0752 [1.0610, 1.0861] (n=3330) | 1.0769 [1.0628, 1.0878] (n=3330) |
 | nirspec_g235h | OK | 7/7 | 7.236/7.216 | 1394/1399 | 1.0037 [0.9777, 1.0602] (n=3424) | 1.0566 [1.0443, 1.0800] (n=3424) | 1.0585 [1.0462, 1.0819] (n=3424) |
-| niriss_soss | OK | 1/2 | 11.008/16.482 | 916/613 | 1.0147 [0.9881, 1.3051] (n=2040) | 7.0800 [3.2762, 14.4750] (n=2040) | 5.7918 [2.6801, 11.8414] (n=2040) |
+| niriss_soss | OK | 2/2 | 16.502/16.482 | 611/613 | 1.0147 [0.9881, 1.3051] (n=2040) | 1.0643 [1.0278, 1.1159] (n=2040) | 1.0660 [1.0295, 1.1177] (n=2040) |
 | nircam_f322w2 | OK | 67/67 | 23.167/23.161 | 435/436 | 1.0008 [0.9636, 1.0161] (n=1812) | 1.0945 [0.9698, 1.1033] (n=1812) | 1.0958 [0.9709, 1.1046] (n=1812) |
 | nircam_f444w | OK | 100/100 | 34.407/34.402 | 293/294 | 0.9980 [0.9652, 1.0243] (n=1267) | 1.0981 [1.0092, 1.1095] (n=1267) | 1.1000 [1.0109, 1.1114] (n=1267) |
 | miri_lrs | OK | 39/39 | 6.362/6.362 | 1586/1587 | 1.0011 [1.0003, 1.0018] (n=372) | 1.3484 [1.3411, 1.6161] (n=372) | 1.3488 [1.3415, 1.6166] (n=372) |
@@ -98,9 +98,9 @@ Noise-model attribution (median per-integration variance over pure photon counts
 
 | mode | this tool (pandeia extracted noise) | PandExo (fml) |
 |---|---|---|
-| nirspec_g395h | 1.234 | 1.015 |
+| nirspec_g395h | 1.158 | 1.015 |
 | nirspec_g235h | 1.129 | 1.017 |
-| niriss_soss | 53.772 | 1.075 |
+| niriss_soss | 1.309 | 1.075 |
 | nircam_f322w2 | 1.192 | 1.007 |
 | nircam_f444w | 1.206 | 1.015 |
 | miri_lrs | 5.924 | 3.293 |
@@ -121,7 +121,7 @@ PandExo warnings for miri_lrs: {'% full well high?': 'All good (78% < 80%)'}
 
 ## Star `faint_k` (Teff 4500 K, logg 4.6, [Fe/H] 0.0, Ks 13.0)
 
-Backend: engine 2026.7 + pandeia_data-2026.7-jwst (worker v8); PandExo 2026.7 on engine 2026.7.
+Backend: engine 2026.7 + pandeia_data-2026.7-jwst (worker v9); PandExo 2026.7 on engine 2026.7.
 
 | mode | status | ngroup ours/PX | t_int s ours/PX | n_int ours/PX(in) | flux ratio | sigma ratio (matched) | sigma ratio (policy) |
 |---|---|---|---|---|---|---|---|
