@@ -1,19 +1,26 @@
 name: full-stack-smoke
 
 # Cross-repository integration smoke test. The fast `tests` workflow is
-# numpy-only and installs NO vulcan-retrieval / VULCAN-JAX stack, so it cannot
-# catch a broken jax-vulcan <-> vulcan-retrieval integration (e.g. a released
-# vulcan-jax that is missing the live-T(P) condensation builder). This job
-# installs the WHOLE stack from the current HEADs of all three sibling repos and
-# exercises the condensation path end-to-end:
+# numpy-only and installs the two sibling packages at the PINNED commits from
+# deploy/pins.env, so it cannot catch drift at the siblings' HEADs. This job
+# is the drift canary: it installs the WHOLE stack from the current HEADs of
+# all FOUR sibling repos (vulcan-forward was split out of vulcan-retrieval on
+# 2026-07-29; this workflow missed the split and every chem test skipped with
+# "No module named 'vulcan_forward'" from 2026-08-03 until the 2026-08-10
+# fix) and exercises the condensation path end-to-end:
 #
 #   fresh env
 #   -> install jax-vulcan HEAD (VULCAN-JAX)
+#   -> install vulcan-forward HEAD (the shared chemistry+RT engine)
 #   -> install vulcan-retrieval HEAD
 #   -> install vulcan-jwst-tool HEAD
 #   -> assert vulcan_jax.conden exposes make_conden_spec + build_conden_profile
 #   -> build + solve a small live-T(P) S8 condensation model (isothermal AND
 #      Guillot) and assert finite output + nonzero S8 condensate
+#
+# HEAD-tracking here is deliberate and NOT covered by the pins.env manifest
+# rule: the pinned unit CI validates what deploys, this weekly job detects
+# cross-repo breaks before a release pin ever advances onto them.
 #
 # It is deliberately OUT of the fast Python-version matrix: it is slow
 # (SNCHO-network compile + two condensing solves) and runs on a schedule or on
@@ -44,6 +51,12 @@ jobs:
           repository: imalsky/jax-vulcan
           path: VULCAN-JAX
 
+      - name: Checkout vulcan-forward HEAD
+        uses: actions/checkout@v4
+        with:
+          repository: imalsky/vulcan-forward
+          path: vulcan-forward
+
       - name: Checkout vulcan-retrieval HEAD
         uses: actions/checkout@v4
         with:
@@ -59,6 +72,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install "jax>=0.6.2" "numpy>=1.26" "scipy>=1.12" "exojax==2.2.3" pytest
           pip install --no-deps -e ./VULCAN-JAX
+          pip install --no-deps -e ./vulcan-forward
           pip install --no-deps -e ./vulcan-retrieval
           pip install --no-deps -e ./vulcan-jwst-tool
 
