@@ -217,7 +217,7 @@ tests/parity_picaso/   PICASO-native RT vs ExoJAX cross-model check, offline
 
 | File | Contents |
 |---|---|
-| [`docs/physics_and_conventions.md`](docs/physics_and_conventions.md) | "How this tool works, end to end" (the guided tour, with the noise model described carefully), composition scaling, T-P and Kzz options, default structures, clouds, boundary conditions, backend policy, PICASO engine scope and limits, config deviations vs upstream VULCAN |
+| [`docs/physics_and_conventions.md`](docs/physics_and_conventions.md) | Composition scaling, T-P and Kzz options, default structures, clouds, boundary conditions, backend policy, PICASO engine scope and limits, config deviations vs upstream VULCAN |
 | [`docs/decision_records.md`](docs/decision_records.md) | Disposition of every audit and review finding (2026-07-21 audit, 2026-08-05 review) plus the draft upstream PICASO report |
 | [`TODO.md`](TODO.md) | The live list of every known gap, shortcoming, deferred feature, and accepted limitation |
 
