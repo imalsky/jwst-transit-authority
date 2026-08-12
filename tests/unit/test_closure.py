@@ -49,30 +49,6 @@ def test_poisson_count_closure():
     assert np.allclose(est.var(axis=0), nz["var_phot"], rtol=0.15)
 
 
-def test_matched_filter_amplitude_variance_closure():
-    """The profiled amplitude estimate on pure-noise draws must have variance
-    1/(u^T C^-1 u); the diagonal assumption must fail on correlated noise."""
-    rng = np.random.default_rng(13)
-    n = 60
-    wl = np.geomspace(3.0, 5.0, n)
-    var_phot = np.full(n, 4e-11)
-    floor = np.full(n, 1.5e-5)
-    C = noise_mod.build_cov(wl, var_phot, floor, "conservative")
-    L = np.linalg.cholesky(C)
-    u = np.exp(-0.5 * ((wl - 4.0) / 0.15) ** 2)     # smooth-ish template
-
-    ci_u = np.linalg.solve(C, u)
-    info = float(u @ ci_u)                          # u^T C^-1 u
-    n_mc = 6000
-    y = rng.standard_normal((n_mc, n)) @ L.T        # y ~ N(0, C)
-    a_hat = (y @ ci_u) / info
-    assert np.var(a_hat) == pytest.approx(1.0 / info, rel=0.1)
-    # the DIAGONAL metric under-quotes the amplitude variance on this noise:
-    w = 1.0 / np.maximum(var_phot, floor ** 2)
-    a_diag = (y @ (w * u)) / float(u @ (w * u))
-    assert np.var(a_diag) > 2.0 * (1.0 / float(u @ (w * u)))
-
-
 @pytest.mark.skipif(os.environ.get("JWST_TOOL_RUN_SLOW") != "1",
                     reason="slow: 3 full VULCAN-JAX+ExoJAX forward runs "
                            "(~5-10 min, JAX required); set JWST_TOOL_RUN_SLOW=1")

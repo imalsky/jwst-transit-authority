@@ -247,6 +247,15 @@ def test_fisher_zero_response_parameter_reads_inf():
 
 # --- nuisance-row rescaling invariance -----------------------------------------
 
+def _slope_row(wl: np.ndarray) -> np.ndarray:
+    """A centered, unit-RMS linear-in-ln(lambda) row: a second nuisance
+    direction beyond the segment offsets, so the remix tests exercise a
+    multi-row span."""
+    r = np.log(np.asarray(wl, float))
+    r = r - r.mean()
+    return r / np.sqrt(np.mean(r ** 2))
+
+
 def test_detection_score_invariant_under_nuisance_row_rescaling():
     """The profiled score depends only on the SPAN of the nuisance rows; the
     raw-eigenvalue threshold silently dropped a valid down-scaled row."""
@@ -256,19 +265,13 @@ def test_detection_score_invariant_under_nuisance_row_rescaling():
     sigma = np.full(n, 1e-4)
     signal = 5e-4 * np.exp(-0.5 * ((wl - 4.0) / 0.1) ** 2)
     seg = (wl >= 4.0).astype(int)
-    rows = detect._segment_rows(seg) + detect._slope_rows(seg, wl)
+    rows = detect._segment_rows(seg) + [_slope_row(wl)]
     base = detect.detection_significance(signal, sigma, nuisance=rows)
-    C = noise_mod.build_cov(wl, sigma ** 2 * 0.25, sigma, "conservative")
-    base_cov = detect.detection_significance(signal, sigma, nuisance=rows,
-                                             cov=C)
     for trial in range(25):
         f = 10.0 ** rng.uniform(-12, 12, len(rows))
         scaled = [r * fi for r, fi in zip(rows, f)]
         got = detect.detection_significance(signal, sigma, nuisance=scaled)
         assert got == pytest.approx(base, rel=1e-9)
-        got_cov = detect.detection_significance(signal, sigma,
-                                                nuisance=scaled, cov=C)
-        assert got_cov == pytest.approx(base_cov, rel=1e-9)
 
 
 def test_detection_score_invariant_under_nuisance_basis_rotation():
@@ -280,11 +283,9 @@ def test_detection_score_invariant_under_nuisance_basis_rotation():
     sigma = np.full(n, 1e-4)
     signal = 5e-4 * np.exp(-0.5 * ((wl - 4.0) / 0.1) ** 2)
     seg = (wl >= 4.0).astype(int)
-    rows = detect._segment_rows(seg) + detect._slope_rows(seg, wl)
+    rows = detect._segment_rows(seg) + [_slope_row(wl)]
     R = np.stack(rows)
     base = detect.detection_significance(signal, sigma, nuisance=rows)
-    C = noise_mod.build_cov(wl, sigma ** 2 * 0.25, sigma, "conservative")
-    base_cov = detect.detection_significance(signal, sigma, nuisance=rows, cov=C)
     trials = 0
     while trials < 20:
         M = rng.standard_normal((len(rows), len(rows)))
@@ -294,9 +295,6 @@ def test_detection_score_invariant_under_nuisance_basis_rotation():
         mixed = list(M @ R)                          # arbitrary basis of the span
         assert detect.detection_significance(signal, sigma, nuisance=mixed) \
             == pytest.approx(base, rel=1e-7)
-        assert detect.detection_significance(signal, sigma, nuisance=mixed,
-                                             cov=C) == pytest.approx(base_cov,
-                                                                     rel=1e-7)
 
 
 def test_zero_nuisance_row_is_ignored():
@@ -309,9 +307,8 @@ def test_zero_nuisance_row_is_ignored():
     assert b == pytest.approx(a, rel=1e-12)
 
 
-# --- fail-fast on invalid public noise/covariance inputs ----------------------
-# noise_inflation is squared, so -1 silently acted as +1; build_cov accepted
-# negative variances and NaN/negative wavelengths.
+# --- fail-fast on invalid public noise inputs ---------------------------------
+# noise_inflation is squared, so -1 silently acted as +1.
 
 def _tiny_mode_result(n=50):
     return dict(wl=np.linspace(3.0, 4.0, n).tolist(),
@@ -346,27 +343,6 @@ def test_pixel_variance_rejects_bad_inputs():
                                        np.full(50, 1e3)).tolist()
     with pytest.raises(ValueError, match="noise_1int"):
         noise_mod.pixel_depth_variance(bad_noise, 3600.0, 3600.0, 1)
-
-
-def test_build_cov_rejects_bad_inputs():
-    wl = np.linspace(3.0, 4.0, 10)
-    var = np.full(10, 1e-9)
-    fl = np.full(10, 5e-5)
-    for kw, msg in ((dict(wl_center=np.where(np.arange(10) == 2, -1.0, wl)),
-                     "wavelengths"),
-                    (dict(var_phot=np.where(np.arange(10) == 2, -1e-9, var)),
-                     "var_phot"),
-                    (dict(var_phot=np.where(np.arange(10) == 2, np.nan, var)),
-                     "var_phot"),
-                    (dict(floor=np.where(np.arange(10) == 2, np.nan, fl)),
-                     "floor")):
-        args = dict(wl_center=wl, var_phot=var, floor=fl)
-        args.update(kw)
-        with pytest.raises(ValueError, match=msg):
-            noise_mod.build_cov(args["wl_center"], args["var_phot"],
-                                args["floor"], "moderate")
-    with pytest.raises(ValueError, match="1-D"):
-        noise_mod.build_cov(wl, var[:5], fl, "moderate")
 
 
 def test_make_bins_rejects_bad_inputs():

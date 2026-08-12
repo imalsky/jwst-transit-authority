@@ -9,6 +9,10 @@ config-vs-upstream-master deviation table (formerly
 `docs/jwst_tool_upstream_deviations.md`), appended as their own parts below.
 Decision records live in the one other doc, `docs/decision_records.md`.
 
+New readers: start with the last part, "How this tool works, end to end"
+(added 2026-08-11), which walks the whole pipeline and describes the
+noise model carefully.
+
 ## Composition scaling
 
 Any metallicity or C/O knob must pick a convention, because C/O and metallicity
@@ -73,19 +77,22 @@ assumed in Moses et al. (2016) and `Pfunc` as the one in Tsai (2020). `JM16` is
 `Kzz = max(K_deep, 1e5 (300 mbar/P)^0.5)`; `Pfunc` is
 `max(K_max, K_max (K_p_lev/P)^0.4)`.
 
-## Default structure is the analytic Guillot profile
+## Default structure is the verified measured table where one ships
 
-Every planet, under both engines, defaults to a Guillot (2010) `T(P)` with
-constant `Kzz` (2026-08-09 decision; before that WASP-39 b defaulted to its
-bundled measured table). The analytic profile is the differentiable choice: it
-carries T-P Fisher rows and works with the AD-default differentiation method,
-while a tabulated `T(P)` has no temperature parameter at all. Bundled measured
-tables stay **selectable** (`tp_mode="file"` resolves to that planet's own
-table, and its `Kzz` column then supplies the mixing profile too).
+A planet whose bundled measured `T(P)`/`Kzz` table is verified end to end
+defaults to that table under the VULCAN engine; every other planet, and the
+PICASO engine, defaults to a Guillot (2010) `T(P)` with constant `Kzz`
+(2026-08-11 decision, reversing the structure half of the 2026-08-09
+speed-first defaults: the default WASP-39 b run must reproduce the
+literature-validated SO2 state, and the table also converges faster). Today
+the verified set is exactly WASP-39 b. The trade-off runs the other way now:
+a tabulated `T(P)` has no temperature parameter, so default file-mode Fisher
+forecasts carry no temperature row and are conditional on the profile; switch
+to `tp_mode="guillot"` when you need one.
 
-| Planet | Bundled table (selectable) |
+| Planet | Bundled table |
 |---|---|
-| WASP-39 b | `atm_W39b_evening_TP_Kzz.txt` (Tsai et al. 2023 evening terminator), verified end to end |
+| WASP-39 b | `atm_W39b_evening_TP_Kzz.txt` (Tsai et al. 2023 evening terminator), verified end to end and the default |
 | HD 189733 b | `atm_HD189_Kzz.txt` — selectable but not verified: the solver does not certify a steady state on it at default settings, while the analytic profile converges in about 36 s |
 | HD 209458 b | Refused. It is a full thermosphere model reaching 2997 K inside the chemistry grid, above the 2980 K opacity ceiling, and it is never clipped |
 | WASP-107 b | None bundled |
@@ -94,18 +101,19 @@ Two facts are kept separate on purpose: whether a table **exists** for a planet,
 and whether a run on it has been **verified end to end**. Tables are per-planet
 and never substituted; selecting a planet without a usable one tells you why.
 
-**Stated trade-off: the analytic defaults are biased in a systematic
+**Stated trade-off: the analytic stand-in is biased in a systematic
 direction.** A constant `Kzz` cannot follow a profile that climbs orders of
 magnitude with altitude, and it is the photochemically active upper atmosphere
 that pays. Measured against the bundled tables over the chemistry grid at
-p < 1 mbar, the constant 1e9 cm²/s default runs 3.8-48x low for WASP-39 b
+p < 1 mbar, the constant 1e9 cm²/s stand-in runs 3.8-48x low for WASP-39 b
 (`atm_W39b_evening_TP_Kzz.txt`) and 10-17x low for HD 189733 b
 (`atm_HD189_Kzz.txt`), always suppressing photochemical products. The factor is
 pressure-cut dependent — deeper than ~10 mbar the table falls *below* 1e9 for
-WASP-39 b — so quote it with the cut. On WASP-39 b the Guillot default also ran
+WASP-39 b — so quote it with the cut. On WASP-39 b the Guillot profile also ran
 about 100 K hot through the SO2 formation zone when this was measured
 (2026-07-21); the published-detection agreement (G395H SO2 4.16 sigma) belongs
-to the **shipped table**, so select `tp_mode="file"` for W39b SO2 work.
+to the **shipped table**, which is why the table is the W39b default again.
+Never quote Guillot-mode W39b SO2 numbers against Alderson/Tsai 2023.
 
 ## Boundary conditions
 
@@ -492,7 +500,7 @@ reproduction or inspection before fixing):
   Space volumes) is cached for 5 minutes with a manual refresh button --
   it no longer runs on every Streamlit interaction.
 - **Public-instance protection**: a cross-process flock semaphore caps
-  concurrent heavy subprocesses (forward + ETC, adjoint) at 2 per
+  concurrent heavy subprocesses (forward + ETC) at 2 per
   instance; further launches are declined with a message instead of piling
   onto shared hardware. Slot files follow the same never-unlink lifecycle.
 - **Deployment reproducibility**: upload_data.sh stages picaso-reference
@@ -597,3 +605,195 @@ Documented separately: `VULCAN-JAX/docs/validation.md` (VULCAN-JAX
 parity and bug guide) and `jax_paper/paper/notes_gaps.md` (ranked gaps;
 headline: reservoir projection default-on in JAX vs none in master). Those
 apply to every consumer of VULCAN-JAX, not just this tool.
+
+# How this tool works, end to end
+
+Added 2026-08-11 (tool 0.28.0) as the orientation part of this doc: what
+happens between "pick a planet" and "here is your detection forecast",
+with the noise model described carefully. Statements here summarize the
+code; where a number is quoted, the source of record is named.
+
+## The one-paragraph version
+
+You choose a planet, an atmosphere assumption, and a set of JWST
+instrument modes. The tool computes the atmosphere's composition with a
+photochemical kinetics model (VULCAN-JAX), turns it into a transmission
+or emission spectrum (ExoJAX), and asks STScI's Pandeia exposure-time
+calculator what measurement uncertainty each instrument mode would
+achieve on your star. Model and noise are binned through one shared
+measurement operator, and the result is scored: a matched-template
+signal-to-noise for the target molecule, the number of transits needed
+to reach your target significance, and (optionally) Fisher-forecast
+uncertainties on atmospheric parameters.
+
+## Stage by stage
+
+1. **Inputs.** The four sidebar steps (target, atmosphere, science goal,
+   observation) fill one dictionary of canonical parameters. Everything
+   that changes the physics is canonical; every cache is keyed on it.
+2. **Chemistry.** VULCAN-JAX solves steady-state photochemical kinetics
+   through the shared `vulcan-forward` engine (or PICASO chemical
+   equilibrium, as an alternative engine with its own scope; see the
+   PICASO part above). A run must pass the convergence gate or it stops
+   with an error; spectra are cached in `output/model_cache`.
+3. **Radiative transfer.** ExoJAX computes the high-resolution spectrum
+   from the converged composition, with optional cloud decks. Emission
+   is absorption-only by scope.
+4. **Instrument noise.** Pandeia, run in its own conda environment
+   through a subprocess worker. Described in full below.
+5. **One measurement operator.** `binning.py` bins the model, the
+   removed-molecule model, every Jacobian row, and the noise through the
+   same count-space operator. For modes whose analysis bins approach the
+   native resolving power (PRISM, MIRI LRS, blue SOSS) the model is
+   first blurred to the instrument's R(lambda), weighted by the stellar
+   flux, because that is the average the instrument itself forms.
+6. **Scoring and forecasts.** `detect.py` computes the detection score
+   and transits-to-target; `fisher.py` computes parameter forecasts from
+   certified Jacobian rows (finite differences or forward-mode AD).
+
+## The noise model, carefully
+
+### What Pandeia computes, and how it is run
+
+The noise starts from a real exposure-time-calculator simulation, not an
+analytic formula. For each instrument mode, the worker
+(`pandeia_worker.py`) has Pandeia simulate the 2-D detector scene for
+your star (normalized to its 2MASS Ks magnitude against Pandeia's own
+Vega reference) and extract a 1-D spectrum with the same aperture
+strategy PandExo uses. The result, per native detector pixel, is the
+extracted stellar flux and its one-integration uncertainty. That
+uncertainty includes the full extracted-noise budget: photon noise plus
+correlated ramp/read noise, background, dark current, IPC, and
+quantum-yield excess.
+
+The worker runs in a separate conda environment holding a matched STScI
+release triple (engine 2026.7 + `pandeia_data-2026.7-jwst` +
+`pandeia_psfs-2026.7-jwst`); a mismatched triple is refused. The engine
+and reference-data identity is fingerprinted into every noise-cache key,
+so switching backends can never serve stale numbers.
+
+Two things the worker measures rather than assumes:
+
+- **The ramp (groups per integration).** Longer ramps collect more
+  photons per integration but risk saturation. The worker searches for
+  the largest group count that Pandeia MEASURES as safe against the
+  saturation limit (default 80% full well), and proves maximality by
+  also measuring that the next integer up is unsafe (or that the cap is
+  reached). Predictions only seed the search; "saturated" always means
+  measured, never predicted. Lower floors come from Pandeia's own
+  per-detector minimums (NIR modes 1 group, MIRI 2), with warnings when
+  a selected ramp is below the operationally recommended count.
+- **The true integration cycle time** (`t_cycle_s`): the exposure-time
+  difference between a 2-integration and a 1-integration calculation.
+  This captures between-integration reset frames (which a naive
+  single-integration scalar misses; on MIRI that error reached ~9% in
+  sigma at the minimum ramp).
+
+What Pandeia does NOT give you: a time-series systematics model. There
+are no 1/f residuals, visit-long trends, detrending covariance, or
+stellar spots/faculae in the simulated noise. The minimum noise floor
+(below) is the honest control for that missing physics.
+
+### From one integration to a transit-depth uncertainty
+
+The observable is the transit depth, d = 1 - F_in/F_out. Per native
+pixel:
+
+    var(depth) = (sigma_1int / flux)^2 * (1/n_in + 1/n_out) / n_transits
+
+where n_in and n_out are the whole integrations that fit into the
+in-transit window (the transit duration) and the out-of-transit baseline
+respectively, using the measured cycle time. Counts are floored to whole
+integrations; a window shorter than one cycle is refused, never rounded
+up to a pretend integration.
+
+Two deliberate approximations, both stated and both conservative:
+
+- **Box transit.** Ingress/egress shape and limb darkening are
+  neglected; the depth is treated as a step.
+- **Symmetric in/out.** The out-of-transit flux and noise stand in for
+  the in-transit values too. The overestimate grows with depth: about
+  3d/4 in relative variance for equal baselines (+0.76% in sigma at 1%
+  depth, +8.2% at 10%). This is kept so that noise stays independent of
+  the model and one operator can bin both; the exact in/out split is a
+  known refinement, not a bug.
+
+### Binning to analysis resolution
+
+Per-pixel variances are combined into analysis bins in count space, with
+the extracted stellar flux as the weight:
+
+    var_bin = sum(w^2 var_pixel) / (sum w)^2,   w = flux
+
+This is the variance of the SAME weighted-average estimator used to bin
+the model, which is the point: score and noise describe one consistent
+measurement. (An inverse-variance combination would quote a different,
+"optimal-weights" estimator than the one the model is binned with, and
+is deliberately not used.) Fully saturated pixels are excluded from the
+operator; partially saturated pixels are kept but counted per bin;
+degenerate-wavelength pixels (zero spectral support) are dropped.
+
+### The minimum noise floor
+
+After binning and transit combination, a minimum floor is applied on the
+final bins, with exact PandExo semantics:
+
+    sigma_final = max(sigma_random, floor)
+
+The floor is a hard lower bound: never added in quadrature, never
+rescaled with the binning resolution, and never averaged down by adding
+transits. It can be absent, a constant in ppm, or a wavelength-vs-ppm
+table (linearly interpolated, constant beyond the table edges). There is
+NO default floor anywhere in the stack: a default would silently set the
+headline precision, so the caller must choose one, and the choice is
+recorded in the run provenance. The per-mode numbers in the GUI are
+prefilled suggestions only.
+
+### Many transits, and the sensitivity factor
+
+The random variance scales as 1/N in the number of transits; the floor
+does not. So the achievable significance rises monotonically with N and
+saturates at a floor-only ceiling (`sig_inf`). "Transits to target" is
+computed against this curve: if the target exceeds the ceiling it is
+reported unreachable outright, and with no floor set the ceiling is
+infinite and "unreachable" only means "more than the 500-transit scan
+limit". A `noise_inflation` factor multiplies the random sigma (default
+1.0, the Pandeia prediction as-is); published achieved-vs-predicted
+ratios ship as reference points only, never as a calibration.
+
+The noise is diagonal, per bin. The correlated-floor scenario machinery
+was removed in 0.28.0 (see `decision_records.md`); systematic structure
+is handled instead by the nuisance directions in the score, next.
+
+### What the score means
+
+sigma_detect is a CONDITIONAL matched-template signal-to-noise: the
+chi-square distance between the full model spectrum and the same
+spectrum with the target molecule's opacity removed, under the per-bin
+sigmas above, with calibration nuisances profiled out. The profiled
+directions are one constant depth offset plus one step per extra
+detector segment (an NRS1|NRS2 offset must never be able to masquerade
+as signal); the projected variant additionally profiles the T-P,
+reference-radius, and cloud Jacobian directions when a Jacobian was
+computed. It is not a retrieval detection significance: the atmosphere
+is held at the specified state, and a retrieval freeing more parameters
+under the same model and noise assumptions will usually report a lower
+number.
+
+### How accurate is the noise, measured
+
+The parity harness (`tests/parity/`, fail-closed gate, committed report)
+runs this tool and PandExo on the same pinned Pandeia release and the
+same submitted configurations. On the current artifact (engine 2026.7,
+worker v10): wavelength grids, extracted count rates (per-mode flux
+medians 0.9866-1.0297), group selection, integration timing, and
+configuration-level saturation all match 1:1. The remaining sigma
+difference is the noise model itself and is one-sided: this tool
+propagates Pandeia's full extracted noise while PandExo's analytic
+formula sits near pure photon noise, so this tool is systematically
+CONSERVATIVE -- roughly 2-24% higher sigma on the NIR modes on matched
+configurations (up to ~31% on the faint-star policy configs) and 33-56%
+on MIRI LRS, where background and detector terms dominate. The source of
+record for these numbers is `tests/parity/outputs/REPORT.md`. Sigmas
+from this tool must never be labeled "PandExo-identical": they are
+pandeia-extracted-noise forecasts.

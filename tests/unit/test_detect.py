@@ -179,27 +179,15 @@ def test_detection_significance_rejects_bad_inputs():
     with pytest.raises(ValueError, match="nuisance row"):
         detect.detection_significance(good_s, good_sig,
                                       nuisance=[np.ones(2)])
-    # covariance: non-square, non-finite, non-symmetric, non-PD all raise
-    with pytest.raises(ValueError, match="cov shape"):
-        detect.detection_significance(good_s, good_sig, cov=np.eye(2))
-    with pytest.raises(ValueError, match="symmetric"):
-        detect.detection_significance(good_s, good_sig,
-                                      cov=np.array([[1.0, 2.0, 0.0],
-                                                    [0.0, 1.0, 0.0],
-                                                    [0.0, 0.0, 1.0]]) * 1e-8)
-    with pytest.raises(ValueError, match="positive-definite"):
-        detect.detection_significance(good_s, good_sig, cov=-np.eye(3) * 1e-8)
 
 
-def test_sigma_and_cov_at_transits_reject_bad_n():
+def test_sigma_at_transits_rejects_bad_n():
     result = dict(n_transits_eval=1, var_phot=np.full(4, 1e-8),
-                  floor=np.zeros(4), wl=np.linspace(3, 4, 4), scenario="random")
+                  floor=np.zeros(4), wl=np.linspace(3, 4, 4))
     assert detect.sigma_at_transits(result, 3).shape == (4,)   # valid
     for bad in (0, -2, 2.5):
         with pytest.raises(ValueError, match="positive integer"):
             detect.sigma_at_transits(result, bad)
-        with pytest.raises(ValueError, match="positive integer"):
-            detect.cov_at_transits(result, bad)
 
 
 # --- transit-count validation and no-floor limits ----------------------------
@@ -247,47 +235,36 @@ def test_depth_error_bins_records_validated_count():
         noise_mod.depth_error_bins(mr, edges, 3600.0, 3600.0, 4.5, None)
 
 
-def _result(scenario: str, floor_ppm: float, n=60, signal_ppm=150.0) -> dict:
+def _result(floor_ppm: float, n=60, signal_ppm=150.0) -> dict:
     wl = np.linspace(3.0, 5.0, n)
     bump = signal_ppm * 1e-6 * np.exp(
         -0.5 * ((np.log(wl) - np.log(4.0)) / 0.10) ** 2)
     return dict(wl=wl, depth=0.02 + bump, depth_wo=np.full(n, 0.02),
                 floor=np.full(n, floor_ppm * 1e-6),
                 var_phot=np.full(n, 300e-6) ** 2, n_transits_eval=1,
-                scenario=scenario, seg=np.zeros(n, int),
-                slope_rows=np.zeros((0, n)))
+                seg=np.zeros(n, int))
 
 
-@pytest.mark.parametrize("scenario", ["random", "conservative"])
-def test_no_floor_gives_infinite_detect_limit_not_1e26(scenario):
+def test_no_floor_gives_infinite_detect_limit_not_1e26():
     """With no floor, sigma averages down without bound: the limit is inf and
     the finite clip absurdity never reaches a user-facing surface."""
-    tt = detect.transits_to_target(_result(scenario, 0.0), 8.0)
+    tt = detect.transits_to_target(_result(0.0), 8.0)
     assert tt["sig_inf"] == float("inf")
     assert tt["reachable"] and tt["n"] is not None
-    # no floor -> no floor EXCESS -> no correlated term -> monotone scan, so
-    # no reachability WINDOW is reported even under a correlated preset
-    assert tt["n_last"] is None
 
 
-@pytest.mark.parametrize("scenario", ["random", "conservative"])
-def test_no_floor_correlated_covariance_is_absent_and_score_is_monotone(
-        scenario):
-    r = _result(scenario, 0.0)
-    assert all(detect.cov_at_transits(r, n) is None for n in (1, 5, 50, 500))
+def test_no_floor_score_is_monotone_in_transits():
+    r = _result(0.0)
     sc = [detect.detection_significance(
               np.asarray(r["depth"]) - np.asarray(r["depth_wo"]),
               detect.sigma_at_transits(r, n),
-              nuisance=detect._result_nuisance(r),
-              cov=detect.cov_at_transits(r, n))
+              nuisance=detect._result_nuisance(r))
           for n in (1, 2, 5, 20, 100, 500)]
     assert np.all(np.diff(sc) > 0.0)
 
 
-@pytest.mark.parametrize("scenario", ["random", "conservative"])
-def test_floored_limit_is_finite_and_unchanged_by_the_fix(scenario):
-    """The floored path keeps its exact previous behavior."""
-    tt = detect.transits_to_target(_result(scenario, 100.0), 8.0)
+def test_floored_limit_is_finite_and_gates_reachability():
+    tt = detect.transits_to_target(_result(100.0), 8.0)
     assert np.isfinite(tt["sig_inf"]) and 0.0 < tt["sig_inf"] < 100.0
     assert not tt["reachable"]          # target above the floor-capped limit
 
@@ -295,7 +272,7 @@ def test_floored_limit_is_finite_and_unchanged_by_the_fix(scenario):
 def test_no_floor_unreachable_target_still_reports_inf_limit():
     """Beyond-cap targets are unreachable with sig_inf = inf: 'ran out of
     transits', not 'a systematic caps it'."""
-    r = _result("random", 0.0, signal_ppm=2.0)
+    r = _result(0.0, signal_ppm=2.0)
     tt = detect.transits_to_target(r, 5.0)
     assert not tt["reachable"] and tt["sig_inf"] == float("inf")
 

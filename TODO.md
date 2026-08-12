@@ -1,8 +1,8 @@
 # TODO: open gaps and shortcomings
 
 The one live list of everything known to be missing, approximate, or
-deferred in this tool. Updated 2026-08-09 (ramp-floor fix + archive fill,
-tool 0.25.0). Keep this file current: close items here when they
+deferred in this tool. Updated 2026-08-11 (default structure + cleanup,
+tool 0.28.0). Keep this file current: close items here when they
 land, add new ones as they are found. The reasoning behind every decision
 lives in `docs/decision_records.md`; scope and conventions live in
 `docs/physics_and_conventions.md`.
@@ -48,9 +48,9 @@ lives in `docs/decision_records.md`; scope and conventions live in
 - **Upstream PICASO report** (`docs/decision_records.md`, part 3): four
   findings drafted for filing as GitHub issues on natashabatalha/picaso.
   Never posted; needs explicit approval to file.
-- **Adjoint diagnostics panel**: hidden as "in development" since 0.23.2
-  (`app._ADJOINT_PANEL_IN_DEV`; the full panel code is intact behind the
-  flag). Decide: finish and re-enable, or remove.
+- **CLOSED 2026-08-11 (0.28.0): adjoint diagnostics panel.** Decided:
+  removed from the GUI (with the provenance/diagnostics expanders).
+  `adjoint_diag.py`, its cache, CLI, and tests stay as the expert path.
 - **Subarray/readout search as a feature**: each mode is one fixed
   configuration by design (disclosed everywhere since 0.23.3). Ranking
   alternate PRISM/SOSS subarrays and readout patterns would be a new

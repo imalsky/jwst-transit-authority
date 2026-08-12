@@ -102,30 +102,34 @@ def test_gcm_baseline_and_scale_are_removed():
     assert all("has_gcm_baseline" not in pd for pd in planets.PLANETS.values())
 
 
-def test_default_structure_is_the_analytic_guillot_profile():
-    # 2026-08-09 maintainer decision: the analytic Guillot profile with
-    # constant Kzz is the default structure for EVERY planet (it is the
-    # differentiable choice; file mode has no T-P Fisher row). A verified
-    # bundled table is SELECTABLE, never the default.
+def test_default_structure_is_the_verified_table_where_one_ships():
+    # 2026-08-11 maintainer decision (reversing the structure half of the
+    # 2026-08-09 speed-first flip): a planet whose bundled measured T-P/Kzz
+    # table is VERIFIED end-to-end defaults to it; every other planet
+    # defaults to the analytic Guillot profile with constant Kzz. The
+    # default W39b run must reproduce the literature-validated SO2 state.
     for key in planets.PLANETS:
         cp = forward.canonical_params(dict(planet=key))
-        assert cp["tp_mode"] == "guillot", key
-        assert cp["kzz_mode"] == "const", key
-    # choosing the shipped table explicitly still resolves to the planet's
-    # own content-addressed table, and its Kzz column supplies the mixing
-    cp = forward.canonical_params(dict(planet="wasp39b", tp_mode="file"))
-    assert cp["tp_file"] == forward.TP_FILE_SHIPPED
-    assert cp["tp_file_sha1"]                         # content-addressed
-    assert cp["kzz_mode"] == "file"                   # table carries Kzz
-    assert cp["kzz_const"] == 0.0                     # inert once tabulated
+        if forward.shipped_tp_table_is_default(key):
+            assert cp["tp_mode"] == "file", key
+            assert cp["tp_file"] == forward.TP_FILE_SHIPPED, key
+            assert cp["tp_file_sha1"], key            # content-addressed
+            assert cp["kzz_mode"] == "file", key      # table carries Kzz
+            assert cp["kzz_const"] == 0.0, key        # inert once tabulated
+        else:
+            assert cp["tp_mode"] == "guillot", key
+            assert cp["kzz_mode"] == "const", key
+    # today that verified set is exactly WASP-39 b
+    assert forward.canonical_params(
+        dict(planet="wasp39b"))["tp_mode"] == "file"
 
 
 def test_having_a_table_does_not_by_itself_make_it_verified():
-    # shipped_tp_table_is_default is the VERIFICATION record (since
-    # 2026-08-09 it no longer selects the default -- that is Guillot
-    # everywhere): HD 189733 b ships a good profile that the solver does
-    # NOT certify at default settings, and any planet in that state must
-    # carry a written reason.
+    # shipped_tp_table_is_default gates the default (again, since
+    # 2026-08-11) AND is the verification record: HD 189733 b ships a good
+    # profile that the solver does NOT certify at default settings, so it
+    # must stay selectable-but-not-default, and any planet in that state
+    # must carry a written reason.
     assert forward.shipped_tp_table_name("hd189733b")
     assert not forward.shipped_tp_table_is_default("hd189733b")
     assert forward.canonical_params(dict(planet="hd189733b"))["tp_mode"] == "guillot"
@@ -152,12 +156,13 @@ def test_shipped_table_is_per_planet_never_a_substitute():
             with pytest.raises(ValueError, match="not available for planet"):
                 forward.canonical_params(dict(planet=key, tp_mode="file"))
     assert len(set(seen.values())) == len(seen)       # no shared table
-    # the default resolver answers guillot for every provider (checked on
-    # the pure resolver -- a full canonical_params call under
-    # chem_provider="picaso" would demand the PICASO refdata tree)
+    # the verified table is the default under the vulcan provider only; the
+    # picaso provider keeps the analytic default (checked on the pure
+    # resolver -- a full canonical_params call under chem_provider="picaso"
+    # would demand the PICASO refdata tree)
     assert forward._default_tp_mode(
         dict(planet="wasp39b", chem_provider="picaso")) == "guillot"
-    assert forward._default_tp_mode(dict(planet="wasp39b")) == "guillot"
+    assert forward._default_tp_mode(dict(planet="wasp39b")) == "file"
 
 
 def test_guillot_default_tirr_follows_the_selected_planet():
@@ -420,11 +425,13 @@ def test_rt_knobs_fragment_the_cache_key():
 # --- WASP-39 b reference state: DO NOT let this drift ------------------------
 # The REFERENCE W39b configuration (tp_mode="file", the shipped evening-
 # terminator table) is the one measured against the published JWST detection
-# (G395H SO2 4.16 sigma vs 4.5-4.8 published). Since 2026-08-09 it is no
-# longer the DEFAULT (that is Guillot everywhere -- differentiability-first
-# defaults), but it must stay reachable and bit-identical: the agreement is a
-# property of a SPECIFIC atmosphere. Re-measure against the literature before
-# updating expected values.
+# (G395H SO2 4.16 sigma vs 4.5-4.8 published). Since 2026-08-11 it is the
+# DEFAULT again (it was demoted to selectable 2026-08-09/-11 under the
+# Guillot-everywhere flip). The guard stays anchored to the EXPLICIT
+# file-mode config so it keeps protecting the reference atmosphere even if
+# the default ever moves again; a separate assertion below pins default ==
+# reference. Re-measure against the literature before updating expected
+# values.
 W39B_REFERENCE = {
     "tp_mode": "file",                      # measured evening-terminator table
     "tp_file": "shipped",
@@ -455,10 +462,14 @@ def test_wasp39b_reference_state_is_the_literature_validated_one():
 def test_wasp39b_reference_cache_key_is_stable():
     # The key hashes every canonical parameter: if ANY default feeding the
     # reference run changes, this trips even when the pins above still pass.
-    # The hash is the one the pre-2026-08-09 DEFAULT run carried, proving the
-    # reference atmosphere is bit-identical to the validated default of old.
+    # The hash is the one the pre-2026-08-09 default run carried, proving the
+    # reference atmosphere is bit-identical to the validated one of old.
     assert forward.params_key(forward.canonical_params(
         dict(planet="wasp39b", tp_mode="file"))) == "f14f4d10512552ea"
+    # ... and since 2026-08-11 the bare DEFAULT run is that same atmosphere:
+    # a default W39b forecast is the literature-validated configuration.
+    assert forward.params_key(forward.canonical_params(
+        dict(planet="wasp39b"))) == "f14f4d10512552ea"
 
 
 def test_wasp39b_shipped_table_bytes_are_unchanged():

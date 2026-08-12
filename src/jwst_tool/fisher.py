@@ -138,21 +138,10 @@ def _segment_offset_rows(result: dict) -> np.ndarray:
     return np.stack([(seg == s).astype(float) for s in range(n_seg)])
 
 
-def _slope_nuisance_rows(result: dict) -> np.ndarray:
-    """Per-segment slope rows the mode's noise scenario profiles (stored by
-    detect.evaluate_mode; empty (0, n_bins) when the scenario floats none)."""
-    nb = np.asarray(result["sigma"]).size
-    return np.asarray(result.get("slope_rows", np.zeros((0, nb))), float)
-
-
 def _fisher(Jn: np.ndarray, result: dict) -> np.ndarray:
-    """J C^-1 J^T under the mode's noise model: the stored scenario covariance
-    when present (correlated floor), else the exact diagonal fast path."""
-    cov = result.get("cov")
-    if cov is None:
-        s = np.asarray(result["sigma"])
-        return (Jn / s[None, :] ** 2) @ Jn.T
-    return Jn @ np.linalg.solve(np.asarray(cov, float), Jn.T)
+    """J W J^T under the mode's diagonal noise model, W = diag(1/sigma^2)."""
+    s = np.asarray(result["sigma"])
+    return (Jn / s[None, :] ** 2) @ Jn.T
 
 
 def mode_forecast(result: dict, free_names: list[str],
@@ -160,14 +149,12 @@ def mode_forecast(result: dict, free_names: list[str],
                   conditional: dict | None = None) -> dict:
     """Per-mode marginalized sigmas. result needs jac_bins (n_par, n_bins) whose rows
     are [free..., lnR0], sigma (n_bins,), and (optionally) seg (n_bins,) for the
-    per-segment offset nuisances, cov (correlated-scenario covariance) and
-    slope_rows (per-segment slope nuisances). ``diag``: see _marg_sigmas.
+    per-segment offset nuisances. ``diag``: see _marg_sigmas.
     Pass a dict as ``conditional`` to also receive the conditional sigmas
     (others fixed; see _conditional_sigmas) from the SAME Fisher matrix."""
     J = np.asarray(result["jac_bins"])
     steps = _segment_offset_rows(result)          # (n_steps, n_bins)
-    slope = _slope_nuisance_rows(result)          # (n_slopes, n_bins)
-    Jn = np.vstack([J] + [x for x in (steps, slope) if x.size])
+    Jn = np.vstack([J, steps]) if steps.size else J
     F = _fisher(Jn, result)
     if conditional is not None:
         conditional.update(zip(free_names,
@@ -181,23 +168,20 @@ def combined_forecast(results: list[dict], free_names: list[str],
                       conditional: dict | None = None) -> dict:
     """All modes jointly: shared free params + shared lnR0 + one depth offset
     per detector SEGMENT (NRS1/NRS2 counted separately for the two-detector
-    gratings) + each mode's scenario slope nuisances, all marginalized. Noise
-    is block-diagonal across modes (each block the mode's scenario covariance
-    or diagonal sigma; no cross-mode noise correlation is modeled).
+    gratings), all marginalized. Noise is block-diagonal across modes
+    (diagonal sigma; no cross-mode noise correlation is modeled).
     ``conditional``: as in mode_forecast."""
     n_f = len(free_names)
-    # count nuisance columns: one offset per segment + this mode's slope rows
-    seg_counts, slope_counts = [], []
+    # count nuisance columns: one offset per segment
+    seg_counts = []
     for r in results:
         nb = np.asarray(r["sigma"]).size
         seg = np.asarray(r.get("seg", np.zeros(nb, int)), int)
         seg_counts.append(int(seg.max()) + 1 if seg.size else 1)
-        slope_counts.append(_slope_nuisance_rows(r).shape[0])
-    n_nui = int(sum(seg_counts)) + int(sum(slope_counts))
-    n_tot = n_f + 1 + n_nui                        # free + lnR0 + nuisances
+    n_tot = n_f + 1 + int(sum(seg_counts))         # free + lnR0 + offsets
     F = np.zeros((n_tot, n_tot))
     col = n_f + 1
-    for r, n_seg, n_sl in zip(results, seg_counts, slope_counts):
+    for r, n_seg in zip(results, seg_counts):
         J = np.asarray(r["jac_bins"])             # rows: free..., lnR0
         nb = J.shape[1]
         seg = np.asarray(r.get("seg", np.zeros(nb, int)), int)
@@ -207,9 +191,6 @@ def combined_forecast(results: list[dict], free_names: list[str],
         for s_id in range(n_seg):                 # this mode's per-segment offsets
             Jg[col + s_id] = (seg == s_id).astype(float)
         col += n_seg
-        if n_sl:                                  # this mode's slope nuisances
-            Jg[col:col + n_sl] = _slope_nuisance_rows(r)
-            col += n_sl
         F += _fisher(Jg, r)
     if conditional is not None:
         conditional.update(zip(free_names, _conditional_sigmas(F, n_f)))
@@ -224,49 +205,32 @@ def transits_to_target(result: dict, free_names: list[str], gp: str,
     on ``gp`` reaches ``target_display``, with the systematic floor respected.
 
     ``sigma_at_transits(result, n) -> per-bin sigma`` comes from detect.py.
-    Returns dict(n, n_last, reachable, sig_inf); ``sig_inf`` is the
-    infinite-transit limit of the scenario noise model in display units.
-    Under the diagonal "random" scenario the forecast is monotone in N, so a
-    target below sig_inf short-circuits to unreachable. Under a correlated
-    scenario the floor-EXCESS systematic grows with N and the forecast can be
-    best at a finite N, so reachability comes from the full scan and
-    ``n_last`` is the largest scanned count still meeting the target -- never
-    reintroduce the unconditional sig_inf gate. With no floor set anywhere,
-    sig_inf is 0.0 and the scan is monotone; unreachability then means the
-    target needs more than N_TRANSITS_CAP transits.
+    Returns dict(n, reachable, sig_inf); ``sig_inf`` is the infinite-transit
+    (floor-only) limit in display units. The forecast is monotone in N
+    (diagonal noise), so a target below sig_inf short-circuits to
+    unreachable. With no floor set anywhere, sig_inf is 0.0 and
+    unreachability then means the target needs more than N_TRANSITS_CAP
+    transits.
     """
     from . import detect as _detect  # local import: fisher stays numpy-only otherwise
 
-    def _sig_with(sigma, cov):
+    def _sig_with(sigma):
         r2 = dict(result)
         r2["sigma"] = sigma
-        r2["cov"] = cov
         return display_sigma(gp, mode_forecast(r2, free_names)[gp], co_eval=co_eval)
 
     _floor = np.asarray(result["floor"])
     if not np.any(_floor > 0.0):
-        # No floor: nothing caps the precision, no floor excess, no
-        # correlated term at any finite N. Reporting the 1e-30-clipped value
-        # here produced a spurious reachability window.
-        sig_inf, cov_inf, diagonal = 0.0, None, True
+        # No floor: nothing caps the precision. Reporting the 1e-30-clipped
+        # value here produced a spurious reachability gate.
+        sig_inf = 0.0
     else:
-        cov_inf = _detect.cov_at_transits(result, 1, floor_only=True)
-        sig_inf = _sig_with(np.maximum(_floor, 1e-30), cov_inf)
+        sig_inf = _sig_with(np.maximum(_floor, 1e-30))
         if not np.isfinite(sig_inf):
-            return dict(n=None, n_last=None, reachable=False, sig_inf=sig_inf)
-        diagonal = cov_inf is None     # random scenario: monotone in N
-    if diagonal and target_display < sig_inf:
-        return dict(n=None, n_last=None, reachable=False, sig_inf=sig_inf)
-    n_first = n_last = None
+            return dict(n=None, reachable=False, sig_inf=sig_inf)
+    if target_display < sig_inf:
+        return dict(n=None, reachable=False, sig_inf=sig_inf)
     for n in range(1, _detect.N_TRANSITS_CAP + 1):
-        ok = _sig_with(sigma_at_transits(result, n),
-                       _detect.cov_at_transits(result, n)) <= target_display
-        if ok:
-            if n_first is None:
-                n_first = n
-                if diagonal:           # monotone: smallest n is the answer
-                    return dict(n=n, n_last=None, reachable=True,
-                                sig_inf=sig_inf)
-            n_last = n
-    return dict(n=n_first, n_last=n_last, reachable=n_first is not None,
-                sig_inf=sig_inf)
+        if _sig_with(sigma_at_transits(result, n)) <= target_display:
+            return dict(n=n, reachable=True, sig_inf=sig_inf)
+    return dict(n=None, reachable=False, sig_inf=sig_inf)

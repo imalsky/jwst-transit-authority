@@ -34,7 +34,7 @@ def test_round_trip_restores_the_full_run():
                          floor_mode="constant",
                          floors={"nirspec_g395h": 15.0},
                          noise_infl={"nirspec_g395h": 1.05},
-                         scenario="random", show_noise=False, seed=0))
+                         show_noise=False, seed=0))
     state, notes = share_config.widget_state(share, _key)
     assert not notes
 
@@ -153,3 +153,26 @@ def test_valid_embedded_tp_table_is_archived_and_restored(tmp_path):
     assert p.parent == forward._uploads_dir()
     assert p.suffix == ".txt" and p.exists()
     assert p.read_text() == text
+
+
+def test_removed_noise_scenario_is_noted_not_restored():
+    """Correlated-floor noise scenarios were removed in 0.28.0. An old config
+    that selected one loads with a note; the widget state never carries a
+    scenario key. scenario="random" (the old default) loads silently."""
+    share = share_config.build_share(
+        _canon(),
+        goal=dict(goal="detect", goal_param=None, target_prec=None,
+                  target_sig=3.0, marginalize=False, do_fisher=False,
+                  fisher_params=[], jac_method="fd"),
+        observation=dict(modes=["nirspec_g395h"], n_transits=1, r_bin=100,
+                         floor_mode="none", floors={}, noise_infl={},
+                         show_noise=False, seed=0))
+    share["observation"]["scenario"] = "conservative"
+    state, notes = share_config.widget_state(share, _key)
+    assert not any("scenario" in k for k in state)
+    assert any("scenario" in n for n in notes)
+
+    share["observation"]["scenario"] = "random"
+    state, notes = share_config.widget_state(share, _key)
+    assert not any("scenario" in k for k in state)
+    assert not any("scenario" in n for n in notes)

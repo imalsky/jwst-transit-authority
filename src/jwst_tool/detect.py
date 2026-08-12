@@ -15,14 +15,12 @@ atmospheric state: the nested-model chi-square distance between the full
 spectrum and the spectrum with one molecule's opacity removed, with the
 calibration nuisances profiled out --
 
-    chi2 = s^T W s - b^T A^{-1} b,   W = diag(1/sigma^2)  or  C^{-1},
+    chi2 = s^T W s - b^T A^{-1} b,   W = diag(1/sigma^2),
     b = U W s,  A = U W U^T,         s_b = d_full - d_without_X
 
-W is diagonal under the default "random" scenario or the inverse of the full
-scenario covariance C (noise.build_cov). The rows of U are one constant
-depth offset, one step per extra detector segment (NRS1|NRS2 -- real G395H
-fits float such offsets), and, when the scenario says so, one centered slope
-per segment. It is NOT a retrieval detection significance: the atmosphere
+The rows of U are one constant depth offset and one step per extra detector
+segment (NRS1|NRS2 -- real G395H fits float such offsets). It is NOT a
+retrieval detection significance: the atmosphere
 is held at the specified state, and a retrieval that frees more parameters
 under the same model and noise assumptions will usually report a lower
 significance (a best-case comparison under those conditions, not a universal
@@ -65,28 +63,9 @@ def _segment_rows(seg: np.ndarray) -> list[np.ndarray]:
     return [(seg == s).astype(float) for s in range(1, int(seg.max()) + 1)]
 
 
-def _slope_rows(seg: np.ndarray, wl: np.ndarray) -> list[np.ndarray]:
-    """Per-segment linear-in-ln(lambda) rows, unit RMS, centered so the
-    offset rows keep spanning constants. Every segment gets one, including
-    the first."""
-    seg = np.asarray(seg, int)
-    lnl = np.log(np.asarray(wl, float))
-    rows = []
-    for s in range(int(seg.max()) + 1 if seg.size else 0):
-        m = seg == s
-        if m.sum() < 3:
-            continue
-        r = np.where(m, lnl - lnl[m].mean(), 0.0)
-        rms = float(np.sqrt(np.mean(r[m] ** 2)))
-        if rms > 0:
-            rows.append(r / rms)
-    return rows
-
-
 def detection_significance(signal: np.ndarray, sigma: np.ndarray,
                            nuisance: list[np.ndarray] | None = None,
-                           marginalize_offset: bool = True,
-                           cov: np.ndarray | None = None) -> float:
+                           marginalize_offset: bool = True) -> float:
     """sqrt(Delta chi^2) of a binned signal against noise, with linear
     nuisance directions profiled out (rank-aware).
 
@@ -98,13 +77,10 @@ def detection_significance(signal: np.ndarray, sigma: np.ndarray,
     matrix. Numerically null directions are dropped rather than inverted;
     zero-norm rows are excluded outright.
 
-    ``cov`` (optional): full per-bin depth covariance (noise.build_cov);
-    when given it REPLACES ``sigma`` in the metric. With ``cov=None`` the
-    metric is the exact diagonal W = diag(1/sigma^2) fast path.
+    The metric is the exact diagonal W = diag(1/sigma^2).
 
     Inputs are validated loudly: ``signal`` 1-D and finite; ``sigma``
-    matching, finite, > 0 (unused when ``cov`` is given); nuisance rows
-    matching; ``cov`` square, finite, symmetric, positive-definite.
+    matching, finite, > 0; nuisance rows matching.
     """
     signal = np.asarray(signal, float)
     if signal.ndim != 1 or signal.size == 0 or not np.all(np.isfinite(signal)):
@@ -115,44 +91,21 @@ def detection_significance(signal: np.ndarray, sigma: np.ndarray,
             raise ValueError(f"detection_significance: nuisance row {i} has "
                              f"shape {np.asarray(r).shape}, expected "
                              f"{signal.shape}")
-    if cov is not None:
-        C = np.asarray(cov, float)
-        if C.shape != (signal.size, signal.size):
-            raise ValueError(f"detection_significance: cov shape {C.shape} "
-                             f"must be ({signal.size}, {signal.size})")
-        if not np.all(np.isfinite(C)):
-            raise ValueError("detection_significance: cov has non-finite values")
-        if not np.allclose(C, C.T, rtol=1e-8, atol=1e-30):
-            raise ValueError("detection_significance: cov is not symmetric")
-        try:
-            np.linalg.cholesky(C)
-        except np.linalg.LinAlgError as e:
-            raise ValueError("detection_significance: cov is not "
-                             "positive-definite") from e
-    else:
-        sig = np.asarray(sigma, float)
-        if sig.shape != signal.shape or not np.all(np.isfinite(sig)) \
-                or np.any(sig <= 0.0):
-            raise ValueError("detection_significance: sigma must match signal's "
-                             "shape and be finite and > 0")
+    sig = np.asarray(sigma, float)
+    if sig.shape != signal.shape or not np.all(np.isfinite(sig)) \
+            or np.any(sig <= 0.0):
+        raise ValueError("detection_significance: sigma must match signal's "
+                         "shape and be finite and > 0")
     # keep the constant row even for a single bin: one bin + free offset =
     # zero shape information, so the honest score is 0 (never |s|/sigma)
     rows = [np.ones_like(signal)] if marginalize_offset else []
     rows += [np.asarray(r, float) for r in (nuisance or [])]
-    if cov is not None:
-        ci_s = np.linalg.solve(np.asarray(cov, float), signal)
-        chi2 = float(signal @ ci_s)
-        if rows:
-            U = np.stack(rows)
-            A = U @ np.linalg.solve(np.asarray(cov, float), U.T)
-            b = U @ ci_s
-    else:
-        w = 1.0 / np.asarray(sigma, float) ** 2
-        chi2 = float(np.sum(w * signal ** 2))
-        if rows:
-            U = np.stack(rows)
-            A = (U * w) @ U.T
-            b = (U * w) @ signal
+    w = 1.0 / np.asarray(sigma, float) ** 2
+    chi2 = float(np.sum(w * signal ** 2))
+    if rows:
+        U = np.stack(rows)
+        A = (U * w) @ U.T
+        b = (U * w) @ signal
     if rows:
         # normalize to correlation form so the rank decision depends on the
         # nuisance SPAN, not on row amplitudes/units
@@ -187,83 +140,41 @@ def sigma_at_transits(result: dict, n_transits: int) -> np.ndarray:
                       np.asarray(result["floor"]))
 
 
-def cov_at_transits(result: dict, n_transits: int,
-                    floor_only: bool = False) -> np.ndarray | None:
-    """The evaluated mode's scenario covariance re-scaled to ``n_transits``
-    (random diagonal scales 1/N; diag(C) = max(var_N, floor^2) at every N);
-    None under the diagonal random scenario. ``floor_only=True`` gives the
-    infinite-transit limit. NOTE: the correlated budget is the floor EXCESS,
-    so it GROWS with N and scores are NOT monotone in N under a correlated
-    scenario (see transits_to_target)."""
-    scen = result.get("scenario", "random")
-    floor = np.asarray(result["floor"])
-    if floor_only:
-        return noise_mod.build_cov(result["wl"], np.zeros_like(floor),
-                                   np.maximum(floor, 1e-30), scen)
-    n0 = int(result["n_transits_eval"])
-    var = np.asarray(result["var_phot"]) * (n0 / float(_n_transits(n_transits)))
-    return noise_mod.build_cov(result["wl"], var, floor, scen)
-
-
 def _result_nuisance(result: dict) -> list[np.ndarray]:
     """The evaluated mode's profiled calibration rows: per-segment offset
-    steps always, plus per-segment slopes when its scenario says so."""
-    rows = _segment_rows(result["seg"]) if "seg" in result else []
-    slope = result.get("slope_rows")
-    if slope is not None and np.asarray(slope).size:
-        rows += list(np.asarray(slope, float))
-    return rows
+    steps."""
+    return _segment_rows(result["seg"]) if "seg" in result else []
 
 
 def transits_to_target(result: dict, target_sig: float) -> dict:
     """Smallest transit count reaching ``target_sig`` for the detect goal.
 
-    Returns dict(n=int|None, n_last=int|None, reachable=bool, sig_inf=float).
-    ``sig_inf`` is the infinite-transit (floor-only) limit of the mode's
-    scenario noise model. Under the default diagonal "random" scenario the
-    score is monotone in N and sig_inf is an exact ceiling. Under a
-    correlated scenario the floor-EXCESS systematic grows as the photon term
-    averages down: the score can PEAK at a finite N, so sig_inf is a limit,
-    NOT a bound -- never gate on it; reachability comes from the full
-    1..N_TRANSITS_CAP scan. With no floor set anywhere, ``sig_inf`` is inf
-    and unreachable means "needs more than the cap", not a systematic
-    ceiling.
-    ``n`` is the smallest count meeting the target; ``n_last`` (correlated
-    scenarios only, else None) is the largest scanned count still meeting it
-    -- a finite window means over-observing past ``n_last`` loses the
-    detection again. The mode's scenario stays in force at every count.
+    Returns dict(n=int|None, reachable=bool, sig_inf=float). ``sig_inf`` is
+    the infinite-transit (floor-only) limit; the score is monotone in N
+    (diagonal noise; sigma_N = max(sigma_random_N, floor)), so sig_inf is an
+    exact ceiling and a target above it is unreachable. With no floor set
+    anywhere, ``sig_inf`` is inf and unreachable means "needs more than the
+    N_TRANSITS_CAP scan limit", not a systematic ceiling.
     """
     if result.get("depth_wo") is None:
-        return dict(n=None, n_last=None, reachable=False, sig_inf=float("nan"))
+        return dict(n=None, reachable=False, sig_inf=float("nan"))
     signal = np.asarray(result["depth"]) - np.asarray(result["depth_wo"])
     nuis = _result_nuisance(result)
     floor = np.asarray(result["floor"])
     if not np.any(floor > 0.0):
         # no floor: the limit is genuinely INFINITE (report inf, not the
-        # ~1e26 the 1e-30 clip would give), and no floor means no floor
-        # EXCESS -- build_cov is None at every N, so the scan is monotone
-        sig_inf, cov_inf, diagonal = float("inf"), None, True
+        # ~1e26 the 1e-30 clip would give)
+        sig_inf = float("inf")
     else:
-        cov_inf = cov_at_transits(result, 1, floor_only=True)
         sig_inf = detection_significance(signal, np.maximum(floor, 1e-30),
-                                         nuisance=nuis, cov=cov_inf)
-        diagonal = cov_inf is None    # random scenario: monotone in N
-    if diagonal and target_sig > sig_inf:
-        return dict(n=None, n_last=None, reachable=False, sig_inf=sig_inf)
-    n_first = n_last = None
+                                         nuisance=nuis)
+    if target_sig > sig_inf:
+        return dict(n=None, reachable=False, sig_inf=sig_inf)
     for n in range(1, N_TRANSITS_CAP + 1):
-        ok = detection_significance(signal, sigma_at_transits(result, n),
-                                    nuisance=nuis,
-                                    cov=cov_at_transits(result, n)) >= target_sig
-        if ok:
-            if n_first is None:
-                n_first = n
-                if diagonal:          # monotone: smallest n is the answer
-                    return dict(n=n, n_last=None, reachable=True,
-                                sig_inf=sig_inf)
-            n_last = n
-    return dict(n=n_first, n_last=n_last, reachable=n_first is not None,
-                sig_inf=sig_inf)
+        if detection_significance(signal, sigma_at_transits(result, n),
+                                  nuisance=nuis) >= target_sig:
+            return dict(n=n, reachable=True, sig_inf=sig_inf)
+    return dict(n=None, reachable=False, sig_inf=sig_inf)
 
 
 # Native-grid pixel-census keys, counted BEFORE the worker's finite/positive
@@ -289,8 +200,7 @@ def _native_pixel_counts(mode_result: dict) -> dict:
 
 def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
                   R_bin: float, t_in_s: float, t_out_s: float, n_transits: int,
-                  floor_spec, noise_inflation: float = 1.0,
-                  scenario: str = "random") -> dict:
+                  floor_spec, noise_inflation: float = 1.0) -> dict:
     """One instrument mode -> binned model, sigmas, conditional template S/N.
 
     Bins cover the intersection of the mode's science band, the model's
@@ -298,13 +208,6 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
     share ONE count-space operator (module docstring). ``target_mol=None``
     (the parameter-constraint goal) skips the molecule-removed comparison:
     ``sigma_detect`` comes back NaN and ``depth_wo`` None.
-
-    ``scenario`` names a noise.SCENARIOS entry ("random" is the default and
-    the headline configuration; the correlated presets are EXPERIMENTAL): it
-    sets the floor excess's correlation structure and whether per-segment
-    slopes are profiled. ``sigma_detect_by_scenario`` scores the template
-    under EVERY scenario; per-bin total variance is scenario-invariant, so
-    differences are correlation structure only.
     """
     m = ins.MODES[mode_key]
     wl_model = model["wl_um"]
@@ -417,12 +320,6 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
     seg = binning.bin_segments(op, seg_full)
     steps = _segment_rows(seg)
 
-    # scenario: floor correlation + slope profiling (unknown names raise)
-    sc = noise_mod.SCENARIOS[scenario]
-    slopes = _slope_rows(seg, nz["wl_center"]) if sc["slopes"] else []
-    cov = noise_mod.build_cov(nz["wl_center"], nz["var_phot"], nz["floor"],
-                              scenario)
-
     d_full_b = binning.bin_model(op, wl_model, depth)
     jac_bins = None
     jac_names = ([str(x) for x in model["jac_names"]]
@@ -430,27 +327,17 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
     if jac_rows is not None:
         jac_bins = np.stack([binning.bin_model(op, wl_model, row)
                              for row in jac_rows])
-    sigma_detect_by_scenario = {}
     if depth_wo is not None:
         d_wo_b = binning.bin_model(op, wl_model, depth_wo)
         s_b = d_full_b - d_wo_b
-        # score the template under every scenario (cheap) for the GUI
-        for name, sc_i in noise_mod.SCENARIOS.items():
-            nuis_i = steps + (_slope_rows(seg, nz["wl_center"])
-                              if sc_i["slopes"] else [])
-            cov_i = (cov if name == scenario else
-                     noise_mod.build_cov(nz["wl_center"], nz["var_phot"],
-                                         nz["floor"], name))
-            sigma_detect_by_scenario[name] = detection_significance(
-                s_b, nz["sigma"], nuisance=nuis_i, cov=cov_i)
-        sigma_detect = sigma_detect_by_scenario[scenario]
+        sigma_detect = detection_significance(s_b, nz["sigma"], nuisance=steps)
         # also profile the T-P/cloud/lnR0 Jacobian directions (conditional)
         sigma_detect_proj = float("nan")
         if jac_bins is not None and jac_names:
-            nuis = steps + slopes + [jac_bins[i] for i, n in enumerate(jac_names)
-                                     if n in _NUISANCE_JAC]
+            nuis = steps + [jac_bins[i] for i, n in enumerate(jac_names)
+                            if n in _NUISANCE_JAC]
             sigma_detect_proj = detection_significance(s_b, nz["sigma"],
-                                                       nuisance=nuis, cov=cov)
+                                                       nuisance=nuis)
     else:
         d_wo_b, sigma_detect, sigma_detect_proj = None, float("nan"), float("nan")
 
@@ -511,10 +398,6 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         var_phot=nz["var_phot"], floor=nz["floor"],
         noise_infl=float(noise_inflation), lsf_applied=lsf_applied,
         n_transits_eval=int(nz["n_transits"]),
-        scenario=scenario, cov=cov,
-        slope_rows=(np.stack(slopes) if slopes
-                    else np.zeros((0, nz["sigma"].size))),
-        sigma_detect_by_scenario=sigma_detect_by_scenario,
         sigma_detect=sigma_detect, sigma_detect_proj=sigma_detect_proj,
         median_sigma_ppm=float(np.median(nz["sigma"]) * 1e6),
         n_bins=int(nz["wl_center"].size),

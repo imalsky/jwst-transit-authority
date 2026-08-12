@@ -63,7 +63,7 @@ def _synthetic_out(science_mode="transmission", saturated=False,
     out_meta = dict(
         goal="detect", target="SO2", goal_param=None, target_prec=None,
         target_sig=3.0, n_transits=n_transits, show_noise=False, seed=0,
-        r_bin=100, planet="WASP-39 b", scenario="random",
+        r_bin=100, planet="WASP-39 b",
         floor_mode="constant")
     return out, out_meta
 

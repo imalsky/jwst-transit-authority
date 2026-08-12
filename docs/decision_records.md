@@ -816,3 +816,89 @@ unconverged). This appears to be the physical deep-adiabat degeneracy of
 static irradiated RCE rather than a bug; we note it because "converged"
 output can differ substantially at depth depending on the rcb guess, which
 users of the climate mode may not expect.
+
+---
+
+# Decision 2026-08-11: the verified measured table is the default structure again (0.28.0)
+
+Maintainer decision (Isaac): the default WASP-39 b run must reproduce the
+literature-validated SO2 state. Under the 2026-08-09 Guillot-everywhere
+default, a default G395H run read SO2 at ~2.1 sigma against the published
+4.8 (Alderson+2023) / 4.5 (Tsai+2023) -- the documented Guillot bias (~100 K
+hot in the SO2 formation zone, Kzz 4-33x low), not a noise or tool defect.
+This reverses item 2 of the 2026-08-09 speed-first record and ONLY item 2:
+
+1. `_default_tp_mode` again returns the planet's verified measured table
+   under the vulcan provider (`shipped_tp_table_is_default`, today exactly
+   WASP-39 b, whose Kzz column then supplies the mixing profile too);
+   Guillot everywhere else and under PICASO. The GUI mirrors the same
+   resolver, so widget and API defaults move together.
+2. Kept from 2026-08-09: the AD-first GUI differentiation default (AD gates
+   on photo/condensation/provider, not on tp_mode, so it composes with file
+   mode), the lnZ + dlnCO default free-parameter set, and the PRISM + G395H
+   + MIRI LRS default mode trio (0.27.0). Speed is not sacrificed: the
+   tabulated structure converges in ~28 s vs ~8 min for the Guillot +
+   constant-Kzz stand-in (measured 2026-07-21). The cost is the documented
+   one: default Fisher forecasts carry no temperature row (file mode has no
+   T-P parameter), so they are conditional on the profile.
+3. The W39B_REFERENCE guard stays anchored to the EXPLICIT `tp_mode="file"`
+   configuration (protection independent of future default moves) and a new
+   assertion pins the bare-default cache key to the same `f14f4d10512552ea`,
+   proving the default run is bit-identical to the literature-validated
+   atmosphere. No `forward._VERSION` bump: canonical-set semantics are
+   unchanged, only which set the defaults resolve to.
+
+**Considered and rejected in the same request:** switching to a simpler
+analytic (PandExo-style photon-only) noise model to close the remaining
+4.16-vs-4.8 gap. That change is neither small nor neutral -- the pandeia
+extracted-noise forecasts are deliberately conservative by ~2-24% (NIR,
+matched) and the parity record forbids presenting sigmas as
+PandExo-identical -- so the noise model stays as is. The rp_rjup=1.279 /
+rstar_rsun=0.932 source pairing (biases every sigma low; the measured
+white-light ratio would give G395H SO2 4.44) also stays: re-pairing radii
+audited against the chemistry cfg is a science decision, still OPEN in the
+2026-07-21 record.
+
+---
+
+# Decision 2026-08-11: correlated-floor scenarios removed; provenance and adjoint panels hidden (0.28.0)
+
+Maintainer request (Isaac), same release as the default-structure reversal.
+
+## 1. Correlated-floor noise scenarios REMOVED end to end
+
+The experimental `noise.SCENARIOS` machinery (2026-07-12; "moderate" /
+"conservative" presets re-allocating the floor excess into a smooth
+ln-lambda kernel, per-segment slope nuisances, `build_cov`, the stored
+`cov`/`slope_rows`, `sigma_detect_by_scenario`, and the GUI radio +
+cross-scenario columns) is deleted, not hidden. It was always excluded from
+headline results (default "random" = exact diagonal), stated as an
+assumption rather than a calibrated JWST systematics model, and unused in
+any recorded science decision. What remains is the diagonal model the
+headline numbers always used: sigma = max(sigma_random, floor) per bin,
+with per-segment offset nuisances.
+
+Consequences reversed with it: `transits_to_target` (detect and fisher) is
+monotone again, so the `target > sig_inf -> unreachable` short-circuit is
+CORRECT and reinstated, and the correlated-scenario reachability WINDOW
+(`n_last`, "lost again past N") is gone. The 2026-07-15 "never reintroduce
+the unconditional sig_inf gate" pin is retired WITH its cause: that rule
+existed because correlated floor-excess made scores non-monotone; without
+scenarios the monotone proof holds. `tests/unit/test_scenarios.py` and the
+matched-filter covariance closure test were deleted; the window tests now
+pin the monotone semantics. Old share-config files carrying a correlated
+`scenario` load with a note (never silently re-scored); `scenario:
+"random"` loads silently.
+
+## 2. "Model quality and provenance" and "Advanced diagnostics" panels removed
+
+Both result-page expanders are gone. Everything they displayed remains
+computed, gated, and stored (chemistry/PICASO/climate certificates and the
+backend fingerprint in the model npz and noise caches; a run that fails a
+gate still stops with an error) -- this is display-only removal, disclosure
+via the docs instead of the GUI. The backend label still shows on the
+remaining user-facing surfaces (intro text, ETC status line), satisfying
+the BACKEND_STATUS rule. The adjoint panel (already disabled "in
+development" since 0.23.x) is deleted from the GUI; `adjoint_diag.py`
+itself, its cache, its CLI (`python -m jwst_tool.adjoint_diag`), and its
+tests are untouched and remain the expert path.

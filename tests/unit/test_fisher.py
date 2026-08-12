@@ -126,14 +126,12 @@ def test_combined_forecast_counts_offsets_per_segment():
 def test_mode_forecast_equals_combined_single_result():
     """mode_forecast(r) and combined_forecast([r]) must implement the SAME
     statistical model (free params + shared lnR0 + one constant offset per
-    segment + slope rows), INCLUDING the first segment's offset."""
+    segment), INCLUDING the first segment's offset."""
     rng = np.random.default_rng(7)
     nb = 45
     seg = np.array([0] * 22 + [1] * 23)
     jac = rng.standard_normal((3, nb))             # 2 free + lnR0
-    slope_rows = rng.standard_normal((2, nb))
-    r = dict(jac_bins=jac, sigma=np.full(nb, 1e-4), seg=seg,
-             slope_rows=slope_rows)
+    r = dict(jac_bins=jac, sigma=np.full(nb, 1e-4), seg=seg)
     a = fisher.mode_forecast(dict(r), ["p0", "p1"])
     b = fisher.combined_forecast([dict(r)], ["p0", "p1"])
     for k in ("p0", "p1"):
@@ -267,45 +265,41 @@ def test_combined_conditional_accumulates_modes():
 
 # --- fisher no-floor limits ---------------------------------------------------
 
-def _result(scenario: str, floor_ppm: float, n=60, signal_ppm=150.0) -> dict:
+def _result(floor_ppm: float, n=60, signal_ppm=150.0) -> dict:
     wl = np.linspace(3.0, 5.0, n)
     bump = signal_ppm * 1e-6 * np.exp(
         -0.5 * ((np.log(wl) - np.log(4.0)) / 0.10) ** 2)
     return dict(wl=wl, depth=0.02 + bump, depth_wo=np.full(n, 0.02),
                 floor=np.full(n, floor_ppm * 1e-6),
                 var_phot=np.full(n, 300e-6) ** 2, n_transits_eval=1,
-                scenario=scenario, seg=np.zeros(n, int),
-                slope_rows=np.zeros((0, n)))
+                seg=np.zeros(n, int))
 
 
-def _fisher_result(scenario: str, floor_ppm: float, n=60) -> dict:
+def _fisher_result(floor_ppm: float, n=60) -> dict:
     wl = np.linspace(3.0, 5.0, n)
-    r = _result(scenario, floor_ppm, n=n)
+    r = _result(floor_ppm, n=n)
     rng = np.random.default_rng(0)
     jac = np.vstack([1e-4 * np.sin(2.0 * wl), 1e-4 * np.cos(3.0 * wl),
                      1e-4 * rng.normal(size=n)])
     r["jac_bins"] = jac
     r["jac_names"] = ["lnZ", "lnKzz", "lnR0"]
     r["sigma"] = np.maximum(np.sqrt(r["var_phot"]), r["floor"])
-    r["cov"] = None
     return r
 
 
-@pytest.mark.parametrize("scenario", ["random", "conservative"])
-def test_fisher_no_floor_limit_is_zero_not_1e_minus_26(scenario):
+def test_fisher_no_floor_limit_is_zero_not_1e_minus_26():
     """Precision improves without bound with no floor, so the display-unit
     limit is exactly 0.0 and the scan stays monotone."""
-    r = _fisher_result(scenario, 0.0)
+    r = _fisher_result(0.0)
     names = ["lnZ", "lnKzz", "lnR0"]
     tt = fisher.transits_to_target(r, names, "lnZ", 1e9,
                                    detect.sigma_at_transits)
     assert tt["sig_inf"] == 0.0
-    assert tt["reachable"] and tt["n_last"] is None
+    assert tt["reachable"]
 
 
-@pytest.mark.parametrize("scenario", ["random", "conservative"])
-def test_fisher_floored_limit_stays_finite_and_positive(scenario):
-    r = _fisher_result(scenario, 100.0)
+def test_fisher_floored_limit_stays_finite_and_positive():
+    r = _fisher_result(100.0)
     names = ["lnZ", "lnKzz", "lnR0"]
     tt = fisher.transits_to_target(r, names, "lnZ", 1e9,
                                    detect.sigma_at_transits)

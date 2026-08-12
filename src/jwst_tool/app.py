@@ -41,7 +41,7 @@ import streamlit as st
 
 TOOL_DIR = Path(__file__).resolve().parent   # forward.py subprocess lives here
 
-from jwst_tool import adjoint_diag, binning, datacheck, detect, \
+from jwst_tool import binning, datacheck, detect, \
     fisher as fisher_mod, forward
 from jwst_tool import archive
 from jwst_tool import noise as noise_mod
@@ -81,21 +81,16 @@ def _csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode()
 
 
-def _not_reached_reason(scenario: str, val: str, floored: bool,
-                        evw: str) -> str:
+def _not_reached_reason(val: str, floored: bool, evw: str) -> str:
     """Honest phrasing for a target the transit scan did not reach.
 
-    With a floor, sig_inf is an exact ceiling under the random scenario and
-    only the N-to-infinity limit under a correlated one. With NO floor
-    nothing caps the score: say the scan reached its limit, never "never"."""
+    With a floor, sig_inf is an exact ceiling. With NO floor nothing caps
+    the score: say the scan reached its limit, never "never"."""
     if not floored:
         return (f"not reached within the scan limit of "
                 f"{detect.N_TRANSITS_CAP} {evw}s; with no noise floor set, a "
                 "larger count could still reach the target")
-    if scenario == "random":
-        return f"the noise floor caps the score at {val}"
-    return (f"no count up to {detect.N_TRANSITS_CAP} reaches it; "
-            f"the N-to-infinity limit is {val}")
+    return f"the noise floor caps the score at {val}"
 
 
 def _has_floor(r: dict) -> bool:
@@ -125,9 +120,9 @@ def _op_status(r: dict) -> str:
     return "verify in APT"
 
 
-def _transits_cell(tt: dict, scenario: str, val_never: str, floored: bool,
+def _transits_cell(tt: dict, val_never: str, floored: bool,
                    evw: str) -> str:
-    """'events to target' table cell, window-aware for correlated scenarios.
+    """'events to target' table cell.
 
     "unreachable" is reserved for a floor-proven result; a scan that only ran
     out of events reads ">N (scan limit)"."""
@@ -135,12 +130,8 @@ def _transits_cell(tt: dict, scenario: str, val_never: str, floored: bool,
         if not floored:
             return f">{detect.N_TRANSITS_CAP} (scan limit; no floor set)"
         return (f"unreachable "
-                f"({_not_reached_reason(scenario, val_never, floored, evw)})")
-    cell = str(tt["n"])
-    if (tt.get("n_last") is not None
-            and tt["n_last"] < detect.N_TRANSITS_CAP):
-        cell += f" (lost again past {tt['n_last']})"
-    return cell
+                f"({_not_reached_reason(val_never, floored, evw)})")
+    return str(tt["n"])
 
 st.set_page_config(page_title="JWST Exoplanet Observation Planner",
                    layout="wide")
@@ -278,7 +269,6 @@ _FD_THETA_MIN, _FD_THETA_MAX = 3, 5    # minutes per FD Kzz/T row
 _AD_ROW_MIN, _AD_ROW_MAX = 1, 2        # minutes per AD row
 
 _PROG_RE = re.compile(r"\[fwd\] PROG ([0-9.]+) (.*)")
-_ADJ_PROG_RE = re.compile(r"\[adj\] PROG ([0-9.]+) (.*)")
 
 
 def _fmt_dur(s: float) -> str:
@@ -1417,18 +1407,6 @@ with st.sidebar:
             0.05, key=K(f"infl_{k}"))
             for k in mode_keys}
 
-        st.markdown("**Experimental: correlated-floor scenarios**")
-        scenario = st.radio(
-            "Systematics scenario", list(noise_mod.SCENARIOS),
-            format_func=lambda s: noise_mod.SCENARIOS[s]["label"],
-            key=K("scenario"), label_visibility="collapsed")
-        st.caption("The default (**random**) is the exact diagonal noise "
-                   "model. The correlated presets move the floor excess "
-                   "into a spectrally smooth kernel with the same per-bin "
-                   "totals. They are stated assumptions, **not calibrated "
-                   "JWST systematics models**. Use them to stress-test "
-                   "how rankings move.")
-
     # -----------------------------------------------------------------------
     # More settings: solver grid, condensation, boundary conditions,
     # advanced RT, and display controls, behind one entry point.
@@ -1752,7 +1730,7 @@ with st.expander("Run summary & configuration"):
                                   else "wavelength table"))
                         for k in mode_keys},
                 noise_infl={k: float(infl[k]) for k in mode_keys},
-                scenario=scenario, show_noise=bool(show_noise),
+                show_noise=bool(show_noise),
                 seed=int(seed)),
             tp_table_text=(Path(tp_file_path).read_text()
                            if tp_file_path else None),
@@ -1900,8 +1878,7 @@ def _compute_locked():
             try:
                 results.append(detect.evaluate_mode(
                     k, etc[k], model, target_mol, r_bin, t_in_s, t_out_s,
-                    n_transits, floors[k], noise_inflation=infl[k],
-                    scenario=scenario))
+                    n_transits, floors[k], noise_inflation=infl[k]))
             except Exception as e:
                 # one bad mode must not kill the whole run -- report it with
                 # its label + the actual reason, keep evaluating the rest
@@ -1924,7 +1901,7 @@ if run_clicked:
             goal=goal, target=target_mol, goal_param=goal_param,
             target_prec=target_prec, target_sig=target_sig,
             n_transits=n_transits, show_noise=show_noise, seed=seed,
-            r_bin=r_bin, planet=planet_label, scenario=scenario,
+            r_bin=r_bin, planet=planet_label,
             floor_mode=floor_mode,
             # the SELECTED floor, not the registry suggestion: a result must
             # carry the number that produced it
@@ -2038,21 +2015,16 @@ if goal_r == "detect":
             # N, the systematic floor does not -- a plain 1/sqrt(N) law is
             # optimistic exactly where it matters
             tt = detect.transits_to_target(best, tsig)
-            _scen = meta.get("scenario", "random")
             if tt["reachable"]:
-                _win = ("" if tt.get("n_last") is None
-                        or tt["n_last"] >= detect.N_TRANSITS_CAP else
-                        f" Correlated-scenario window: past {tt['n_last']} "
-                        f"{_ev}s the detection is lost again.")
                 st.warning(verdict + f"  Below the target; {tt['n']} {_ev}s "
                            f"of {best['label']} would reach it (floor-aware "
-                           "estimate)." + _win)
+                           "estimate).")
             else:
                 _fl = _has_floor(best)
                 _lim = f"{tt['sig_inf']:.1f}σ" if _fl else ""
                 st.warning(
                     verdict + "  The target was "
-                    + _not_reached_reason(_scen, _lim, _fl, _ev) + ". "
+                    + _not_reached_reason(_lim, _fl, _ev) + ". "
                     + ("Lower the floor, choose other modes, or relax the "
                        "target." if _fl else
                        "Choose other modes or relax the target."))
@@ -2117,22 +2089,17 @@ else:
         tt = fisher_mod.transits_to_target(best_r, fisher_names, gp,
                                            target / tsig, detect.sigma_at_transits,
                                            co_eval=co_eval)
-        _scen = meta.get("scenario", "random")
         if tt["reachable"]:
-            _win = ("" if tt.get("n_last") is None
-                    or tt["n_last"] >= detect.N_TRANSITS_CAP else
-                    f" Correlated-scenario window: past {tt['n_last']} "
-                    f"{_ev}s the target is missed again.")
             st.warning(verdict + f"  Below the target; {tt['n']} {_ev}s of "
                        f"{ins.MODES[bk]['label']} would reach it (floor-aware "
-                       "estimate)." + _win)
+                       "estimate).")
         else:
             _fl = _has_floor(best_r)
             _lim = (f"±{tsig * tt['sig_inf']:.3g}{usp} at {tsig:g}σ" if _fl
                     else "")
             st.warning(
                 verdict + "  The target was "
-                + _not_reached_reason(_scen, _lim, _fl, _ev) + ". "
+                + _not_reached_reason(_lim, _fl, _ev) + ". "
                 + ("Lower the floor, combine modes, or relax the target."
                    if _fl else "Combine modes or relax the target."))
 
@@ -2424,19 +2391,12 @@ for r in sorted(results, key=key_order):
         _proj = r.get("sigma_detect_proj", float("nan"))
         if np.isfinite(_proj):
             row["σ_detect (proj)"] = round(_proj, 1)
-        # experimental correlated scenarios stay OUT of the table unless the
-        # user explicitly selected one
-        if meta.get("scenario", "random") != "random":
-            for _sc, _v in r.get("sigma_detect_by_scenario", {}).items():
-                if _sc != r.get("scenario"):
-                    row[f"σ ({_sc}, exp.)"] = round(_v, 1)
         _t = float(meta.get("target_sig") or 3.0)
         if r["sigma_detect"] > 0:
             _tt = detect.transits_to_target(r, _t)
             _fl = _has_floor(r)
             row[_tt_col] = _transits_cell(
-                _tt, meta.get("scenario", "random"),
-                f"{_tt['sig_inf']:.1f}σ" if _fl else "", _fl, _ev)
+                _tt, f"{_tt['sig_inf']:.1f}σ" if _fl else "", _fl, _ev)
         else:
             row[_tt_col] = ""
     else:
@@ -2451,8 +2411,7 @@ for r in sorted(results, key=key_order):
                                                 co_eval=co_eval)
             _fl = _has_floor(r)
             row[_tt_col] = _transits_cell(
-                _tt, meta.get("scenario", "random"),
-                f"±{tsig * _tt['sig_inf']:.3g}" if _fl else "", _fl, _ev)
+                _tt, f"±{tsig * _tt['sig_inf']:.3g}" if _fl else "", _fl, _ev)
         else:
             row[_tt_col] = ""
     # the exact fixed detector configuration this row evaluated (each MODES
@@ -2477,11 +2436,6 @@ if goal_r == "detect":
         "will usually report a lower significance. σ_detect (proj) also "
         "profiles out the available temperature-profile, reference-radius, "
         "and cloud directions; prefer it for narrow margins."
-        + (f" σ_detect is scored under the **{meta.get('scenario')}** "
-           "correlated-floor scenario (EXPERIMENTAL, a stated assumption, "
-           "not a calibrated systematics model); the σ (…, exp.) columns "
-           "re-score it under the other scenarios at identical per-bin "
-           "totals." if meta.get("scenario", "random") != "random" else "")
     )
 else:
     st.caption(
@@ -2543,7 +2497,7 @@ if fisher_names and "jac" in model:
     st.dataframe(frows, width="stretch", hide_index=True)
     st.caption(
         "One row per mode and parameter. **Marginalized**: joint fit; all "
-        "other parameters plus the lnR0 / per-segment offset / slope "
+        "other parameters plus the lnR0 and per-segment offset "
         "nuisances are free and marginalized out. **Conditional**: "
         "everything else held fixed at the input values, a narrower and "
         "more optimistic bound. Both are local Cramer-Rao lower bounds "
@@ -2572,8 +2526,7 @@ if fisher_names and "jac" in model:
             "a real posterior wider, and informative priors can make it "
             "narrower.\n"
             "- The sensitivities d(spectrum)/d(parameter) use the "
-            "differentiation method selected in the science-goal step, "
-            "shown per row in Model quality and provenance below: "
+            "differentiation method selected in the science-goal step: "
             "**central finite differences** of independently re-converged "
             "solves (default; composition rows re-initialize the chemistry "
             "at the perturbed elemental abundances, the standard VULCAN "
@@ -2603,303 +2556,3 @@ if fisher_names and "jac" in model:
 elif out.get("fisher_names"):
     st.info("A constraint forecast was requested but the cached model has "
             "no Jacobian. Press Run to compute it.")
-
-# --- model quality and provenance (collapsed: supports the result) ---------
-with st.expander("Model quality and provenance"):
-    if out.get("provenance"):
-        _pv = out["provenance"]
-        st.caption(
-            f"**{ins.BACKEND_STATUS}.** Backend: pandeia.engine "
-            f"{_pv['engine_version']} + {_pv['refdata_name']} "
-            f"(refdata {_pv['refdata_version']}), worker v{_pv['worker_version']} "
-            ",  recorded in every noise cache.")
-    # chemistry certificate, provider-aware: everything shown passed its
-    # gate, or run_model would have raised
-    if "conv_longdy" in model and np.asarray(model["conv_longdy"]).size:
-        _gate = float(np.asarray(model["conv_gate"], float)[0])
-        st.caption(
-            "Chemistry convergence check (every stage passed, or the run "
-            "would have stopped with an error): " + "; ".join(
-                f"{s}: residual {l:.3g} below the {_gate:g} threshold "
-                f"({int(a)} solver steps)"
-                for s, a, l in zip(model["conv_stages"], model["conv_accept"],
-                                   np.asarray(model["conv_longdy"], float)))
-            + ".")
-    if "picaso_cert_json" in model:
-        _pcert = json.loads(str(model["picaso_cert_json"]))
-        st.caption(
-            "PICASO equilibrium quality check (every item passed, or the run "
-            "would have stopped with an error): built from the table grid "
-            f"points {_pcert['nodes'][0]} | {_pcert['nodes'][1]} "
-            f"(weights {_pcert['wf']:.3f} / {_pcert['wc']:.3f}). Before "
-            "renormalizing, the listed gas species summed to "
-            f"{_pcert['gas_sum_min']:.4f} at worst / "
-            f"{_pcert['gas_sum_median']:.4f} typically "
-            "(the tables omit some minor species, so the sum is renormalized "
-            "per layer -- standard practice"
-            + (f"; {_pcert['n_layers_below_warn']} layer(s) fell below the "
-               f"{_pcert['gas_sum_warn']:g} attention flag" if
-               _pcert.get("n_layers_below_warn") else "")
-            + ")"
-            + (f". Hot-layer carbon-to-oxygen came out at "
-               f"{_pcert['realized_gas_co_hotT']:.3f}"
-               if _pcert.get("realized_gas_co_hotT") is not None else "")
-            + (f". {len(_pcert['suspect_cells_in_span'])} known imperfect table "
-               "cell(s) sit in this profile's range (details: "
-               "docs/physics_and_conventions.md, PICASO section)"
-               if _pcert.get("suspect_cells_in_span") else "")
-            + (f". {len(_pcert['corrections_applied'])} catalogued table "
-               "fix(es) were applied (only ever to defects vetted and listed "
-               "in docs/physics_and_conventions.md, PICASO section)"
-               if _pcert.get("corrections_applied") else "")
-            + ". Ions and electrons count toward the gas total; graphite is "
-              "treated as a solid, not a gas.")
-    if "climate_provenance_json" in model:
-        _clj = json.loads(str(model["climate_provenance_json"]))
-        _clc = _clj.get("cert", {})
-        _cvz = [int(x) for x in (_clc.get("cvz_locs") or []) if int(x) > 0]
-        _cvz_top = _cvz[0] if _cvz else "?"
-        st.caption(
-            "Climate quality check (passed): energy balanced at the top of "
-            "the atmosphere to "
-            f"{_clc.get('flux_toa_over_tidal', float('nan')):.1e} of the "
-            "internal heat flux; temperature-gradient range "
-            f"[{_clc.get('grad_min', float('nan')):.2f}, "
-            f"{_clc.get('grad_max', float('nan')):.2f}] (dlnT/dlnP); "
-            f"convective from layer {_cvz_top} down"
-            ". The chemistry runs on this profile afterwards and never feeds "
-            "back into the climate's heating. Reminder: the deep profile "
-            "depends on the radiative-convective boundary setting (its widget "
-            "help has the measured sensitivity).")
-    if fisher_names and "jac" in model and "fd_err" in model:
-        # per-row provenance: FD rows passed the h-vs-2h consistency gate at
-        # run time (a failed row raises and no model is cached); AD rows are
-        # warm-started jvp (no step to vary, so no consistency metric)
-        _methods = ([str(m) for m in model["jac_row_method"]]
-                    if "jac_row_method" in model
-                    else ["fd-central"] * len(model["jac_names"]))
-        _parts = []
-        for n, m, e in zip(model["jac_names"], _methods,
-                           np.asarray(model["fd_err"], float)):
-            if str(n) == "lnR0":
-                continue
-            _sym = forward.PARAM_SYMBOLS.get(str(n), str(n))
-            if m == "ad-jvp":
-                _parts.append(f"{_sym} AD (warm jvp)")
-            elif not np.isfinite(e):
-                # ungated single-central-difference RT rows report their
-                # h-vs-2h metric as NaN (unmeasured), never a false 0.0
-                _parts.append(f"{_sym} FD-RT (smooth, ungated)")
-            else:
-                _parts.append(f"{_sym} FD {e:.3f}")
-        st.caption(
-            "How each Jacobian row was computed. "
-            "**FD** rows are central finite differences. Every step "
-            "re-solves the model to convergence, and two step sizes are "
-            "combined (Richardson). The number after FD compares the "
-            "derivative at step h with the one at step 2h. 0 means they "
-            f"agree exactly; a row fails above {forward.FD_CONSISTENCY_TOL}. "
-            "**AD** rows differentiate the solver itself, in forward mode, "
-            "warm-started from the converged state. Photochemistry is on "
-            "for these rows. "
-            "The two methods were compared once on WASP-39 b. They agreed "
-            "to within 0.07-1.6% per row. The 1.6% row is metallicity, "
-            "where the gap is a known fixed-grid difference. That "
-            "comparison checks the method. It is not an error bar for this "
-            "run. "
-            f"Rows: {', '.join(_parts)}.")
-
-# --- advanced diagnostics: adjoint sensitivities (reverse-mode AD) -----------
-# One reverse-mode adjoint solve gives dL/dlnk over EVERY reaction and dL/dT
-# over EVERY layer. Analyzes the CACHED model's canonical params (_cpj),
-# never the live sidebar. Expert feature, kept out of the default flow; when
-# unavailable, one caption says so instead of a full panel.
-# The full panel is hidden while the adjoint diagnostics are in development;
-# flip _ADJOINT_PANEL_IN_DEV to False to restore it unchanged.
-_ADJOINT_PANEL_IN_DEV = True
-with st.expander("Advanced diagnostics (in development)"):
-    if _ADJOINT_PANEL_IN_DEV:
-        st.caption("In development.")
-    elif _cpj.get("chem_provider") == "picaso":
-        st.caption(
-            "Unavailable for this run: adjoint diagnostics differentiate "
-            "the VULCAN reaction network (reverse-mode AD through the "
-            "steady-state solver), and the PICASO equilibrium engine has "
-            "no reaction network. Re-run with the VULCAN engine to use "
-            "this panel.")
-    elif _cpj.get("use_condense"):
-        st.caption(
-            "Unavailable for this run: it used condensation, whose pinned "
-            "reservoir is frozen at a step-history-dependent transient, so "
-            "no derivative through it is trustworthy. Re-run with "
-            "condensation off to use this panel.")
-    else:
-        st.caption(
-            "One **reverse-mode adjoint solve** through the converged "
-            "VULCAN-JAX state gives the sensitivity of a molecule's "
-            "photosphere abundance to **every reaction rate** in the "
-            "network and to **every layer's temperature** at once: the "
-            "high-dimensional questions where automatic differentiation "
-            "is the only practical tool (the constraint Jacobians above, "
-            "over a handful of parameters, use finite differences "
-            "instead). Validated upstream to 0.2-0.8% against finite "
-            "differences on the WASP-39 b SO2 and HD 189733 b CH4 "
-            "benchmarks. This is an expert research feature: the first "
-            "run on a machine can take hours on CPU (compilation).")
-        _adj_mols = [str(m) for m in model["mols"]]
-        _adj_tgt = str(meta.get("target") or "")
-        _adj_default = (_adj_tgt if _adj_tgt in _adj_mols
-                        else "SO2" if "SO2" in _adj_mols else _adj_mols[0])
-        adj_species = st.selectbox(
-            "Target molecule", _adj_mols, index=_adj_mols.index(_adj_default),
-            key=K("adjsp"),
-            help="L = log10 VMR of this molecule at its peak-abundance layer "
-                 "inside the transit photosphere (1e-5 to 0.1 bar).")
-        adj = adjoint_diag.load_result(_cpj, adj_species)
-        if adj is None:
-            st.caption(
-                "Not cached for this model + molecule. Cost: one chemistry "
-                "re-solve with an extended budget, plus the adjoint "
-                "ensemble. The FIRST adjoint run on a machine also compiles "
-                "the solver's step-VJP, which can take hours on CPU; the "
-                "result lands in the persistent JAX compile cache, so later "
-                "runs skip straight to the solve.")
-            # temporarily disabled in the GUI (in development); a disabled
-            # button always returns False, so the run path below is unreachable
-            st.caption("In development. Temporarily disabled.")
-            if st.button("Run adjoint diagnostics", key=K("adjrun"),
-                         disabled=True, help="In development"):
-                _adj_slot = runlimit.acquire("adjoint")
-                if _adj_slot is None:
-                    st.error(
-                        f"This instance is already running "
-                        f"{runlimit.MAX_CONCURRENT} heavy calculations "
-                        "(shared, public hardware). Try again in a few "
-                        "minutes.")
-                    st.stop()
-                try:
-                    with st.status("Running reverse-mode adjoint diagnostics …",
-                                   expanded=True) as status:
-                        # no prior: the first run on a machine compiles the
-                        # step-VJP (hours on CPU), later runs skip it; the
-                        # remaining-time readout is purely measured
-                        bar = _TimedBar(text="starting …")
-                        adjoint_diag.ADJOINT_CACHE.mkdir(parents=True,
-                                                         exist_ok=True)
-                        _apf = (adjoint_diag.ADJOINT_CACHE /
-                                f"{adjoint_diag.adjoint_key(_cpj, adj_species)}"
-                                ".params.json")
-                        _apf.write_text(json.dumps(_cpj))
-                        box = st.empty()
-                        lines = []
-
-                        def _adj_line(line):
-                            m = _ADJ_PROG_RE.match(line)
-                            if m:
-                                bar.update(min(1.0, float(m.group(1))),
-                                           m.group(2))
-                            else:
-                                lines.append(line)
-                                box.code("\n".join(lines[-10:]))
-                                bar.tick()
-
-                        with _managed_proc(
-                                [sys.executable, "-m",
-                                 "jwst_tool.adjoint_diag", str(_apf),
-                                 adj_species]) as proc:
-                            _watch_proc(proc, _adj_line, bar.tick)
-                            proc.wait()
-                        if proc.returncode != 0:
-                            status.update(label="Adjoint diagnostics failed",
-                                          state="error")
-                            st.error("Adjoint diagnostics failed. Last "
-                                     "output:\n\n```\n"
-                                     + "\n".join(lines[-25:]) + "\n```")
-                        else:
-                            bar.done()
-                            status.update(label="Adjoint diagnostics done",
-                                          state="complete")
-                            st.rerun()
-                finally:
-                    # release even on failure: a leaked slot would stay held
-                    # until a server restart
-                    _adj_slot.release()
-        else:
-            _trust = bool(adj["magnitudes_trusted"])
-            # pair antisymmetry: older cached npz predate it, so show only
-            # when present. Diagnostic-only, never a trust gate.
-            _pa_txt = (f", forward/reverse pair antisymmetry "
-                       f"{float(adj['pair_antisym']):.3g} (diagnostic only, "
-                       "not a trust gate)" if "pair_antisym" in adj else "")
-            st.caption(
-                f"Loss: log10 VMR({adj_species}) = "
-                f"{float(adj['loss_log10_vmr']):.2f} at "
-                f"P = {float(adj['loss_p_bar']):.1e} bar. Certification: "
-                f"fixed-point error {float(adj['fp_err']):.1e}, adjoint "
-                f"residual (median) {float(adj['resid_median']):.3g}, "
-                f"twin-ensemble spread {float(adj['ensemble_spread']):.3g} "
-                f"over {int(adj['n_solves'])} solves{_pa_txt}; scope-audit worst "
-                f"defect {float(adj['audit_max_rel_defect']):.1e} "
-                f"(loss footprint {float(adj['audit_loss_footprint_defect']):.1e})"
-                f"; photolysis feedback "
-                f"{'ON' if bool(adj['photo_feedback']) else 'off'}. "
-                + ("**Magnitudes are trustworthy** (residual <= 0.2 and "
-                   "spread <= 0.15, the upstream gates)." if _trust else
-                   "**Treat as a RANKING**: residual or spread exceeds the "
-                   "upstream trust gates, so magnitudes are indicative only."))
-            _adj_df = pd.DataFrame({
-                "reaction": [str(x) for x in adj["top_label"][:10]],
-                "type": [str(x) for x in adj["top_kind"][:10]],
-                "dL/dln k": [f"{v:+.3g}" for v in
-                             np.asarray(adj["top_S"], float)[:10]],
-            })
-            st.dataframe(_adj_df, width="stretch", hide_index=True)
-            st.caption(
-                "Physical (detailed-balance pair-summed) sensitivities of the "
-                "loss to each reaction's rate constant, top 10 of the full "
-                "network. Sign: positive means a faster rate increases the "
-                f"abundance. Under a uniform Agundez (2025) class-B rate "
-                f"uncertainty ({float(adj['uq_class_dex']):g} dex per "
-                "reaction), the implied abundance spread is sigma(log10 VMR) "
-                f"= {float(adj['uq_sigma_log10']):.2f} dex. That is a stated "
-                "assumption, not a per-reaction uncertainty assessment.")
-            fig_adj, ax_adj = plt.subplots(figsize=(6.0, 3.4))
-            _pb = np.asarray(adj["p_bar"], float)
-            _dt = np.asarray(adj["dLdT"], float)
-            ax_adj.plot(_dt * 1.0e3, _pb, lw=1.4)
-            ax_adj.axhline(float(adj["loss_p_bar"]), ls=":", lw=0.8,
-                           color="gray")
-            ax_adj.set_yscale("log")
-            ax_adj.invert_yaxis()
-            ax_adj.set_xlabel(f"d log10 VMR({adj_species}) / dT  [1e-3 per K]")
-            ax_adj.set_ylabel("Pressure [bar]")
-            ax_adj.set_title("Per-layer temperature sensitivity (adjoint)")
-            st.pyplot(fig_adj, width="stretch")
-            st.caption(
-                "Chemistry-path gradient: how the target's photosphere "
-                "abundance responds to warming each layer. Photolysis cross "
-                "sections and the diffusion/geometry rebuild are frozen by "
-                "design, the upstream contract, with rebuild consistency "
-                f"{float(adj['rebuild_consistency']):.1e}. The dotted line "
-                "marks the loss layer.")
-            _a1, _a2 = st.columns(2)
-            _a1.download_button(
-                "Reactions (CSV)", _csv_bytes(pd.DataFrame({
-                    "reaction": [str(x) for x in adj["top_label"]],
-                    "type": [str(x) for x in adj["top_kind"]],
-                    "dL_dlnk": np.asarray(adj["top_S"], float),
-                })),
-                f"{_fname_base}_adjoint_{adj_species}_reactions.csv",
-                "text/csv", key=K("dl_adj_csv"))
-            _a2.download_button(
-                "dL/dT profile (CSV)", _csv_bytes(pd.DataFrame({
-                    "p_bar": _pb, "dlog10vmr_dT_perK": _dt})),
-                f"{_fname_base}_adjoint_{adj_species}_dLdT.csv",
-                "text/csv", key=K("dl_adj_dt_csv"))
-
-
-
-
-
-
-

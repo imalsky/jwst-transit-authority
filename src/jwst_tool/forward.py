@@ -190,21 +190,29 @@ TP_FILE_UPLOAD = "upload"         # user-supplied table; content-addressed copy
 # cross-checks these constants against the LIVE cfg, CO_BASELINE-style.
 CHEM_P_SPAN_DYN = (0.1, 7.6e6)
 
-# Structure default (2026-08-09 maintainer decision): the analytic Guillot
-# profile, for EVERY planet and provider. It is the differentiable choice --
-# file mode has no T-P Fisher row and pairs poorly with the AD-first GUI
-# defaults set the same day. A planet's bundled MEASURED T-P/Kzz table stays
-# SELECTABLE (tp_mode="file" resolves to that planet's own table and its Kzz
-# column), and shipped_tp_table_is_default still records which tables are
-# verified end-to-end. Stated trade-off, measured on W39b 2026-07-21 (when
-# the verified table WAS the default): Guillot + constant Kzz ran ~100 K hot
-# through the SO2 formation zone with Kzz 4-33x low, suppressing the headline
-# SO2 science (2.0 vs 4.5 sigma) -- select the shipped table for W39b SO2
-# work. Which planets have a table is data: planets.PLANETS[...]["tp_table"].
+# Structure default (2026-08-11 maintainer decision, reversing the structure
+# half of the 2026-08-09 speed-first flip): where vulcan_jax bundles a
+# MEASURED T-P/Kzz table VERIFIED end-to-end for a planet, that table (and
+# its Kzz column) is the default structure; the analytic Guillot profile is
+# the default everywhere else and under the picaso provider. Rationale: the
+# default W39b run must reproduce the literature-validated SO2 state (G395H
+# SO2 4.16 sigma vs Alderson+2023 4.8 / Tsai+2023 4.5); on the Guillot +
+# constant-Kzz stand-in it read ~2 sigma (measured 2026-07-21: ~100 K hot
+# through the SO2 formation zone, Kzz 4-33x low). The table also converges
+# FASTER (28 s vs ~8 min), so this costs no speed; the stated trade-off is
+# that file mode has no T-P Fisher row (Fisher forecasts are conditional on
+# the profile -- switch to Guillot when a temperature row is needed). The
+# AD-first GUI defaults of 2026-08-09 are kept and compatible (AD gates on
+# photo/conden/provider, not on tp_mode). Which planets have a table is
+# data: planets.PLANETS[...]["tp_table"].
 def _default_tp_mode(params: dict) -> str:
-    """tp_mode default: the analytic Guillot profile everywhere (2026-08-09;
-    previously the planet's verified measured table where one shipped).
-    ``params`` is kept for signature stability with canonical_params/the GUI."""
+    """tp_mode default: the planet's measured table where a default run on it
+    is VERIFIED, else the analytic Guillot profile. Having a table is not
+    enough -- see shipped_tp_table_is_default."""
+    planet = str(params.get("planet", "wasp39b"))
+    if (shipped_tp_table_is_default(planet)
+            and str(params.get("chem_provider", "vulcan")) == "vulcan"):
+        return "file"
     return "guillot"
 
 
@@ -360,12 +368,15 @@ def shipped_tp_table_name(planet: str) -> str:
 
 
 def shipped_tp_table_is_default(planet: str) -> bool:
-    """Whether ``planet``'s bundled table is VERIFIED end-to-end at default
-    settings. Since 2026-08-09 this no longer selects the default structure
-    (that is Guillot everywhere -- see _default_tp_mode); it remains the
-    verification record distinguishing a certified table from a merely
-    bundled one. HD 189733 b ships a good profile the solver will not certify
-    at default settings (planets.PLANETS[...]["tp_table_note"] carries the
+    """Whether ``planet``'s bundled table is its DEFAULT structure.
+
+    Separate from merely having one: a table only becomes the default once a
+    default run on it has been verified end-to-end here (default-selecting
+    again since 2026-08-11; between 2026-08-09 and then this was a pure
+    verification record under the Guillot-everywhere default). HD 189733 b
+    ships a good profile the solver will not certify at default settings, so
+    it stays selectable-but-not-default rather than making that planet error
+    on arrival (planets.PLANETS[...]["tp_table_note"] carries the
     measurement)."""
     entry = planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS)
     return bool(entry.get("tp_table") and entry.get("tp_table_default"))

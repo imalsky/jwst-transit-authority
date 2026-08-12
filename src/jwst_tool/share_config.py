@@ -347,7 +347,6 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
     # -- observation (step 4)
     if obs:
         from jwst_tool import instruments as ins
-        from jwst_tool import noise as noise_mod
         if obs.get("ks_mag") is not None:
             state[pk("ks")] = float(obs["ks_mag"])
         if obs.get("t14") is not None:
@@ -385,9 +384,13 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
         for m, v in (obs.get("noise_infl") or {}).items():
             if m in ins.MODES and isinstance(v, (int, float)):
                 state[key(f"infl_{m}")] = float(v)
-        sc = obs.get("scenario")
-        if sc in noise_mod.SCENARIOS:
-            state[key("scenario")] = sc
+        # correlated-floor noise scenarios were removed 2026-08-11 (0.28.0);
+        # a config saved before that may still carry the key
+        if obs.get("scenario") not in (None, "random"):
+            notes.append(
+                f"this configuration selected the removed experimental "
+                f"noise scenario {obs['scenario']!r}; the standard "
+                "(diagonal) noise model is used instead")
         if obs.get("seed") is not None:
             state[key("seed")] = int(obs["seed"])
         if obs.get("show_noise") is not None:
