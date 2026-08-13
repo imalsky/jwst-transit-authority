@@ -1,23 +1,22 @@
-"""One-figure proposal summary: spectra + marginalized forecast posteriors +
-per-mode/per-combination precision ranking.
+"""One-figure proposal summary: spectra + marginalized forecast posteriors.
 
 Pure matplotlib + numpy, importable and renderable without Streamlit (the GUI
 builds the input dicts; tests render headless). The composition takes plain
 dicts/arrays so it is unit-testable without any engine or noise backend.
 
-The three panels answer the collaborator's three questions in one graphic:
+The two panels answer the collaborator's three questions in one graphic:
 
-* LEFT  -- can the hypothesis be tested? The model spectrum with each mode's
-  simulated data points (per-mode color + marker; optionally one seeded mock
-  noise realization).
-* CENTER -- what would the measurement look like? Up to two 1D marginalized
+* LEFT  -- can the hypothesis be tested, and which mode is best at what
+  precision? The model spectrum with each mode's simulated data points
+  (per-mode color + marker; optionally one seeded mock noise realization).
+  Each legend entry carries that mode's expected performance number (the
+  caller appends it to the point-series label: a conditional template S/N
+  for a detection goal, an expected +/- for a constraint goal).
+* RIGHT -- what would the measurement look like? Up to two 1D marginalized
   Fisher-Gaussian forecast curves (posteriors.FORECAST_LABEL wording: these
   are linearized Cramer-Rao forecasts, never sampled retrieval posteriors).
   An unconstrained direction renders as an explicit annotation, never a fake
   finite curve.
-* RIGHT -- which mode or combination is best, and at what precision? A
-  horizontal bar chart of the expected precision on a chosen parameter (or
-  the conditional template S/N when the science goal is a detection).
 
 House style: the vendored science.mplstyle with the GUI's serif/STIX
 overrides, so the standalone render matches the in-app figures.
@@ -122,48 +121,23 @@ def _validate_panels(posterior_panels) -> list[dict]:
     return out
 
 
-def _validate_ranking(ranking) -> dict | None:
-    if ranking is None:
-        return None
-    if not isinstance(ranking, dict):
-        raise ValueError("compose_summary_figure: ranking must be a dict")
-    entries = []
-    for i, e in enumerate(_req(ranking, "entries", "ranking")):
-        where = f"ranking.entries[{i}]"
-        v = float(_req(e, "value", where))
-        if not np.isfinite(v) or v < 0.0:
-            raise ValueError(f"{where}: value must be finite and >= 0, "
-                             f"got {v!r}")
-        entries.append(dict(label=str(_req(e, "label", where)), value=v,
-                            color=str(e.get("color", "#555555"))))
-    if not entries:
-        raise ValueError("ranking: entries is empty")
-    target = ranking.get("target")
-    return dict(xlabel=str(_req(ranking, "xlabel", "ranking")),
-                entries=entries,
-                target=(None if target is None else float(target)),
-                value_fmt=str(ranking.get("value_fmt", "{:.3g}")))
-
-
 def compose_summary_figure(spectrum: dict, posterior_panels=None,
-                           ranking: dict | None = None,
                            title: str | None = None,
                            footnote: str | None = None):
-    """Compose the three-part proposal summary figure; returns the Figure.
+    """Compose the two-part proposal summary figure; returns the Figure.
 
     ``spectrum``: dict(wl_um, depth_ppm, depth_label, model_label,
     points=[dict(label, color, marker, wl_um, depth_ppm, sigma_ppm), ...]).
     Depths in ppm; the model curve is plotted as given (pre-smooth it for
     display upstream if desired -- this function never alters the data).
+    Per-mode expected performance belongs IN each point label (the caller
+    appends the number), so the legend carries the ranking.
 
     ``posterior_panels``: up to two dicts, one per parameter:
     dict(axis_label, curves=[dict(label, theta, pdf, color, ls, lw), ...],
     notes=[...], center=float|None). An unconstrained direction belongs in
     ``notes`` (rendered as an in-panel annotation), never as a curve. A
     panel must carry curves or notes -- silence is not allowed.
-
-    ``ranking``: dict(xlabel, entries=[dict(label, value, color), ...],
-    target=float|None, value_fmt=str) or None to omit the right panel.
 
     ``footnote``: honesty caption under the figure (pass
     posteriors.FORECAST_LABEL-based wording from the caller).
@@ -173,13 +147,12 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
     """
     spec = _validate_spectrum(spectrum)
     panels = _validate_panels(posterior_panels)
-    rank = _validate_ranking(ranking)
 
     with plt.style.context([str(_STYLE_FILE), _STYLE_OVERRIDES]):
-        fig = plt.figure(figsize=(13.0, 4.8), dpi=200)
-        gs = fig.add_gridspec(2, 3, width_ratios=[2.0, 1.15, 1.3],
-                              wspace=0.34, hspace=0.42,
-                              left=0.06, right=0.985,
+        fig = plt.figure(figsize=(11.5, 4.8), dpi=200)
+        gs = fig.add_gridspec(2, 2, width_ratios=[2.2, 1.15],
+                              wspace=0.30, hspace=0.42,
+                              left=0.09, right=0.985,
                               top=(0.88 if title else 0.94),
                               bottom=(0.22 if footnote else 0.14))
 
@@ -212,7 +185,7 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
             ax.legend(loc="best", frameon=False, fontsize=7,
                       ncol=1 if len(spec["points"]) <= 3 else 2)
 
-        # -- CENTER: up to two marginalized forecast posteriors -------------
+        # -- RIGHT: up to two marginalized forecast posteriors --------------
         for i in range(2):
             axp = fig.add_subplot(gs[i, 1])
             if i >= len(panels):
@@ -235,33 +208,6 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
                          ha="center", va="center", fontsize=7,
                          color="#883333", wrap=True)
             axp.grid(alpha=0.15)
-
-        # -- RIGHT: precision / template-S/N ranking ------------------------
-        axr = fig.add_subplot(gs[:, 2])
-        if rank is None:
-            axr.set_axis_off()
-        else:
-            entries = rank["entries"]
-            names = [e["label"] for e in entries]
-            vals = [e["value"] for e in entries]
-            cols = [e["color"] for e in entries]
-            bars = axr.barh(names, vals, color=cols, height=0.62)
-            vmax = max(vals + ([rank["target"]] if rank["target"] else []))
-            for b, v in zip(bars, vals):
-                axr.text(b.get_width() + vmax * 0.02,
-                         b.get_y() + b.get_height() / 2,
-                         rank["value_fmt"].format(v),
-                         va="center", fontsize=7, color="#333333")
-            if rank["target"] is not None:
-                axr.axvline(rank["target"], color="#333333", lw=0.9, ls="--")
-                axr.text(rank["target"], 1.01, "target",
-                         transform=axr.get_xaxis_transform(),
-                         fontsize=7, color="#333333", ha="center",
-                         va="bottom")
-            axr.set_xlim(0, vmax * 1.22 + 1e-12)
-            axr.set_xlabel(rank["xlabel"], fontsize=8)
-            axr.tick_params(labelsize=7)
-            axr.grid(axis="x", alpha=0.25)
 
         if title:
             fig.suptitle(str(title), fontsize=11)

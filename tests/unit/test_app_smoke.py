@@ -30,7 +30,7 @@ def _synthetic_out(science_mode="transmission", saturated=False,
     detect.transits_to_target, which needs the full evaluate_mode payload.
     ``with_jac=True`` adds a two-parameter Jacobian (lnZ, dlnCO + lnR0) to
     the model and a SECOND mode, so the Fisher table, the combo builder,
-    the forecast posteriors, and the summary-figure ranking all render.
+    the forecast posteriors, and the summary figure all render.
     """
     import json
     import numpy as np
@@ -226,15 +226,15 @@ def test_noise_floor_has_no_default_and_blocks_the_run():
     assert not _floor_error(at)
 
 
-def test_constant_floor_prefill_is_labeled_illustrative():
-    """The 15-40 ppm prefill must never read as a calibration for the program."""
+def test_constant_floor_prefill_renders_per_mode_inputs():
+    """Choosing the constant floor renders one editable input per mode
+    (the 2026-08-12 caption trim removed the prose; the widgets stay)."""
     at = AppTest.from_file(str(APP), default_timeout=60)
     at.run()
     at.radio(key="n0_floormode").set_value("constant").run()
     assert not at.exception, at.exception
-    caps = " ".join((c.value or "") for c in at.caption).lower()
-    assert "illustrative" in caps
-    assert "not in-flight calibrations" in caps
+    keys = {w.key for w in at.get("number_input")}
+    assert any(k and k.startswith("n0_floor_") for k in keys)
 
 
 def test_emission_results_use_eclipse_terms():
@@ -431,10 +431,8 @@ def test_mock_observation_controls_and_reroll():
     re-roll steps the seed (reproducibility: the seed stays visible)."""
     at = _run_app()
     assert not at.exception, at.exception
-    assert at.checkbox(key="n0_shownoise").value is False
+    assert at.checkbox(key="n0_shownoise").value is True   # ON by default
     assert at.number_input(key="n0_seed").value == 0
-    at.checkbox(key="n0_shownoise").check().run()
-    assert not at.exception, at.exception
     at.button(key="n0_reroll").click().run()
     assert not at.exception, at.exception
     assert at.number_input(key="n0_seed").value == 1
@@ -463,7 +461,7 @@ def test_mock_observation_render_disclosure_and_download():
 
 def test_combo_builder_and_summary_figure_render_with_jacobians():
     """With Jacobians present: the combo builder renders, adding a combo
-    puts its rows in the Fisher table and its bar in the summary ranking,
+    puts its rows in the Fisher table,
     and the proposal summary figure offers PDF + PNG downloads."""
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
     at = AppTest.from_file(str(APP), default_timeout=60)

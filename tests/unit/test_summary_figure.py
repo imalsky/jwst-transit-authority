@@ -39,18 +39,10 @@ def _panel():
                 notes=[], center=1.0)
 
 
-def _ranking():
-    return dict(xlabel="expected ±[M/H] [dex] at 3σ",
-                entries=[dict(label="G395H", value=0.21, color="#199e70"),
-                         dict(label="COMBO: pair", value=0.13,
-                              color="#777777")],
-                target=0.1, value_fmt="{:.3g}")
-
-
 def test_full_figure_composes_and_exports_png_and_pdf():
     fig = summary_figure.compose_summary_figure(
         _spectrum(), posterior_panels=[_panel(), _panel()],
-        ranking=_ranking(), title="WASP-39 b -- transmission forecast",
+        title="WASP-39 b -- transmission forecast",
         footnote="Linearized Fisher (Cramer-Rao) forecast; not a sampled "
                  "posterior.")
     try:
@@ -58,8 +50,8 @@ def test_full_figure_composes_and_exports_png_and_pdf():
             buf = io.BytesIO()
             fig.savefig(buf, format=fmt)
             assert buf.getbuffer().nbytes > 1000, fmt
-        # 1 spectrum + 2 posterior panels + 1 ranking
-        assert len(fig.axes) == 4
+        # 1 spectrum + 2 posterior panels
+        assert len(fig.axes) == 3
     finally:
         import matplotlib.pyplot as plt
         plt.close(fig)
@@ -122,12 +114,3 @@ def test_validation_is_loud():
         summary_figure.compose_summary_figure(
             _spectrum(with_points=False),
             posterior_panels=[_panel(), _panel(), _panel()])
-    with pytest.raises(ValueError, match="entries is empty"):
-        summary_figure.compose_summary_figure(
-            _spectrum(with_points=False),
-            ranking=dict(xlabel="x", entries=[]))
-    with pytest.raises(ValueError, match="finite"):
-        summary_figure.compose_summary_figure(
-            _spectrum(with_points=False),
-            ranking=dict(xlabel="x",
-                         entries=[dict(label="a", value=np.inf)]))

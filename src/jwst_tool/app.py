@@ -1243,7 +1243,7 @@ with st.sidebar:
         pass                       # constraints unavailable; caption above
     elif goal == "detect":
         do_fisher = st.checkbox(
-            "Also calculate parameter constraints", value=False,
+            "Also calculate parameter constraints", value=True,
             key=K("dofish"),
             help="Adds a Fisher parameter forecast to the detection run. "
                  "Each free parameter costs extra solves (see the cost "
@@ -1300,16 +1300,6 @@ with st.sidebar:
                 st.caption("Locked to finite differences: PICASO's "
                            "chemistry is table interpolation, with no "
                            "solver for AD to differentiate.")
-            st.caption(
-                ("Cost per row under PICASO: well under a minute. A "
-                 "climate T_int row re-runs the climate and takes "
-                 "several minutes.") if _pic else
-                (f"Cost per row: finite differences take about "
-                 f"{_FD_COMP_MIN}-{_FD_COMP_MAX} min for a composition "
-                 f"parameter and {_FD_THETA_MIN}-{_FD_THETA_MAX} min for "
-                 f"Kzz or temperature. AD takes about "
-                 f"{_AD_ROW_MIN}-{_AD_ROW_MAX} min per row. Cloud and "
-                 "Mie rows take seconds."))
             # Loud slow-path flag: FD re-solves the chemistry per row, so
             # point the user at AD before a multi-hour run (VULCAN only).
             if fisher_params and jac_method == "fd" and not _pic:
@@ -1371,9 +1361,6 @@ with st.sidebar:
 
     with st.expander("Noise model (Pandeia)"):
         st.markdown("**Minimum noise floor** (PandExo convention)")
-        st.caption("A hard minimum: σ_final = max(σ_random, floor) on the "
-                   "final bins. It is never added in quadrature and never "
-                   f"averages down with more {_evw}s.")
         # NO PRESELECTION (index=None): a 15-40 ppm floor dominates the
         # reported precision and a zero floor claims undemonstrated precision
         # -- neither is neutral, so the user must own the choice.
@@ -1393,11 +1380,6 @@ with st.sidebar:
                 f"{ins.MODES[k]['label']} minimum floor (ppm)", 0.0, 200.0,
                 ins.MODES[k]["floor_ppm_suggested"], 5.0, key=K(f"floor_{k}"))
                 for k in mode_keys}
-            st.caption(
-                "Prefilled with per-mode planning values (15-40 ppm), "
-                "informed by the Greene+2016 convention but not identical "
-                "to it. These are illustrative, not in-flight calibrations. "
-                "Edit them for your program.")
         elif floor_mode == "file":
             up = st.file_uploader(
                 "Two columns: wavelength (µm), floor (ppm)",
@@ -1451,12 +1433,6 @@ with st.sidebar:
                              or floor_mode == "constant"
                              or (floor_mode == "file" and floor_table is not None))
 
-        st.markdown("**Random-noise multiplier** (× Pandeia σ, optional)")
-        st.caption("Default **1.0** uses the Pandeia prediction as-is. "
-                   "Published achieved-vs-predicted ratios run about "
-                   "1.05-1.2x and are reference points, not a calibration. "
-                   "Unlike the floor, this noise averages down with more "
-                   f"{_evw}s.")
         infl = {k: st.number_input(
             f"{ins.MODES[k]['label']} random-noise multiplier", 1.0, 3.0,
             float(ins.MODES[k].get("noise_infl", 1.0)),
@@ -1633,7 +1609,7 @@ with st.sidebar:
         # downloadable, clearly named with its seed).
         show_noise = st.checkbox(
             "Show a simulated mock observation (one noise realization)",
-            value=False, key=K("shownoise"),
+            value=True, key=K("shownoise"),
             help="Adds one random noise draw per bin on top of the binned "
                  "model, at each mode's final per-bin uncertainty (noise "
                  "floor included) -- what a single real observation could "
@@ -2211,14 +2187,6 @@ else:
 # feasibility (data volume, schedulability, calibration warnings), so the
 # verdict must carry that caveat -- an operationally unsupportable
 # configuration can otherwise be presented as "Best" (2026-08-05 review).
-if ok:
-    st.caption(
-        "Best-mode rankings compare expected science information under this "
-        "tool's fixed detector configurations; scores are conditional "
-        "statistics for the selected atmosphere, not retrieval results. "
-        "Operational feasibility (data volume, scheduling, calibration "
-        "warnings) is not checked; verify the chosen configuration in APT "
-        "before proposing.")
 
 # --- spectrum figure -------------------------------------------------------
 st.subheader("Simulated eclipse emission spectrum"
@@ -2308,21 +2276,16 @@ fig.legend(_handles, _labels, loc="lower center", ncol=3, frameon=False,
 st.pyplot(fig, width="stretch")
 _spec_png = _fig_png(fig)
 plt.close(fig)
-st.caption(
-    f"Model {_cpj.get('science_mode', 'transmission')} spectrum with the "
-    "depths and predicted uncertainties of each selected mode binned to "
-    f"the shared analysis resolution R = λ/Δλ = {meta['r_bin']}, for "
-    f"{meta['n_transits']} {_ev}"
-    f"{'s' if meta['n_transits'] > 1 else ''}. Each mode is first "
-    "simulated at its instrument's native resolution, then binned."
-    + (f" The plotted points are one simulated mock observation "
-       f"(seed {int(seed)}): the binned model plus one random draw per bin "
-       "at the final per-bin uncertainty, added after the forward model "
-       "and the noise model. A single realization can be lucky or unlucky; "
-       "every quoted precision and the conditional template S/N are "
-       "computed from the noiseless model and never include this draw. "
-       "Use 'New realization' (More settings → Display & reproducibility) "
-       "to re-roll." if _mock is not None else ""))
+if _mock is not None:
+    st.caption(
+        f"The plotted points are one simulated mock observation "
+        f"(seed {int(seed)}): the binned model plus one random draw per bin "
+        "at the final per-bin uncertainty, added after the forward model "
+        "and the noise model. A single realization can be lucky or unlucky; "
+        "every quoted precision and the conditional template S/N are "
+        "computed from the noiseless model and never include this draw. "
+        "Use 'New realization' (More settings → Display & reproducibility) "
+        "to re-roll.")
 
 # downloads: the figure + the plotted numbers (binned points, native model)
 _bin_df = pd.concat([
@@ -2462,9 +2425,6 @@ with col2:
     st.pyplot(fig3, width="stretch")
     _tp_png = _fig_png(fig3)
     plt.close(fig3)
-    st.caption(f"As modeled ({cpj.get('tp_mode', '?')} mode). Dotted lines: "
-               "the [320, 2980] K opacity window; profiles outside it are "
-               "rejected, never clipped.")
     _p_arr = np.asarray(model["p_bar"], dtype=float)
     _T_arr = np.asarray(model["T"], dtype=float)
     if cpj.get("science_mode") == "emission":
@@ -2578,14 +2538,7 @@ st.download_button("Mode details (CSV)", _csv_bytes(pd.DataFrame(rows)),
                    f"{_fname_base}_mode_details.csv", "text/csv",
                    key=K("dl_modes_csv"))
 if goal_r == "detect":
-    st.caption(
-        "**σ_detect is a conditional matched-template S/N** for the selected "
-        "atmosphere, not a retrieval detection. A retrieval that frees more "
-        "atmospheric parameters under the same model and noise assumptions "
-        "will usually report a lower significance. σ_detect (proj) also "
-        "profiles out the available temperature-profile, reference-radius, "
-        "and cloud directions; prefer it for narrow margins."
-    )
+    pass
 else:
     st.caption(
         f"± per mode is the marginalized Fisher forecast scaled to {tsig:g}σ "
@@ -2990,87 +2943,63 @@ if _have_fisher:
 
 # --- proposal summary figure -------------------------------------------------
 st.subheader("Proposal summary figure")
-st.caption(
-    "One graphic for a proposal: the simulated spectra (left), the "
-    "marginalized forecast posteriors (center), and the expected "
-    "per-mode / per-combination performance (right).")
-_sum_points = []
-for r in results:
-    _y = (np.asarray(_mock["modes"][r["mode_key"]]["depth_mock"], float)
-          if _mock is not None else np.asarray(r["depth"], float)) * 1e6
-    _sum_points.append(dict(
-        label=r["label"] + (" (saturated!)" if r["saturated"] else ""),
-        color=ins.MODE_COLOR[r["mode_key"]],
-        marker=ins.MODE_MARKER.get(r["mode_key"], "o"),
-        wl_um=np.asarray(r.get("wl_eff", r["wl"]), float),
-        depth_ppm=_y,
-        sigma_ppm=np.asarray(r["sigma"], float) * 1e6))
-_sum_spectrum = dict(wl_um=wl_s, depth_ppm=d_plot,
-                     depth_label=_depth_lbl,
-                     model_label="model (smoothed for display)",
-                     points=_sum_points)
 
-_sum_rank = None
+# Per-mode expected performance, rendered IN the legend label of each
+# point series (replaces the retired right-hand ranking panel): the
+# conditional template S/N for a detection goal, the expected ± on a
+# chosen parameter for a constraint/Fisher run.
+_leg_num: dict = {}
+_tsig_s = float(meta.get("target_sig") or 3.0)
 if goal_r == "detect":
-    _rank_rs = sorted([r for r in results if np.isfinite(r["sigma_detect"])],
-                      key=lambda r: r["sigma_detect"])
-    if _rank_rs:
-        _sum_rank = dict(
-            xlabel=f"{meta['target']} conditional template S/N "
-                   f"({meta['n_transits']} {_ev}"
-                   f"{'s' if meta['n_transits'] > 1 else ''})",
-            entries=[dict(label=r["label"]
-                          + (" (saturated)" if r["saturated"] else ""),
-                          value=float(r["sigma_detect"]),
-                          color=ins.MODE_COLOR[r["mode_key"]])
-                     for r in _rank_rs],
-            target=float(meta.get("target_sig") or 3.0),
-            value_fmt="{:.1f}σ")
+    for r in results:
+        if np.isfinite(r["sigma_detect"]):
+            _leg_num[r["mode_key"]] = f"{float(r['sigma_detect']):.1f}σ"
 elif _have_fisher:
     _rk_key = K("sum_rank_param_" + "_".join(fisher_names))
     if st.session_state.get(_rk_key) not in fisher_names:
         st.session_state.pop(_rk_key, None)
     _gp_default = meta.get("goal_param")
     _rk_param = st.selectbox(
-        "Ranking parameter (right panel)", fisher_names,
+        "Legend parameter (per-mode expected ±)", fisher_names,
         index=(fisher_names.index(_gp_default)
                if _gp_default in fisher_names else 0),
         key=_rk_key, format_func=lambda n: forward.PARAM_LABELS[n])
-    _tsig_s = float(meta.get("target_sig") or 3.0)
-    _entries = []
     for r in [x for x in results if x.get("jac_bins") is not None
               and not x["saturated"]]:
         _v = _tsig_s * fisher_mod.display_sigma(
             _rk_param, fisher_mod.mode_forecast(r, fisher_names)[_rk_param],
             co_eval=co_eval)
         if np.isfinite(_v):
-            _entries.append(dict(label=r["label"], value=float(_v),
-                                 color=ins.MODE_COLOR[r["mode_key"]]))
-    _usable_r = [x for x in results if x.get("jac_bins") is not None
-                 and not x["saturated"]]
-    if len(_usable_r) >= 2:
-        _v = _tsig_s * fisher_mod.display_sigma(
-            _rk_param,
-            fisher_mod.combined_forecast(_usable_r, fisher_names)[_rk_param],
-            co_eval=co_eval)
-        if np.isfinite(_v):
-            _entries.append(dict(label="ALL USABLE (combined)",
-                                 value=float(_v), color="#555555"))
-    for _rec in combo_recs:
-        _v = _tsig_s * float(_rec["sigma_marginalized_display"][_rk_param])
-        if np.isfinite(_v):
-            _entries.append(dict(label=f"COMBO: {_rec['name']}",
-                                 value=float(_v), color="#777777"))
-    if _entries:
-        _entries.sort(key=lambda e: -e["value"])   # best (smallest) at top
-        _tgt = (float(meta["target_prec"])
-                if (goal_r == "constrain"
-                    and meta.get("goal_param") == _rk_param
-                    and meta.get("target_prec") is not None) else None)
-        _sum_rank = dict(
-            xlabel=f"expected ±{forward.param_axis(_rk_param)} "
-                   f"at {_tsig_s:g}σ",
-            entries=_entries, target=_tgt, value_fmt="{:.3g}")
+            _leg_num[r["mode_key"]] = f"±{_v:.3g}"
+
+_sum_points = []
+for r in results:
+    _y = (np.asarray(_mock["modes"][r["mode_key"]]["depth_mock"], float)
+          if _mock is not None else np.asarray(r["depth"], float)) * 1e6
+    _lbl = r["label"] + (" (saturated!)" if r["saturated"] else "")
+    if r["mode_key"] in _leg_num:
+        _lbl += f": {_leg_num[r['mode_key']]}"
+    _sum_points.append(dict(
+        label=_lbl,
+        color=ins.MODE_COLOR[r["mode_key"]],
+        marker=ins.MODE_MARKER.get(r["mode_key"], "o"),
+        wl_um=np.asarray(r.get("wl_eff", r["wl"]), float),
+        depth_ppm=_y,
+        sigma_ppm=np.asarray(r["sigma"], float) * 1e6))
+_leg_note = None
+if _leg_num:
+    _leg_note = (
+        f"legend: {meta['target']} conditional template S/N per mode, "
+        f"{meta['n_transits']} {_ev}"
+        f"{'s' if meta['n_transits'] > 1 else ''}"
+        if goal_r == "detect" else
+        f"legend: expected ±{forward.param_axis(_rk_param)} per mode "
+        f"at {_tsig_s:g}σ")
+_sum_spectrum = dict(wl_um=wl_s, depth_ppm=d_plot,
+                     depth_label=_depth_lbl,
+                     model_label="model (smoothed for display)"
+                                 + (f"\n({_leg_note})" if _leg_note else ""),
+                     points=_sum_points)
 
 _sum_foot = (
     "Forecasts are linearized Fisher (Cramer-Rao) bounds under the quoted "
@@ -3082,7 +3011,6 @@ _sum_foot = (
        if _mock is not None else ""))
 fig_sum = summary_figure.compose_summary_figure(
     _sum_spectrum, posterior_panels=_post_panels or None,
-    ranking=_sum_rank,
     title=f"{meta.get('planet', 'planet')} -- "
           f"{_cpj.get('science_mode', 'transmission')} forecast summary",
     footnote=_sum_foot)
@@ -3097,10 +3025,4 @@ _s1.download_button("Figure (PDF, vector)", _sum_pdf,
 _s2.download_button("Figure (PNG)", _sum_png,
                     f"{_fname_base}_proposal_summary.png", "image/png",
                     key=K("dl_summary_png"))
-st.caption(
-    "Left: the model spectrum with each mode's simulated data. Center: "
-    "marginalized Fisher-Gaussian forecast posteriors (drawn above). "
-    "Right: expected performance per mode and combination. Rankings "
-    "compare expected science information under this tool's fixed detector "
-    "configurations; verify any chosen configuration in APT before "
-    "proposing.")
+
