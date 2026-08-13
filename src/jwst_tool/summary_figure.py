@@ -79,7 +79,16 @@ def _validate_spectrum(spectrum: dict) -> dict:
                            color=str(_req(p, "color", where)),
                            marker=str(p.get("marker", "o")),
                            wl_um=pw, depth_ppm=pd, sigma_ppm=ps))
+    depth2 = spectrum.get("depth2_ppm")
+    if depth2 is not None:
+        depth2 = _finite_1d(depth2, "depth2_ppm", "spectrum")
+        if depth2.shape != wl.shape:
+            raise ValueError(f"spectrum: depth2_ppm {depth2.shape} and "
+                             f"wl_um {wl.shape} shapes differ")
+        depth2 = depth2[order]
     return dict(wl_um=wl[order], depth_ppm=depth[order],
+                depth2_ppm=depth2,
+                depth2_label=str(spectrum.get("depth2_label", "comparison")),
                 depth_label=str(spectrum.get("depth_label",
                                              "transit depth (ppm)")),
                 model_label=str(spectrum.get("model_label", "model")),
@@ -160,6 +169,9 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
         ax = fig.add_subplot(gs[:, 0])
         ax.plot(spec["wl_um"], spec["depth_ppm"], color="#444444", lw=1.1,
                 alpha=0.9, zorder=2, label=spec["model_label"])
+        if spec["depth2_ppm"] is not None:
+            ax.plot(spec["wl_um"], spec["depth2_ppm"], color="#888888",
+                    lw=1.0, ls="--", zorder=1, label=spec["depth2_label"])
         for p in spec["points"]:
             ax.errorbar(p["wl_um"], p["depth_ppm"], yerr=p["sigma_ppm"],
                         fmt=p["marker"], ms=3.6, lw=0.9, color=p["color"],

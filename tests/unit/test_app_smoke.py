@@ -157,8 +157,9 @@ def test_results_render_with_synthetic_run():
     assert not at.exception, at.exception
     # every figure and table must offer a download
     dl_labels = {b.label for b in at.get("download_button")}
-    assert {"Figure (PNG)", "Binned points (CSV)", "Native model (CSV)",
-            "Values (CSV)", "Mode details (CSV)"} <= dl_labels
+    assert {"Figure (PDF, vector)", "Figure (PNG)", "Binned points (CSV)",
+            "Native model (CSV)", "Values (CSV)",
+            "Mode details (CSV)"} <= dl_labels
 
 
 def _deferred_labels(at):
@@ -253,6 +254,7 @@ def test_emission_results_use_eclipse_terms():
     assert not any("transit" in s for s in succ), succ
     subs = [s.value for s in at.subheader]
     assert any("eclipse emission spectrum" in s for s in subs), subs
+    assert not any(s == "Proposal summary figure" for s in subs)
 
 
 def test_all_saturated_state_has_no_best_mode():
@@ -472,7 +474,7 @@ def test_combo_builder_and_summary_figure_render_with_jacobians():
     subs = [s.value for s in at.subheader]
     assert "Mode combinations" in subs
     assert "Marginalized forecast posteriors" in subs
-    assert "Proposal summary figure" in subs
+    assert any("forecast summary" in s for s in subs), subs
     dl = {b.label for b in at.get("download_button")}
     assert "Figure (PDF, vector)" in dl
     # add a named combination through the builder widgets

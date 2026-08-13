@@ -207,14 +207,20 @@ realization: a curve of the same width whose center is shifted by the draw.
 Over many realizations the shift has zero mean and the marginalized Fisher
 covariance -- it is a visualization of realization scatter, not a retrieval.
 
-### Proposal summary figure
+### The results figure
 
-One composed three-panel graphic for proposals: the model spectrum with
-each mode's simulated data points, up to two marginalized forecast
-posterior panels (best mode against the best combination), and the
-precision or template-S/N ranking bars. Downloadable as vector PDF and
-PNG; the footnote carries the same linearized-forecast wording as the
-posterior section.
+The results page renders one composed, proposal-ready graphic (no figure
+appears twice): the model spectrum with each mode's simulated data points
+on the left, and up to two marginalized forecast posterior panels (best
+mode or combination, with an optional dashed comparison) on the right.
+Each mode's expected performance -- its conditional template S/N for a
+detection goal, its expected ± for a constraint goal -- rides in that
+mode's legend entry, so the per-mode ranking needs no separate chart.
+Downloadable as vector PDF and PNG alongside the binned-points, native
+model, and (when the mock layer is on) seeded mock-observation CSVs; the
+footnote carries the same linearized-forecast wording as the posterior
+section. The T-P profile remains its own small figure, and the Fisher
+table carries the full per-mode and per-combination numbers.
 
 ### NIRSpec G395M
 

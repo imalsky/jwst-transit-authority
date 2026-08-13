@@ -2182,10 +2182,7 @@ else:
 # verdict must carry that caveat -- an operationally unsupportable
 # configuration can otherwise be presented as "Best" (2026-08-05 review).
 
-# --- spectrum figure -------------------------------------------------------
-st.subheader("Simulated eclipse emission spectrum"
-             if str(_cpj.get("science_mode", "transmission")) == "emission"
-             else "Simulated transmission spectrum")
+# --- spectrum data (rendered ONCE, on the summary figure below) -------------
 wl = model["wl_um"]
 order = np.argsort(wl)
 wl_s, d_s = wl[order], model["depth"][order] * 1e6
@@ -2207,15 +2204,10 @@ def _display_smooth(y_ppm):
 
 
 d_plot = _display_smooth(d_s)
-fig, ax = plt.subplots(figsize=(10.5, 5.2), dpi=200)
-ax.plot(wl_s, d_plot, color="#444444", lw=1.2, alpha=0.9, zorder=2,
-        label="model (smoothed for display)")
 d_wo_s = None
 if goal_r == "detect":
     mols = [str(x) for x in model["mols"]]
     d_wo_s = model["depth_wo"][mols.index(meta["target"])][order] * 1e6
-    ax.plot(wl_s, _display_smooth(d_wo_s), color="#888888", lw=1.1, ls="--",
-            zorder=1, label=f"model without {meta['target']}")
 # Mock-observation layer (display only): one seeded N(0, sigma_i) draw per
 # bin ON TOP of the binned noiseless model, generated AFTER the forward
 # model and the noise model (posteriors.mock_realization). The LIVE widget
@@ -2225,63 +2217,11 @@ if goal_r == "detect":
 # or the result CSVs -- only the clearly-named mock download below.
 _mock = (posteriors.mock_realization(results, int(seed))
          if show_noise else None)
-pt_lo, pt_hi = [], []            # plotted point extents (keep error bars in view)
-for r in results:
-    c = ins.MODE_COLOR[r["mode_key"]]
-    mk = ins.MODE_MARKER.get(r["mode_key"], "o")
-    y = r["depth"] * 1e6
-    if _mock is not None:
-        y = _mock["modes"][r["mode_key"]]["depth_mock"] * 1e6
-    label = r["label"] + (" (saturated!)" if r["saturated"] else "")
-    # plot at the response-weighted effective wavelength (matters near
-    # detector gaps); marker + color together identify the mode
-    x = r.get("wl_eff", r["wl"])
-    ax.errorbar(x, y, yerr=r["sigma"] * 1e6, fmt=mk, ms=4.2, lw=1.0,
-                color=c, ecolor=c, elinewidth=0.8, capsize=0, zorder=3,
-                label=label)
-    pt_lo.append(float(np.min(y - r["sigma"] * 1e6)))
-    pt_hi.append(float(np.max(y + r["sigma"] * 1e6)))
-ax.set_xscale("log")
-lo = min(min(r["wl"].min() for r in results), 1.0)
-hi = max(r["wl"].max() for r in results)
-ticks = [t for t in (1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 7.0, 10.0, 12.0)
-         if lo * 0.97 <= t <= hi * 1.03]
-ax.set_xticks(ticks)
-ax.set_xticklabels([f"{t:g}" for t in ticks])
-ax.set_xlim(lo * 0.97, hi * 1.03)
-# y-limits: keep the model in-window AND every plotted error bar in view
-sel = (wl_s >= lo * 0.97) & (wl_s <= hi * 1.03)
-y_lo = min(float(d_plot[sel].min()), min(pt_lo))
-y_hi = max(float(d_plot[sel].max()), max(pt_hi))
-pad = 0.06 * (y_hi - y_lo)
-ax.set_ylim(y_lo - pad, y_hi + pad)
-ax.set_xlabel("wavelength (µm)")
 _depth_lbl = ("eclipse depth (ppm)"
               if str(model.get("science_mode", "transmission")) == "emission"
               else "transit depth (ppm)")
-ax.set_ylabel(_depth_lbl)
-ax.grid(alpha=0.25)
-# legend below the axes; marker + color pairs identify each mode
-_handles, _labels = ax.get_legend_handles_labels()
-_lg_rows = int(np.ceil(len(_labels) / 3))
-fig.subplots_adjust(bottom=0.11 + 0.058 * _lg_rows)
-fig.legend(_handles, _labels, loc="lower center", ncol=3, frameon=False,
-           fontsize=10, bbox_to_anchor=(0.5, 0.01))
-st.pyplot(fig, width="stretch")
-_spec_png = _fig_png(fig)
-plt.close(fig)
-if _mock is not None:
-    st.caption(
-        f"The plotted points are one simulated mock observation "
-        f"(seed {int(seed)}): the binned model plus one random draw per bin "
-        "at the final per-bin uncertainty, added after the forward model "
-        "and the noise model. A single realization can be lucky or unlucky; "
-        "every quoted precision and the conditional template S/N are "
-        "computed from the noiseless model and never include this draw. "
-        "Use 'New realization' (step 4 · Observation) "
-        "to re-roll.")
 
-# downloads: the figure + the plotted numbers (binned points, native model)
+# plotted/binned numbers for the downloads under the summary figure
 _bin_df = pd.concat([
     pd.DataFrame({
         "mode": r["mode_key"], "label": r["label"],
@@ -2294,116 +2234,13 @@ _bin_df = pd.concat([
 _native = {"wl_um": wl_s, "depth_ppm": d_s}
 if d_wo_s is not None:
     _native[f"depth_without_{meta['target']}_ppm"] = d_wo_s
-_d1, _d2, _d3, _d4 = st.columns([1.2, 1.5, 1.5, 2.8])
-_d1.download_button("Figure (PNG)", _spec_png,
-                    f"{_fname_base}_spectrum.png", "image/png",
-                    key=K("dl_spec_png"))
-_d2.download_button("Binned points (CSV)", _csv_bytes(_bin_df),
-                    f"{_fname_base}_binned_points.csv", "text/csv",
-                    key=K("dl_spec_bins"))
-_d3.download_button("Native model (CSV)", _csv_bytes(pd.DataFrame(_native)),
-                    f"{_fname_base}_model_spectrum.csv", "text/csv",
-                    key=K("dl_spec_native"))
-if _mock is not None:
-    # the mock data is downloadable, but ONLY under a name that says what it
-    # is (a seeded mock realization) -- the result CSVs above stay noiseless
-    _mock_df = pd.concat([
-        pd.DataFrame({
-            "mode": r["mode_key"], "label": r["label"],
-            "wl_um": np.asarray(r["wl"], dtype=float),
-            "depth_mock_ppm": np.asarray(
-                _mock["modes"][r["mode_key"]]["depth_mock"],
-                dtype=float) * 1e6,
-            "sigma_ppm": np.asarray(r["sigma"], dtype=float) * 1e6,
-            "seed": int(seed),
-        }) for r in results], ignore_index=True)
-    _d4.download_button(
-        "Mock observation (CSV)", _csv_bytes(_mock_df),
-        f"{_fname_base}_mock_realization_seed{int(seed)}.csv", "text/csv",
-        key=K("dl_spec_mock"),
-        help="One simulated noise realization (the plotted points), with "
-             "its seed. Not a forecast product: the binned-points and "
-             "model CSVs stay noiseless.")
 
-# --- goal chart + T-P profile ----------------------------------------------
-col1, col2 = st.columns([2.6, 1.4])
+# --- T-P profile (the per-mode ranking lives in the summary-figure
+# legend and the Fisher/combination tables -- rendered once, not as
+# a separate bar chart) ---------------------------------------------
+_tp_col, _ = st.columns([1.4, 2.6])
 
-with col1:
-    if goal_r == "detect":
-        st.subheader(f"{meta['target']} conditional template S/N (σ_detect)")
-        rs = sorted(results, key=lambda r: r["sigma_detect"])
-        names = [r["label"] + (" (saturated)" if r["saturated"] else "")
-                 for r in rs]
-        vals = [r["sigma_detect"] for r in rs]
-        cols = [ins.MODE_COLOR[r["mode_key"]] for r in rs]
-        xrefs, xlabel = (3.0, 5.0), (f"conditional template S/N "
-                                     f"({meta['n_transits']} {_ev}"
-                                     f"{'s' if meta['n_transits'] > 1 else ''})")
-        fmt_v = lambda v: f"{v:.1f}σ"
-        vline_target = float(meta.get("target_sig") or 3.0)
-    else:
-        st.subheader(f"Expected uncertainty on {glabel}")
-        items = sorted(per_mode.items(), key=lambda kv: -kv[1])   # best at top
-        names = [ins.MODES[k]["label"] for k, _ in items]
-        vals = [v for _, v in items]
-        cols = [ins.MODE_COLOR[k] for k, _ in items]
-        if np.isfinite(comb):
-            names.append("ALL USABLE (combined)")
-            vals.append(comb)
-            cols.append("#555555")
-        # named combinations: same math as the combined row
-        # (posteriors.combo_forecast), scaled to the same tsig
-        for _rec in combo_recs:
-            _v = tsig * float(_rec["sigma_marginalized_display"].get(
-                gp, np.inf))
-            if np.isfinite(_v):
-                names.append(f"COMBO: {_rec['name']}")
-                vals.append(_v)
-                cols.append("#777777")
-        # no parenthetical: it pushed the label past the axes width, and the
-        # count and direction are already on the page
-        xrefs, xlabel = (), f"expected ±{forward.param_axis(gp)} at {tsig:g}σ"
-        fmt_v = lambda v: f"{v:.3g}"
-        vline_target = target
-    fig2, ax2 = plt.subplots(figsize=(7.4, 0.52 * len(names) + 1.5), dpi=200)
-    bars = ax2.barh(names, vals, color=cols, height=0.62)
-    for b, v in zip(bars, vals):
-        ax2.text(b.get_width() + max(vals) * 0.02,
-                 b.get_y() + b.get_height() / 2, fmt_v(v),
-                 va="center", fontsize=10, color="#333333")
-    # reference/target labels sit just ABOVE the axes box so they never
-    # collide with the bars; a reference equal to the target is skipped
-    # (coincident labels overprint)
-    _blend2 = mtransforms.blended_transform_factory(ax2.transData,
-                                                    ax2.transAxes)
-    for ref in xrefs:
-        if ref < max(vals) * 1.15 and ref != vline_target:
-            ax2.axvline(ref, color="#bbbbbb", lw=0.8, ls=":")
-            ax2.text(ref, 1.02, f"{ref:.0f}σ", transform=_blend2,
-                     fontsize=9, color="#888888", ha="center", va="bottom")
-    if vline_target is not None:
-        ax2.axvline(vline_target, color="#333333", lw=1.0, ls="--")
-        ax2.text(vline_target, 1.02, "target", transform=_blend2,
-                 fontsize=10, color="#333333", ha="center", va="bottom")
-    ax2.set_xlim(0, max(max(vals), vline_target or 0) * 1.18 + 1e-12)
-    ax2.set_xlabel(xlabel)
-    ax2.grid(axis="x", alpha=0.25)
-    fig2.tight_layout()
-    st.pyplot(fig2, width="stretch")
-    _rank_png = _fig_png(fig2)
-    plt.close(fig2)
-    _metric = (f"sigma_detect_{meta['target']}" if goal_r == "detect"
-               else f"uncertainty_{gp}_at_{tsig:g}sigma")
-    _rank_df = pd.DataFrame({"mode": names, _metric: vals})
-    _r1, _r2, _ = st.columns([1.2, 1.2, 2.6])
-    _r1.download_button("Figure (PNG)", _rank_png,
-                        f"{_fname_base}_{_slug(_metric)}_ranking.png",
-                        "image/png", key=K("dl_rank_png"))
-    _r2.download_button("Values (CSV)", _csv_bytes(_rank_df),
-                        f"{_fname_base}_{_slug(_metric)}_ranking.csv",
-                        "text/csv", key=K("dl_rank_csv"))
-
-with col2:
+with _tp_col:
     st.subheader("T-P profile")
     cpj = _cpj
     fig3, ax3 = plt.subplots(figsize=(3.8, 4.2), dpi=200)
@@ -2894,49 +2731,13 @@ if _have_fisher:
                                      center=_centers_all.get(_p)))
 
         if _post_panels:
-            _npan = len(_post_panels)
-            fig_p, axs_p = plt.subplots(
-                1, _npan, figsize=(4.6 * _npan, 3.2), dpi=200,
-                squeeze=False)
-            for _ax, _pan in zip(axs_p[0], _post_panels):
-                for _c in _pan["curves"]:
-                    _ax.plot(_c["theta"], _c["pdf"], color=_c["color"],
-                             ls=_c["ls"], lw=_c["lw"], label=_c["label"])
-                if _pan["center"] is not None:
-                    _ax.axvline(_pan["center"], color="#999999", lw=0.7,
-                                ls=":")
-                _ax.set_xlabel(_pan["axis_label"])
-                _ax.set_yticks([])
-                _ax.set_ylabel("forecast density", fontsize=8)
-                if _pan["curves"]:
-                    _ax.legend(loc="upper right", frameon=False, fontsize=7)
-                for _ki, _note in enumerate(_pan["notes"]):
-                    _ax.text(0.5, 0.5 - 0.16 * _ki, _note,
-                             transform=_ax.transAxes, ha="center",
-                             va="center", fontsize=7, color="#883333",
-                             wrap=True)
-                _ax.grid(alpha=0.15)
-            fig_p.tight_layout()
-            st.pyplot(fig_p, width="stretch")
-            _post_png = _fig_png(fig_p)
-            plt.close(fig_p)
-            st.download_button("Figure (PNG)", _post_png,
-                               f"{_fname_base}_forecast_posteriors.png",
-                               "image/png", key=K("dl_post_png"))
-            st.caption(
-                "Each curve is the Gaussian implied by the marginalized "
-                "Fisher width, centered on the input model -- a linearized "
-                "Cramer-Rao forecast, not a sampled retrieval posterior."
-                + (" The dotted curve marks the parameters a linearized fit "
-                   "would recover from the plotted mock observation (seed "
-                   f"{int(seed)}): same width, center shifted by that one "
-                   "noise draw. A single realization can be lucky or "
-                   "unlucky; the shift has zero mean over realizations, and "
-                   "no quoted precision includes it."
-                   if _mock is not None and _post_sel else ""))
+            st.caption("Drawn on the summary figure below, next to "
+                       "the spectrum.")
 
-# --- proposal summary figure -------------------------------------------------
-st.subheader("Proposal summary figure")
+# --- the results figure (spectrum + forecast posteriors, rendered once) -----
+st.subheader("Simulated eclipse emission spectrum & forecast summary"
+             if str(_cpj.get("science_mode", "transmission")) == "emission"
+             else "Simulated transmission spectrum & forecast summary")
 
 # Per-mode expected performance, rendered IN the legend label of each
 # point series (replaces the retired right-hand ranking panel): the
@@ -2994,6 +2795,11 @@ _sum_spectrum = dict(wl_um=wl_s, depth_ppm=d_plot,
                      model_label="model (smoothed for display)"
                                  + (f"\n({_leg_note})" if _leg_note else ""),
                      points=_sum_points)
+if d_wo_s is not None:
+    # detect goal: the same without-target comparison curve the old
+    # standalone spectrum carried (smoothed identically for display)
+    _sum_spectrum["depth2_ppm"] = _display_smooth(d_wo_s)
+    _sum_spectrum["depth2_label"] = f"model without {meta['target']}"
 
 _sum_foot = (
     "Forecasts are linearized Fisher (Cramer-Rao) bounds under the quoted "
@@ -3012,11 +2818,52 @@ st.pyplot(fig_sum, width="stretch")
 _sum_png = _fig_png(fig_sum)
 _sum_pdf = _fig_pdf(fig_sum)
 plt.close(fig_sum)
-_s1, _s2, _ = st.columns([1.2, 1.2, 2.6])
+if _mock is not None:
+    st.caption(
+        f"The plotted points are one simulated mock observation "
+        f"(seed {int(seed)}): the binned model plus one random draw per bin "
+        "at the final per-bin uncertainty, added after the forward model "
+        "and the noise model. A single realization can be lucky or unlucky; "
+        "every quoted precision and the conditional template S/N are "
+        "computed from the noiseless model and never include this draw. "
+        "Use 'New realization' (step 4 · Observation) to re-roll."
+        + (" The dotted posterior curve marks the parameters a linearized "
+           "fit would recover from that mock observation: same width, "
+           "center shifted by that one noise draw. The shift has zero mean "
+           "over realizations."
+           if _post_panels and any(len(_pan["curves"]) > 1
+                                   for _pan in _post_panels) else ""))
+_s1, _s2, _s3, _s4, _s5 = st.columns([1.5, 1.2, 1.5, 1.5, 1.9])
 _s1.download_button("Figure (PDF, vector)", _sum_pdf,
                     f"{_fname_base}_proposal_summary.pdf",
                     "application/pdf", key=K("dl_summary_pdf"))
 _s2.download_button("Figure (PNG)", _sum_png,
                     f"{_fname_base}_proposal_summary.png", "image/png",
                     key=K("dl_summary_png"))
+_s3.download_button("Binned points (CSV)", _csv_bytes(_bin_df),
+                    f"{_fname_base}_binned_points.csv", "text/csv",
+                    key=K("dl_spec_bins"))
+_s4.download_button("Native model (CSV)", _csv_bytes(pd.DataFrame(_native)),
+                    f"{_fname_base}_model_spectrum.csv", "text/csv",
+                    key=K("dl_spec_native"))
+if _mock is not None:
+    # the mock data is downloadable, but ONLY under a name that says what it
+    # is (a seeded mock realization) -- the result CSVs above stay noiseless
+    _mock_df = pd.concat([
+        pd.DataFrame({
+            "mode": r["mode_key"], "label": r["label"],
+            "wl_um": np.asarray(r["wl"], dtype=float),
+            "depth_mock_ppm": np.asarray(
+                _mock["modes"][r["mode_key"]]["depth_mock"],
+                dtype=float) * 1e6,
+            "sigma_ppm": np.asarray(r["sigma"], dtype=float) * 1e6,
+            "seed": int(seed),
+        }) for r in results], ignore_index=True)
+    _s5.download_button(
+        "Mock observation (CSV)", _csv_bytes(_mock_df),
+        f"{_fname_base}_mock_realization_seed{int(seed)}.csv", "text/csv",
+        key=K("dl_spec_mock"),
+        help="One simulated noise realization (the plotted points), with "
+             "its seed. Not a forecast product: the binned-points and "
+             "model CSVs stay noiseless.")
 
