@@ -247,24 +247,41 @@ def _plot_spectrum(ax, spec: dict) -> None:
     ax.set_xlim(lo, hi)
     ylim = spec["depth_range"] or _visible_ylim(spec, lo, hi)
     if ylim is not None:
+        if spec["depth_range"] is None and spec["points"]:
+            # Headroom for the IN-AXES legend (maintainer, 2026-08-13).
+            # Unlike the old y-limit inflation this replaces, it is applied
+            # to the VISIBLE data range and sized from the legend's actual
+            # row count, so it scales with what is drawn instead of being a
+            # fixed fudge -- and only when a legend will be drawn at all.
+            # An explicit depth_range from the caller is never overridden.
+            _rows = len(spec["points"]) + 1 + (spec["depth2_ppm"] is not None)
+            _frac = min(0.42, 0.075 * (_rows if _rows <= 4
+                                       else np.ceil(_rows / 2) + 1))
+            y0, y1 = ylim
+            ylim = (y0, y0 + (y1 - y0) / (1.0 - _frac))
         ax.set_ylim(*ylim)
     ax.set_xlabel("wavelength (µm)", fontsize=_AX_LBL)
     ax.set_ylabel(spec["depth_label"], fontsize=_AX_LBL)
     ax.tick_params(labelsize=_TICK)
     ax.grid(alpha=0.25)
     if spec["points"]:
-        # Legend OUTSIDE the axes, below (2026-08-13). It used to sit inside
-        # at "upper left", which forced a y-limit inflation to keep it off the
-        # data -- that padding distorted the visible depth range purely for
-        # the legend's benefit. Outside the axes needs no padding and can
-        # never overlap a series, so the data range is the data range.
+        # Legend INSIDE the axes (maintainer, 2026-08-13), superseding the
+        # below-the-axes placement. loc="best" lets matplotlib score the
+        # candidate corners against the plotted artists, so it lands where
+        # the data is not -- there is NO y-limit inflation to make room (that
+        # padding distorted the visible depth range purely for the legend's
+        # benefit, and is what the outside placement originally fixed).
+        # A translucent frame keeps it readable if it must sit over gridlines.
         _n_leg = len(spec["points"]) + 1 + (spec["depth2_ppm"] is not None)
-        _leg = ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16),
-                         frameon=False, fontsize=_LEG,
-                         ncol=(1 if _n_leg <= 2 else 2), handletextpad=0.5,
-                         borderaxespad=0.0, columnspacing=1.0,
+        # "upper left" into the reserved headroom, not "best": with a wide
+        # spectrum every corner touches data at some wavelength.
+        _leg = ax.legend(loc="upper left", frameon=True, framealpha=0.82,
+                         edgecolor="none", fontsize=_LEG,
+                         ncol=(1 if _n_leg <= 4 else 2), handletextpad=0.5,
+                         borderaxespad=0.4, columnspacing=1.0,
                          labelspacing=0.3,
                          title=spec["legend_title"])
+        _leg.set_zorder(5)
         if spec["legend_title"]:
             _leg.get_title().set_fontsize(_LEG)
 
@@ -296,6 +313,7 @@ def _plot_posterior_box(axp, panels: list[dict]) -> None:
     is the forecast -- fully intact.
     """
     axes = [axp, axp.twiny()]
+    _src_labels: list[str] = []
     for i, (pan, ax_i) in enumerate(zip(panels, axes)):
         col = _PARAM_COLORS[i % len(_PARAM_COLORS)]
         for c in pan["curves"]:
@@ -305,12 +323,18 @@ def _plot_posterior_box(axp, panels: list[dict]) -> None:
                 pdf = pdf / peak          # unit peak: see the y-axis note
             ax_i.plot(c["theta"], pdf, color=col, ls=c["ls"], lw=c["lw"],
                       label=f"{pan['axis_label']} -- {c['label']}")
+            _src_labels.append(str(c["label"]))
         if pan["center"] is not None:
             ax_i.axvline(pan["center"], color=col, lw=0.7, ls=":", alpha=0.6)
         ax_i.set_xlabel(pan["axis_label"], fontsize=_AX_LBL, color=col)
         ax_i.tick_params(axis="x", labelsize=_TICK, colors=col)
         ax_i.xaxis.label.set_color(col)
-        ax_i.set_ylim(0.0, 1.10)
+        # Headroom above the unit-peak curves for the in-axes legend. The
+        # curves fill the box's width, so loc="best" has no empty corner to
+        # find -- without this the legend lands ON the posteriors. Costs
+        # nothing readable: the y axis is a normalized relative density with
+        # no ticks, so the extra space carries no information either way.
+        ax_i.set_ylim(0.0, 1.42)
 
     axp.set_yticks([])
     axp.set_ylabel("relative forecast density", fontsize=_AX_LBL)
@@ -323,11 +347,28 @@ def _plot_posterior_box(axp, panels: list[dict]) -> None:
         h, l = ax_i.get_legend_handles_labels()
         handles += h
         labels += l
+    # Every curve now comes from ONE source, so repeating its name in each
+    # entry is noise: hoist it to the legend title and label each entry by
+    # its parameter. (When sources ever differ again, the labels stay full.)
+    title = None
+    if len(set(_src_labels)) == 1 and len(_src_labels) == len(labels):
+        title = _src_labels[0]
+        labels = [l.split(" -- ", 1)[0] for l in labels]
     if handles:
-        axp.legend(handles, labels, loc="upper center",
-                   bbox_to_anchor=(0.5, -0.16), frameon=False,
-                   fontsize=_LEG, ncol=1, handletextpad=0.5,
-                   borderaxespad=0.0, labelspacing=0.3)
+        # INSIDE the axes, same as the spectrum panel. The box carries one
+        # curve per parameter (two entries at most), so it fits in a corner
+        # without covering a posterior. Attached to the base axes, not the
+        # twin, so one legend covers both x-axes.
+        # "upper center" not "best": the headroom reserved above the curves
+        # is where it belongs, and loc="best" would still score a corner that
+        # a wide posterior reaches into.
+        leg = axp.legend(handles, labels, loc="upper center", frameon=True,
+                         framealpha=0.82, edgecolor="none",
+                         fontsize=_LEG, ncol=1, handletextpad=0.5,
+                         borderaxespad=0.4, labelspacing=0.3, title=title)
+        leg.set_zorder(5)
+        if title:
+            leg.get_title().set_fontsize(_LEG)
     notes = [n for pan in panels for n in pan["notes"]]
     for k, note in enumerate(notes):
         axp.text(0.5, 0.5 - 0.18 * k, note, transform=axp.transAxes,
@@ -377,12 +418,15 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
         # The spectrum is no longer square -- a 2:1 wavelength panel is the
         # right shape for a spectrum and matches how these appear in papers.
         # The forecast box stays square.
-        fig = plt.figure(figsize=(12.0, 5.0), dpi=200)
+        # Legends are INSIDE the axes now, so the generous bottom margin
+        # they used to occupy is reclaimed: the panels get the height back
+        # instead of reserving a legend strip under them.
+        fig = plt.figure(figsize=(12.0, 4.6), dpi=200)
         gs = fig.add_gridspec(1, 2, width_ratios=[2.0, 1.0],
                               wspace=0.20,
                               left=0.065, right=0.985,
-                              top=(0.93 if title else 0.97),
-                              bottom=(0.30 if footnote else 0.26))
+                              top=(0.91 if title else 0.965),
+                              bottom=(0.155 if footnote else 0.115))
 
         # -- LEFT: spectrum with per-mode simulated points (2x width) -------
         ax = fig.add_subplot(gs[0, 0])

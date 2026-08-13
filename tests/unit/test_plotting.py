@@ -37,14 +37,18 @@ def _vmr_cols(p):
             for i, m in enumerate(MOLS)]
 
 
-def _summary_fig():
+def _summary_fig(n_points: int = 3):
+    """The composed summary figure. ``n_points`` sets how many mode series
+    are drawn, which is what makes the spectrum legend grow."""
     wl = np.linspace(1.0, 12.0, 300)
-    pts = [dict(label=f"mode {i}: {4.2 - i:.1f}s", color=c, marker=m,
-                wl_um=np.linspace(1.0 + 3 * i, 4.0 + 3 * i, 25),
+    _palette = ["#1f4e9c", "#8c2d04", "#0f6b4f", "#6a3d9a", "#117733",
+                "#882255"]
+    pts = [dict(label=f"mode {i}: {4.2 - i * 0.4:.1f}s",
+                color=_palette[i % len(_palette)], marker="^",
+                wl_um=np.linspace(1.0 + 1.5 * i, 4.0 + 1.5 * i, 25),
                 depth_ppm=np.full(25, 20000.0 + 50 * i),
                 sigma_ppm=np.full(25, 60.0))
-           for i, (c, m) in enumerate([("#1f4e9c", "o"), ("#8c2d04", "s"),
-                                       ("#0f6b4f", "^")])]
+           for i in range(n_points)]
     th = np.linspace(-1.0, 1.0, 200)
     pans = [dict(axis_label="log Z",
                  curves=[dict(label="PRISM 0.044", theta=th,
@@ -336,36 +340,50 @@ def test_minor_tick_labels_are_suppressed_on_log_axes():
 # Legends outside the axes
 # ---------------------------------------------------------------------------
 
-def test_every_legend_sits_outside_its_axes_and_inside_the_figure():
-    """The invariant that replaced the y-limit headroom hack.
+def test_summary_legends_sit_inside_their_axes_and_cover_no_data():
+    """Summary figure legends are INSIDE the axes (maintainer, 2026-08-13).
 
-    Data are clipped to their axes, so 'legend bbox outside the axes bbox'
-    IS the no-data-overlap rule; 'inside the figure bbox' catches clipping.
+    This SUPERSEDES the earlier outside-the-axes rule for the summary figure
+    only -- the paired T-P/mixing-ratio panels keep their external legends
+    (see test_vmr_legend_clears_the_axes_ticks_and_axis_label).
+
+    "Inside" alone is not the requirement: the reason the legends went
+    outside originally was that they landed on the data. Both panels reserve
+    headroom sized from the legend's row count and pin the legend into it, so
+    the real invariant is that no legend rectangle contains a plotted vertex.
+    Checked across 1, 3 and 6 series, since the spectrum legend grows.
     """
-    fig = _summary_fig()
-    with plotting.render_lock:
-        fig.canvas.draw()
-        renderer = fig.canvas.get_renderer()
-        boxes = []
-        # spectrum + forecast box. The forecast box's TWIN axis carries no
-        # legend of its own -- one merged legend covers both x-axes.
-        legended = [ax for ax in fig.axes if ax.get_legend() is not None]
-        assert len(legended) == 2, f"expected 2 legends, got {len(legended)}"
-        for i, ax in enumerate(legended):
-            leg = ax.get_legend()
-            lb = leg.get_window_extent(renderer)
-            ab = ax.get_window_extent()
-            assert not lb.overlaps(ab), f"axes{i} legend overlaps its axes"
-            fb = fig.bbox
-            assert (lb.x0 >= fb.x0 - 1 and lb.x1 <= fb.x1 + 1
-                    and lb.y0 >= fb.y0 - 1 and lb.y1 <= fb.y1 + 1), \
-                f"axes{i} legend is clipped by the figure edge"
-            boxes.append(lb)
-        for i in range(len(boxes)):
-            for j in range(i + 1, len(boxes)):
-                assert not boxes[i].overlaps(boxes[j]), \
-                    f"legends {i} and {j} overlap"
-    plt.close(fig)
+    for n_pts in (1, 3, 6):
+        fig = _summary_fig(n_points=n_pts)
+        try:
+            with plotting.render_lock:
+                fig.canvas.draw()
+                renderer = fig.canvas.get_renderer()
+                legends = [ax for ax in fig.axes
+                           if ax.get_legend() is not None]
+                assert len(legends) == 2, \
+                    f"expected 2 legends, got {len(legends)}"
+                for ax in legends:
+                    lb = ax.get_legend().get_window_extent(renderer)
+                    ab = ax.get_window_extent()
+                    assert (lb.x0 >= ab.x0 - 2 and lb.x1 <= ab.x1 + 2
+                            and lb.y0 >= ab.y0 - 2 and lb.y1 <= ab.y1 + 2), \
+                        f"legend escaped its axes (n_pts={n_pts})"
+                    covered = 0
+                    for ln in ax.get_lines():
+                        xd, yd = ln.get_data()
+                        if len(xd) < 2:
+                            continue
+                        pix = ax.transData.transform(
+                            np.column_stack([xd, yd]))
+                        covered += int(((pix[:, 0] >= lb.x0)
+                                        & (pix[:, 0] <= lb.x1)
+                                        & (pix[:, 1] >= lb.y0)
+                                        & (pix[:, 1] <= lb.y1)).sum())
+                    assert covered == 0, \
+                        f"legend covers {covered} vertices (n_pts={n_pts})"
+        finally:
+            plt.close(fig)
 
 
 def test_vmr_legend_clears_the_axes_ticks_and_axis_label():

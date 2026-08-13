@@ -2583,69 +2583,71 @@ if _have_fisher:
                                                             np.inf)
             return float(v) if np.isfinite(v) else np.inf
 
+        # ONE curve per parameter (maintainer, 2026-08-13). This box used to
+        # draw best-source + optional overlay, each with its jitter-draw fit
+        # beside it -- 2 parameters x 2 sources x 2 curves = 8 lines, in two
+        # colors, which was unreadable. Now: the user picks ONE source and
+        # gets one line per parameter, in that parameter's color.
         _best_lbl = min(_sources, key=_src_score)
-        _ov_opts = ["none"] + [s for s in _sources if s != _best_lbl]
-        _ov_key = K("post_overlay")
-        if st.session_state.get(_ov_key) not in _ov_opts:
-            st.session_state.pop(_ov_key, None)
-        _overlay = st.selectbox(
-            "Compare against (drawn dashed)", _ov_opts, index=0,
-            key=_ov_key,
-            help="Overlays a second, usually weaker, mode or combination "
-                 "for comparison. The best source (smallest marginalized "
-                 "uncertainty on the first drawn parameter) is drawn "
-                 "solid.")
+        _src_opts = list(_sources)
+        _src_key = K("post_source")
+        if st.session_state.get(_src_key) not in _src_opts:
+            st.session_state.pop(_src_key, None)
+        _post_src = st.selectbox(
+            "Forecast source", _src_opts,
+            index=_src_opts.index(_best_lbl), key=_src_key,
+            help="Which mode or custom combination the drawn posteriors "
+                 "come from. Defaults to the tightest one (smallest "
+                 "marginalized uncertainty on the first drawn parameter). "
+                 "Every source's width is in the table above.")
 
         _mock_rec = {}
         if _mock is not None and _post_sel:
             # linearized single-realization recovery on the SAME stacked
             # system as the forecast (posteriors.mock_recovery)
-            for _lbl in ([_best_lbl] + ([_overlay] if _overlay != "none"
-                                        else [])):
-                _mock_rec[_lbl] = posteriors.mock_recovery(
-                    _sources[_lbl], fisher_names, _mock, co_eval=co_eval)
-
-        def _src_color(lbl: str) -> str:
-            for r in _usable_post:
-                if r["label"] == lbl:
-                    return ins.MODE_COLOR[r["mode_key"]]
-            return "#555555"
+            _mock_rec[_post_src] = posteriors.mock_recovery(
+                _sources[_post_src], fisher_names, _mock, co_eval=co_eval)
 
         for _p in _post_sel:
             _curves, _notes = [], []
-            for _lbl, _ls, _lw in (((_best_lbl, "-", 1.8),)
-                                   + (((_overlay, "--", 1.4),)
-                                      if _overlay != "none" else ())):
-                _pr = _recs_by_src[_lbl]["params"].get(_p)
-                if _pr is None:
-                    _sig = _recs_by_src[_lbl]["sigma_marginalized"][_p]
-                    if np.isfinite(_sig):
-                        _notes.append(f"{_lbl}: no input-model center is "
-                                      "defined for this parameter under "
-                                      "the run's settings, so no curve is "
-                                      "drawn (its forecast width is in the "
-                                      "table above)")
-                    else:
-                        _notes.append(f"{_lbl}: unconstrained (no curve)")
-                    continue
-                if _pr["constrained"]:
-                    _curves.append(dict(
-                        label=_lbl, theta=_pr["theta"], pdf=_pr["pdf"],
-                        color=_src_color(_lbl), ls=_ls, lw=_lw))
-                    _mr = _mock_rec.get(_lbl)
-                    if _mr is not None and _mr["recovered"].get(_p):
-                        _d = float(_mr["delta_display"][_p])
-                        _mc = posteriors.gaussian_curve(
-                            _pr["center"] + _d, _pr["sigma_display"])
-                        _curves.append(dict(
-                            label=f"{_lbl}: fit to this jitter draw",
-                            theta=_mc["theta"], pdf=_mc["pdf"],
-                            color="#883333", ls=":", lw=1.2,
-                            kind=posteriors.MOCK_RECOVERY_KIND))
+            _lbl = _post_src
+            _pr = _recs_by_src[_lbl]["params"].get(_p)
+            if _pr is None:
+                _sig = _recs_by_src[_lbl]["sigma_marginalized"][_p]
+                if np.isfinite(_sig):
+                    _notes.append(f"{_lbl}: no input-model center is "
+                                  "defined for this parameter under "
+                                  "the run's settings, so no curve is "
+                                  "drawn (its forecast width is in the "
+                                  "table above)")
                 else:
-                    _notes.append(f"{_lbl}: unconstrained -- this "
-                                  "direction carries no information in "
-                                  "the fitted band (no curve, by design)")
+                    _notes.append(f"{_lbl}: unconstrained (no curve)")
+            elif _pr["constrained"]:
+                _mr = _mock_rec.get(_lbl)
+                if _mr is not None and _mr["recovered"].get(_p):
+                    # THE JITTERED CURVE is the one drawn: same width as the
+                    # forecast (it is the forecast, recentered on what this
+                    # realization recovers), so no width information is lost
+                    # by dropping the unshifted twin. The dotted center line
+                    # still marks the input value, so the offset stays legible.
+                    _d = float(_mr["delta_display"][_p])
+                    _mc = posteriors.gaussian_curve(
+                        _pr["center"] + _d, _pr["sigma_display"])
+                    _curves.append(dict(
+                        label=f"{_lbl}: fit to this jitter draw",
+                        theta=_mc["theta"], pdf=_mc["pdf"],
+                        ls="-", lw=1.8,
+                        kind=posteriors.MOCK_RECOVERY_KIND))
+                else:
+                    # jitter off (or this parameter not recovered): the
+                    # unshifted forecast, labelled so the difference is plain
+                    _curves.append(dict(
+                        label=f"{_lbl}: forecast", theta=_pr["theta"],
+                        pdf=_pr["pdf"], ls="-", lw=1.8))
+            else:
+                _notes.append(f"{_lbl}: unconstrained -- this "
+                              "direction carries no information in "
+                              "the fitted band (no curve, by design)")
             _post_panels.append(dict(axis_label=forward.param_axis(_p),
                                      axis_unit=forward.PARAM_UNITS.get(_p, ""),
                                      curves=_curves, notes=_notes,
