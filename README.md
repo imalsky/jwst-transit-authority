@@ -215,7 +215,9 @@ on the left, and up to two marginalized forecast posterior panels (best
 mode or combination, with an optional dashed comparison) on the right.
 Each mode's expected performance -- its conditional template S/N for a
 detection goal, its expected ± for a constraint goal -- rides in that
-mode's legend entry, so the per-mode ranking needs no separate chart.
+mode's legend entry as a value (the legend is not sorted by performance;
+the Fisher table carries the ordered comparison). Saturated modes carry no
+value, matching every other ranking in the tool.
 Downloadable as vector PDF and PNG alongside the binned-points, native
 model, and (when the mock layer is on) seeded mock-observation CSVs; the
 footnote carries the same linearized-forecast wording as the posterior
@@ -886,8 +888,17 @@ with reasoning; accepted limitations are listed below under
 ## Open gaps and accepted limitations
 
 The one live list of everything known to be missing, approximate, or
-deferred in this tool. Updated 2026-08-13 (external forecast-products
-review response). Keep this section current: close items here when they
+deferred in this tool. Updated 2026-08-13 (0.29.3: MIRI native-R ordering
+fix, post-push audit response).
+
+* `app.py`'s post-run section is still one long top-level block sharing
+  implicit variables; extracting pure result builders (mode performance,
+  posterior panels, summary spectrum, export frames) is the next
+  maintainability step. Deferred deliberately: it is a large refactor of the
+  most-frequently-changed file and does not belong in a UI release.
+* `science.mplstyle` is a vendored copy of an older matplotlib defaults file
+  rather than a minimal set of intentional overrides, so it will keep
+  surfacing upstream deprecations one at a time. Keep this section current: close items here when they
 land, add new ones as they are found. The reasoning behind every decision
 lives in notes.md, Decision records; scope and conventions live in
 [Physics and conventions](#physics-and-conventions).

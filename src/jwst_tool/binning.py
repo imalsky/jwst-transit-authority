@@ -131,6 +131,14 @@ def smooth_to_native_r(wl_model: np.ndarray, y: np.ndarray,
     SOSS); on high-R modes the kernel is unresolved by the model grid and the
     input is returned unchanged.
 
+    ``wl_r``/``r_curve`` are the native resolving-power table. ``wl_r`` MUST
+    be strictly ascending and is validated: the kernel width comes from
+    ``np.interp(lambda, wl_r, r_curve)``, which silently returns garbage on a
+    descending table (numpy requires increasing xp and does not check). The
+    pandeia pixel grid is DISPERSION order, not wavelength order -- MIRI LRS
+    ships it descending -- so a caller handing the raw worker grid straight
+    through got R = R(red end) at every wavelength. Sort before calling.
+
     ``weight`` is the stellar flux at ``wl_model``. The instrument measures
     LSF-averaged COUNTS, so d_obs = L[F d] / L[F], the flux-weighted LSF mean
     -- never revert to the flat L[d] blur (it mislocated depth by tens of ppm
@@ -146,6 +154,36 @@ def smooth_to_native_r(wl_model: np.ndarray, y: np.ndarray,
     touch the returned region.
     """
     wl, yv = _validate_model(wl_model, y, "smooth_to_native_r")
+    # The R(lambda) table is consumed by np.interp, which REQUIRES ascending
+    # xp and returns silent nonsense otherwise (a descending table reads as
+    # the last value everywhere). Validate BEFORE any early return, so a
+    # mis-ordered curve raises on every mode rather than only where the blur
+    # is active. Same rule as the model grid: never silently repair upstream
+    # input -- a caller handing a dispersion-ordered pixel grid must fix its
+    # own ordering, because sorting here would hide the pairing bug if
+    # wl_r and r_curve were ever misaligned.
+    wl_r_v = _validate_wl(wl_r, "smooth_to_native_r: wl_r")
+    r_v = np.asarray(r_curve, float)
+    if r_v.shape != wl_r_v.shape:
+        raise ValueError(
+            f"smooth_to_native_r: r_curve shape {r_v.shape} != wl_r shape "
+            f"{wl_r_v.shape} -- the native-R table must be one R per "
+            "wavelength")
+    if not np.all(np.isfinite(r_v)) or np.any(r_v <= 0.0):
+        raise ValueError(
+            "smooth_to_native_r: r_curve (native resolving power) must be "
+            f"finite and > 0 -- got {int((~np.isfinite(r_v)).sum())} "
+            f"non-finite / {int((r_v <= 0.0).sum())} non-positive value(s)")
+    if wl_r_v.size > 1 and np.any(np.diff(wl_r_v) <= 0.0):
+        _bad = int(np.argmax(np.diff(wl_r_v) <= 0.0))
+        raise ValueError(
+            "smooth_to_native_r: wl_r (the native-R wavelength table) must be "
+            f"STRICTLY ASCENDING -- first violation at index {_bad} "
+            f"({wl_r_v[_bad]:g} -> {wl_r_v[_bad + 1]:g}). The kernel width is "
+            "read with np.interp, which requires increasing sample points and "
+            "silently returns the end value everywhere on a descending table "
+            "(MIRI LRS ships its pandeia grid in dispersion order, 13.86 -> "
+            "5.02 um). Sort wl_r and r_curve together before calling.")
     # Validate the weight BEFORE any early return: the no-op paths must still
     # reject a NaN/negative stellar flux, or the same bad input raises or
     # passes depending on the mode.

@@ -35,7 +35,6 @@ from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.transforms as mtransforms
 import pandas as pd
 import streamlit as st
 
@@ -164,6 +163,11 @@ st.markdown(
     "observation, and the proposal summary figure are new in this release. "
     "Sanity-check any forecast from this tool against a full retrieval "
     "before submitting a proposal.")
+
+# The Run row renders HERE (above the explainers). Its widgets depend on
+# sidebar state that is read further down, so the slot is reserved now and
+# filled once those values exist.
+_run_slot = st.container()
 
 with st.expander("How the model works, and its limits"):
     st.markdown(
@@ -541,7 +545,7 @@ def _queue_archive_fill() -> None:
 
 
 def _bump_seed() -> None:
-    """'New realization' control: step the mock-observation seed. The seed
+    """'New jitter draw' control: step the mock-observation seed. The seed
     stays visible in its widget, so the realization is always reproducible."""
     st.session_state[K("seed")] = (
         int(st.session_state.get(K("seed"), 0)) + 1) % 10000
@@ -604,10 +608,6 @@ with st.sidebar:
                    "press Run.")
         for _n in st.session_state.get("_cfg_load_notes") or []:
             st.warning(f"Not restored: {_n}")
-    else:
-        st.caption("Optional: start from a configuration file downloaded "
-                   "from this tool (Run summary & configuration), or set "
-                   "everything below yourself.")
     st.divider()
 
     # -----------------------------------------------------------------------
@@ -619,8 +619,6 @@ with st.sidebar:
         format_func=lambda k: planets.PLANETS[k]["label"] if k in planets.PLANETS
         else "Custom planet …")
     pdef = planets.PLANETS.get(planet_key, planets.CUSTOM_DEFAULTS)
-    st.caption(pdef["note"] if planet_key in planets.PLANETS
-               else "Starts from WASP-39 b values. Edit everything below.")
     science_mode = st.radio(
         "Observation type", ["transmission", "emission"], horizontal=True,
         key=K("scimode"),
@@ -1342,21 +1340,24 @@ with st.sidebar:
     # Display only -- no jittered value may enter detection or Fisher
     # scores, caches, or downloaded result CSVs (the mock data itself is
     # downloadable, clearly named with its seed).
-    show_noise = st.checkbox(
-        "Show a simulated mock observation (one noise realization)",
-        value=True, key=K("shownoise"))
-    _mk1, _mk2 = st.columns([1.2, 1.0])
-    seed = _mk1.number_input(
-        "Mock-observation seed", 0, 9999, 0, key=K("seed"),
-        disabled=not show_noise,
-        help="The same seed reproduces the identical mock observation. "
-             "The seed is displayed with the results and saved in the "
-             "configuration download.")
-    _mk2.button("New realization", key=K("reroll"), on_click=_bump_seed,
-                disabled=not show_noise,
-                help="Draws a new mock observation by stepping the seed. "
-                     "The new seed stays visible, so any realization can "
-                     "be reproduced.")
+    with st.expander("Jitter (simulated data points)"):
+        show_noise = st.checkbox(
+            "Jitter", value=True, key=K("shownoise"),
+            help="Draw one random noise realization on the plotted points: "
+                 "the binned model plus N(0, scale x sigma_i) per bin. "
+                 "Display only -- no quoted number includes it.")
+        _mk1, _mk2 = st.columns(2)
+        jitter_scale = _mk1.number_input(
+            "Scale (x sigma)", 0.0, 5.0, 1.0, 0.1, key=K("jscale"),
+            disabled=not show_noise,
+            help="Multiplies the per-bin sigma used for the draw. 1.0 draws "
+                 "at the forecast uncertainty.")
+        seed = _mk2.number_input(
+            "Seed", 0, 9999, 0, key=K("seed"), disabled=not show_noise,
+            help="The same seed reproduces the identical draw.")
+        st.button("Redraw", key=K("reroll"), on_click=_bump_seed,
+                  disabled=not show_noise,
+                  help="Steps the seed for a new draw.")
 
     with st.expander("Timing, saturation & binning (Pandeia)"):
         t_base = st.number_input(
@@ -1724,20 +1725,21 @@ est = "instant (cached)" if cached else (
     + ")")
 
 # --- Run row: validation messages, run button, review summary --------------
-if params_error:
-    st.error(f"Cannot run with the current settings: {params_error}")
-_still_needs = []
-if not mode_keys:
-    _still_needs.append("an instrument mode (step 4 · Observation)")
-if not floor_choice_made:
-    _still_needs.append("a minimum noise floor type "
-                        "(step 4 · Observation, Noise model)")
-if _still_needs:
-    st.error("This run still needs: " + "; ".join(_still_needs) + ".")
-col_btn, _ = st.columns([1, 3])
-run_clicked = col_btn.button("Run", type="primary", width="stretch",
-                             disabled=(bool(params_error) or not mode_keys
-                                       or not floor_choice_made))
+with _run_slot:
+    if params_error:
+        st.error(f"Cannot run with the current settings: {params_error}")
+    _still_needs = []
+    if not mode_keys:
+        _still_needs.append("an instrument mode (step 4 · Observation)")
+    if not floor_choice_made:
+        _still_needs.append("a minimum noise floor type "
+                            "(step 4 · Observation, Noise model)")
+    if _still_needs:
+        st.error("This run still needs: " + "; ".join(_still_needs) + ".")
+    col_btn, _ = st.columns([1, 3])
+    run_clicked = col_btn.button("Run", type="primary", width="stretch",
+                                 disabled=(bool(params_error) or not mode_keys
+                                           or not floor_choice_made))
 
 with st.expander("Run summary & configuration"):
     _goal_txt = (f"detect {target_mol} at {target_sig:g}σ" if goal == "detect"
@@ -1780,6 +1782,7 @@ with st.expander("Run summary & configuration"):
                 noise_infl={k: float(infl[k]) for k in mode_keys},
                 show_noise=bool(show_noise),
                 seed=int(seed),
+                jitter_scale=float(jitter_scale),
                 combos=[dict(name=str(c["name"]),
                              modes=[str(m) for m in c["modes"]])
                         for c in (st.session_state.get(K("combos")) or [])]),
@@ -2073,15 +2076,8 @@ if goal_r == "detect":
         ranked = sorted(ok, key=lambda r: -r["sigma_detect"])
         best = ranked[0]
         bsig = best["sigma_detect"]
-        verdict = (f"**Best mode for detecting {meta['target']} on "
-                   f"{meta.get('planet', '?')}: {best['label']} "
-                   f"({_mode_cfg(best['mode_key'])})**, "
-                   f"{bsig:.1f}σ in {ntr} {_ev}{'s' if ntr > 1 else ''} "
-                   f"(target {tsig:g}σ; Δχ² = {bsig * bsig:.0f}; median precision "
-                   f"{best['median_sigma_ppm']:.0f} ppm per R={meta['r_bin']} bin).")
-        if best["warnings"]:
-            verdict += (" This configuration has warnings (see the "
-                        "mode details table).")
+        verdict = (f"**{best['label']}**: {bsig:.1f}σ in {ntr} "
+                   f"{_ev}{'s' if ntr > 1 else ''} (target {tsig:g}σ).")
         if bsig >= tsig:
             st.success(verdict + "  Meets the target.")
         elif bsig > 0:
@@ -2142,16 +2138,9 @@ else:
     bk = min(per_mode, key=per_mode.get)
     bs = per_mode[bk]
     ntr = meta["n_transits"]
-    verdict = (f"**Best mode for constraining {glabel} on "
-               f"{meta.get('planet', '?')}: {ins.MODES[bk]['label']} "
-               f"({_mode_cfg(bk)})**, "
-               f"±{bs:.3g}{usp} at {tsig:g}σ in {ntr} {_ev}"
-               f"{'s' if ntr > 1 else ''} (target ±{target:g}{usp} "
-               f"at {tsig:g}σ).")
-    _bw = next(r for r in usable_jac if r["mode_key"] == bk)["warnings"]
-    if _bw:
-        verdict += (" This configuration has warnings (see the "
-                    "mode details table).")
+    verdict = (f"**{ins.MODES[bk]['label']}**: ±{bs:.3g}{usp} at "
+               f"{tsig:g}σ in {ntr} {_ev}{'s' if ntr > 1 else ''} "
+               f"(target ±{target:g}{usp}).")
     if bs <= target:
         st.success(verdict + "  Meets the target.")
     elif np.isfinite(comb) and comb <= target:
@@ -2211,11 +2200,12 @@ if goal_r == "detect":
 # Mock-observation layer (display only): one seeded N(0, sigma_i) draw per
 # bin ON TOP of the binned noiseless model, generated AFTER the forward
 # model and the noise model (posteriors.mock_realization). The LIVE widget
-# state drives it (not the stored run meta), so "New realization" re-rolls
+# state drives it (not the stored run meta), so "New jitter draw" redraws
 # without recomputing anything; the seed is displayed and reproducible.
 # HARD RULE: nothing from this layer enters detection/Fisher scores, caches,
 # or the result CSVs -- only the clearly-named mock download below.
-_mock = (posteriors.mock_realization(results, int(seed))
+_mock = (posteriors.mock_realization(results, int(seed),
+                                    scale=float(jitter_scale))
          if show_noise else None)
 _depth_lbl = ("eclipse depth (ppm)"
               if str(model.get("science_mode", "transmission")) == "emission"
@@ -2235,353 +2225,366 @@ _native = {"wl_um": wl_s, "depth_ppm": d_s}
 if d_wo_s is not None:
     _native[f"depth_without_{meta['target']}_ppm"] = d_wo_s
 
-# --- T-P profile (the per-mode ranking lives in the summary-figure
-# legend and the Fisher/combination tables -- rendered once, not as
-# a separate bar chart) ---------------------------------------------
-_tp_col, _ = st.columns([1.4, 2.6])
+with st.expander("Physical structure (T-P profile, mixing ratios)"):
+    _tp_col, _vmr_col, _ = st.columns([1.4, 1.4, 1.2])
 
-with _tp_col:
-    st.subheader("T-P profile")
-    cpj = _cpj
-    fig3, ax3 = plt.subplots(figsize=(3.8, 4.2), dpi=200)
-    ax3.plot(model["T"], model["p_bar"], color="#2a78d6", lw=1.6)
-    for tlim in (320.0, 2980.0):
-        ax3.axvline(tlim, color="#cccccc", lw=0.8, ls=":")
-    ax3.set_yscale("log")
-    ax3.invert_yaxis()
-    ax3.set_xlabel("temperature (K)")
-    ax3.set_ylabel("pressure (bar)")
-    ax3.grid(alpha=0.25)
-    fig3.tight_layout()
-    st.pyplot(fig3, width="stretch")
-    _tp_png = _fig_png(fig3)
-    plt.close(fig3)
-    _p_arr = np.asarray(model["p_bar"], dtype=float)
-    _T_arr = np.asarray(model["T"], dtype=float)
-    if cpj.get("science_mode") == "emission":
-        if float(_T_arr.max()) > 2000.0:
-            st.warning(
-                f"Layers hotter than 2000 K are present (deepest "
-                f"{_T_arr.max():.0f} K). Eclipse spectra can probe them "
-                "through opacity windows, and the ultra-hot opacity "
-                "sources (H- continuum, Na/K/Fe atomic lines, TiO/VO/FeH) "
-                "are not modeled, so fluxes and forecasts in those "
-                "windows are uncertain.")
-    else:
-        # transmission probes p <~ 0.1 bar; a hot deep adiabat below that is
-        # invisible to the chord geometry and must not trip the warning
-        _probe = _p_arr <= 0.1
-        if _probe.any() and float(_T_arr[_probe].max()) > 2000.0:
-            st.warning(
-                "The transmission photosphere (p <= 0.1 bar) exceeds "
-                "2000 K. Ultra-hot opacity sources are not modeled (no "
-                "H- continuum, no Na/K/Fe atomic lines, no TiO/VO/FeH), "
-                "so spectra and forecasts up here overstate molecular "
-                "detectability.")
-    _tp_df = pd.DataFrame({"p_bar": np.asarray(model["p_bar"], dtype=float),
-                           "T_K": np.asarray(model["T"], dtype=float)})
-    _t1, _t2 = st.columns(2)
-    _t1.download_button("Figure (PNG)", _tp_png,
-                        f"{_fname_base}_tp_profile.png", "image/png",
-                        key=K("dl_tp_png"))
-    _t2.download_button("Values (CSV)", _csv_bytes(_tp_df),
-                        f"{_fname_base}_tp_profile.csv", "text/csv",
-                        key=K("dl_tp_csv"))
-
-# --- mode details table ------------------------------------------------------
-st.subheader("Mode details")
-rows = []
-key_order = (lambda r: -r["sigma_detect"]) if goal_r == "detect" else (
-    lambda r: per_mode.get(r["mode_key"], np.inf))
-for r in sorted(results, key=key_order):
-    notes = []
-    if r["saturated"]:
-        notes.append(f"saturates (full-well {r['sat_frac']:.2f} at the "
-                     "shortest permitted ramp)")
-    n_part = int(np.sum(np.asarray(r.get("n_pix_partial_sat", 0)) > 0))
-    # Quote the NATIVE-grid count: a fully saturated channel has non-finite
-    # extracted noise, so the worker's own filter drops it and the
-    # post-filter count under-reports. None = the payload predates the
-    # census; say "unmeasured", never a number that reads "none saturated".
-    _n_full_native = r.get("n_pix_full_sat_native")
-    if _n_full_native is None:
-        if r.get("n_pix_full_sat_dropped"):
-            notes.append(f"at least {r['n_pix_full_sat_dropped']} fully "
-                         "saturated pixels excluded (native count unmeasured; "
-                         "re-run for a worker v7+ census)")
-    elif _n_full_native:
-        notes.append(f"{_n_full_native} fully saturated pixels excluded")
-    if r.get("n_pix_degenerate_dropped"):
-        notes.append(f"{r['n_pix_degenerate_dropped']} degenerate-wavelength "
-                     "pixels excluded")
-    if n_part:
-        notes.append(f"partial saturation in {n_part} bins")
-    if r["warnings"]:
-        notes.append("; ".join(list(r["warnings"])[:2]))
-    row = {"mode": r["label"],
-           "band (µm)": f"{r['wl'].min():.2f}-{r['wl'].max():.2f}"}
-    # NOTE: this column must stay all-string -- mixing int and str values makes
-    # streamlit's Arrow serialization fail (loud pyarrow tracebacks per render)
-    if r.get("lsf_applied"):
-        notes.append("model blurred to native R (Gaussian LSF approximation)")
-    if r.get("n_segments", 1) > 1:
-        notes.append(f"{r['n_segments']} detector segments (offset per segment)")
-    if goal_r == "detect":
-        row["σ_detect"] = round(r["sigma_detect"], 1)
-        _proj = r.get("sigma_detect_proj", float("nan"))
-        if np.isfinite(_proj):
-            row["σ_detect (proj)"] = round(_proj, 1)
-        _t = float(meta.get("target_sig") or 3.0)
-        if r["sigma_detect"] > 0:
-            _tt = detect.transits_to_target(r, _t)
-            _fl = _has_floor(r)
-            row[_tt_col] = _transits_cell(
-                _tt, f"{_tt['sig_inf']:.1f}σ" if _fl else "", _fl, _ev)
+    with _tp_col:
+        fig3, ax3 = plt.subplots(figsize=(3.8, 4.2), dpi=200)
+        ax3.plot(model["T"], model["p_bar"], color="#2a78d6", lw=1.6)
+        for tlim in (320.0, 2980.0):
+            ax3.axvline(tlim, color="#cccccc", lw=0.8, ls=":")
+        ax3.set_xlim(1.0, 3000.0)
+        ax3.set_yscale("log")
+        ax3.invert_yaxis()
+        ax3.set_xlabel("temperature (K)")
+        ax3.set_ylabel("pressure (bar)")
+        ax3.grid(alpha=0.25)
+        ax3_ylim = ax3.get_ylim()
+        fig3.tight_layout()
+        st.pyplot(fig3, width="stretch")
+        _tp_png = _fig_png(fig3)
+        plt.close(fig3)
+        _p_arr = np.asarray(model["p_bar"], dtype=float)
+        _T_arr = np.asarray(model["T"], dtype=float)
+        if _cpj.get("science_mode") == "emission":
+            if float(_T_arr.max()) > 2000.0:
+                st.warning(
+                    f"Layers hotter than 2000 K are present (deepest "
+                    f"{_T_arr.max():.0f} K). Eclipse spectra can probe them "
+                    "through opacity windows, and the ultra-hot opacity "
+                    "sources (H- continuum, Na/K/Fe atomic lines, TiO/VO/FeH) "
+                    "are not modeled, so fluxes and forecasts in those "
+                    "windows are uncertain.")
         else:
-            row[_tt_col] = ""
-    else:
-        s = per_mode.get(r["mode_key"], np.inf)
-        row[f"±{forward.param_axis(gp)} at {tsig:g}σ"] = (
-            f"{s:.3g}" if np.isfinite(s)
-            else ("saturated" if r["saturated"] else "unconstrained"))
-        if np.isfinite(s) and not r["saturated"]:
-            _tt = fisher_mod.transits_to_target(r, fisher_names, gp,
-                                                target / tsig,
-                                                detect.sigma_at_transits,
-                                                co_eval=co_eval)
-            _fl = _has_floor(r)
-            row[_tt_col] = _transits_cell(
-                _tt, f"±{tsig * _tt['sig_inf']:.3g}" if _fl else "", _fl, _ev)
+            # transmission probes p <~ 0.1 bar; a hot deep adiabat below that is
+            # invisible to the chord geometry and must not trip the warning
+            _probe = _p_arr <= 0.1
+            if _probe.any() and float(_T_arr[_probe].max()) > 2000.0:
+                st.warning(
+                    "The transmission photosphere (p <= 0.1 bar) exceeds "
+                    "2000 K. Ultra-hot opacity sources are not modeled (no "
+                    "H- continuum, no Na/K/Fe atomic lines, no TiO/VO/FeH), "
+                    "so spectra and forecasts up here overstate molecular "
+                    "detectability.")
+        _tp_df = pd.DataFrame({"p_bar": np.asarray(model["p_bar"], dtype=float),
+                               "T_K": np.asarray(model["T"], dtype=float)})
+        _t1, _t2 = st.columns(2)
+        _t1.download_button("Figure (PNG)", _tp_png,
+                            f"{_fname_base}_tp_profile.png", "image/png",
+                            key=K("dl_tp_png"))
+        _t2.download_button("Values (CSV)", _csv_bytes(_tp_df),
+                            f"{_fname_base}_tp_profile.csv", "text/csv",
+                            key=K("dl_tp_csv"))
+
+    with _vmr_col:
+        _ymix = model.get("ymix")
+        if _ymix is None:
+            st.info("This run predates the stored mixing-ratio profiles "
+                    "(re-run to populate them).")
         else:
-            row[_tt_col] = ""
-    # the exact fixed detector configuration this row evaluated (each MODES
-    # entry is one subarray + readout pattern, never the whole instrument
-    # mode) plus its honest operational status
-    row.update({"configuration": _mode_cfg(r["mode_key"]),
-                "operational status": _op_status(r),
-                "median σ (ppm)": round(r["median_sigma_ppm"]),
-                "bins": r["n_bins"], "groups/integration": r["ngroup"],
-                "cadence (s)": round(r["t_cycle_s"], 1),
-                "notes": "; ".join(notes)})
-    rows.append(row)
-st.dataframe(rows, width="stretch", hide_index=True)
-st.download_button("Mode details (CSV)", _csv_bytes(pd.DataFrame(rows)),
-                   f"{_fname_base}_mode_details.csv", "text/csv",
-                   key=K("dl_modes_csv"))
-if goal_r == "detect":
-    pass
-else:
-    st.caption(
-        f"± per mode is the marginalized Fisher forecast scaled to {tsig:g}σ "
-        f"(see the table below); '{_tt_col}' re-solves the Fisher forecast "
-        f"at each {_ev} count with the random term scaled 1/N and the minimum "
-        "floor as a hard lower bound. A floor-limited target reads "
-        "'unreachable' with its floor limit, and a no-floor scan that runs "
-        f"out at {detect.N_TRANSITS_CAP} {_ev}s reads '>{detect.N_TRANSITS_CAP} "
-        "(scan limit)', never an optimistic 1/√N extrapolation. Saturated "
-        "modes are excluded from all forecasts."
-    )
+            _ymix = np.asarray(_ymix, dtype=float)
+            _mols_all = [str(m) for m in model["mols"]]
+            if _ymix.ndim != 2 or _ymix.shape[0] != _p_arr.size:
+                raise ValueError(
+                    f"ymix shape {_ymix.shape} does not match the pressure grid "
+                    f"({_p_arr.size} layers): the stored model is inconsistent")
+            # plot the molecules the spectrum actually uses, ordered by peak
+            # abundance so the legend reads top-down
+            _cols = [(_m, _ymix[:, _i]) for _i, _m in enumerate(_mols_all)
+                     if _i < _ymix.shape[1]]
+            _cols.sort(key=lambda kv: -float(np.nanmax(kv[1])))
+            fig4, ax4 = plt.subplots(figsize=(3.8, 4.2), dpi=200)
+            for _m, _y in _cols:
+                ax4.plot(np.clip(_y, 1e-14, None), _p_arr, lw=1.4, label=_m)
+            ax4.set_xscale("log")
+            ax4.set_xlim(1e-12, 1.0)
+            ax4.set_yscale("log")
+            ax4.set_ylim(ax3_ylim)
+            ax4.set_xlabel("volume mixing ratio")
+            ax4.set_ylabel("pressure (bar)")
+            ax4.grid(alpha=0.25)
+            ax4.legend(loc="best", frameon=False, fontsize=7, ncol=2)
+            fig4.tight_layout()
+            st.pyplot(fig4, width="stretch")
+            _vmr_png = _fig_png(fig4)
+            plt.close(fig4)
+            _vmr_df = pd.DataFrame({"p_bar": _p_arr}
+                                   | {m: y for m, y in _cols})
+            _v1, _v2 = st.columns(2)
+            _v1.download_button("Figure (PNG)", _vmr_png,
+                                f"{_fname_base}_mixing_ratios.png", "image/png",
+                                key=K("dl_vmr_png"))
+            _v2.download_button("Values (CSV)", _csv_bytes(_vmr_df),
+                                f"{_fname_base}_mixing_ratios.csv", "text/csv",
+                                key=K("dl_vmr_csv"))
 
-# --- mode combinations (builder) --------------------------------------------
-# Named combinations of the modes that were run, evaluated through
-# posteriors.combo_forecast / compare_combos (the same combination math as
-# the "ALL USABLE (combined)" row). They add rows to the Fisher table below
-# and bars to the comparison chart above.
-if fisher_names and "jac" in model:
-    st.subheader("Mode combinations")
-    st.caption(
-        "Compare named combinations of the modes in this run, e.g. "
-        "\"SOSS + G395H\" against \"SOSS + G395H + MIRI\". Each "
-        "combination is forecast jointly (shared reference radius, one "
-        "depth offset per detector segment), exactly like the ALL USABLE "
-        "row. Saturated modes contribute no usable data and are excluded "
-        "from each combination, with the exclusion noted. Combinations "
-        "are saved in the configuration download.")
-    _cb_opts = [r["mode_key"] for r in results
-                if r.get("jac_bins") is not None]
-    # a stored selection can reference a mode absent from this run's results
-    # (Streamlit crashes at widget instantiation on off-menu session state)
-    _cb_stale = st.session_state.get(K("cb_modes"))
-    if _cb_stale is not None:
-        _cb_kept = [m for m in _cb_stale if m in _cb_opts]
-        if _cb_kept != list(_cb_stale):
-            st.session_state[K("cb_modes")] = _cb_kept
-    _note = st.session_state.pop("_combo_note", None)
-    if _note is not None:
-        getattr(st, _note[0])(_note[1])
-    _cbc1, _cbc2, _cbc3 = st.columns([1.6, 2.2, 1.0])
-    _cbc1.text_input("Combination name", key=K("cb_name"),
-                     placeholder="e.g. SOSS + G395H")
-    _cbc2.multiselect("Modes in the combination", _cb_opts,
-                      key=K("cb_modes"),
-                      format_func=lambda k: ins.MODES[k]["label"])
-    _cbc3.button("Add combination", key=K("cb_add"), on_click=_combo_add)
-    _usable_keys = [r["mode_key"] for r in results
-                    if r.get("jac_bins") is not None and not r["saturated"]]
 
-    def _combo_add_all_usable() -> None:
-        combos = st.session_state.setdefault(K("combos"), [])
-        if any(c["name"] == "All usable" for c in combos):
-            st.session_state["_combo_note"] = (
-                "info", "The 'All usable' combination already exists.")
-            return
-        combos.append(dict(name="All usable", modes=list(_usable_keys)))
-        st.session_state["_combo_note"] = (
-            "success", "Added the 'All usable' combination.")
-
-    if len(_usable_keys) >= 2:
-        st.button("Add preset: all usable modes", key=K("cb_add_all"),
-                  on_click=_combo_add_all_usable,
-                  help="One combination holding every usable (unsaturated) "
-                       "mode of this run -- the same mode set as the ALL "
-                       "USABLE row.")
-    for _i, _c in enumerate(st.session_state.get(K("combos")) or []):
-        _cc1, _cc2 = st.columns([4.0, 1.0])
-        _cc1.markdown(
-            f"- **{_c['name']}**: "
-            + ", ".join(ins.MODES[m]["label"] if m in ins.MODES else m
-                        for m in _c["modes"]))
-        _cc2.button("Remove", key=K(f"cb_rm_{_i}"), on_click=_combo_remove,
-                    args=(_i,))
-    for _cname, _cerr in combo_errs:
-        st.error(f"Combination {_cname!r} could not be forecast: {_cerr}")
-    for _rec in combo_recs:
-        if _rec["excluded"]:
-            st.warning(
-                f"Combination {_rec['name']!r}: "
-                + ", ".join(ins.MODES[e["mode_key"]]["label"]
-                            if e["mode_key"] in ins.MODES else e["mode_key"]
-                            for e in _rec["excluded"])
-                + " excluded (saturated at the shortest ramp tried -- "
-                  "unusable data). The forecast uses "
-                + (", ".join(ins.MODES[m]["label"]
-                             for m in _rec["usable_modes"])) + ".")
-
-# --- parameter constraint forecast (Fisher) --------------------------------
-# authoritative parameter order = the Jacobian rows as cached (canonical/sorted),
-# NOT the multiselect order
-if fisher_names and "jac" in model:
-    tsig_f = float(meta.get("target_sig") or 3.0)
-    st.subheader("Parameter constraint forecast (Fisher)")
-    with_jac = [r for r in results if r.get("jac_bins") is not None]
-
-    def _cell(n, s):
-        v = tsig_f * fisher_mod.display_sigma(n, s, co_eval=co_eval)
-        return "unconstrained" if not np.isfinite(v) or v > 1e4 else f"{v:.3g}"
-
-    # long format, one row per mode x parameter, marginalized and conditional
-    # side by side -- both read off the SAME nuisance-augmented Fisher matrix
-    _marg_col = f"marginalized ± at {tsig_f:g}σ"
-    _cond_col = "conditional ± (others fixed)"
-
-    def _param_rows(mode_label, sig, cond):
-        return [{"mode": mode_label,
-                 "parameter": forward.PARAM_LABELS[n],
-                 _marg_col: _cell(n, sig[n]),
-                 _cond_col: _cell(n, cond[n]),
-                 "unit": forward.PARAM_UNITS[n] or (
-                     "C/O ratio" if n == "dlnCO" else "dimensionless")}
-                for n in fisher_names]
-
-    frows = []
-    usable_f = [r for r in with_jac if not r["saturated"]]
-    for r in with_jac:
+with st.expander("Mode details"):
+    # --- mode details table ------------------------------------------------------
+    rows = []
+    key_order = (lambda r: -r["sigma_detect"]) if goal_r == "detect" else (
+        lambda r: per_mode.get(r["mode_key"], np.inf))
+    for r in sorted(results, key=key_order):
+        notes = []
         if r["saturated"]:
-            # shown for completeness; a saturated mode contributes no usable
-            # data (same exclusion policy as the verdict + combined)
-            frows.append({"mode": r["label"],
-                          "parameter": "(saturated, excluded)",
-                          _marg_col: "", _cond_col: "", "unit": ""})
-            continue
-        cond = {}
-        sig = fisher_mod.mode_forecast(r, fisher_names, conditional=cond)
-        frows.extend(_param_rows(r["label"], sig, cond))
-    fdiag = {}
-    if len(usable_f) >= 2:
-        cond = {}
-        sig = fisher_mod.combined_forecast(usable_f, fisher_names, diag=fdiag,
-                                           conditional=cond)
-        frows.extend(_param_rows("ALL USABLE (combined)", sig, cond))
-    # named combinations: long-format rows from the SAME records feeding the
-    # comparison chart (posteriors.combo_forecast; display units already
-    # applied, so the rows re-scale to tsig directly)
-    for _rec in combo_recs:
-        for n in fisher_names:
-            _sm = tsig_f * float(_rec["sigma_marginalized_display"][n])
-            _sc = tsig_f * float(_rec["sigma_conditional_display"][n])
-            frows.append({
-                "mode": f"COMBO: {_rec['name']}",
-                "parameter": forward.PARAM_LABELS[n],
-                _marg_col: ("unconstrained"
-                            if not np.isfinite(_sm) or _sm > 1e4
-                            else f"{_sm:.3g}"),
-                _cond_col: ("unconstrained"
-                            if not np.isfinite(_sc) or _sc > 1e4
-                            else f"{_sc:.3g}"),
-                "unit": forward.PARAM_UNITS[n] or (
-                    "C/O ratio" if n == "dlnCO" else "dimensionless")})
-    st.dataframe(frows, width="stretch", hide_index=True)
-    st.caption(
-        "One row per mode and parameter. **Marginalized**: joint fit; all "
-        "other parameters plus the lnR0 and per-segment offset "
-        "nuisances are free and marginalized out. **Conditional**: "
-        "everything else held fixed at the input values, a narrower and "
-        "more optimistic bound. Both are local Cramer-Rao lower bounds "
-        "from the same Fisher matrix, and neither is a posterior "
-        "uncertainty; a large gap between them means the parameter is "
-        "degenerate with the others in that band, not that the spectral "
-        "response is missing.")
-    st.download_button("Constraint forecast (CSV)",
-                       _csv_bytes(pd.DataFrame(frows)),
-                       f"{_fname_base}_fisher_forecast.csv", "text/csv",
-                       key=K("dl_fisher_csv"))
-    if fdiag:
-        rank, dim = fdiag["fisher_rank"], fdiag["fisher_dimension"]
-        st.caption(
-            f"Numerical health (combined): Fisher rank {rank}/{dim}, condition "
-            f"number {fdiag['condition_number']:.2g}."
-            + (" **Rank-deficient: degenerate directions are reported as "
-               "unconstrained, not as fake finite numbers.**" if rank < dim else ""))
-    with st.expander("How to read this table"):
-        st.markdown(
-            f"- Each bound is the **expected ±uncertainty at {tsig_f:g}σ** "
-            f"(= {tsig_f:g} × the Fisher 1σ) on that parameter if you fitted "
-            "all listed parameters *simultaneously* to that mode's simulated "
-            "data. It is a linearized, local best case (Cramer-Rao bound) "
-            "with no priors: nonlinear responses and degeneracies can make "
-            "a real posterior wider, and informative priors can make it "
-            "narrower.\n"
-            "- The sensitivities d(spectrum)/d(parameter) use the "
-            "differentiation method selected in the science-goal step: "
-            "**central finite differences** of independently re-converged "
-            "solves (default; composition rows re-initialize the chemistry "
-            "at the perturbed elemental abundances, the standard VULCAN "
-            "workflow), or **warm-started forward-mode automatic "
-            "differentiation** (the AD metallicity row holds the "
-            "structural hydrostatic grid fixed, a stated 1.6%-level "
-            "difference from FD in the earlier benchmark).\n"
-            "- Each per-mode row also fits (and marginalizes over) a reference-"
-            "radius nuisance **lnR0** plus one absolute-depth **offset per "
-            "detector segment**, so the two-detector NIRSpec gratings (G395H, "
-            "G235H) float independent **NRS1 and NRS2** steps, as every real "
-            "G395H fit does (Moran+2023, Madhusudhan+2023). The combined row "
-            "shares lnR0 across modes and keeps one offset per segment across "
-            "all of them; that is what keeps multi-instrument combinations "
-            "honest.\n"
-            "- **No priors** are applied: a parameter with no spectral response "
-            "in a mode's band reads *unconstrained* rather than a fake number.\n"
-            "- Metallicity **[M/H]** and vertical mixing **log Kzz** are reported "
-            "in **dex** (factors of 10); **C/O** is the absolute carbon/oxygen "
-            "number ratio N_C/N_O (default ≈ 0.55, the network's WASP-39b "
-            "elemental set from Tsai et al. 2023).\n"
-            f"- σ is evaluated at the {_ev} count you set. Only the "
-            "photon/detector term averages down with more of them; the "
-            f"systematic floor does not. Use the '{_tt_col}' column, "
-            "not a 1/√N extrapolation."
-        )
-elif out.get("fisher_names"):
-    st.info("A constraint forecast was requested but the cached model has "
-            "no Jacobian. Press Run to compute it.")
+            notes.append(f"saturates (full-well {r['sat_frac']:.2f} at the "
+                         "shortest permitted ramp)")
+        n_part = int(np.sum(np.asarray(r.get("n_pix_partial_sat", 0)) > 0))
+        # Quote the NATIVE-grid count: a fully saturated channel has non-finite
+        # extracted noise, so the worker's own filter drops it and the
+        # post-filter count under-reports. None = the payload predates the
+        # census; say "unmeasured", never a number that reads "none saturated".
+        _n_full_native = r.get("n_pix_full_sat_native")
+        if _n_full_native is None:
+            if r.get("n_pix_full_sat_dropped"):
+                notes.append(f"at least {r['n_pix_full_sat_dropped']} fully "
+                             "saturated pixels excluded (native count unmeasured; "
+                             "re-run for a worker v7+ census)")
+        elif _n_full_native:
+            notes.append(f"{_n_full_native} fully saturated pixels excluded")
+        if r.get("n_pix_degenerate_dropped"):
+            notes.append(f"{r['n_pix_degenerate_dropped']} degenerate-wavelength "
+                         "pixels excluded")
+        if n_part:
+            notes.append(f"partial saturation in {n_part} bins")
+        if r["warnings"]:
+            notes.append("; ".join(list(r["warnings"])[:2]))
+        row = {"mode": r["label"],
+               "band (µm)": f"{r['wl'].min():.2f}-{r['wl'].max():.2f}"}
+        # NOTE: this column must stay all-string -- mixing int and str values makes
+        # streamlit's Arrow serialization fail (loud pyarrow tracebacks per render)
+        if r.get("lsf_applied"):
+            notes.append("model blurred to native R (Gaussian LSF approximation)")
+        if r.get("n_segments", 1) > 1:
+            notes.append(f"{r['n_segments']} detector segments (offset per segment)")
+        if goal_r == "detect":
+            row["σ_detect"] = round(r["sigma_detect"], 1)
+            _proj = r.get("sigma_detect_proj", float("nan"))
+            if np.isfinite(_proj):
+                row["σ_detect (proj)"] = round(_proj, 1)
+            _t = float(meta.get("target_sig") or 3.0)
+            if r["sigma_detect"] > 0:
+                _tt = detect.transits_to_target(r, _t)
+                _fl = _has_floor(r)
+                row[_tt_col] = _transits_cell(
+                    _tt, f"{_tt['sig_inf']:.1f}σ" if _fl else "", _fl, _ev)
+            else:
+                row[_tt_col] = ""
+        else:
+            s = per_mode.get(r["mode_key"], np.inf)
+            row[f"±{forward.param_axis(gp)} at {tsig:g}σ"] = (
+                f"{s:.3g}" if np.isfinite(s)
+                else ("saturated" if r["saturated"] else "unconstrained"))
+            if np.isfinite(s) and not r["saturated"]:
+                _tt = fisher_mod.transits_to_target(r, fisher_names, gp,
+                                                    target / tsig,
+                                                    detect.sigma_at_transits,
+                                                    co_eval=co_eval)
+                _fl = _has_floor(r)
+                row[_tt_col] = _transits_cell(
+                    _tt, f"±{tsig * _tt['sig_inf']:.3g}" if _fl else "", _fl, _ev)
+            else:
+                row[_tt_col] = ""
+        # the exact fixed detector configuration this row evaluated (each MODES
+        # entry is one subarray + readout pattern, never the whole instrument
+        # mode) plus its honest operational status
+        row.update({"configuration": _mode_cfg(r["mode_key"]),
+                    "operational status": _op_status(r),
+                    "median σ (ppm)": round(r["median_sigma_ppm"]),
+                    "bins": r["n_bins"], "groups/integration": r["ngroup"],
+                    "cadence (s)": round(r["t_cycle_s"], 1),
+                    "notes": "; ".join(notes)})
+        rows.append(row)
+    st.dataframe(rows, width="stretch", hide_index=True)
+    st.download_button("Mode details (CSV)", _csv_bytes(pd.DataFrame(rows)),
+                       f"{_fname_base}_mode_details.csv", "text/csv",
+                       key=K("dl_modes_csv"))
+
+
+with st.expander("Mode combinations"):
+    # --- mode combinations (builder) --------------------------------------------
+    # Named combinations of the modes that were run, evaluated through
+    # posteriors.combo_forecast / compare_combos (the same combination math as
+    # the "ALL USABLE (combined)" row). They add rows to the Fisher table below
+    # and bars to the comparison chart above.
+    if fisher_names and "jac" in model:
+        _cb_opts = [r["mode_key"] for r in results
+                    if r.get("jac_bins") is not None]
+        # a stored selection can reference a mode absent from this run's results
+        # (Streamlit crashes at widget instantiation on off-menu session state)
+        _cb_stale = st.session_state.get(K("cb_modes"))
+        if _cb_stale is not None:
+            _cb_kept = [m for m in _cb_stale if m in _cb_opts]
+            if _cb_kept != list(_cb_stale):
+                st.session_state[K("cb_modes")] = _cb_kept
+        _note = st.session_state.pop("_combo_note", None)
+        if _note is not None:
+            getattr(st, _note[0])(_note[1])
+        _cbc1, _cbc2, _cbc3 = st.columns([1.6, 2.2, 1.0])
+        _cbc1.text_input("Combination name", key=K("cb_name"),
+                         placeholder="e.g. SOSS + G395H")
+        _cbc2.multiselect("Modes in the combination", _cb_opts,
+                          key=K("cb_modes"),
+                          format_func=lambda k: ins.MODES[k]["label"])
+        _cbc3.button("Add combination", key=K("cb_add"), on_click=_combo_add)
+        _usable_keys = [r["mode_key"] for r in results
+                        if r.get("jac_bins") is not None and not r["saturated"]]
+
+        def _combo_add_all_usable() -> None:
+            combos = st.session_state.setdefault(K("combos"), [])
+            if any(c["name"] == "All usable" for c in combos):
+                st.session_state["_combo_note"] = (
+                    "info", "The 'All usable' combination already exists.")
+                return
+            combos.append(dict(name="All usable", modes=list(_usable_keys)))
+            st.session_state["_combo_note"] = (
+                "success", "Added the 'All usable' combination.")
+
+        if len(_usable_keys) >= 2:
+            st.button("Add preset: all usable modes", key=K("cb_add_all"),
+                      on_click=_combo_add_all_usable,
+                      help="One combination holding every usable (unsaturated) "
+                           "mode of this run -- the same mode set as the ALL "
+                           "USABLE row.")
+        for _i, _c in enumerate(st.session_state.get(K("combos")) or []):
+            _cc1, _cc2 = st.columns([4.0, 1.0])
+            _cc1.markdown(
+                f"- **{_c['name']}**: "
+                + ", ".join(ins.MODES[m]["label"] if m in ins.MODES else m
+                            for m in _c["modes"]))
+            _cc2.button("Remove", key=K(f"cb_rm_{_i}"), on_click=_combo_remove,
+                        args=(_i,))
+        for _cname, _cerr in combo_errs:
+            st.error(f"Combination {_cname!r} could not be forecast: {_cerr}")
+        for _rec in combo_recs:
+            if _rec["excluded"]:
+                st.warning(
+                    f"Combination {_rec['name']!r}: "
+                    + ", ".join(ins.MODES[e["mode_key"]]["label"]
+                                if e["mode_key"] in ins.MODES else e["mode_key"]
+                                for e in _rec["excluded"])
+                    + " excluded (saturated at the shortest ramp tried -- "
+                      "unusable data). The forecast uses "
+                    + (", ".join(ins.MODES[m]["label"]
+                                 for m in _rec["usable_modes"])) + ".")
+
+
+with st.expander("Parameter constraint forecast (Fisher)"):
+    # --- parameter constraint forecast (Fisher) --------------------------------
+    # authoritative parameter order = the Jacobian rows as cached (canonical/sorted),
+    # NOT the multiselect order
+    if fisher_names and "jac" in model:
+        tsig_f = float(meta.get("target_sig") or 3.0)
+        with_jac = [r for r in results if r.get("jac_bins") is not None]
+
+        def _cell(n, s):
+            v = tsig_f * fisher_mod.display_sigma(n, s, co_eval=co_eval)
+            return "unconstrained" if not np.isfinite(v) or v > 1e4 else f"{v:.3g}"
+
+        # long format, one row per mode x parameter, marginalized and conditional
+        # side by side -- both read off the SAME nuisance-augmented Fisher matrix
+        _marg_col = f"marginalized ± at {tsig_f:g}σ"
+        _cond_col = "conditional ± (others fixed)"
+
+        def _param_rows(mode_label, sig, cond):
+            return [{"mode": mode_label,
+                     "parameter": forward.PARAM_LABELS[n],
+                     _marg_col: _cell(n, sig[n]),
+                     _cond_col: _cell(n, cond[n]),
+                     "unit": forward.PARAM_UNITS[n] or (
+                         "C/O ratio" if n == "dlnCO" else "dimensionless")}
+                    for n in fisher_names]
+
+        frows = []
+        usable_f = [r for r in with_jac if not r["saturated"]]
+        for r in with_jac:
+            if r["saturated"]:
+                # shown for completeness; a saturated mode contributes no usable
+                # data (same exclusion policy as the verdict + combined)
+                frows.append({"mode": r["label"],
+                              "parameter": "(saturated, excluded)",
+                              _marg_col: "", _cond_col: "", "unit": ""})
+                continue
+            cond = {}
+            sig = fisher_mod.mode_forecast(r, fisher_names, conditional=cond)
+            frows.extend(_param_rows(r["label"], sig, cond))
+        fdiag = {}
+        if len(usable_f) >= 2:
+            cond = {}
+            sig = fisher_mod.combined_forecast(usable_f, fisher_names, diag=fdiag,
+                                               conditional=cond)
+            frows.extend(_param_rows("ALL USABLE (combined)", sig, cond))
+        # named combinations: long-format rows from the SAME records feeding the
+        # comparison chart (posteriors.combo_forecast; display units already
+        # applied, so the rows re-scale to tsig directly)
+        for _rec in combo_recs:
+            for n in fisher_names:
+                _sm = tsig_f * float(_rec["sigma_marginalized_display"][n])
+                _sc = tsig_f * float(_rec["sigma_conditional_display"][n])
+                frows.append({
+                    "mode": f"COMBO: {_rec['name']}",
+                    "parameter": forward.PARAM_LABELS[n],
+                    _marg_col: ("unconstrained"
+                                if not np.isfinite(_sm) or _sm > 1e4
+                                else f"{_sm:.3g}"),
+                    _cond_col: ("unconstrained"
+                                if not np.isfinite(_sc) or _sc > 1e4
+                                else f"{_sc:.3g}"),
+                    "unit": forward.PARAM_UNITS[n] or (
+                        "C/O ratio" if n == "dlnCO" else "dimensionless")})
+        st.dataframe(frows, width="stretch", hide_index=True)
+        st.download_button("Constraint forecast (CSV)",
+                           _csv_bytes(pd.DataFrame(frows)),
+                           f"{_fname_base}_fisher_forecast.csv", "text/csv",
+                           key=K("dl_fisher_csv"))
+        if fdiag:
+            rank, dim = fdiag["fisher_rank"], fdiag["fisher_dimension"]
+            st.caption(
+                f"Numerical health (combined): Fisher rank {rank}/{dim}, condition "
+                f"number {fdiag['condition_number']:.2g}."
+                + (" **Rank-deficient: degenerate directions are reported as "
+                   "unconstrained, not as fake finite numbers.**" if rank < dim else ""))
+        with st.expander("How to read this table"):
+            st.markdown(
+                f"- Each bound is the **expected ±uncertainty at {tsig_f:g}σ** "
+                f"(= {tsig_f:g} × the Fisher 1σ) on that parameter if you fitted "
+                "all listed parameters *simultaneously* to that mode's simulated "
+                "data. It is a linearized, local best case (Cramer-Rao bound) "
+                "with no priors: nonlinear responses and degeneracies can make "
+                "a real posterior wider, and informative priors can make it "
+                "narrower.\n"
+                "- The sensitivities d(spectrum)/d(parameter) use the "
+                "differentiation method selected in the science-goal step: "
+                "**central finite differences** of independently re-converged "
+                "solves (default; composition rows re-initialize the chemistry "
+                "at the perturbed elemental abundances, the standard VULCAN "
+                "workflow), or **warm-started forward-mode automatic "
+                "differentiation** (the AD metallicity row holds the "
+                "structural hydrostatic grid fixed, a stated 1.6%-level "
+                "difference from FD in the earlier benchmark).\n"
+                "- Each per-mode row also fits (and marginalizes over) a reference-"
+                "radius nuisance **lnR0** plus one absolute-depth **offset per "
+                "detector segment**, so the two-detector NIRSpec gratings (G395H, "
+                "G235H) float independent **NRS1 and NRS2** steps, as every real "
+                "G395H fit does (Moran+2023, Madhusudhan+2023). The combined row "
+                "shares lnR0 across modes and keeps one offset per segment across "
+                "all of them; that is what keeps multi-instrument combinations "
+                "honest.\n"
+                "- **No priors** are applied: a parameter with no spectral response "
+                "in a mode's band reads *unconstrained* rather than a fake number.\n"
+                "- Metallicity **[M/H]** and vertical mixing **log Kzz** are reported "
+                "in **dex** (factors of 10); **C/O** is the absolute carbon/oxygen "
+                "number ratio N_C/N_O (default ≈ 0.55, the network's WASP-39b "
+                "elemental set from Tsai et al. 2023).\n"
+                f"- σ is evaluated at the {_ev} count you set. Only the "
+                "photon/detector term averages down with more of them; the "
+                f"systematic floor does not. Use the '{_tt_col}' column, "
+                "not a 1/√N extrapolation."
+            )
+    elif out.get("fisher_names"):
+        st.info("A constraint forecast was requested but the cached model has "
+                "no Jacobian. Press Run to compute it.")
+
 
 
 # --- marginalized forecast posteriors + proposal summary figure ------------
@@ -2617,7 +2620,6 @@ _post_sel: list[str] = []
 _have_fisher = bool(fisher_names) and "jac" in model
 if _have_fisher:
     st.subheader("Marginalized forecast posteriors")
-    st.caption(posteriors.FORECAST_LABEL)
 
     _usable_post = [r for r in results
                     if r.get("jac_bins") is not None and not r["saturated"]]
@@ -2718,10 +2720,10 @@ if _have_fisher:
                         _mc = posteriors.gaussian_curve(
                             _pr["center"] + _d, _pr["sigma_display"])
                         _curves.append(dict(
-                            label=f"{_lbl}: one mock realization "
-                                  f"(seed {int(seed)})",
+                            label=f"{_lbl}: fit to this jitter draw",
                             theta=_mc["theta"], pdf=_mc["pdf"],
-                            color="#883333", ls=":", lw=1.2))
+                            color="#883333", ls=":", lw=1.2,
+                            kind=posteriors.MOCK_RECOVERY_KIND))
                 else:
                     _notes.append(f"{_lbl}: unconstrained -- this "
                                   "direction carries no information in "
@@ -2730,11 +2732,9 @@ if _have_fisher:
                                      curves=_curves, notes=_notes,
                                      center=_centers_all.get(_p)))
 
-        if _post_panels:
-            st.caption("Drawn on the summary figure below, next to "
-                       "the spectrum.")
-
 # --- the results figure (spectrum + forecast posteriors, rendered once) -----
+# one target significance for every number on this page
+_target_sig = float(meta.get("target_sig") or 3.0)
 st.subheader("Simulated eclipse emission spectrum & forecast summary"
              if str(_cpj.get("science_mode", "transmission")) == "emission"
              else "Simulated transmission spectrum & forecast summary")
@@ -2744,10 +2744,11 @@ st.subheader("Simulated eclipse emission spectrum & forecast summary"
 # conditional template S/N for a detection goal, the expected ± on a
 # chosen parameter for a constraint/Fisher run.
 _leg_num: dict = {}
-_tsig_s = float(meta.get("target_sig") or 3.0)
 if goal_r == "detect":
+    # saturated modes carry no usable data anywhere else (rankings,
+    # combinations, forecasts); they get no score in the legend either
     for r in results:
-        if np.isfinite(r["sigma_detect"]):
+        if not r["saturated"] and np.isfinite(r["sigma_detect"]):
             _leg_num[r["mode_key"]] = f"{float(r['sigma_detect']):.1f}σ"
 elif _have_fisher:
     _rk_key = K("sum_rank_param_" + "_".join(fisher_names))
@@ -2761,7 +2762,7 @@ elif _have_fisher:
         key=_rk_key, format_func=lambda n: forward.PARAM_LABELS[n])
     for r in [x for x in results if x.get("jac_bins") is not None
               and not x["saturated"]]:
-        _v = _tsig_s * fisher_mod.display_sigma(
+        _v = _target_sig * fisher_mod.display_sigma(
             _rk_param, fisher_mod.mode_forecast(r, fisher_names)[_rk_param],
             co_eval=co_eval)
         if np.isfinite(_v):
@@ -2769,9 +2770,14 @@ elif _have_fisher:
 
 _sum_points = []
 for r in results:
+    # saturated modes are excluded from every ranking, combination and
+    # forecast; plotting simulated points for one would give unusable data
+    # scientific weight. The saturation itself is reported in Mode details.
+    if r["saturated"]:
+        continue
     _y = (np.asarray(_mock["modes"][r["mode_key"]]["depth_mock"], float)
           if _mock is not None else np.asarray(r["depth"], float)) * 1e6
-    _lbl = r["label"] + (" (saturated!)" if r["saturated"] else "")
+    _lbl = r["label"]
     if r["mode_key"] in _leg_num:
         _lbl += f": {_leg_num[r['mode_key']]}"
     _sum_points.append(dict(
@@ -2789,7 +2795,7 @@ if _leg_num:
         f"{'s' if meta['n_transits'] > 1 else ''}"
         if goal_r == "detect" else
         f"legend: expected ±{forward.param_axis(_rk_param)} per mode "
-        f"at {_tsig_s:g}σ")
+        f"at {_target_sig:g}σ")
 _sum_spectrum = dict(wl_um=wl_s, depth_ppm=d_plot,
                      depth_label=_depth_lbl,
                      model_label="model (smoothed for display)"
@@ -2801,14 +2807,7 @@ if d_wo_s is not None:
     _sum_spectrum["depth2_ppm"] = _display_smooth(d_wo_s)
     _sum_spectrum["depth2_label"] = f"model without {meta['target']}"
 
-_sum_foot = (
-    "Forecasts are linearized Fisher (Cramer-Rao) bounds under the quoted "
-    "noise model -- Gaussian by construction, local, best-case; not sampled "
-    "retrieval posteriors. σ_detect is a conditional template S/N, not a "
-    "retrieval detection."
-    + (f" Plotted data points are one simulated mock observation "
-       f"(seed {int(seed)}); quoted precisions never include that draw."
-       if _mock is not None else ""))
+_sum_foot = None
 fig_sum = summary_figure.compose_summary_figure(
     _sum_spectrum, posterior_panels=_post_panels or None,
     title=f"{meta.get('planet', 'planet')} -- "
@@ -2818,21 +2817,6 @@ st.pyplot(fig_sum, width="stretch")
 _sum_png = _fig_png(fig_sum)
 _sum_pdf = _fig_pdf(fig_sum)
 plt.close(fig_sum)
-if _mock is not None:
-    st.caption(
-        f"The plotted points are one simulated mock observation "
-        f"(seed {int(seed)}): the binned model plus one random draw per bin "
-        "at the final per-bin uncertainty, added after the forward model "
-        "and the noise model. A single realization can be lucky or unlucky; "
-        "every quoted precision and the conditional template S/N are "
-        "computed from the noiseless model and never include this draw. "
-        "Use 'New realization' (step 4 · Observation) to re-roll."
-        + (" The dotted posterior curve marks the parameters a linearized "
-           "fit would recover from that mock observation: same width, "
-           "center shifted by that one noise draw. The shift has zero mean "
-           "over realizations."
-           if _post_panels and any(len(_pan["curves"]) > 1
-                                   for _pan in _post_panels) else ""))
 _s1, _s2, _s3, _s4, _s5 = st.columns([1.5, 1.2, 1.5, 1.5, 1.9])
 _s1.download_button("Figure (PDF, vector)", _sum_pdf,
                     f"{_fname_base}_proposal_summary.pdf",
@@ -2853,17 +2837,22 @@ if _mock is not None:
         pd.DataFrame({
             "mode": r["mode_key"], "label": r["label"],
             "wl_um": np.asarray(r["wl"], dtype=float),
+            # the PLOTTED x-coordinate (differs from wl_um near detector
+            # gaps): the figure must be reproducible from this file alone
+            "wl_eff_um": np.asarray(r.get("wl_eff", r["wl"]), dtype=float),
             "depth_mock_ppm": np.asarray(
                 _mock["modes"][r["mode_key"]]["depth_mock"],
                 dtype=float) * 1e6,
             "sigma_ppm": np.asarray(r["sigma"], dtype=float) * 1e6,
             "seed": int(seed),
+            "jitter_scale": float(_mock["scale"]),
+            "disclosure": _mock["label"],
+            "seed_scheme": _mock["seed_scheme"],
+            "numpy_version": _mock["numpy_version"],
         }) for r in results], ignore_index=True)
     _s5.download_button(
         "Mock observation (CSV)", _csv_bytes(_mock_df),
         f"{_fname_base}_mock_realization_seed{int(seed)}.csv", "text/csv",
         key=K("dl_spec_mock"),
-        help="One simulated noise realization (the plotted points), with "
-             "its seed. Not a forecast product: the binned-points and "
-             "model CSVs stay noiseless.")
+        help=posteriors.MOCK_SHORT_LABEL)
 

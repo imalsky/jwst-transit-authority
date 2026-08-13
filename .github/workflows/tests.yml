@@ -54,3 +54,25 @@ jobs:
           cffconvert --validate
       - name: Run unit tests
         run: python -m pytest tests -q -ra
+
+  # The unit lane installs no streamlit/pandas, so tests/unit/test_app_smoke.py
+  # importorskips itself there -- the result page (the most frequently changed
+  # code) would never execute in CI. This lane runs it for real on one
+  # interpreter.
+  gui-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install GUI deps (streamlit + pandas on top of the unit set)
+        run: |
+          pip install "jax>=0.6" numpy scipy matplotlib pytest streamlit pandas pyarrow
+          source deploy/pins.env
+          pip install --no-deps "vulcan-jax @ git+https://github.com/imalsky/jax-vulcan.git@${VULCAN_JAX_SHA}"
+          pip install --no-deps "vulcan-forward @ git+https://github.com/imalsky/vulcan-forward.git@${VULCAN_FORWARD_SHA}"
+          pip install --no-deps -e .
+      - name: Run the Streamlit result-page smoke tests
+        run: python -m pytest tests/unit/test_app_smoke.py tests/unit/test_share_config.py -q -ra

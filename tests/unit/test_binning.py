@@ -466,3 +466,37 @@ def test_lsf_weight_validated_on_both_paths(grid, make_bad):
 def test_lsf_valid_weight_preserves_a_flat_depth_on_both_paths(grid):
     out = _lsf(grid, np.full_like(grid, 2.5))
     assert np.allclose(out, 0.01, rtol=0, atol=1e-15)
+
+
+# --- native-R table ordering (MIRI LRS dispersion-order pixel grid) -----------
+#
+# The pandeia pixel grid is DISPERSION order, not wavelength order: MIRI LRS
+# ships it descending (13.86 -> 5.02 um). The kernel width is read with
+# np.interp, which requires increasing sample points and silently returns the
+# end value everywhere on a descending table -- so a raw pass-through blurred
+# the whole 5-12 um band at R(red end) = 42 instead of R = 42..208.
+
+def test_smooth_refuses_a_descending_native_r_table():
+    """A descending wl_r must RAISE, not silently return R(last) everywhere."""
+    wl = np.geomspace(5.0, 12.0, 4000)
+    y = np.full(wl.size, 0.01)
+    wl_r = np.linspace(12.0, 5.0, 200)               # dispersion order
+    r = np.linspace(208.0, 42.0, 200)                # paired with it
+    with pytest.raises(ValueError, match="STRICTLY ASCENDING"):
+        binning.smooth_to_native_r(wl, y, wl_r, r, 5.2, 11.8)
+    # ... and the same table sorted is accepted
+    binning.smooth_to_native_r(wl, y, wl_r[::-1], r[::-1], 5.2, 11.8)
+
+
+def test_smooth_validates_the_r_curve_itself():
+    wl = np.geomspace(5.0, 12.0, 2000)
+    y = np.full(wl.size, 0.01)
+    wl_r = np.geomspace(5.0, 12.0, 50)
+    with pytest.raises(ValueError, match="r_curve"):
+        binning.smooth_to_native_r(wl, y, wl_r, np.full(49, 100.0), 5.2, 11.8)
+    with pytest.raises(ValueError, match="r_curve"):
+        binning.smooth_to_native_r(wl, y, wl_r, np.full(50, 0.0), 5.2, 11.8)
+    with pytest.raises(ValueError, match="r_curve"):
+        bad = np.full(50, 100.0)
+        bad[7] = np.nan
+        binning.smooth_to_native_r(wl, y, wl_r, bad, 5.2, 11.8)

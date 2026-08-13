@@ -324,3 +324,65 @@ def test_miri_floor_ramp_gets_a_distinct_operational_warning():
     assert not [w for w in r2["warnings"] if w.startswith("MIRI floor ramp")]
     assert any("below this mode's STScI-recommended ramp" in w
                for w in r2["warnings"])
+
+
+# --- MIRI LRS ships its pixel grid in DISPERSION order (descending) -----------
+
+def _miri_descending_inputs(descending):
+    """MIRI-LRS-shaped evaluate_mode inputs with a real R(lambda) ramp.
+
+    ``descending=True`` reproduces the worker payload exactly: pandeia returns
+    the LRS grid in dispersion order (13.86 -> 5.02 um) with r_native paired
+    element-wise, so wl/flux/noise/r_native are all reversed together. The
+    binned depth must not depend on that ordering.
+    """
+    wl_asc = np.linspace(5.0, 12.0, 372)
+    # native R ramps ~42 -> ~208 across the LRS band (jwst_miri_p750l_disp)
+    r_asc = np.linspace(42.0, 208.0, wl_asc.size)
+    # throughput falls steeply to the red, like the real extracted count rate
+    flux_asc = 1e6 * np.exp(-(wl_asc - 5.0) / 2.0)
+    sl = slice(None, None, -1) if descending else slice(None)
+    mode_result = dict(
+        wl=wl_asc[sl].tolist(), flux=flux_asc[sl].tolist(),
+        noise_1int=np.full(wl_asc.size, 1e3)[sl].tolist(),
+        t_cycle_s=10.0, r_native=r_asc[sl].tolist(),
+        n_full_sat=np.zeros(wl_asc.size).tolist(),
+        n_part_sat=np.zeros(wl_asc.size).tolist(),
+        ngroup=10, sat_frac=0.5, saturated=False)
+    # a structured depth so the kernel WIDTH matters (a flat depth is a fixed
+    # point of any blur and would make this test vacuous)
+    wl_model = np.linspace(4.9, 12.1, 8000)
+    depth = 0.02 + 1e-3 * np.sin(60.0 * np.log(wl_model))
+    model = dict(wl_um=wl_model, depth=depth, mols=["H2O"])
+    return mode_result, model
+
+
+def test_miri_lsf_uses_local_native_r_not_the_dispersion_order_end_value():
+    """The native-R blur must read R(lambda), not R at the end of the payload.
+
+    The MIRI LRS pixel grid arrives DESCENDING; np.interp requires ascending
+    sample points and silently returns the last table value everywhere on a
+    reversed one, so passing the raw grid blurred the entire 5-12 um band at
+    the red-end R (~42) instead of R = 42..208. Both orderings describe the
+    same instrument, so both must give the same binned depth.
+    """
+    kw = dict(target_mol=None, R_bin=100.0, t_in_s=3600.0, t_out_s=3600.0,
+              n_transits=1, floor_spec=None)
+    mr_desc, model_desc = _miri_descending_inputs(descending=True)
+    mr_asc, model_asc = _miri_descending_inputs(descending=False)
+    r_desc = detect.evaluate_mode("miri_lrs", mr_desc, model_desc, **kw)
+    r_asc = detect.evaluate_mode("miri_lrs", mr_asc, model_asc, **kw)
+    assert r_desc["lsf_applied"] and r_asc["lsf_applied"]
+    assert np.allclose(r_desc["wl"], r_asc["wl"], rtol=0, atol=1e-12)
+    # ordering is a payload convention, never a physics change
+    assert np.allclose(r_desc["depth"], r_asc["depth"], rtol=0, atol=1e-12), (
+        "binned depth changed with the pandeia grid ORDER: the native-R blur "
+        "is reading the resolving-power table out of order (max diff "
+        f"{np.max(np.abs(r_desc['depth'] - r_asc['depth'])) * 1e6:.1f} ppm)")
+    # guard the fixture: the blur must genuinely depend on R here, or the
+    # equality above would hold for the wrong reason
+    mr_flat, model_flat = _miri_descending_inputs(descending=False)
+    mr_flat["r_native"] = np.full(len(mr_flat["wl"]), 42.0).tolist()
+    r_flat = detect.evaluate_mode("miri_lrs", mr_flat, model_flat, **kw)
+    assert np.max(np.abs(r_flat["depth"] - r_asc["depth"])) > 1e-6, \
+        "fixture is insensitive to R(lambda); the ordering test proves nothing"

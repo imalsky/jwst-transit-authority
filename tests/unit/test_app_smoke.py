@@ -273,6 +273,35 @@ def test_all_saturated_state_has_no_best_mode():
     assert not any("Best mode" in e.value for e in at.error)
 
 
+def test_saturated_mode_gets_no_score_and_no_plotted_points():
+    """A saturated mode carries no usable data: it must not appear in the
+    results figure with a detection score or simulated points, matching the
+    exclusion every ranking, combination and forecast already applies."""
+    import jwst_tool.summary_figure as sf
+
+    seen = {}
+    _real = sf.compose_summary_figure
+
+    def _spy(spectrum, **kw):
+        seen["labels"] = [p["label"] for p in (spectrum.get("points") or [])]
+        return _real(spectrum, **kw)
+
+    out, out_meta = _synthetic_out(saturated=True, sigma_detect=5.0)
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["out"] = out
+    at.session_state["out_meta"] = out_meta
+    sf.compose_summary_figure = _spy
+    try:
+        at.run()
+    finally:
+        sf.compose_summary_figure = _real
+    assert not at.exception, at.exception
+    # every mode in this run saturates -> no plotted series at all, and in
+    # particular no "<mode>: 5.0σ" legend entry
+    assert seen.get("labels") == [], seen
+    assert not any("σ" in lbl for lbl in seen.get("labels", []))
+
+
 def test_valid_below_target_result_is_warning_not_error():
     """A run that works but finds no signal is a scientific outcome, not a
     software failure: it must render as a warning, never an error."""
@@ -429,7 +458,7 @@ def test_beta_statement_on_intro():
 
 
 def test_mock_observation_controls_and_reroll():
-    """The mock-observation toggle + seed + 'New realization' render; the
+    """The mock-observation toggle + seed + 'New jitter draw' render; the
     re-roll steps the seed (reproducibility: the seed stays visible)."""
     at = _run_app()
     assert not at.exception, at.exception
@@ -452,11 +481,9 @@ def test_mock_observation_render_disclosure_and_download():
     at.session_state["n0_seed"] = 7
     at.run()
     assert not at.exception, at.exception
-    caps = " ".join((c.value or "") for c in at.caption)
-    assert "seed 7" in caps
-    assert "lucky or unlucky" in caps
-    assert "noiseless model" in caps
     dl = {b.label for b in at.get("download_button")}
+    # the mock CSV is the disclosure: it is named with its seed and is the
+    # ONLY export carrying the draw (no UI prose, per the GUI prose policy)
     assert "Mock observation (CSV)" in dl
     assert {"Binned points (CSV)", "Native model (CSV)"} <= dl
 
@@ -472,7 +499,12 @@ def test_combo_builder_and_summary_figure_render_with_jacobians():
     at.run()
     assert not at.exception, at.exception
     subs = [s.value for s in at.subheader]
-    assert "Mode combinations" in subs
+    # results sections are collapsible groups now; the combo builder lives
+    # inside the "Mode combinations" expander
+    exps = [e.label for e in at.get("expander")]
+    assert "Mode combinations" in exps, exps
+    assert "Parameter constraint forecast (Fisher)" in exps, exps
+    assert "Physical structure (T-P profile, mixing ratios)" in exps, exps
     assert "Marginalized forecast posteriors" in subs
     assert any("forecast summary" in s for s in subs), subs
     dl = {b.label for b in at.get("download_button")}
@@ -523,8 +555,8 @@ def test_combo_and_posterior_widgets_survive_reset():
 
 
 def test_posterior_panel_mock_recovery_overlay_renders():
-    """Mock layer ON + Jacobians: the posterior section draws and disclosed
-    the one-mock-realization overlay wording."""
+    """Mock layer ON + Jacobians: the results render with the mock layer and
+    the seeded mock export, with no exception from the recovery overlay."""
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
     at = AppTest.from_file(str(APP), default_timeout=60)
     at.session_state["out"] = out
@@ -533,11 +565,10 @@ def test_posterior_panel_mock_recovery_overlay_renders():
     at.session_state["n0_seed"] = 3
     at.run()
     assert not at.exception, at.exception
-    caps = " ".join((c.value or "") for c in at.caption)
-    assert "mock observation (seed 3)" in caps
-    assert "zero mean over realizations" in caps
-    # the honesty label rides the section itself
-    assert "Not a sampled posterior" in caps
+    dl = {b.label for b in at.get("download_button")}
+    assert "Mock observation (CSV)" in dl
+    subs = [s.value for s in at.subheader]
+    assert any("forecast summary" in s for s in subs), subs
 
 
 def test_emission_mode_archive_fill_skips_transit_duration():

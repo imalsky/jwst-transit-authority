@@ -362,6 +362,13 @@ def compare_combos(combos, results_by_mode: dict, free_names: list[str],
 # ---------------------------------------------------------------------------
 
 MOCK_KIND = "mock_observation_realization"
+# The disclosure exists in exactly two forms, reused everywhere it is
+# needed (a short one for controls and exports, a full one for provenance
+# records) so the wording cannot drift between call sites.
+MOCK_SHORT_LABEL = (
+    "One seeded realization of the adopted effective diagonal noise model; "
+    "display only.")
+
 MOCK_LABEL = (
     "One simulated noise realization: the binned noiseless model plus one "
     "seeded Gaussian draw per bin at each mode's final per-bin uncertainty "
@@ -370,6 +377,7 @@ MOCK_LABEL = (
     "S/N is computed from the noiseless model and is independent of this "
     "draw by construction.")
 
+MOCK_RECOVERY_KIND = "mock_recovery"
 MOCK_RECOVERY_LABEL = (
     "Recovered parameter shift for one simulated noise realization under "
     "the same linearization as the forecast (delta_theta = F^+ J^T "
@@ -393,9 +401,9 @@ def _mode_stream_seed(seed: int, mode_key: str) -> list[int]:
 
 def _assert_mode_streams_distinct(mode_keys) -> None:
     """crc32 is a 32-bit identifier; a collision between two registered mode
-    keys would silently give them identical noise draws. Refuse loudly (the
-    instruments registry is small, so this is an import-time guard in the
-    consumer, not a runtime cost)."""
+    keys would silently give them identical noise draws. The registry is
+    small, so checking the stream ids on each mock draw is negligible and
+    prevents a silent collision."""
     crcs = {}
     for k in mode_keys:
         c = zlib.crc32(str(k).encode())
@@ -407,18 +415,22 @@ def _assert_mode_streams_distinct(mode_keys) -> None:
         crcs[c] = k
 
 
-def mock_realization(results, seed: int) -> dict:
+def mock_realization(results, seed: int, scale: float = 1.0) -> dict:
     """One seeded mock observation over the run's evaluated modes.
 
     ``results``: list of ``detect.evaluate_mode`` result dicts (each needs
     ``mode_key``, ``depth``, ``sigma``). ``seed``: non-negative int; the same
     seed reproduces the identical realization (numpy ``default_rng`` with a
     per-mode substream -- global ``np.random`` state is never touched).
+    ``scale``: non-negative multiplier on the drawn sigma (1.0 = draw at the
+    forecast uncertainty; 0.0 = no scatter). It scales the DRAW only -- the
+    reported ``sigma`` (the plotted error bar and every quoted number) is
+    always the unscaled forecast uncertainty.
 
-    Returns dict(kind, label, seed, modes) where modes[mode_key] is
-    dict(noise, depth_mock, sigma): ``noise`` is the N(0, sigma_i) draw per
-    bin (sigma_i = that mode's FINAL per-bin depth error, floor included) and
-    ``depth_mock = depth + noise``.
+    Returns dict(kind, label, seed, scale, modes) where modes[mode_key] is
+    dict(noise, depth_mock, sigma): ``noise`` is the N(0, scale*sigma_i) draw
+    per bin (sigma_i = that mode's FINAL per-bin depth error, floor included)
+    and ``depth_mock = depth + noise``.
 
     This is a DISPLAY/mock-observation layer: nothing here may enter
     detection or Fisher scores, caches, or result exports -- the draw is
@@ -428,6 +440,10 @@ def mock_realization(results, seed: int) -> dict:
     seed = int(seed)
     if seed < 0:
         raise ValueError(f"mock_realization: seed must be >= 0, got {seed}")
+    scale = float(scale)
+    if not np.isfinite(scale) or scale < 0.0:
+        raise ValueError("mock_realization: scale must be finite and >= 0, "
+                         f"got {scale!r}")
     rlist = list(results)
     if not rlist:
         raise ValueError("mock_realization: results is empty")
@@ -454,13 +470,16 @@ def mock_realization(results, seed: int) -> dict:
             raise ValueError(f"mock_realization: mode {key!r} sigma must be "
                              "finite and > 0 everywhere")
         rng = np.random.default_rng(_mode_stream_seed(seed, key))
-        noise = rng.normal(0.0, s)
+        # scale multiplies the DRAW only; the reported sigma stays the
+        # forecast uncertainty (error bars and quoted numbers never move)
+        noise = rng.normal(0.0, s) * scale
         modes[key] = dict(noise=noise, depth_mock=d + noise, sigma=s)
     # Provenance for archival reproducibility: default_rng's bitstream is
     # stable in practice but not contractually guaranteed across numpy
     # versions, so the generating scheme and numpy version ride the record.
-    return dict(kind=MOCK_KIND, label=MOCK_LABEL, seed=seed, modes=modes,
-                seed_scheme=SEED_SCHEME, numpy_version=np.__version__)
+    return dict(kind=MOCK_KIND, label=MOCK_LABEL, seed=seed, scale=scale,
+                modes=modes, seed_scheme=SEED_SCHEME,
+                numpy_version=np.__version__)
 
 
 def mock_recovery(results, free_names: list[str], realization: dict,

@@ -280,7 +280,15 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         # removed-molecule, and Jacobian rows (operator stays linear in depth)
         po = np.argsort(wl_pix)
         flux_model = np.maximum(np.interp(wl_model, wl_pix[po], flux_pix[po]), 0.0)
-        depth_sm = binning.smooth_to_native_r(wl_model, depth, wl_pix, r_nat,
+        # R(lambda) must go in ASCENDING wavelength order: the pandeia pixel
+        # grid is dispersion order, not wavelength order, and MIRI LRS ships
+        # it DESCENDING (13.86 -> 5.02 um). Passing it raw made the operator's
+        # np.interp read a reversed table and return R = R(red end) = 42
+        # everywhere, blurring the whole 5-12 um band with a ~5x-too-wide
+        # kernel. smooth_to_native_r now refuses an out-of-order curve, so
+        # this sort is the contract, not a convenience.
+        wl_r, r_curve = wl_pix[po], r_nat[po]
+        depth_sm = binning.smooth_to_native_r(wl_model, depth, wl_r, r_curve,
                                               b_lo, b_hi, weight=flux_model)
         # metadata ONLY -- never gate the blur of OTHER vectors on this: a
         # flat baseline is a fixed point of the LSF while a narrow Jacobian
@@ -288,12 +296,12 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         lsf_applied = bool(np.any(depth_sm != depth))
         depth = depth_sm
         if depth_wo is not None:
-            depth_wo = binning.smooth_to_native_r(wl_model, depth_wo, wl_pix,
-                                                  r_nat, b_lo, b_hi,
+            depth_wo = binning.smooth_to_native_r(wl_model, depth_wo, wl_r,
+                                                  r_curve, b_lo, b_hi,
                                                   weight=flux_model)
         if jac_rows is not None:
-            jac_rows = [binning.smooth_to_native_r(wl_model, row, wl_pix,
-                                                   r_nat, b_lo, b_hi,
+            jac_rows = [binning.smooth_to_native_r(wl_model, row, wl_r,
+                                                   r_curve, b_lo, b_hi,
                                                    weight=flux_model)
                         for row in jac_rows]
     else:

@@ -4,7 +4,8 @@ Pure matplotlib + numpy, importable and renderable without Streamlit (the GUI
 builds the input dicts; tests render headless). The composition takes plain
 dicts/arrays so it is unit-testable without any engine or noise backend.
 
-The two panels answer the collaborator's three questions in one graphic:
+Three equal, square panels side by side answer the collaborator's three
+questions in one graphic:
 
 * LEFT  -- can the hypothesis be tested, and which mode is best at what
   precision? The model spectrum with each mode's simulated data points
@@ -12,11 +13,11 @@ The two panels answer the collaborator's three questions in one graphic:
   Each legend entry carries that mode's expected performance number (the
   caller appends it to the point-series label: a conditional template S/N
   for a detection goal, an expected +/- for a constraint goal).
-* RIGHT -- what would the measurement look like? Up to two 1D marginalized
-  Fisher-Gaussian forecast curves (posteriors.FORECAST_LABEL wording: these
-  are linearized Cramer-Rao forecasts, never sampled retrieval posteriors).
-  An unconstrained direction renders as an explicit annotation, never a fake
-  finite curve.
+* CENTER and RIGHT -- what would the measurement look like? Up to two 1D
+  marginalized
+  Fisher-Gaussian forecast curves (linearized Cramer-Rao forecasts, never
+  sampled retrieval posteriors). An unconstrained direction renders as an
+  explicit annotation, never a fake finite curve.
 
 House style: the vendored science.mplstyle with the GUI's serif/STIX
 overrides, so the standalone render matches the in-app figures.
@@ -32,6 +33,10 @@ _STYLE_FILE = Path(__file__).resolve().parent / "science.mplstyle"
 
 # The GUI's overrides on top of the vendored style (app.py applies the same
 # set globally); repeated here so a headless render matches the app.
+# One typography scale across the three square panels (the vendored style is
+# sized for a single full-width axes; a third-width panel needs its own).
+_AX_LBL, _TICK, _LEG = 9.0, 8.0, 7.0
+
 _STYLE_OVERRIDES = {
     "font.family": "serif",
     "mathtext.fontset": "stix",
@@ -115,6 +120,8 @@ def _validate_panels(posterior_panels) -> list[dict]:
                                  f"{pdf.shape} shapes differ")
             curves.append(dict(label=str(_req(c, "label", cw)),
                                theta=theta, pdf=pdf,
+                               kind=(None if c.get("kind") is None
+                                     else str(c["kind"])),
                                color=str(c.get("color", "#333333")),
                                ls=str(c.get("ls", "-")),
                                lw=float(c.get("lw", 1.6))))
@@ -130,10 +137,82 @@ def _validate_panels(posterior_panels) -> list[dict]:
     return out
 
 
+def _plot_spectrum(ax, spec: dict) -> None:
+    """Render the model spectrum and each mode's simulated points."""
+    ax.plot(spec["wl_um"], spec["depth_ppm"], color="#444444", lw=1.1,
+            alpha=0.9, zorder=2, label=spec["model_label"])
+    if spec["depth2_ppm"] is not None:
+        ax.plot(spec["wl_um"], spec["depth2_ppm"], color="#888888",
+                lw=1.0, ls="--", zorder=1, label=spec["depth2_label"])
+    for p in spec["points"]:
+        ax.errorbar(p["wl_um"], p["depth_ppm"], yerr=p["sigma_ppm"],
+                    fmt=p["marker"], ms=3.6, lw=0.9, color=p["color"],
+                    ecolor=p["color"], elinewidth=0.7, capsize=0,
+                    zorder=3, label=p["label"])
+    ax.set_xscale("log")
+    lo = float(min(spec["wl_um"].min(),
+                   min((p["wl_um"].min() for p in spec["points"]),
+                       default=spec["wl_um"].min())))
+    hi = float(max(spec["wl_um"].max(),
+                   max((p["wl_um"].max() for p in spec["points"]),
+                       default=spec["wl_um"].max())))
+    ticks = [t for t in (1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 7.0, 10.0, 12.0)
+             if lo * 0.97 <= t <= hi * 1.03]
+    # 10 and 12 collide on a square panel; keep the decade
+    if 10.0 in ticks and 12.0 in ticks:
+        ticks.remove(12.0)
+    if ticks:
+        ax.set_xticks(ticks)
+        ax.set_xticklabels([f"{t:g}" for t in ticks])
+    ax.set_xlim(lo * 0.97, hi * 1.03)
+    ax.set_xlabel("wavelength (µm)", fontsize=_AX_LBL)
+    ax.set_ylabel(spec["depth_label"], fontsize=_AX_LBL)
+    ax.tick_params(labelsize=_TICK)
+    ax.grid(alpha=0.25)
+    if spec["points"]:
+        # headroom for the legend: 1 row per entry (2-column layout
+        # halves it), so the legend never lands on the data
+        _n_leg = len(spec["points"]) + 1 + (spec["depth2_ppm"] is not None)
+        _ncol = 1 if _n_leg <= 3 else 2
+        _rows = int(np.ceil(_n_leg / _ncol))
+        _y0, _y1 = ax.get_ylim()
+        ax.set_ylim(_y0, _y0 + (_y1 - _y0) / (1.0 - 0.075 * _rows))
+        ax.legend(loc="upper left", frameon=False, fontsize=_LEG,
+                  ncol=_ncol, handletextpad=0.5, borderaxespad=0.4,
+                  columnspacing=1.0, labelspacing=0.3)
+
+
+
+def _plot_posterior_panel(axp, pan: dict) -> None:
+    """Render one marginalized forecast posterior panel."""
+    for c in pan["curves"]:
+        axp.plot(c["theta"], c["pdf"], color=c["color"], ls=c["ls"],
+                 lw=c["lw"], label=c["label"])
+    if pan["center"] is not None:
+        axp.axvline(pan["center"], color="#999999", lw=0.7, ls=":")
+    axp.set_xlabel(pan["axis_label"], fontsize=_AX_LBL)
+    axp.set_yticks([])
+    axp.tick_params(labelsize=_TICK)
+    axp.set_ylabel("forecast density", fontsize=_AX_LBL)
+    if pan["curves"]:
+        _y0, _y1 = axp.get_ylim()
+        axp.set_ylim(_y0, _y0 + (_y1 - _y0)
+                     / (1.0 - 0.085 * len(pan["curves"])))
+        axp.legend(loc="upper right", frameon=False, fontsize=_LEG,
+                   handletextpad=0.5, borderaxespad=0.4,
+                   labelspacing=0.3)
+    for k, note in enumerate(pan["notes"]):
+        axp.text(0.5, 0.5 - 0.18 * k, note, transform=axp.transAxes,
+                 ha="center", va="center", fontsize=7,
+                 color="#883333", wrap=True)
+    axp.grid(alpha=0.15)
+
+
+
 def compose_summary_figure(spectrum: dict, posterior_panels=None,
                            title: str | None = None,
                            footnote: str | None = None):
-    """Compose the two-part proposal summary figure; returns the Figure.
+    """Compose the three-panel proposal summary figure; returns the Figure.
 
     ``spectrum``: dict(wl_um, depth_ppm, depth_label, model_label,
     points=[dict(label, color, marker, wl_um, depth_ppm, sigma_ppm), ...]).
@@ -158,72 +237,32 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
     panels = _validate_panels(posterior_panels)
 
     with plt.style.context([str(_STYLE_FILE), _STYLE_OVERRIDES]):
-        fig = plt.figure(figsize=(11.5, 4.8), dpi=200)
-        gs = fig.add_gridspec(2, 2, width_ratios=[2.2, 1.15],
-                              wspace=0.30, hspace=0.42,
-                              left=0.09, right=0.985,
+        # three EQUAL, SQUARE panels side by side: spectrum, then up to two
+        # marginalized forecast posteriors
+        fig = plt.figure(figsize=(12.0, 4.3), dpi=200)
+        gs = fig.add_gridspec(1, 3, width_ratios=[1.0, 1.0, 1.0],
+                              wspace=0.16,
+                              left=0.075, right=0.99,
                               top=(0.88 if title else 0.94),
-                              bottom=(0.22 if footnote else 0.14))
+                              bottom=(0.18 if footnote else 0.13))
 
         # -- LEFT: spectrum with per-mode simulated points ------------------
-        ax = fig.add_subplot(gs[:, 0])
-        ax.plot(spec["wl_um"], spec["depth_ppm"], color="#444444", lw=1.1,
-                alpha=0.9, zorder=2, label=spec["model_label"])
-        if spec["depth2_ppm"] is not None:
-            ax.plot(spec["wl_um"], spec["depth2_ppm"], color="#888888",
-                    lw=1.0, ls="--", zorder=1, label=spec["depth2_label"])
-        for p in spec["points"]:
-            ax.errorbar(p["wl_um"], p["depth_ppm"], yerr=p["sigma_ppm"],
-                        fmt=p["marker"], ms=3.6, lw=0.9, color=p["color"],
-                        ecolor=p["color"], elinewidth=0.7, capsize=0,
-                        zorder=3, label=p["label"])
-        ax.set_xscale("log")
-        lo = float(min(spec["wl_um"].min(),
-                       min((p["wl_um"].min() for p in spec["points"]),
-                           default=spec["wl_um"].min())))
-        hi = float(max(spec["wl_um"].max(),
-                       max((p["wl_um"].max() for p in spec["points"]),
-                           default=spec["wl_um"].max())))
-        ticks = [t for t in (1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 7.0, 10.0, 12.0)
-                 if lo * 0.97 <= t <= hi * 1.03]
-        if ticks:
-            ax.set_xticks(ticks)
-            ax.set_xticklabels([f"{t:g}" for t in ticks])
-        ax.set_xlim(lo * 0.97, hi * 1.03)
-        ax.set_xlabel("wavelength (µm)")
-        ax.set_ylabel(spec["depth_label"])
-        ax.grid(alpha=0.25)
-        if spec["points"]:
-            ax.legend(loc="best", frameon=False, fontsize=7,
-                      ncol=1 if len(spec["points"]) <= 3 else 2)
+        ax = fig.add_subplot(gs[0, 0])
+        ax.set_box_aspect(1.0)
+        _plot_spectrum(ax, spec)
 
-        # -- RIGHT: up to two marginalized forecast posteriors --------------
+        # -- CENTER/RIGHT: up to two marginalized forecast posteriors -------
         for i in range(2):
-            axp = fig.add_subplot(gs[i, 1])
+            axp = fig.add_subplot(gs[0, i + 1])
+            axp.set_box_aspect(1.0)
             if i >= len(panels):
                 axp.set_axis_off()
                 continue
-            pan = panels[i]
-            for c in pan["curves"]:
-                axp.plot(c["theta"], c["pdf"], color=c["color"], ls=c["ls"],
-                         lw=c["lw"], label=c["label"])
-            if pan["center"] is not None:
-                axp.axvline(pan["center"], color="#999999", lw=0.7, ls=":")
-            axp.set_xlabel(pan["axis_label"], fontsize=8)
-            axp.set_yticks([])
-            axp.tick_params(labelsize=7)
-            axp.set_ylabel("forecast density", fontsize=7)
-            if pan["curves"]:
-                axp.legend(loc="upper right", frameon=False, fontsize=6)
-            for k, note in enumerate(pan["notes"]):
-                axp.text(0.5, 0.5 - 0.18 * k, note, transform=axp.transAxes,
-                         ha="center", va="center", fontsize=7,
-                         color="#883333", wrap=True)
-            axp.grid(alpha=0.15)
+            _plot_posterior_panel(axp, panels[i])
 
         if title:
             fig.suptitle(str(title), fontsize=11)
         if footnote:
-            fig.text(0.06, 0.02, str(footnote), fontsize=6.5,
+            fig.text(0.075, 0.015, str(footnote), fontsize=6.5,
                      color="#555555", ha="left", va="bottom", wrap=True)
     return fig

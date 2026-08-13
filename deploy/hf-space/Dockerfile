@@ -1,17 +1,17 @@
 # vulcan-jwst-tool as a Hugging Face Docker Space.
 #
 # The Space repo holds ONLY this deployment shim (Dockerfile, entrypoint,
-# bootstrap, README); the build clones the three GitHub repos, so updating
-# code = push to GitHub, then Settings -> Factory rebuild (a plain rebuild
-# may reuse the cached clone layer -- factory rebuild is the reliable path).
+# bootstrap, README); the build clones the three GitHub repos. To deploy new
+# code: push to GitHub, bump the matching *_SHA ARG below (that busts the
+# clone layer), push the Space files. Factory rebuild is the fallback if a
+# build ever reuses a stale clone layer anyway.
 #
 # Datasets are NOT in the image: the entrypoint seeds /data (the Space's
 # persistent-storage volume) from a private HF dataset repo on first boot.
 # Requires: persistent storage enabled (Small tier) + secret HF_TOKEN.
-# Pinned by digest (2026-08-13 review): a :latest tag lets an unrelated
-# upstream rebuild change the base environment under fixed source SHAs.
-# This digest is the base the validated 0.29.0 image was built on; update
-# it deliberately, with a decision record, never implicitly.
+# Base image pinned by DIGEST, not :latest -- an upstream rebuild must never
+# change the environment under fixed source SHAs. Update deliberately, with
+# a notes.md decision record.
 FROM condaforge/miniforge3@sha256:8edc74dee5b29511a9c1a8941c77efbf438b47edffb6320ab8675dc06bd618c2
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -23,26 +23,19 @@ RUN conda create -y -n app python=3.12 \
     && conda clean -afy
 
 # Clone name VULCAN-JAX is load-bearing for the engine's path contract.
-# RESTART NONCE: 2 (2026-08-04). Any commit to the Space repo re-runs the
-# platform init steps, which is the only restart path an `hf auth login`
-# token has -- the /restart and hardware endpoints answer 401. Bump this
-# comment (leaving the pins alone) to retry a transient platform failure:
-# comments do NOT bust the Docker cache, so every layer hits and the
-# container simply starts again. Used once for an `hf-mount` failure
-# ("Initialization step 'hf-mount' failed with exit code: 0", empty reason,
-# no app logs, hardware never allocated) whose two volume sources were both
-# verified intact -- if a mount source is ever genuinely missing, fix the
-# volume instead, since a restart cannot help.
 #
-# Every deployed repository is pinned to an EXACT commit; update the three
-# *_SHA args on every release (jwst-tool = the validated content commit,
-# siblings = the heads CI validated against). The pre-0.25.1 SRC_STAMP echo
-# only busted the Docker cache and then cloned whatever each default branch
-# pointed to at build time -- BUILD_INFO recorded the drift instead of
-# preventing it (2026-08-09 review). Changing an ARG default busts the
-# cache of the layers that use it, so the pins are also the cache-bust.
-# The build FAILS on a pin/rev-parse mismatch; BUILD_INFO records the
-# enforced pins.
+# RESTART NONCE: 2. Any commit to the Space repo re-runs the platform init
+# steps -- the only restart path an `hf auth login` token has. Bump this
+# number (leaving the pins alone) to retry a transient platform failure:
+# comments do not bust the Docker cache, so every layer hits and the
+# container simply restarts.
+#
+# Every deployed repository is pinned to an EXACT commit: jwst-tool = the
+# validated content commit, siblings = the heads CI validated against.
+# Changing an ARG default busts the cache of the layers that use it, so the
+# pins are also the cache-bust. The build FAILS on a pin/rev-parse mismatch;
+# BUILD_INFO records the enforced pins.
+# (History of these decisions: notes.md, Decision records.)
 ARG VULCAN_JAX_SHA=c847198c7c2fca10f4274fbb1eb8faf8d9831c3e
 ARG VULCAN_FORWARD_SHA=af304a1d5f6ec049a84ac11901cde7aaa7b74c5a
 ARG JWST_TOOL_SHA=838146e2caaf135eb8ad0406f52e50de82dc013f
