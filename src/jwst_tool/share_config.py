@@ -395,13 +395,6 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
             state[key("seed")] = int(obs["seed"])
         if obs.get("show_noise") is not None:
             state[key("shownoise")] = bool(obs["show_noise"])
-        if obs.get("jitter_scale") is not None:
-            _js = float(obs["jitter_scale"])
-            if not (0.0 <= _js <= 5.0):
-                raise ValueError(
-                    f"observation.jitter_scale must be within [0, 5], "
-                    f"got {_js!r}")
-            state[key("jscale")] = _js
         # named mode combinations (results-side builder; K("combos") is a
         # plain session key, applied like any widget key before widgets)
         combos_in = obs.get("combos") or []

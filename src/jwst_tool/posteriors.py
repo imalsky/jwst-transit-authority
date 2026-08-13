@@ -415,21 +415,23 @@ def _assert_mode_streams_distinct(mode_keys) -> None:
         crcs[c] = k
 
 
-def mock_realization(results, seed: int, scale: float = 1.0) -> dict:
+def mock_realization(results, seed: int) -> dict:
     """One seeded mock observation over the run's evaluated modes.
 
     ``results``: list of ``detect.evaluate_mode`` result dicts (each needs
     ``mode_key``, ``depth``, ``sigma``). ``seed``: non-negative int; the same
     seed reproduces the identical realization (numpy ``default_rng`` with a
     per-mode substream -- global ``np.random`` state is never touched).
-    ``scale``: non-negative multiplier on the drawn sigma (1.0 = draw at the
-    forecast uncertainty; 0.0 = no scatter). It scales the DRAW only -- the
-    reported ``sigma`` (the plotted error bar and every quoted number) is
-    always the unscaled forecast uncertainty.
+    The draw is ALWAYS at the mode's own per-bin sigma -- the same
+    uncertainty the error bars, the conditional template S/N and the Fisher
+    forecast use. There is deliberately no scale factor: a 0.5x or 2x draw
+    is not a realization of the model whose error bars are plotted beside
+    it. To change the assumed uncertainty, change the noise model (the
+    per-mode random-noise multiplier), which propagates to every number.
 
-    Returns dict(kind, label, seed, scale, modes) where modes[mode_key] is
-    dict(noise, depth_mock, sigma): ``noise`` is the N(0, scale*sigma_i) draw
-    per bin (sigma_i = that mode's FINAL per-bin depth error, floor included)
+    Returns dict(kind, label, seed, modes) where modes[mode_key] is
+    dict(noise, depth_mock, sigma): ``noise`` is the N(0, sigma_i) draw per
+    bin (sigma_i = that mode's FINAL per-bin depth error, floor included)
     and ``depth_mock = depth + noise``.
 
     This is a DISPLAY/mock-observation layer: nothing here may enter
@@ -440,10 +442,6 @@ def mock_realization(results, seed: int, scale: float = 1.0) -> dict:
     seed = int(seed)
     if seed < 0:
         raise ValueError(f"mock_realization: seed must be >= 0, got {seed}")
-    scale = float(scale)
-    if not np.isfinite(scale) or scale < 0.0:
-        raise ValueError("mock_realization: scale must be finite and >= 0, "
-                         f"got {scale!r}")
     rlist = list(results)
     if not rlist:
         raise ValueError("mock_realization: results is empty")
@@ -470,16 +468,13 @@ def mock_realization(results, seed: int, scale: float = 1.0) -> dict:
             raise ValueError(f"mock_realization: mode {key!r} sigma must be "
                              "finite and > 0 everywhere")
         rng = np.random.default_rng(_mode_stream_seed(seed, key))
-        # scale multiplies the DRAW only; the reported sigma stays the
-        # forecast uncertainty (error bars and quoted numbers never move)
-        noise = rng.normal(0.0, s) * scale
+        noise = rng.normal(0.0, s)
         modes[key] = dict(noise=noise, depth_mock=d + noise, sigma=s)
     # Provenance for archival reproducibility: default_rng's bitstream is
     # stable in practice but not contractually guaranteed across numpy
     # versions, so the generating scheme and numpy version ride the record.
-    return dict(kind=MOCK_KIND, label=MOCK_LABEL, seed=seed, scale=scale,
-                modes=modes, seed_scheme=SEED_SCHEME,
-                numpy_version=np.__version__)
+    return dict(kind=MOCK_KIND, label=MOCK_LABEL, seed=seed, modes=modes,
+                seed_scheme=SEED_SCHEME, numpy_version=np.__version__)
 
 
 def mock_recovery(results, free_names: list[str], realization: dict,

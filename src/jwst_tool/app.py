@@ -1343,16 +1343,14 @@ with st.sidebar:
     with st.expander("Jitter (simulated data points)"):
         show_noise = st.checkbox(
             "Jitter", value=True, key=K("shownoise"),
-            help="Draw one random noise realization on the plotted points: "
-                 "the binned model plus N(0, scale x sigma_i) per bin. "
-                 "Display only -- no quoted number includes it.")
-        _mk1, _mk2 = st.columns(2)
-        jitter_scale = _mk1.number_input(
-            "Scale (x sigma)", 0.0, 5.0, 1.0, 0.1, key=K("jscale"),
-            disabled=not show_noise,
-            help="Multiplies the per-bin sigma used for the draw. 1.0 draws "
-                 "at the forecast uncertainty.")
-        seed = _mk2.number_input(
+            help="Show one seeded random realization of the adopted noise "
+                 "model on the plotted points: the binned model plus "
+                 "N(0, sigma_i) per bin, at the same per-bin uncertainty "
+                 "the error bars and the forecast already use. Only the "
+                 "particular random draw is display-only. To change the "
+                 "assumed uncertainty itself, use the per-mode random-noise "
+                 "multiplier under Noise model.")
+        seed = st.number_input(
             "Seed", 0, 9999, 0, key=K("seed"), disabled=not show_noise,
             help="The same seed reproduces the identical draw.")
         st.button("Redraw", key=K("reroll"), on_click=_bump_seed,
@@ -1782,7 +1780,6 @@ with st.expander("Run summary & configuration"):
                 noise_infl={k: float(infl[k]) for k in mode_keys},
                 show_noise=bool(show_noise),
                 seed=int(seed),
-                jitter_scale=float(jitter_scale),
                 combos=[dict(name=str(c["name"]),
                              modes=[str(m) for m in c["modes"]])
                         for c in (st.session_state.get(K("combos")) or [])]),
@@ -2204,8 +2201,7 @@ if goal_r == "detect":
 # without recomputing anything; the seed is displayed and reproducible.
 # HARD RULE: nothing from this layer enters detection/Fisher scores, caches,
 # or the result CSVs -- only the clearly-named mock download below.
-_mock = (posteriors.mock_realization(results, int(seed),
-                                    scale=float(jitter_scale))
+_mock = (posteriors.mock_realization(results, int(seed))
          if show_noise else None)
 _depth_lbl = ("eclipse depth (ppm)"
               if str(model.get("science_mode", "transmission")) == "emission"
@@ -2845,7 +2841,6 @@ if _mock is not None:
                 dtype=float) * 1e6,
             "sigma_ppm": np.asarray(r["sigma"], dtype=float) * 1e6,
             "seed": int(seed),
-            "jitter_scale": float(_mock["scale"]),
             "disclosure": _mock["label"],
             "seed_scheme": _mock["seed_scheme"],
             "numpy_version": _mock["numpy_version"],

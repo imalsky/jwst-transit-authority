@@ -440,3 +440,35 @@ def test_mode_stream_crc_collision_refused_and_registry_clean():
     assert zlib.crc32(a.encode()) == zlib.crc32(b.encode())
     with pytest.raises(ValueError, match="collide"):
         posteriors._assert_mode_streams_distinct([a, b])
+
+
+def test_mock_draw_uses_the_same_sigma_as_the_reported_error_bars():
+    """The mock draw must be a realization of the SAME noise model whose
+    error bars and forecasts are displayed beside it: no scale factor, and
+    the drawn scatter must match the reported sigma. A scale knob that moved
+    the dots without moving the forecast was removed in 0.29.4 -- this pins
+    the invariant so it cannot come back silently."""
+    import inspect
+    import numpy as np
+    from jwst_tool import posteriors
+
+    # the API must not accept a scale/multiplier on the draw
+    params = set(inspect.signature(posteriors.mock_realization).parameters)
+    assert params == {"results", "seed"}, params
+
+    r = dict(_result(n_bins=400))
+    r["mode_key"] = "nirspec_prism"
+    r["sigma"] = np.full(400, 3.0e-4)
+    r["depth"] = np.full(400, 0.021)
+    draws = []
+    for sd in range(24):
+        m = posteriors.mock_realization([r], seed=sd)["modes"]["nirspec_prism"]
+        # depth_mock is exactly depth + noise, and sigma is REPORTED unscaled
+        assert np.allclose(m["depth_mock"], r["depth"] + m["noise"])
+        assert np.array_equal(m["sigma"], r["sigma"])
+        draws.append(m["noise"] / r["sigma"])
+    z = np.concatenate(draws)
+    # standardized residuals ~ N(0,1): a scale factor of s would show up here
+    # as std = s. 9600 samples -> std known to ~0.7%.
+    assert abs(float(z.std()) - 1.0) < 0.05, float(z.std())
+    assert abs(float(z.mean())) < 0.05, float(z.mean())
