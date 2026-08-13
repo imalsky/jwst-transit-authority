@@ -46,6 +46,7 @@ from jwst_tool import archive
 from jwst_tool import noise as noise_mod
 from jwst_tool import posteriors
 from jwst_tool import proc as proc_mod
+from jwst_tool import plotting
 from jwst_tool import share_config
 from jwst_tool import summary_figure
 from jwst_tool import instruments as ins
@@ -71,18 +72,36 @@ def _slug(s: str) -> str:
 
 
 def _fig_png(fig, dpi: int = 200) -> bytes:
-    """Rasterize a figure for download (PNG, dpi 200 -- house convention)."""
+    """Rasterize a figure for download (PNG, dpi 200 -- house convention).
+
+    Under plotting.render_lock: savefig measures text through the
+    process-global mathtext parser (see plotting.py).
+    """
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight",
-                facecolor="white")
+    with plotting.render_lock:
+        fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight",
+                    facecolor="white")
     return buf.getvalue()
 
 
 def _fig_pdf(fig) -> bytes:
     """Vector PDF export (proposal-ready; text and lines stay vector)."""
     buf = io.BytesIO()
-    fig.savefig(buf, format="pdf", bbox_inches="tight", facecolor="white")
+    with plotting.render_lock:
+        fig.savefig(buf, format="pdf", bbox_inches="tight", facecolor="white")
     return buf.getvalue()
+
+
+def _show_fig(fig) -> None:
+    """Render a figure into the page under the render lock, then close it.
+
+    st.pyplot rasterizes, so it enters the same shared mathtext parser as
+    layout does -- it belongs inside the lock like every other materialization
+    (plotting.py has the full argument).
+    """
+    with plotting.render_lock:
+        st.pyplot(fig, width="stretch")
+        plt.close(fig)
 
 
 def _csv_bytes(df: pd.DataFrame) -> bytes:
@@ -194,17 +213,6 @@ Each run computes a spectrum live, for exactly the atmosphere you configure:
 
 If a calculation does not pass its numerical quality checks, the tool stops
 and shows an error instead of returning an uncertified spectrum.
-
-**Read the results as optimistic.** The detection score is conditional on
-the selected atmosphere: if a retrieval frees more atmospheric parameters
-under the same model and noise assumptions, the detection significance
-will usually decrease. The Fisher values are local Cramer-Rao lower bounds
-with no priors, not posterior widths: nonlinear responses and degeneracies
-can make a posterior wider, and informative priors can make it narrower.
-The noise model omits time-correlated systematics (visit-long trends, 1/f
-residuals, detrending covariance, stellar heterogeneity), so achieved
-precision is usually poorer. Treat mode rankings as more robust than
-absolute ppm numbers.
         """)
 
 # ---------------------------------------------------------------------------
@@ -288,16 +296,24 @@ _AD_ROW_MIN, _AD_ROW_MAX = 1, 2        # minutes per AD row
 _PROG_RE = re.compile(r"\[fwd\] PROG ([0-9.]+) (.*)")
 
 
-def _fmt_dur(s: float) -> str:
-    """Compact duration: '42 s', '3 m 05 s', '1 h 12 m'."""
+def _fmt_clock(s: float) -> str:
+    """Fixed-width duration, always 9 chars: ' HH:MM:SS'.
+
+    The ONLY duration formatter here. It replaced a variable-width `_fmt_dur`
+    ('42 s' / '3 m 05 s' / '1 h 12 m') that every readout used: crossing a
+    unit boundary changed the string LENGTH, which is what made the progress
+    row -- and every widget below it -- jitter on each tick. `.done()` uses
+    this too, so the final render does not resize the row one last time.
+    """
     s = max(0, int(round(s)))
-    if s < 60:
-        return f"{s} s"
-    m, sec = divmod(s, 60)
-    if m < 60:
-        return f"{m} m {sec:02d} s"
-    h, m = divmod(m, 60)
-    return f"{h} h {m:02d} m"
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    return f"{min(h, 99):3d}:{m:02d}:{sec:02d}"
+
+
+# Fixed pixel height for the streaming solver/ETC log boxes: the content
+# grows line by line, and an auto-height box moves everything under it.
+_LOG_BOX_PX = 220
 
 
 class _TimedBar:
@@ -308,17 +324,28 @@ class _TimedBar:
     measured pace, weighted by the completed fraction; with no prior it is
     purely measured. Blend the two REMAINING-time estimates, never the two
     totals -- blending totals cancels the measured pace and freezes the
-    countdown for the whole stage."""
+    countdown for the whole stage.
+
+    LAYOUT STABILITY (2026-08-13): the label is built at a CONSTANT width so
+    the bar and everything under it stop shifting on every tick. Two rules
+    make that hold: the clock is fixed-width ``HH:MM:SS`` (``_fmt_clock``, so
+    59s -> 1m 00s never changes the string length), and the stage label is
+    padded/truncated to ``_STAGE_W`` characters. The text is also wrapped in a
+    monospace span, because character-count padding alone does not give a
+    constant PIXEL width in a proportional UI font -- and because a label that
+    reflows to a second line moves every widget below it."""
+
+    _STAGE_W = 46          # stage-label field; long labels are truncated
 
     def __init__(self, prior_total_s: float | None = None,
                  text: str = "starting ..."):
-        self._bar = st.progress(0.0, text=text)
         self._t0 = time.monotonic()
         self._prior = prior_total_s
         self._frac = 0.0
         self._label = text
+        self._bar = st.progress(0.0, text=self._compose())
 
-    def _render(self) -> None:
+    def _compose(self) -> str:
         e = time.monotonic() - self._t0
         remaining = None
         if self._frac > 0.0:
@@ -332,10 +359,18 @@ class _TimedBar:
                 remaining = measured_left
         elif self._prior:
             remaining = max(self._prior - e, 0.0)
-        txt = f"{self._label}  (elapsed {_fmt_dur(e)}"
-        txt += (f", about {_fmt_dur(remaining)} left)"
-                if remaining is not None else ")")
-        self._bar.progress(min(1.0, self._frac), text=txt)
+        stage = str(self._label)
+        if len(stage) > self._STAGE_W:
+            stage = stage[:self._STAGE_W - 1] + "…"
+        left = (_fmt_clock(remaining) if remaining is not None
+                else "  --:--:--")
+        # monospace + non-breaking spaces: constant pixel width, no reflow
+        body = (f"{stage:<{self._STAGE_W}}  elapsed {_fmt_clock(e)}"
+                f"  left {left}")
+        return "`" + body.replace(" ", "\u00a0") + "`"
+
+    def _render(self) -> None:
+        self._bar.progress(min(1.0, self._frac), text=self._compose())
 
     def update(self, frac: float, label: str) -> None:
         self._frac, self._label = float(frac), label
@@ -346,8 +381,14 @@ class _TimedBar:
         self._render()
 
     def done(self, label: str = "done") -> None:
-        self._bar.progress(
-            1.0, text=f"{label}  ({_fmt_dur(time.monotonic() - self._t0)})")
+        # same fixed-width shape as the live ticks, so the final render does
+        # not resize the row one last time
+        self._frac, self._label = 1.0, label
+        elapsed = time.monotonic() - self._t0
+        stage = label[:self._STAGE_W]
+        body = (f"{stage:<{self._STAGE_W}}  elapsed {_fmt_clock(elapsed)}"
+                f"  left {_fmt_clock(0.0)}")
+        self._bar.progress(1.0, text="`" + body.replace(" ", "\u00a0") + "`")
 
 
 def _watch_proc(proc, on_line, on_tick, tick_s: float = 1.0) -> None:
@@ -542,13 +583,6 @@ _apply_pending_archive_fill()
 def _queue_archive_fill() -> None:
     st.session_state["_archive_fill_pending"] = \
         st.session_state.get(K("custom_arch_name"))
-
-
-def _bump_seed() -> None:
-    """'New jitter draw' control: step the mock-observation seed. The seed
-    stays visible in its widget, so the realization is always reproducible."""
-    st.session_state[K("seed")] = (
-        int(st.session_state.get(K("seed"), 0)) + 1) % 10000
 
 
 def _combo_add() -> None:
@@ -1143,9 +1177,6 @@ with st.sidebar:
     # -----------------------------------------------------------------------
     st.divider()
     st.markdown("### 3 · Science goal")
-    # Condensation renders LATER (More settings), so read it from
-    # session_state; matches the widget except on the very first render.
-    _conden_ss = bool(st.session_state.get(K("conden"), False))
     # Under PICASO + climate, dlnCO is NOT offered: climate composition sits
     # exactly on a chemistry-table node with no trustworthy C/O derivative
     # (canonical_params refuses it too).
@@ -1162,11 +1193,8 @@ with st.sidebar:
     mol_options = forward.active_molecules(
         {"chem_provider": chem_provider, "extra_mols": extra_mols})
 
-    if _conden_ss:
-        st.session_state[K("goal")] = "detect"
     goal = st.radio(
         "Goal", ["detect", "constrain"], horizontal=True, key=K("goal"),
-        disabled=_conden_ss,
         format_func={"detect": "Detect a molecule",
                      "constrain": "Constrain a parameter"}.get,
         help="Detect: compare the full spectrum with one that omits the "
@@ -1175,12 +1203,6 @@ with st.sidebar:
              "Constrain: a local Fisher (Cramer-Rao) bound from the "
              "spectrum derivatives, not a posterior uncertainty. "
              "Constraints cost minutes per free parameter.")
-    if _conden_ss:
-        goal = "detect"
-        st.caption(
-            "Condensation is on (More settings). It locks the goal to "
-            "detection: no derivative through the condensation pin is "
-            "valid, so constraints are unavailable.")
     goal_param, target_prec, marginalize = None, None, True
     do_fisher = False
     if goal == "detect":
@@ -1237,9 +1259,7 @@ with st.sidebar:
     # Constraint settings render only when the run will compute derivatives.
     fisher_params: list = []
     jac_method = "fd"
-    if _conden_ss:
-        pass                       # constraints unavailable; caption above
-    elif goal == "detect":
+    if goal == "detect":
         do_fisher = st.checkbox(
             "Also calculate parameter constraints", value=True,
             key=K("dofish"),
@@ -1336,26 +1356,21 @@ with st.sidebar:
                                  key=K("ntr"))
 
     # Mock-observation layer: generated AFTER the forward model and the
-    # noise model (posteriors.mock_realization), never inside them.
-    # Display only -- no jittered value may enter detection or Fisher
-    # scores, caches, or downloaded result CSVs (the mock data itself is
-    # downloadable, clearly named with its seed).
-    with st.expander("Jitter (simulated data points)"):
-        show_noise = st.checkbox(
-            "Jitter", value=True, key=K("shownoise"),
-            help="Show one seeded random realization of the adopted noise "
-                 "model on the plotted points: the binned model plus "
-                 "N(0, sigma_i) per bin, at the same per-bin uncertainty "
-                 "the error bars and the forecast already use. Only the "
-                 "particular random draw is display-only. To change the "
-                 "assumed uncertainty itself, use the per-mode random-noise "
-                 "multiplier under Noise model.")
-        seed = st.number_input(
-            "Seed", 0, 9999, 0, key=K("seed"), disabled=not show_noise,
-            help="The same seed reproduces the identical draw.")
-        st.button("Redraw", key=K("reroll"), on_click=_bump_seed,
-                  disabled=not show_noise,
-                  help="Steps the seed for a new draw.")
+    # noise model (posteriors.mock_realization), never inside them. The
+    # draw IS fitted -- mock_recovery overlays the parameters recovered
+    # from it -- so this is not a cosmetic layer. What it may never touch:
+    # the FORECAST (detection/Fisher scores, caches, result CSVs), which
+    # stays realization-independent by construction.
+    show_noise = st.checkbox(
+        "Jitter", value=True, key=K("shownoise"),
+        help="Add Gaussian noise on top of the spectrum from the forward "
+             "model: one draw per point at that point's own error bar. The "
+             "posterior panels overlay the parameters recovered from this "
+             "draw; the forecast numbers do not depend on it.")
+    seed = st.number_input(
+        "Seed", 0, 9999, 0, key=K("seed"), disabled=not show_noise,
+        help="The same seed reproduces the identical draw and the identical "
+             "recovered parameters.")
 
     with st.expander("Timing, saturation & binning (Pandeia)"):
         t_base = st.number_input(
@@ -1460,8 +1475,9 @@ with st.sidebar:
             for k in mode_keys}
 
     # -----------------------------------------------------------------------
-    # More settings: solver grid, condensation, boundary conditions,
-    # advanced RT, and display controls, behind one entry point.
+    # More settings: solver grid and advanced RT, behind one entry point.
+    # No help tooltips in here (maintainer, 2026-08-13): the labels stand on
+    # their own and the reference material lives in README.md.
     # -----------------------------------------------------------------------
     st.divider()
     st.markdown("### More settings")
@@ -1471,12 +1487,7 @@ with st.sidebar:
         # LOCKED to nz); the PICASO climate solve has its own internal grid.
         nz = st.number_input(
             "Vertical layers (chemistry + RT)", *forward.NZ_RANGE,
-            forward.NZ_DEFAULT, 10, key=K("nz_pic" if _pic else "nz"),
-            help="Pressure levels shared by the chemistry and the "
-                 "radiative transfer. More layers resolve steeper "
-                 "gradients but run slower. The PICASO climate solve uses "
-                 "its own internal grid and is re-gridded onto these "
-                 "layers.")
+            forward.NZ_DEFAULT, 10, key=K("nz_pic" if _pic else "nz"))
         if _pic:
             yconv_cri = forward.YCONV_DEFAULT   # equilibrium: no iterative solver
             st.caption("The solver convergence tolerance applies to the "
@@ -1486,122 +1497,23 @@ with st.sidebar:
             yconv_cri = st.number_input(
                 "Solver convergence tolerance", 1.0e-4, 1.0e-2,
                 forward.YCONV_DEFAULT, 1.0e-4,
-                format="%.1e", key=K("yconv"),
-                help="Steady-state criterion (yconv). 1e-2 is the VULCAN "
-                     "default. Tightening it does not improve weak mid-IR "
-                     "results: raise the native spectral grid points "
-                     "instead. The results page reports the actual "
-                     "residual, and an uncertified run stops with an "
-                     "error.")
+                format="%.1e", key=K("yconv"))
 
-    if _pic:
-        # Equilibrium provider: condensation and boundary conditions do not
-        # exist; canonical_params refuses explicit requests, the GUI never
-        # offers them.
-        use_condense = use_settling = False
-        diff_esc, top_flux, bot_flux = [], [], []
-        st.caption("Condensation and boundary conditions apply to the "
-                   "VULCAN kinetics engine only, so they are not shown for "
-                   "PICASO equilibrium.")
-    else:
-        with st.expander("Condensation (detection goals only)"):
-            _conden_allowed = use_photo and use_moldiff and jac_method == "fd"
-            if not _conden_allowed:
-                st.session_state[K("conden")] = False
-            use_condense = st.checkbox(
-                "S8 condensation (sulfur rainout)", value=False,
-                key=K("conden"), disabled=not _conden_allowed,
-                help="Sulfur rainout with the standard VULCAN treatment. "
-                     "Detection goals only: the pinned sulfur reservoir "
-                     "depends on the solver's step history, so no "
-                     "derivative through it is trustworthy. Warning: on a "
-                     "column too hot to condense, the pin still freezes "
-                     "sulfur at an arbitrary early value. Use it only for "
-                     "planets cool enough for sulfur to condense.")
-            if not _conden_allowed:
-                st.caption(
-                    "Condensation needs photochemistry ON, molecular "
-                    "diffusion ON, and the finite-difference method in "
-                    "the science-goal step.")
-            use_condense = bool(use_condense and _conden_allowed)
-            st.caption(
-                "For aerosol opacity in a constraint forecast, use the "
-                "cloud decks in step 2 instead.")
-
-        with st.expander("Boundary conditions & escape"):
-            st.caption(
-                "Upstream VULCAN boundary-condition options, all off by "
-                "default. Negligible for a typical hot Jupiter.")
-            _settle_ok = use_moldiff and not use_condense
-            if not _settle_ok:
-                st.session_state[K("settle")] = False
-            use_settling = st.checkbox(
-                "Gravitational settling", value=False, key=K("settle"),
-                disabled=not _settle_ok,
-                help="Adds the particle settling velocity to the "
-                     "transport operator. Needs molecular diffusion ON. "
-                     "Not available with condensation.")
-            if not _settle_ok:
-                st.caption("Settling needs molecular diffusion ON and "
-                           "condensation OFF.")
-            if not use_moldiff:            # escape flux ~ TOA Dzz; zero without moldiff
-                st.session_state[K("descape")] = []
-            diff_esc = st.multiselect(
-                "Diffusion-limited escape at the top of atmosphere",
-                list(forward.DIFF_ESC_CHOICES), default=[], key=K("descape"),
-                disabled=not use_moldiff,
-                help="Applies the diffusion-limited escape flux at the "
-                     "top of the atmosphere for the selected species. "
-                     "Needs molecular diffusion ON.")
-            if not use_moldiff:
-                st.caption("Escape needs molecular diffusion ON.")
-            top_lines = st.text_area(
-                "Top-boundary fluxes", value="", key=K("topflux"),
-                placeholder="H2O 1.0e8",
-                help="One species per line: 'SPECIES FLUX', flux in "
-                     "molecules cm^-2 s^-1 (negative = outflux to space). "
-                     "An unknown species stops the run with an error.")
-            bot_lines = st.text_area(
-                "Bottom-boundary fluxes + deposition", value="",
-                key=K("botflux"), placeholder="SO2 1.0e9 0.1",
-                help="One species per line: 'SPECIES FLUX VDEP' (VDEP "
-                     "optional, default 0), flux in molecules cm^-2 s^-1 "
-                     "(positive = outgassing), deposition velocity in "
-                     "cm s^-1 (surface sink).")
-
-            def _parse_bc_lines(text: str, kind: str) -> list:
-                rows = []
-                for ln in (text or "").splitlines():
-                    tok = ln.split()
-                    if not tok or tok[0].startswith("#"):
-                        continue
-                    if kind == "bot" and len(tok) == 2:
-                        tok = tok + ["0.0"]
-                    rows.append(tok)
-                return rows
-
-            top_flux = _parse_bc_lines(top_lines, "top")
-            bot_flux = _parse_bc_lines(bot_lines, "bot")
-            try:                              # immediate loud feedback on typos
-                forward._canon_bc_entries(top_flux, kind="top")
-                forward._canon_bc_entries(bot_flux, kind="bot")
-            except ValueError as e:
-                st.error(
-                    "The boundary-condition entry is not valid: "
-                    f"{e} Edit the line and try again.")
+    # Condensation, gravitational settling, diffusion-limited escape and the
+    # boundary-condition fluxes were REMOVED from the GUI 2026-08-13
+    # (maintainer): they stay canonical parameters in forward.py with their
+    # full compatibility matrix, reachable through the programmatic interface,
+    # but the interface pins them off. share_config REFUSES a loaded
+    # configuration that sets any of them non-default rather than silently
+    # computing a different atmosphere than the file describes.
+    use_condense = use_settling = False
+    diff_esc, top_flux, bot_flux = [], [], []
 
     with st.expander("Advanced radiative transfer (ExoJAX)"):
-        st.caption("ExoJAX modeling choices that can move the spectrum. "
-                   "The defaults are the validated baseline. Changing one "
-                   "re-runs the model.")
         rt_ptop_bar = st.number_input(
             "RT top pressure (bar)",
             1.0e-9, 1.0e-6, 1.0e-8, 1.0e-9,
-            format="%.1e", key=K("rtptop"),
-            help="Where the RT column ends. Above the chemistry grid, the "
-                 "topmost abundances and temperature are held constant, a "
-                 "standard convention. Too low a top saturates strong "
-                 "bands (CO2 4.3, CO 4.7 µm).")
+            format="%.1e", key=K("rtptop"))
         if science_mode == "emission":
             # canonical_params pins simpson in emission (no transit chord);
             # show the pinned state, not a silently ignored choice
@@ -1610,16 +1522,10 @@ with st.sidebar:
             "Transit chord integration", ["simpson", "trapezoid"], index=0,
             key=K("rtint"), disabled=(science_mode == "emission"),
             format_func={"simpson": "Simpson (ExoJAX default)",
-                         "trapezoid": "Trapezoid"}.get,
-            help="Numerical scheme for the transit chord integral. If "
-                 "switching it moves your answer, raise the layer count. "
-                 "Locked in emission (no transit chord there).")
+                         "trapezoid": "Trapezoid"}.get)
         rt_dit_res = st.number_input(
             "Line-wing (broadening) grid resolution",
-            0.1, 1.0, 1.0, 0.1, format="%.1f", key=K("rtdit"),
-            help="PreMODIT broadening-grid spacing. Smaller resolves line "
-                 "wings finer but builds opacity slower. 1.0 is the "
-                 "validated value here. 0.2 is ExoJAX's own default.")
+            0.1, 1.0, 1.0, 0.1, format="%.1f", key=K("rtdit"))
 
     # Reset sits behind a confirmation step: one click must not clear a long
     # configuration and the current results.
@@ -1631,9 +1537,7 @@ with st.sidebar:
         _rc1.button("Confirm reset", on_click=_reset_all, type="primary")
         _rc2.button("Keep settings", on_click=_disarm_reset)
     else:
-        st.button("Reset all settings", on_click=_arm_reset,
-                  help="Returns every setting to its default and clears "
-                       "the current results (asks for confirmation first).")
+        st.button("Reset all settings", on_click=_arm_reset)
 
 params = dict(planet=planet_key, science_mode=science_mode,
               chem_provider=chem_provider,
@@ -1695,8 +1599,7 @@ if t_char < 900.0 and not _pic:
 if tp_mode == "picaso_climate":      # climate solve (cached after the first)
     base_min += 1.5
 # condensing solves carry the window + pin + stricter gate overhead
-if use_condense:
-    base_min += 1.5
+
 # Jacobian-row cost model: fd = 4 solves per row; Tint_cl = 4 full climate
 # re-solves; cloud and Mie rows are RT-only (~seconds); ad = ~1 warm jvp
 _solve_min = (0.15 if _pic else max(1.0, base_min * 0.5))
@@ -1862,7 +1765,9 @@ def _compute_locked():
                     bar.update(min(1.0, float(m.group(1))), m.group(2))
                 else:
                     lines.append(line)
-                    box.code("\n".join(lines[-10:]))
+                    # FIXED height: a growing code block shoves every widget
+                    # below it down each time a line arrives
+                    box.code("\n".join(lines[-10:]), height=_LOG_BOX_PX)
                     bar.tick()
 
             with _managed_proc(
@@ -1910,7 +1815,7 @@ def _compute_locked():
                     n_started[0] += 1
                 else:
                     lines.append(s)
-                    box.code("\n".join(lines[-8:]))
+                    box.code("\n".join(lines[-8:]), height=_LOG_BOX_PX)
                     bar.tick()
 
             etc = noise_mod.run_modes(star, list(mode_keys),
@@ -2194,13 +2099,14 @@ d_wo_s = None
 if goal_r == "detect":
     mols = [str(x) for x in model["mols"]]
     d_wo_s = model["depth_wo"][mols.index(meta["target"])][order] * 1e6
-# Mock-observation layer (display only): one seeded N(0, sigma_i) draw per
+# Mock-observation layer: one seeded N(0, sigma_i) draw per
 # bin ON TOP of the binned noiseless model, generated AFTER the forward
 # model and the noise model (posteriors.mock_realization). The LIVE widget
-# state drives it (not the stored run meta), so "New jitter draw" redraws
+# state drives it (not the stored run meta), so editing the seed redraws
 # without recomputing anything; the seed is displayed and reproducible.
 # HARD RULE: nothing from this layer enters detection/Fisher scores, caches,
-# or the result CSVs -- only the clearly-named mock download below.
+# or the result CSVs -- only the clearly-named mock download below, and the
+# mock_recovery overlay on the posterior panels, which IS fitted to it.
 _mock = (posteriors.mock_realization(results, int(seed))
          if show_noise else None)
 _depth_lbl = ("eclipse depth (ppm)"
@@ -2225,21 +2131,12 @@ with st.expander("Physical structure (T-P profile, mixing ratios)"):
     _tp_col, _vmr_col, _ = st.columns([1.4, 1.4, 1.2])
 
     with _tp_col:
-        fig3, ax3 = plt.subplots(figsize=(3.8, 4.2), dpi=200)
-        ax3.plot(model["T"], model["p_bar"], color="#2a78d6", lw=1.6)
-        for tlim in (320.0, 2980.0):
-            ax3.axvline(tlim, color="#cccccc", lw=0.8, ls=":")
-        ax3.set_xlim(1.0, 3000.0)
-        ax3.set_yscale("log")
-        ax3.invert_yaxis()
-        ax3.set_xlabel("temperature (K)")
-        ax3.set_ylabel("pressure (bar)")
-        ax3.grid(alpha=0.25)
-        ax3_ylim = ax3.get_ylim()
-        fig3.tight_layout()
-        st.pyplot(fig3, width="stretch")
+        # built by plotting.build_tp_figure (pure, importable without
+        # streamlit) so the threaded regression test exercises this exact
+        # code; the whole lifecycle stays under plotting.render_lock
+        fig3, ax3_ylim = plotting.build_tp_figure(model["p_bar"], model["T"])
         _tp_png = _fig_png(fig3)
-        plt.close(fig3)
+        _show_fig(fig3)
         _p_arr = np.asarray(model["p_bar"], dtype=float)
         _T_arr = np.asarray(model["T"], dtype=float)
         if _cpj.get("science_mode") == "emission":
@@ -2289,21 +2186,9 @@ with st.expander("Physical structure (T-P profile, mixing ratios)"):
             _cols = [(_m, _ymix[:, _i]) for _i, _m in enumerate(_mols_all)
                      if _i < _ymix.shape[1]]
             _cols.sort(key=lambda kv: -float(np.nanmax(kv[1])))
-            fig4, ax4 = plt.subplots(figsize=(3.8, 4.2), dpi=200)
-            for _m, _y in _cols:
-                ax4.plot(np.clip(_y, 1e-14, None), _p_arr, lw=1.4, label=_m)
-            ax4.set_xscale("log")
-            ax4.set_xlim(1e-12, 1.0)
-            ax4.set_yscale("log")
-            ax4.set_ylim(ax3_ylim)
-            ax4.set_xlabel("volume mixing ratio")
-            ax4.set_ylabel("pressure (bar)")
-            ax4.grid(alpha=0.25)
-            ax4.legend(loc="best", frameon=False, fontsize=7, ncol=2)
-            fig4.tight_layout()
-            st.pyplot(fig4, width="stretch")
+            fig4 = plotting.build_vmr_figure(_p_arr, _cols, ylim=ax3_ylim)
             _vmr_png = _fig_png(fig4)
-            plt.close(fig4)
+            _show_fig(fig4)
             _vmr_df = pd.DataFrame({"p_bar": _p_arr}
                                    | {m: y for m, y in _cols})
             _v1, _v2 = st.columns(2)
@@ -2785,17 +2670,19 @@ for r in results:
         sigma_ppm=np.asarray(r["sigma"], float) * 1e6))
 _leg_note = None
 if _leg_num:
+    # ONE short line, rendered as the legend's TITLE (not folded into the
+    # model label, which made that entry multi-line and broke the legend's
+    # row spacing). Says what the per-mode numbers are, nothing more.
     _leg_note = (
-        f"legend: {meta['target']} conditional template S/N per mode, "
-        f"{meta['n_transits']} {_ev}"
+        f"{meta['target']} S/N per mode, {meta['n_transits']} {_ev}"
         f"{'s' if meta['n_transits'] > 1 else ''}"
         if goal_r == "detect" else
-        f"legend: expected ±{forward.param_axis(_rk_param)} per mode "
+        f"expected ±{forward.param_axis(_rk_param)} per mode "
         f"at {_target_sig:g}σ")
 _sum_spectrum = dict(wl_um=wl_s, depth_ppm=d_plot,
                      depth_label=_depth_lbl,
-                     model_label="model (smoothed for display)"
-                                 + (f"\n({_leg_note})" if _leg_note else ""),
+                     model_label="model (smoothed for display)",
+                     legend_title=_leg_note,
                      points=_sum_points)
 if d_wo_s is not None:
     # detect goal: the same without-target comparison curve the old
@@ -2809,10 +2696,9 @@ fig_sum = summary_figure.compose_summary_figure(
     title=f"{meta.get('planet', 'planet')} -- "
           f"{_cpj.get('science_mode', 'transmission')} forecast summary",
     footnote=_sum_foot)
-st.pyplot(fig_sum, width="stretch")
 _sum_png = _fig_png(fig_sum)
 _sum_pdf = _fig_pdf(fig_sum)
-plt.close(fig_sum)
+_show_fig(fig_sum)
 _s1, _s2, _s3, _s4, _s5 = st.columns([1.5, 1.2, 1.5, 1.5, 1.9])
 _s1.download_button("Figure (PDF, vector)", _sum_pdf,
                     f"{_fname_base}_proposal_summary.pdf",

@@ -220,3 +220,46 @@ def test_removed_noise_scenario_is_noted_not_restored():
     state, notes = share_config.widget_state(share, _key)
     assert not any("scenario" in k for k in state)
     assert not any("scenario" in n for n in notes)
+
+
+# ---------------------------------------------------------------------------
+# GUI-removed physics (2026-08-13): condensation, settling, escape, BC fluxes
+# ---------------------------------------------------------------------------
+
+def test_default_removed_physics_still_loads_normally():
+    """Nothing is lost when the removed switches sit at their defaults: the
+    overwhelming majority of shared configurations never touched them."""
+    canon = _canon()
+    assert canon["use_condense"] is False and canon["use_settling"] is False
+    assert not canon["diff_esc"] and not canon["top_flux"]
+    state, notes = share_config.widget_state(canon, _key)
+    assert not notes
+    assert state["n0_planet"] == "wasp39b"
+
+
+@pytest.mark.parametrize("over,needle", [
+    (dict(use_condense=True, use_photo=True, use_moldiff=True),
+     "condensation"),
+    (dict(use_settling=True, use_moldiff=True), "gravitational settling"),
+    (dict(diff_esc=["H2"], use_moldiff=True),
+     "diffusion-limited escape"),
+    (dict(top_flux=[["H2O", "1.0e8"]]), "top-boundary"),
+    (dict(bot_flux=[["SO2", "1.0e9", "0.1"]]), "bottom-boundary"),
+])
+def test_nondefault_removed_physics_is_refused_not_silently_dropped(over,
+                                                                   needle):
+    """A configuration that ENABLES physics the GUI no longer offers must
+    RAISE, not load with a note.
+
+    These switches change the atmosphere the model computes. Restoring such a
+    file while pinning them off would look like a successful load and then Run
+    would silently compute something the file does not describe -- exactly the
+    class of silent behavior change the fail-fast rule forbids. (Contrast the
+    removed correlated-noise scenarios, which only get a note: those never
+    changed the model.) The settings remain reachable through the API.
+    """
+    canon = _canon(**over)
+    with pytest.raises(ValueError, match=needle):
+        share_config.widget_state(canon, _key)
+    with pytest.raises(ValueError, match="programmatic interface"):
+        share_config.widget_state(canon, _key)

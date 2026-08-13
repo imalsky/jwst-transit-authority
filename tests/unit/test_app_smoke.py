@@ -457,22 +457,34 @@ def test_beta_statement_on_intro():
     assert "full retrieval" in md
 
 
-def test_mock_observation_controls_and_reroll():
-    """The mock-observation toggle + seed + 'New jitter draw' render; the
-    re-roll steps the seed (reproducibility: the seed stays visible)."""
+def test_mock_observation_controls():
+    """The Jitter toggle + seed render; the 'New draw' BUTTON is gone.
+
+    Removed 2026-08-13 (maintainer): the seed field stays, so a realization is
+    still reproducible and still selectable by typing, but there is no
+    one-click re-roll. Widget keys are unchanged, so share_config round-trips.
+    """
     at = _run_app()
     assert not at.exception, at.exception
     assert at.checkbox(key="n0_shownoise").value is True   # ON by default
     assert at.number_input(key="n0_seed").value == 0
-    at.button(key="n0_reroll").click().run()
+    # editing the seed still redraws without recomputing
+    at.number_input(key="n0_seed").set_value(7).run()
     assert not at.exception, at.exception
-    assert at.number_input(key="n0_seed").value == 1
+    assert at.number_input(key="n0_seed").value == 7
+    assert not [b for b in at.get("button") if b.key == "n0_reroll"], \
+        "the 'New draw' button was removed"
 
 
 def test_mock_observation_render_disclosure_and_download():
-    """With the mock layer ON, the results disclose the seed and the layer's
-    display-only nature, and the mock CSV download (named with its seed)
-    appears; the noiseless result downloads stay."""
+    """With the mock layer ON, the mock CSV download (named with its seed)
+    appears and the noiseless result downloads stay.
+
+    NOT "display-only": the draw is fitted (mock_recovery overlays the
+    recovered parameters on the posterior panels). What the CSV split pins is
+    the one-directional invariant -- the draw rides in its own clearly-named
+    export and never contaminates the noiseless result CSVs.
+    """
     out, out_meta = _synthetic_out(sigma_detect=8.0)
     at = AppTest.from_file(str(APP), default_timeout=60)
     at.session_state["out"] = out
@@ -587,3 +599,45 @@ def test_emission_mode_archive_fill_skips_transit_duration():
     assert at.number_input(key="n0_custom_teff").value == values["teff"]
     warns = " | ".join(w.value for w in at.warning)
     assert "secondary-eclipse duration can differ" in warns
+
+
+def test_removed_sections_and_prose_are_gone():
+    """2026-08-13 UI cleanup (maintainer): the Condensation and 'Boundary
+    conditions & escape' expanders are removed, More settings carries no help
+    tooltips, and two prose blocks are deleted.
+
+    Kept structural, not cosmetic: each assertion names something a future
+    edit could silently reintroduce.
+    """
+    at = _run_app()
+    assert not at.exception, at.exception
+    labels = [e.label for e in at.get("expander")]
+    for gone in ("Condensation (detection goals only)",
+                 "Boundary conditions & escape"):
+        assert gone not in labels, f"{gone!r} expander is back"
+    # the widgets behind them must not exist either
+    keys = {w.key for w in at.get("checkbox")} | {
+        w.key for w in at.get("multiselect")}
+    assert "n0_conden" not in keys and "n0_settle" not in keys
+    assert "n0_descape" not in keys
+    # ExoJAX caption + the intro honesty paragraph
+    md = " ".join(m.value for m in at.markdown)
+    caps = " ".join(c.value for c in at.get("caption"))
+    body = md + " " + caps
+    assert "modeling choices that can move the spectrum" not in body
+    assert "Read the results as optimistic" not in body
+    assert "Treat mode rankings as more robust" not in body
+
+
+def test_more_settings_widgets_carry_no_help_tooltips():
+    """No '?' icons under More settings: the labels stand alone and the
+    reference material lives in README.md (GUI prose policy)."""
+    at = _run_app()
+    assert not at.exception, at.exception
+    for key in ("n0_nz", "n0_yconv", "n0_rtptop", "n0_rtint", "n0_rtdit"):
+        found = [w for w in at.get("number_input") + at.get("selectbox")
+                 if w.key == key]
+        if not found:            # nz_pic under the picaso provider
+            continue
+        assert not getattr(found[0], "help", None), \
+            f"{key} regained a help tooltip"

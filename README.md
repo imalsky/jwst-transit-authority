@@ -143,6 +143,16 @@ derivatives and reports local Cramer-Rao lower bounds. Those are not posterior
 widths: they are local, likelihood-based approximations, and informative priors
 or external data can make a real posterior narrower.
 
+**Treat the mode rankings as more robust than the absolute ppm numbers.** The
+systematic effects the tool leaves out -- time-correlated noise, the
+conditional-atmosphere assumption behind the detection score, the linearization
+behind the Fisher bounds -- push every mode in the same direction and largely
+divide out of a comparison BETWEEN modes, while they move the absolute numbers
+by more than their quoted precision suggests. "G395H beats PRISM for this
+molecule" is the durable result; "4.2 sigma" is the fragile one. (This
+paragraph used to sit in the GUI's intro; it moved here in the 2026-08-13 UI
+cleanup, with the interface keeping only labels, numbers, and loud failures.)
+
 ## Forecast products (beta)
 
 Four result-page features are new in 0.29.0 and carry a beta statement in the
@@ -184,10 +194,13 @@ effective diagonal noise model: when a noise floor stands in for correlated
 instrumental systematics, drawing it as independent bin noise is internally
 consistent with the tool's diagonal likelihood but is not a physical model
 of correlated systematics. The draw is generated after the
-forward model and the noise model, purely for display. The forward model
-itself stays noiseless, and every quoted precision and conditional template
-S/N is computed from the noiseless model -- they are independent of the
-plotted draw by construction. A single realization can be lucky or unlucky;
+forward model and the noise model, never inside them, and it is fitted: the
+posterior panels overlay the parameters recovered from that one realization
+(`posteriors.mock_recovery`, delta = F^+ J^T Sigma^-1 n on the same
+nuisance-profiled system as the forecast), which move with the seed. The
+forward model itself stays noiseless, and the FORECAST -- every quoted
+precision and the conditional template S/N -- is computed from the noiseless
+model and is independent of the plotted draw by construction. A single realization can be lucky or unlucky;
 the seed is shown with the results, reproduces the identical realization,
 and is saved in shared configurations. The mock data can be downloaded, but
 only under a filename that names its seed; the result CSVs stay noiseless.
@@ -223,6 +236,31 @@ model, and (when the mock layer is on) seeded mock-observation CSVs; the
 footnote carries the same linearized-forecast wording as the posterior
 section. The T-P profile remains its own small figure, and the Fisher
 table carries the full per-mode and per-combination numbers.
+
+**Figure conventions (2026-08-13).** Every figure is square (equal panel box
+aspect), every legend sits OUTSIDE its axes, and log axes label at most seven
+decades with no minor ticks. The legends moved out of the axes because keeping
+them inside required inflating the y limits to park them clear of the data,
+which distorted the visible range for the legend's benefit; per-mode numbers
+stay in their own legend entries and the note explaining what those numbers
+mean is the legend's title, never folded into an entry label. The builders
+live in `plotting.py` (`build_tp_figure`, `build_vmr_figure`) and in
+`summary_figure.py`, all importable without Streamlit, so the tests render
+exactly what the app renders.
+
+**Rendering is serialized** behind `plotting.render_lock`, a process-wide
+in-process reentrant lock held across each figure's whole lifecycle:
+construct, lay out, draw, export, close. Matplotlib guards its process-global
+mathtext parser with `Figure._render_lock` only for the duration of
+`Figure.draw`; `tight_layout` runs the layout engine outside that lock and
+measures every tick label, and on a log axis those labels are mathtext. With
+one Streamlit session per thread, two users rendering at once could enter the
+shared parser concurrently and the loser raised
+`ValueError: ParseException: exception raised in parse action`. Measured on
+the deployed pin (matplotlib 3.10.0): 7 of 8 concurrent threads failed before
+the fix, 0 of 8 after. `tests/unit/test_plotting.py` pins both the behavior
+and the structure -- one test fails if a builder stops taking the lock, another
+if an unlocked `tight_layout`/`savefig`/`st.pyplot` call reappears in `app.py`.
 
 ### NIRSpec G395M
 
@@ -309,6 +347,7 @@ src/jwst_tool/
 ├── detect.py          detection statistics
 ├── noise.py           ETC noise model and floors
 ├── binning.py         the single measurement operator
+├── plotting.py        pure figure builders + the render lock
 ├── pandeia_worker.py  Pandeia subprocess
 ├── instruments.py     mode registry and path roots
 ├── datacheck.py       data-availability detection
@@ -460,10 +499,22 @@ about 100 K hot through the SO2 formation zone when this was measured
 to the **shipped table**, which is why the table is the W39b default again.
 Never quote Guillot-mode W39b SO2 numbers against Alderson/Tsai 2023.
 
-### Boundary conditions
+### Boundary conditions and condensation (programmatic interface only)
 
 All off by default: gravitational settling, diffusion-limited escape for H, H2, and
 He, and constant top and bottom per-species fluxes with deposition velocities.
+S8 condensation (sulfur rainout) is likewise off by default and remains
+detection-only, refused with any Jacobian method, with photochemistry off, or
+with molecular diffusion off (see the condensation rules below).
+
+**These five settings left the GUI on 2026-08-13** (`use_condense`,
+`use_settling`, `diff_esc`, `top_flux`, `bot_flux`). They are unchanged
+canonical parameters with their full compatibility matrix and are reachable
+through `jwst_tool.forward.canonical_params` and the CLI; only the interface
+stopped offering them. A shared configuration that leaves them at their
+defaults loads normally, but one that ENABLES any of them is **refused** with an
+error naming the setting: pinning them off silently would present a successful
+restore while Run computed a different atmosphere than the file describes.
 
 ### Clouds
 

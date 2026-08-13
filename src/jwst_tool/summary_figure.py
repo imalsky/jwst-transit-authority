@@ -29,6 +29,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from jwst_tool import plotting
+
 _STYLE_FILE = Path(__file__).resolve().parent / "science.mplstyle"
 
 # The GUI's overrides on top of the vendored style (app.py applies the same
@@ -91,12 +93,17 @@ def _validate_spectrum(spectrum: dict) -> dict:
             raise ValueError(f"spectrum: depth2_ppm {depth2.shape} and "
                              f"wl_um {wl.shape} shapes differ")
         depth2 = depth2[order]
+    _lt = spectrum.get("legend_title")
     return dict(wl_um=wl[order], depth_ppm=depth[order],
                 depth2_ppm=depth2,
                 depth2_label=str(spectrum.get("depth2_label", "comparison")),
                 depth_label=str(spectrum.get("depth_label",
                                              "transit depth (ppm)")),
                 model_label=str(spectrum.get("model_label", "model")),
+                # what the per-entry numbers mean -- ONE short line as the
+                # legend's title, never folded into an entry label (a
+                # multi-line label wrecks the legend's row spacing)
+                legend_title=(None if _lt is None else str(_lt)),
                 points=points)
 
 
@@ -170,16 +177,20 @@ def _plot_spectrum(ax, spec: dict) -> None:
     ax.tick_params(labelsize=_TICK)
     ax.grid(alpha=0.25)
     if spec["points"]:
-        # headroom for the legend: 1 row per entry (2-column layout
-        # halves it), so the legend never lands on the data
+        # Legend OUTSIDE the axes, below (2026-08-13). It used to sit inside
+        # at "upper left", which forced a y-limit inflation to keep it off the
+        # data -- that padding distorted the visible depth range purely for
+        # the legend's benefit. Outside the axes needs no padding and can
+        # never overlap a series, so the data range is the data range.
         _n_leg = len(spec["points"]) + 1 + (spec["depth2_ppm"] is not None)
-        _ncol = 1 if _n_leg <= 3 else 2
-        _rows = int(np.ceil(_n_leg / _ncol))
-        _y0, _y1 = ax.get_ylim()
-        ax.set_ylim(_y0, _y0 + (_y1 - _y0) / (1.0 - 0.075 * _rows))
-        ax.legend(loc="upper left", frameon=False, fontsize=_LEG,
-                  ncol=_ncol, handletextpad=0.5, borderaxespad=0.4,
-                  columnspacing=1.0, labelspacing=0.3)
+        _leg = ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16),
+                         frameon=False, fontsize=_LEG,
+                         ncol=(1 if _n_leg <= 2 else 2), handletextpad=0.5,
+                         borderaxespad=0.0, columnspacing=1.0,
+                         labelspacing=0.3,
+                         title=spec["legend_title"])
+        if spec["legend_title"]:
+            _leg.get_title().set_fontsize(_LEG)
 
 
 
@@ -195,11 +206,11 @@ def _plot_posterior_panel(axp, pan: dict) -> None:
     axp.tick_params(labelsize=_TICK)
     axp.set_ylabel("forecast density", fontsize=_AX_LBL)
     if pan["curves"]:
-        _y0, _y1 = axp.get_ylim()
-        axp.set_ylim(_y0, _y0 + (_y1 - _y0)
-                     / (1.0 - 0.085 * len(pan["curves"])))
-        axp.legend(loc="upper right", frameon=False, fontsize=_LEG,
-                   handletextpad=0.5, borderaxespad=0.4,
+        # outside the axes, below -- same reasoning as the spectrum panel: no
+        # y-limit inflation, so the curve height is the curve height
+        axp.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16),
+                   frameon=False, fontsize=_LEG, ncol=1,
+                   handletextpad=0.5, borderaxespad=0.0,
                    labelspacing=0.3)
     for k, note in enumerate(pan["notes"]):
         axp.text(0.5, 0.5 - 0.18 * k, note, transform=axp.transAxes,
@@ -236,15 +247,23 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
     spec = _validate_spectrum(spectrum)
     panels = _validate_panels(posterior_panels)
 
-    with plt.style.context([str(_STYLE_FILE), _STYLE_OVERRIDES]):
+    # plotting.render_lock covers BOTH hazards here: the style context mutates
+    # global rcParams, and the layout/legend placement below measures mathtext
+    # through matplotlib's process-global parser (plotting.py has the full
+    # argument). Reentrant, so a caller holding it already is fine.
+    with plotting.render_lock, \
+            plt.style.context([str(_STYLE_FILE), _STYLE_OVERRIDES]):
         # three EQUAL, SQUARE panels side by side: spectrum, then up to two
-        # marginalized forecast posteriors
-        fig = plt.figure(figsize=(12.0, 4.3), dpi=200)
+        # marginalized forecast posteriors. set_box_aspect(1.0) below pins
+        # the panels square, so the figure is made TALLER than the panel row
+        # needs and the extra height is given to the axes-external legends
+        # underneath (bottom margin), which is why bottom is generous.
+        fig = plt.figure(figsize=(12.0, 5.0), dpi=200)
         gs = fig.add_gridspec(1, 3, width_ratios=[1.0, 1.0, 1.0],
                               wspace=0.16,
                               left=0.075, right=0.99,
-                              top=(0.88 if title else 0.94),
-                              bottom=(0.18 if footnote else 0.13))
+                              top=(0.93 if title else 0.97),
+                              bottom=(0.30 if footnote else 0.26))
 
         # -- LEFT: spectrum with per-mode simulated points ------------------
         ax = fig.add_subplot(gs[0, 0])
@@ -263,6 +282,6 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
         if title:
             fig.suptitle(str(title), fontsize=11)
         if footnote:
-            fig.text(0.075, 0.015, str(footnote), fontsize=6.5,
+            fig.text(0.075, 0.03, str(footnote), fontsize=6.5,
                      color="#555555", ha="left", va="bottom", wrap=True)
     return fig

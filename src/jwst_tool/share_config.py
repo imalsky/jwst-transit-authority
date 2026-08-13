@@ -254,14 +254,35 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
         state[key("fdiur")] = float(cp["f_diurnal"])
         state[key("moldiff")] = bool(cp["use_moldiff"])
         state[key("vmmol")] = bool(cp["use_vm_mol"])
-        state[key("conden")] = bool(cp["use_condense"])
-        state[key("settle")] = bool(cp["use_settling"])
-        state[key("descape")] = [s for s in (cp.get("diff_esc") or [])
-                                 if s in forward.DIFF_ESC_CHOICES]
-        state[key("topflux")] = "\n".join(
-            " ".join(str(x) for x in row) for row in (cp.get("top_flux") or []))
-        state[key("botflux")] = "\n".join(
-            " ".join(str(x) for x in row) for row in (cp.get("bot_flux") or []))
+        # Condensation, gravitational settling, diffusion-limited escape and
+        # the boundary-condition fluxes left the GUI 2026-08-13. They remain
+        # canonical parameters (API/CLI), so a configuration may legitimately
+        # carry them -- but this app can no longer REPRESENT them. Restoring
+        # such a file and silently pinning them off would look like a
+        # successful load while Run computed a different atmosphere than the
+        # file describes, so a non-default value is REFUSED. Defaults
+        # (False/empty) load normally: nothing is lost. Contrast the removed
+        # noise scenarios, which get a note -- those did not change the model.
+        _removed = []
+        if bool(cp.get("use_condense", False)):
+            _removed.append("condensation (use_condense)")
+        if bool(cp.get("use_settling", False)):
+            _removed.append("gravitational settling (use_settling)")
+        if list(cp.get("diff_esc") or []):
+            _removed.append("diffusion-limited escape (diff_esc)")
+        if list(cp.get("top_flux") or []):
+            _removed.append("top-boundary fluxes (top_flux)")
+        if list(cp.get("bot_flux") or []):
+            _removed.append("bottom-boundary fluxes (bot_flux)")
+        if _removed:
+            raise ValueError(
+                "this configuration enables atmospheric physics the "
+                "interface no longer offers -- " + ", ".join(_removed)
+                + ". These settings still exist in the programmatic "
+                "interface (jwst_tool.forward.canonical_params), so run this "
+                "configuration through the API or CLI; loading it here would "
+                "silently compute a different atmosphere than the file "
+                "describes.")
         state[key("yconv")] = float(cp["yconv_cri"])
 
     # -- clouds & scattering (step 2)

@@ -357,8 +357,9 @@ def compare_combos(combos, results_by_mode: dict, free_names: list[str],
 
 
 # ---------------------------------------------------------------------------
-# Mock-observation layer (display-only; generated AFTER the forward model and
-# the noise model, never inside them)
+# Mock-observation layer: generated AFTER the forward model and the noise
+# model, never inside them. mock_realization draws it; mock_recovery fits it
+# (the forecast itself never sees the draw).
 # ---------------------------------------------------------------------------
 
 MOCK_KIND = "mock_observation_realization"
@@ -367,15 +368,17 @@ MOCK_KIND = "mock_observation_realization"
 # records) so the wording cannot drift between call sites.
 MOCK_SHORT_LABEL = (
     "One seeded realization of the adopted effective diagonal noise model; "
-    "display only.")
+    "the forecast numbers are realization-independent.")
 
 MOCK_LABEL = (
     "One simulated noise realization: the binned noiseless model plus one "
     "seeded Gaussian draw per bin at each mode's final per-bin uncertainty "
-    "(floor included). A display layer only -- a single realization can be "
-    "lucky or unlucky, and every quoted precision and conditional template "
-    "S/N is computed from the noiseless model and is independent of this "
-    "draw by construction.")
+    "(floor included). A single realization can be lucky or unlucky. The "
+    "draw never enters the detection or Fisher scores, the forecast widths, "
+    "the caches, or the noiseless result exports -- every quoted precision "
+    "and conditional template S/N is computed from the noiseless model and "
+    "is independent of the draw by construction -- but it does drive the "
+    "optional linearized recovery overlay (mock_recovery).")
 
 MOCK_RECOVERY_KIND = "mock_recovery"
 MOCK_RECOVERY_LABEL = (
@@ -434,10 +437,12 @@ def mock_realization(results, seed: int) -> dict:
     bin (sigma_i = that mode's FINAL per-bin depth error, floor included)
     and ``depth_mock = depth + noise``.
 
-    This is a DISPLAY/mock-observation layer: nothing here may enter
-    detection or Fisher scores, caches, or result exports -- the draw is
-    generated after the forward model and the noise model, never inside
-    them.
+    This is a mock-observation layer, generated AFTER the forward model and
+    the noise model, never inside them. The invariant is one-directional, NOT
+    "display only": the draw may never enter the detection or Fisher scores,
+    the forecast widths, the caches, or the noiseless result exports -- but it
+    IS fitted by ``mock_recovery``, whose recovered-parameter shift the GUI
+    overlays on the posterior panels.
     """
     seed = int(seed)
     if seed < 0:
