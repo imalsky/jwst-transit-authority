@@ -49,7 +49,9 @@ def test_curve_matches_fisher_sigma_and_normalizes():
         # pdf: peaks at the center, integrates to ~1 on the +/-5 sigma grid
         theta, pdf = rec["theta"], rec["pdf"]
         assert theta[np.argmax(pdf)] == pytest.approx(CENTERS[name], abs=1e-12)
-        assert np.trapz(pdf, theta) == pytest.approx(1.0, abs=1e-4)
+        # np.trapezoid is NumPy 2.0+; np.trapz was removed in NumPy 2.4
+        _trapz = getattr(np, "trapezoid", None) or np.trapz
+        assert _trapz(pdf, theta) == pytest.approx(1.0, abs=1e-4)
         assert theta.min() == pytest.approx(CENTERS[name] - 5 * want)
         assert theta.max() == pytest.approx(CENTERS[name] + 5 * want)
 
@@ -408,3 +410,33 @@ def test_compare_combos_orders_and_rejects_duplicates():
     with pytest.raises(ValueError, match="duplicate combo names"):
         posteriors.compare_combos([("A", [k1]), ("A", [k2])], results, FREE,
                                   co_eval=CO)
+
+
+def test_mock_realization_records_seed_scheme_provenance():
+    """The mock record carries the seed-scheme version and numpy version
+    (archival reproducibility: default_rng bitstreams are not contractually
+    version-stable)."""
+    import numpy as np
+    from jwst_tool import posteriors
+    r = _result(seed=1)
+    r["mode_key"] = "nirspec_g395h"
+    r["depth"] = np.full(40, 0.021)
+    mock = posteriors.mock_realization([r], seed=5)
+    assert mock["seed_scheme"] == posteriors.SEED_SCHEME
+    assert mock["numpy_version"] == np.__version__
+    assert posteriors.SEED_SCHEME.startswith("v1:")
+
+
+def test_mode_stream_crc_collision_refused_and_registry_clean():
+    """A crc32 collision between mode keys would silently share noise
+    draws; the guard refuses it, and today's registry has none."""
+    import zlib
+    import pytest
+    from jwst_tool import posteriors, instruments
+    # today's registry is collision-free
+    posteriors._assert_mode_streams_distinct(instruments.MODES.keys())
+    # a genuine crc32 collision is refused loudly (classic colliding pair)
+    a, b = "plumless", "buckeroo"
+    assert zlib.crc32(a.encode()) == zlib.crc32(b.encode())
+    with pytest.raises(ValueError, match="collide"):
+        posteriors._assert_mode_streams_distinct([a, b])

@@ -378,11 +378,33 @@ MOCK_RECOVERY_LABEL = (
     "covariance over realizations; it is not a retrieval result.")
 
 
+# Version tag for the seed -> stream mapping below. Bump if the mapping ever
+# changes (different hash, different generator), so an archived seed +
+# scheme version pins the exact realization.
+SEED_SCHEME = "v1:default_rng([seed, crc32(mode_key)])"
+
+
 def _mode_stream_seed(seed: int, mode_key: str) -> list[int]:
     """Deterministic per-mode RNG seed sequence: the draw for a mode depends
     only on (seed, mode_key), never on which other modes were run or on the
     selection order. crc32 is platform-stable."""
     return [int(seed), zlib.crc32(mode_key.encode())]
+
+
+def _assert_mode_streams_distinct(mode_keys) -> None:
+    """crc32 is a 32-bit identifier; a collision between two registered mode
+    keys would silently give them identical noise draws. Refuse loudly (the
+    instruments registry is small, so this is an import-time guard in the
+    consumer, not a runtime cost)."""
+    crcs = {}
+    for k in mode_keys:
+        c = zlib.crc32(str(k).encode())
+        if c in crcs:
+            raise ValueError(
+                f"mock-observation seed streams collide: mode keys "
+                f"{crcs[c]!r} and {k!r} share crc32 {c:#010x}; change one "
+                "key or move the stream id to a wider hash")
+        crcs[c] = k
 
 
 def mock_realization(results, seed: int) -> dict:
@@ -409,6 +431,8 @@ def mock_realization(results, seed: int) -> dict:
     rlist = list(results)
     if not rlist:
         raise ValueError("mock_realization: results is empty")
+    _assert_mode_streams_distinct(
+        r.get("mode_key") for r in rlist if r.get("mode_key"))
     modes = {}
     for i, r in enumerate(rlist):
         key = r.get("mode_key")
@@ -432,7 +456,11 @@ def mock_realization(results, seed: int) -> dict:
         rng = np.random.default_rng(_mode_stream_seed(seed, key))
         noise = rng.normal(0.0, s)
         modes[key] = dict(noise=noise, depth_mock=d + noise, sigma=s)
-    return dict(kind=MOCK_KIND, label=MOCK_LABEL, seed=seed, modes=modes)
+    # Provenance for archival reproducibility: default_rng's bitstream is
+    # stable in practice but not contractually guaranteed across numpy
+    # versions, so the generating scheme and numpy version ride the record.
+    return dict(kind=MOCK_KIND, label=MOCK_LABEL, seed=seed, modes=modes,
+                seed_scheme=SEED_SCHEME, numpy_version=np.__version__)
 
 
 def mock_recovery(results, free_names: list[str], realization: dict,

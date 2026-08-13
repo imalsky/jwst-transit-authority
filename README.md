@@ -130,10 +130,13 @@ entered star, as a suggestion. Maintainers refresh the snapshot with
 statistic is a conditional matched-template signal-to-noise ratio: the chi-square
 distance between the model and the same model without that molecule's opacity,
 with calibration nuisances profiled out. It is conditional on the assumed
-atmosphere being exactly right. A retrieval that frees more parameters under the
-same model and noise assumptions will usually report a lower significance, but
-this is a best-case comparison under those conditions, not a mathematical bound.
-It is never a retrieval detection.
+atmosphere being exactly right: an optimistic fixed-atmosphere sensitivity
+metric after profiling the listed nuisance directions. A retrieval that frees
+more parameters under the same model and noise assumptions often reports weaker
+evidence, but retrieval significances come in many forms (Bayes factors,
+posterior exclusions, profile likelihoods with boundaries) and this statistic
+is not a universal upper bound on any of them. It is never a retrieval
+detection.
 
 **Constraint** builds a Fisher-information forecast from the spectrum's parameter
 derivatives and reports local Cramer-Rao lower bounds. Those are not posterior
@@ -176,7 +179,11 @@ unconstrained; the tool never draws a curve for it.
 
 The spectrum plot can overlay one simulated noise realization: the binned
 noiseless model plus one seeded Gaussian draw per bin, at each bin's final
-forecast uncertainty (floor included). The draw is generated after the
+forecast uncertainty (floor included). It is one realization of the adopted
+effective diagonal noise model: when a noise floor stands in for correlated
+instrumental systematics, drawing it as independent bin noise is internally
+consistent with the tool's diagonal likelihood but is not a physical model
+of correlated systematics. The draw is generated after the
 forward model and the noise model, purely for display. The forward model
 itself stays noiseless, and every quoted precision and conditional template
 S/N is computed from the noiseless model -- they are independent of the
@@ -188,9 +195,11 @@ only under a filename that names its seed; the result CSVs stay noiseless.
 Forecasting on noiseless simulated data is a standard convention: it avoids
 a single random noise draw biasing the result, at the documented cost that
 simulated-retrieval posteriors then sit optimistically centered on the true
-values while their widths remain representative (Feng et al. 2018, AJ, 155,
-200, who also compare retrievals on multiple noise instances against the
-noiseless convention in their Section 5.2).
+values. Their widths approximate ensemble-average widths in regular,
+well-constrained regimes, though not near parameter boundaries or strong
+nonlinearities (Feng et al. 2018, AJ, 155, 200, who also compare retrievals
+on multiple noise instances against the noiseless convention in their
+Section 5.2).
 
 With the mock layer on and Jacobians available, the posterior panels also
 show what the linearized fit would recover from that one plotted
@@ -210,20 +219,29 @@ posterior section.
 ### NIRSpec G395M
 
 The mode list now includes NIRSpec G395M (F290LP, SUB2048, NRSRAPID,
-2.87-5.10 um) alongside the seven original modes. It covers the same 3-5 um
-band as G395H at roughly a third of the resolving power, on one detector
-(no NRS1/NRS2 gap). Observing guidance for that band: PRISM is usually the
-best choice when it does not saturate; on bright targets PRISM saturates
-(on the parity benchmark's Ks = 8.5 star it exceeds full well even at the
-1-group minimum ramp), and G395M's brighter saturation limit than PRISM
-recovers the band -- but where G395M itself is down to a few groups, its
-duty cycle is low enough that G395H is usually the better pick. For scale,
-on WASP-39 b (Ks = 10.2) the tool's live noise runs select unsaturated
-ramps of 1 group for PRISM (at the ramp minimum, 65% full well), 32 groups
-for G395M, and 82 for G395H -- both gratings comfortable, PRISM at the
-duty-cycle edge. G395M is not part of the frozen PandExo parity benchmark,
-and its literature noise factor is an extrapolation from G395H -- both are
-listed under [Open gaps](#open-gaps-and-accepted-limitations).
+2.87-5.10 um) alongside the seven original modes. Trade-offs in that band,
+scoped to this tool's fixed configurations: PRISM (as configured here, the
+SUB512 subarray -- statements about PRISM saturation apply to that
+configuration, not to NIRSpec PRISM generally; STScI offers other PRISM
+subarrays for brighter targets that this registry does not carry) gives the
+broadest wavelength coverage at R ~ 100 and is often attractive when it
+stays acceptably unsaturated. G395M gives continuous 2.87-5.18 um coverage
+at R ~ 1000 on one detector; G395H gives R ~ 2700, a higher bright limit in
+many configurations, and an NRS1/NRS2 detector gap near 3.72-3.82 um.
+Neither grating is universally preferred: longer G395H ramps improve
+efficiency when G395M is genuinely limited to very few groups, but at
+moderate group counts the reset-overhead difference is small, and the full
+noise calculation (read noise, saturation, extraction, throughput, final
+binning) -- not a duty-cycle ratio -- decides which configuration carries
+more information for a stated goal. That is what this tool's Pandeia-based
+comparison is for: run the candidate modes at the intended final binning
+and compare. For scale, on WASP-39 b (Ks = 10.2) the tool's live noise runs
+select unsaturated ramps of 1 group for PRISM (at the ramp minimum, 65%
+full well), 32 groups for G395M, and 82 for G395H -- numbers specific to
+that target and these fixed configurations. G395M is not part of the frozen
+PandExo parity benchmark, and its literature noise factor is an
+extrapolation from G395H -- both are listed under
+[Open gaps](#open-gaps-and-accepted-limitations).
 
 ## Scope and limits
 
@@ -862,11 +880,36 @@ with reasoning; accepted limitations are listed below under
 ## Open gaps and accepted limitations
 
 The one live list of everything known to be missing, approximate, or
-deferred in this tool. Updated 2026-08-12 (forecast products + G395M,
-tool 0.29.0). Keep this section current: close items here when they
+deferred in this tool. Updated 2026-08-13 (external forecast-products
+review response). Keep this section current: close items here when they
 land, add new ones as they are found. The reasoning behind every decision
 lives in notes.md, Decision records; scope and conventions live in
 [Physics and conventions](#physics-and-conventions).
+
+### Deferred from the 2026-08-13 external review
+
+- No deterministic proposal-export seed policy yet: the mock-observation
+  seed is user-selectable and displayed, which is reproducible but allows
+  cycling seeds until a realization looks favorable. A proposal-export mode
+  would derive a read-only seed from immutable identifiers (target, mode
+  configuration, tool commit, seed-scheme version) and report the whitened
+  residual statistic and its percentile so an extreme draw is disclosed,
+  not replaced.
+- The combined-mode forecast fixes one systematic model (shared lnR0 plus
+  one free absolute offset per detector segment). Free absolute offsets
+  remove most broadband radius information, so the reported lnR0 precision
+  can ride a small nonconstant component of the radius derivative; the
+  rank-aware solver prevents false finite numbers but a sensitivity
+  display (no offsets / per-instrument / per-segment) is not offered yet.
+- Rank detection runs on the Jacobi-whitened Fisher matrix (correct and
+  scale-invariant); an SVD of the whitened design matrix would avoid
+  squaring the condition number and is a deferred numerical refinement.
+- The absolute-C/O posterior display uses the first-order (delta-method)
+  transform of the ln-space Gaussian; for broad uncertainties the exact
+  transformed density is asymmetric and a symmetric Gaussian can extend
+  below zero.
+- Marginalized forecast curves assume a locally flat prior in the DISPLAY
+  parameterization (flat in lnZ is not flat in Z).
 
 ### Validation gaps (absence of evidence, not defects)
 

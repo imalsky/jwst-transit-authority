@@ -8,7 +8,11 @@
 # Datasets are NOT in the image: the entrypoint seeds /data (the Space's
 # persistent-storage volume) from a private HF dataset repo on first boot.
 # Requires: persistent storage enabled (Small tier) + secret HF_TOKEN.
-FROM condaforge/miniforge3:latest
+# Pinned by digest (2026-08-13 review): a :latest tag lets an unrelated
+# upstream rebuild change the base environment under fixed source SHAs.
+# This digest is the base the validated 0.29.0 image was built on; update
+# it deliberately, with a decision record, never implicitly.
+FROM condaforge/miniforge3@sha256:8edc74dee5b29511a9c1a8941c77efbf438b47edffb6320ab8675dc06bd618c2
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential curl git ca-certificates \

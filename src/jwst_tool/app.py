@@ -1337,6 +1337,27 @@ with st.sidebar:
     n_transits = st.number_input(f"Number of {_evw}s", 1, 10, 1, 1,
                                  key=K("ntr"))
 
+    # Mock-observation layer: generated AFTER the forward model and the
+    # noise model (posteriors.mock_realization), never inside them.
+    # Display only -- no jittered value may enter detection or Fisher
+    # scores, caches, or downloaded result CSVs (the mock data itself is
+    # downloadable, clearly named with its seed).
+    show_noise = st.checkbox(
+        "Show a simulated mock observation (one noise realization)",
+        value=True, key=K("shownoise"))
+    _mk1, _mk2 = st.columns([1.2, 1.0])
+    seed = _mk1.number_input(
+        "Mock-observation seed", 0, 9999, 0, key=K("seed"),
+        disabled=not show_noise,
+        help="The same seed reproduces the identical mock observation. "
+             "The seed is displayed with the results and saved in the "
+             "configuration download.")
+    _mk2.button("New realization", key=K("reroll"), on_click=_bump_seed,
+                disabled=not show_noise,
+                help="Draws a new mock observation by stepping the seed. "
+                     "The new seed stays visible, so any realization can "
+                     "be reproduced.")
+
     with st.expander("Timing, saturation & binning (Pandeia)"):
         t_base = st.number_input(
             f"Out-of-{_evw} baseline (hours)", 0.5, 10.0,
@@ -1600,33 +1621,6 @@ with st.sidebar:
             help="PreMODIT broadening-grid spacing. Smaller resolves line "
                  "wings finer but builds opacity slower. 1.0 is the "
                  "validated value here. 0.2 is ExoJAX's own default.")
-
-    with st.expander("Display & reproducibility"):
-        # Mock-observation layer: generated AFTER the forward model and the
-        # noise model (posteriors.mock_realization), never inside them.
-        # Display only -- no jittered value may enter detection or Fisher
-        # scores, caches, or downloaded result CSVs (the mock data itself is
-        # downloadable, clearly named with its seed).
-        show_noise = st.checkbox(
-            "Show a simulated mock observation (one noise realization)",
-            value=True, key=K("shownoise"),
-            help="Adds one random noise draw per bin on top of the binned "
-                 "model, at each mode's final per-bin uncertainty (noise "
-                 "floor included) -- what a single real observation could "
-                 "look like. Display only: every quoted precision, the "
-                 "conditional template S/N, and all result downloads are "
-                 "computed from the noiseless model and never include "
-                 "this draw.")
-        seed = st.number_input(
-            "Mock-observation seed", 0, 9999, 0, key=K("seed"),
-            help="The same seed reproduces the identical mock observation. "
-                 "The seed is displayed with the results and saved in the "
-                 "configuration download.")
-        st.button("New realization", key=K("reroll"), on_click=_bump_seed,
-                  disabled=not show_noise,
-                  help="Draws a new mock observation by stepping the seed. "
-                       "The new seed stays visible above, so any "
-                       "realization can be reproduced.")
 
     # Reset sits behind a confirmation step: one click must not clear a long
     # configuration and the current results.
@@ -2284,7 +2278,7 @@ if _mock is not None:
         "and the noise model. A single realization can be lucky or unlucky; "
         "every quoted precision and the conditional template S/N are "
         "computed from the noiseless model and never include this draw. "
-        "Use 'New realization' (More settings → Display & reproducibility) "
+        "Use 'New realization' (step 4 · Observation) "
         "to re-roll.")
 
 # downloads: the figure + the plotted numbers (binned points, native model)
