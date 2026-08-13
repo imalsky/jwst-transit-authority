@@ -2,7 +2,7 @@
 # Run on the Mac (or anywhere with awscli configured: `aws configure`).
 # Provisions ONE Ubuntu 24.04 x86_64 EC2 instance + security group for the
 # tool. Alternative with zero CLI setup: Lightsail via the console -- see
-# DEPLOY.md section 2b.
+# notes.md, Deployment runbooks (AWS runbook), step 2b.
 #
 # Required env vars:
 #   KEY_NAME        existing EC2 key-pair name in the region
@@ -54,5 +54,5 @@ echo "Recommended: allocate a static IP so DNS/TLS survive restarts:"
 echo "  aws ec2 allocate-address --region $REGION --query AllocationId --output text"
 echo "  aws ec2 associate-address --region $REGION --instance-id $IID --allocation-id ALLOC_ID"
 echo
-echo "Next (see DEPLOY.md): upload the data bundles, then ssh in and run server_setup.sh"
+echo "Next (see notes.md, Deployment runbooks): upload the data bundles, then ssh in and run server_setup.sh"
 echo "  ssh -i YOUR_KEY.pem ubuntu@$IP"

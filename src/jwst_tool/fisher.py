@@ -95,6 +95,50 @@ def _marg_sigmas(F: np.ndarray, n_report: int,
     return out
 
 
+def _whitened_solve(F: np.ndarray, b: np.ndarray,
+                    n_report: int) -> np.ndarray:
+    """Rank-aware solve of F x = b for the first ``n_report`` entries, using
+    the SAME Jacobi whitening and relative eigen-threshold as _marg_sigmas
+    (so a direction that reads inf there reads NaN here, never a number from
+    an inverted null eigenvalue). Used by the linearized single-realization
+    mock recovery (posteriors.mock_recovery): x = F^+ b with b = J W n.
+
+    Zero-diagonal parameters and parameters loaded on the null subspace
+    (same NULL_LOAD_TOL projection test) come back NaN -- an unconstrained
+    direction has no recovered value by design.
+    """
+    F = np.asarray(F, float)
+    F = 0.5 * (F + F.T)
+    b = np.asarray(b, float)
+    n = F.shape[0]
+    if b.shape != (n,):
+        raise ValueError(f"_whitened_solve: b has shape {b.shape}, expected "
+                         f"({n},)")
+    if not np.all(np.isfinite(b)):
+        raise ValueError("_whitened_solve: b contains non-finite values")
+    out = np.full(n_report, np.nan)
+    d = np.sqrt(np.clip(np.diag(F), 0.0, None))
+    nz = d > 0.0
+    if not nz.any():
+        return out
+    Fw = F[np.ix_(nz, nz)] / np.outer(d[nz], d[nz])
+    w, V = np.linalg.eigh(0.5 * (Fw + Fw.T))
+    wmax = float(w[-1]) if w.size else 0.0
+    good = w > REL_EIG_TOL * max(wmax, 1e-300)
+    if not good.any():
+        return out
+    bw = b[nz] / d[nz]
+    xw = V[:, good] @ ((V[:, good].T @ bw) / w[good])
+    x_nz = xw / d[nz]
+    if (~good).any():
+        load = np.sqrt(np.sum(V[:, ~good] ** 2, axis=1))
+        x_nz[load > NULL_LOAD_TOL] = np.nan
+    full = np.full(n, np.nan)
+    full[nz] = x_nz
+    out[:] = full[:n_report]
+    return out
+
+
 def _conditional_sigmas(F: np.ndarray, n_report: int) -> np.ndarray:
     """Conditional sigmas 1/sqrt(F_ii) for the first n_report parameters
     (every other parameter and nuisance held fixed). Always <= marginalized;
@@ -163,23 +207,23 @@ def mode_forecast(result: dict, free_names: list[str],
     return dict(zip(free_names, sig))
 
 
-def combined_forecast(results: list[dict], free_names: list[str],
-                      diag: dict | None = None,
-                      conditional: dict | None = None) -> dict:
-    """All modes jointly: shared free params + shared lnR0 + one depth offset
-    per detector SEGMENT (NRS1/NRS2 counted separately for the two-detector
-    gratings), all marginalized. Noise is block-diagonal across modes
-    (diagonal sigma; no cross-mode noise correlation is modeled).
-    ``conditional``: as in mode_forecast."""
-    n_f = len(free_names)
-    # count nuisance columns: one offset per segment
+def _combined_system(results: list[dict], n_f: int) -> tuple[int, list]:
+    """The combined stacked design shared by combined_forecast and the
+    linearized mock recovery (posteriors.mock_recovery): global parameter
+    layout [free..., shared lnR0, per-mode per-segment offsets...].
+
+    Returns ``(n_tot, [(Jg, r), ...])`` with one augmented Jacobian
+    (n_tot, n_bins) per result, in input order. Keeping this in ONE place is
+    what guarantees the recovery offsets are consistent with the
+    marginalized sigmas -- never re-derive the layout elsewhere.
+    """
     seg_counts = []
     for r in results:
         nb = np.asarray(r["sigma"]).size
         seg = np.asarray(r.get("seg", np.zeros(nb, int)), int)
         seg_counts.append(int(seg.max()) + 1 if seg.size else 1)
     n_tot = n_f + 1 + int(sum(seg_counts))         # free + lnR0 + offsets
-    F = np.zeros((n_tot, n_tot))
+    out = []
     col = n_f + 1
     for r, n_seg in zip(results, seg_counts):
         J = np.asarray(r["jac_bins"])             # rows: free..., lnR0
@@ -191,6 +235,22 @@ def combined_forecast(results: list[dict], free_names: list[str],
         for s_id in range(n_seg):                 # this mode's per-segment offsets
             Jg[col + s_id] = (seg == s_id).astype(float)
         col += n_seg
+        out.append((Jg, r))
+    return n_tot, out
+
+
+def combined_forecast(results: list[dict], free_names: list[str],
+                      diag: dict | None = None,
+                      conditional: dict | None = None) -> dict:
+    """All modes jointly: shared free params + shared lnR0 + one depth offset
+    per detector SEGMENT (NRS1/NRS2 counted separately for the two-detector
+    gratings), all marginalized. Noise is block-diagonal across modes
+    (diagonal sigma; no cross-mode noise correlation is modeled).
+    ``conditional``: as in mode_forecast."""
+    n_f = len(free_names)
+    n_tot, system = _combined_system(results, n_f)
+    F = np.zeros((n_tot, n_tot))
+    for Jg, r in system:
         F += _fisher(Jg, r)
     if conditional is not None:
         conditional.update(zip(free_names, _conditional_sigmas(F, n_f)))

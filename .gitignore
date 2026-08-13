@@ -31,13 +31,15 @@ data/pandeia_psfs-*/
 # noise cache + a pickled single run) -- machine-local, never tracked
 pandeia_2026_refdata/
 
-# Internal working documents. docs/ carries the published reference set
-# (physics_and_conventions, picaso_roadmap, audit_decisions). data/notes.md is
-# deliberately still tracked: it is data provenance, which consumers need.
+# Internal working documents. The published reference set lives in README.md
+# (physics/conventions, PICASO engine, decision records, open gaps, data
+# provenance, deployment, parity testing) since the 2026-08 consolidation;
+# dev logs and investigations live in the gitignored root notes.md.
 CLAUDE.md
 /notes.md
 
-# Machine-local live-validation transcript (regenerate with
+# Machine-local live-validation transcript (the 2026-07-21 record is merged
+# into the root notes.md; regenerate with
 # JWST_TOOL_RUN_PICASO_LIVE=1 python -m pytest tests/live -q)
 tests/live/RESULTS_v18_1.md
 

@@ -28,4 +28,5 @@ Operational notes:
   The in-app status panel reports data availability and progress.
 - To update the code: push to GitHub, then Settings -> Factory rebuild
   (a factory rebuild avoids a stale cached clone layer).
-- Setup runbook: `SETUP.md` in this repo.
+- Setup runbook: the Deployment runbooks section (Hugging Face Space runbook)
+  of the main repo's local notes.md.

@@ -345,7 +345,7 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
     # ramp; this worker's ramp is deliberately transit-independent (the noise
     # cache is per star+mode, never per event), so warn loudly instead of
     # silently accepting 1-2 cycles. DELIBERATE, decision recorded as S2-10 in
-    # docs/decision_records.md: the box-depth variance stays valid
+    # notes.md, Decision records section: the box-depth variance stays valid
     # at 1-2 cycles; the result is NOT re-run with a shortened ramp, and
     # reviews that flag this are re-finding an accepted trade, not a bug.
     warnings = dict(mode_result.get("warnings", {}))
@@ -375,7 +375,7 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
     # The MIRI floor (2 groups) gets a DISTINCT operational warning: STScI
     # calls 2-5 group MIRI ramps very difficult to calibrate, and a
     # 2026-08-09 review reported (unconfirmed on retrievable jwst-docs
-    # pages; see decision_records) that APT treats 2-group FASTR1 as a
+    # pages; see notes.md, Decision records section) that APT treats 2-group FASTR1 as a
     # limited-access configuration -- so the user is told to confirm
     # approval requirements rather than assured either way.
     if (m["instrument"] == "miri"

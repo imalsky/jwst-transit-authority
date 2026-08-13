@@ -23,11 +23,14 @@ def _run_app():
 
 
 def _synthetic_out(science_mode="transmission", saturated=False,
-                   sigma_detect=0.0, n_transits=1):
+                   sigma_detect=0.0, n_transits=1, with_jac=False):
     """Minimal cached-result pair (out, out_meta) for post-run rendering.
 
     sigma_detect must stay 0 or above target so the render never calls
     detect.transits_to_target, which needs the full evaluate_mode payload.
+    ``with_jac=True`` adds a two-parameter Jacobian (lnZ, dlnCO + lnR0) to
+    the model and a SECOND mode, so the Fisher table, the combo builder,
+    the forecast posteriors, and the summary-figure ranking all render.
     """
     import json
     import numpy as np
@@ -44,22 +47,37 @@ def _synthetic_out(science_mode="transmission", saturated=False,
         "science_mode": science_mode,
         "params_json": json.dumps({"co_ratio": 0.549348,
                                    "tp_mode": "guillot",
+                                   "met_x_solar": 10.0,
                                    "science_mode": science_mode}),
     }
     nb = 12
-    result = {
-        "mode_key": "nirspec_g395h", "label": "NIRSpec G395H",
-        "saturated": saturated, "sat_frac": 0.97,
-        "sigma_detect": sigma_detect,
-        "sigma_detect_proj": float("nan"),
-        "wl": np.linspace(2.9, 5.1, nb), "wl_eff": np.linspace(2.9, 5.1, nb),
-        "depth": np.full(nb, 0.021), "sigma": np.full(nb, 1.5e-4),
-        "floor": np.zeros(nb),
-        "median_sigma_ppm": 150.0, "n_bins": nb, "ngroup": 12,
-        "t_cycle_s": 11.0, "warnings": (), "jac_bins": None,
-    }
-    out = dict(model=model, results=[result], failed=[], unusable=[],
-               fisher_names=[], provenance=None)
+    rng = np.random.default_rng(0)
+
+    def _mode(key, label, wl_lo, wl_hi):
+        return {
+            "mode_key": key, "label": label,
+            "saturated": saturated, "sat_frac": 0.97,
+            "sigma_detect": sigma_detect,
+            "sigma_detect_proj": float("nan"),
+            "wl": np.linspace(wl_lo, wl_hi, nb),
+            "wl_eff": np.linspace(wl_lo, wl_hi, nb),
+            "depth": np.full(nb, 0.021), "sigma": np.full(nb, 1.5e-4),
+            "floor": np.zeros(nb), "seg": np.zeros(nb, int),
+            "median_sigma_ppm": 150.0, "n_bins": nb, "ngroup": 12,
+            "t_cycle_s": 11.0, "warnings": (),
+            "jac_bins": (rng.standard_normal((3, nb)) * 1e-4
+                         if with_jac else None),
+        }
+
+    results = [_mode("nirspec_g395h", "NIRSpec G395H", 2.9, 5.1)]
+    fisher_names = []
+    if with_jac:
+        results.append(_mode("nirspec_prism", "NIRSpec PRISM", 0.7, 5.2))
+        model["jac"] = np.zeros((3, n))
+        model["jac_names"] = np.array(["lnZ", "dlnCO", "lnR0"], dtype="U8")
+        fisher_names = ["lnZ", "dlnCO"]
+    out = dict(model=model, results=results, failed=[], unusable=[],
+               fisher_names=fisher_names, provenance=None)
     out_meta = dict(
         goal="detect", target="SO2", goal_param=None, target_prec=None,
         target_sig=3.0, n_transits=n_transits, show_noise=False, seed=0,
@@ -396,6 +414,130 @@ def test_custom_sflux_nearest_caption_discloses_and_never_flips():
     # the menu itself stayed on the WASP-39 default
     assert at.selectbox(key="n0_custom_sflux").value == \
         "sflux-W39b_Tsai2023.txt"
+
+
+def test_beta_statement_on_intro():
+    """The intro carries the beta disclaimer: new feature set, sanity-check
+    against a full retrieval before proposing."""
+    at = _run_app()
+    assert not at.exception, at.exception
+    md = " ".join(m.value for m in at.markdown)
+    assert "Beta" in md
+    assert "full retrieval" in md
+
+
+def test_mock_observation_controls_and_reroll():
+    """The mock-observation toggle + seed + 'New realization' render; the
+    re-roll steps the seed (reproducibility: the seed stays visible)."""
+    at = _run_app()
+    assert not at.exception, at.exception
+    assert at.checkbox(key="n0_shownoise").value is False
+    assert at.number_input(key="n0_seed").value == 0
+    at.checkbox(key="n0_shownoise").check().run()
+    assert not at.exception, at.exception
+    at.button(key="n0_reroll").click().run()
+    assert not at.exception, at.exception
+    assert at.number_input(key="n0_seed").value == 1
+
+
+def test_mock_observation_render_disclosure_and_download():
+    """With the mock layer ON, the results disclose the seed and the layer's
+    display-only nature, and the mock CSV download (named with its seed)
+    appears; the noiseless result downloads stay."""
+    out, out_meta = _synthetic_out(sigma_detect=8.0)
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["out"] = out
+    at.session_state["out_meta"] = out_meta
+    at.session_state["n0_shownoise"] = True
+    at.session_state["n0_seed"] = 7
+    at.run()
+    assert not at.exception, at.exception
+    caps = " ".join((c.value or "") for c in at.caption)
+    assert "seed 7" in caps
+    assert "lucky or unlucky" in caps
+    assert "noiseless model" in caps
+    dl = {b.label for b in at.get("download_button")}
+    assert "Mock observation (CSV)" in dl
+    assert {"Binned points (CSV)", "Native model (CSV)"} <= dl
+
+
+def test_combo_builder_and_summary_figure_render_with_jacobians():
+    """With Jacobians present: the combo builder renders, adding a combo
+    puts its rows in the Fisher table and its bar in the summary ranking,
+    and the proposal summary figure offers PDF + PNG downloads."""
+    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["out"] = out
+    at.session_state["out_meta"] = out_meta
+    at.run()
+    assert not at.exception, at.exception
+    subs = [s.value for s in at.subheader]
+    assert "Mode combinations" in subs
+    assert "Marginalized forecast posteriors" in subs
+    assert "Proposal summary figure" in subs
+    dl = {b.label for b in at.get("download_button")}
+    assert "Figure (PDF, vector)" in dl
+    # add a named combination through the builder widgets
+    at.text_input(key="n0_cb_name").set_value("PRISM + G395H")
+    at.multiselect(key="n0_cb_modes").set_value(
+        ["nirspec_prism", "nirspec_g395h"])
+    at.button(key="n0_cb_add").click().run()
+    assert not at.exception, at.exception
+    assert at.session_state["n0_combos"] == [
+        dict(name="PRISM + G395H",
+             modes=["nirspec_prism", "nirspec_g395h"])]
+    md = " ".join(m.value for m in at.markdown)
+    assert "PRISM + G395H" in md
+    # its rows are in the Fisher long-format table
+    import pandas as pd
+    tables = [pd.DataFrame(d.value) for d in at.get("dataframe")]
+    assert any(t.astype(str)
+               .apply(lambda c: c.str.contains("COMBO: PRISM \\+ G395H"))
+               .any().any() for t in tables), \
+        "combo rows missing from the Fisher table"
+    # remove works
+    at.button(key="n0_cb_rm_0").click().run()
+    assert not at.exception, at.exception
+    assert at.session_state["n0_combos"] == []
+
+
+def test_combo_and_posterior_widgets_survive_reset():
+    """The confirm-step reset clears combos and the posterior selections
+    (nonce-namespaced keys + un-namespaced pending notes)."""
+    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["out"] = out
+    at.session_state["out_meta"] = out_meta
+    at.session_state["n0_combos"] = [dict(name="X",
+                                          modes=["nirspec_g395h"])]
+    at.run()
+    assert not at.exception, at.exception
+    # arm + confirm the reset (labels, not keys: the reset buttons are keyless)
+    [b for b in at.button if (b.label or "") == "Reset all settings"][0] \
+        .click().run()
+    [b for b in at.button if (b.label or "") == "Confirm reset"][0] \
+        .click().run()
+    assert not at.exception, at.exception
+    assert "n0_combos" not in at.session_state
+    assert "_combo_note" not in at.session_state
+
+
+def test_posterior_panel_mock_recovery_overlay_renders():
+    """Mock layer ON + Jacobians: the posterior section draws and disclosed
+    the one-mock-realization overlay wording."""
+    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["out"] = out
+    at.session_state["out_meta"] = out_meta
+    at.session_state["n0_shownoise"] = True
+    at.session_state["n0_seed"] = 3
+    at.run()
+    assert not at.exception, at.exception
+    caps = " ".join((c.value or "") for c in at.caption)
+    assert "mock observation (seed 3)" in caps
+    assert "zero mean over realizations" in caps
+    # the honesty label rides the section itself
+    assert "Not a sampled posterior" in caps
 
 
 def test_emission_mode_archive_fill_skips_transit_duration():

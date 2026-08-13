@@ -155,6 +155,50 @@ def test_valid_embedded_tp_table_is_archived_and_restored(tmp_path):
     assert p.read_text() == text
 
 
+def test_combos_round_trip_and_invalid_entries_are_noted():
+    """Named mode combinations restore to the K('combos') session key;
+    unknown modes are dropped with a note, nameless/empty/duplicate
+    combinations are never applied silently."""
+    share = share_config.build_share(
+        _canon(),
+        goal=dict(goal="constrain", goal_param="lnZ", target_prec=0.1,
+                  target_sig=3.0, marginalize=True, do_fisher=False,
+                  fisher_params=["lnZ"], jac_method="fd"),
+        observation=dict(modes=["nirspec_g395h", "niriss_soss", "miri_lrs"],
+                         n_transits=1, r_bin=100, floor_mode="none",
+                         floors={}, noise_infl={}, show_noise=True, seed=42,
+                         combos=[
+                             dict(name="SOSS + G395H",
+                                  modes=["niriss_soss", "nirspec_g395h"]),
+                             dict(name="SOSS + G395H + MIRI",
+                                  modes=["niriss_soss", "nirspec_g395h",
+                                         "miri_lrs"])]))
+    state, notes = share_config.widget_state(share, _key)
+    assert not notes
+    assert state["n0_seed"] == 42 and state["n0_shownoise"] is True
+    assert state["n0_combos"] == [
+        dict(name="SOSS + G395H", modes=["niriss_soss", "nirspec_g395h"]),
+        dict(name="SOSS + G395H + MIRI",
+             modes=["niriss_soss", "nirspec_g395h", "miri_lrs"])]
+
+    # unknown mode dropped with a note; all-unknown combo not restored;
+    # nameless and duplicate-name combos noted, first duplicate wins
+    share["observation"]["combos"] = [
+        dict(name="partial", modes=["nirspec_g395h", "not_a_mode"]),
+        dict(name="hollow", modes=["ghost_mode"]),
+        dict(name="", modes=["nirspec_g395h"]),
+        dict(name="partial", modes=["miri_lrs"]),
+    ]
+    state, notes = share_config.widget_state(share, _key)
+    assert state["n0_combos"] == [
+        dict(name="partial", modes=["nirspec_g395h"])]
+    joined = " | ".join(notes)
+    assert "not_a_mode" in joined
+    assert "hollow" in joined
+    assert "without a name" in joined
+    assert "duplicate" in joined.lower()
+
+
 def test_removed_noise_scenario_is_noted_not_restored():
     """Correlated-floor noise scenarios were removed in 0.28.0. An old config
     that selected one loads with a note; the widget state never carries a

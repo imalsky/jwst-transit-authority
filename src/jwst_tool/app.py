@@ -45,8 +45,10 @@ from jwst_tool import binning, datacheck, detect, \
     fisher as fisher_mod, forward
 from jwst_tool import archive
 from jwst_tool import noise as noise_mod
+from jwst_tool import posteriors
 from jwst_tool import proc as proc_mod
 from jwst_tool import share_config
+from jwst_tool import summary_figure
 from jwst_tool import instruments as ins
 from jwst_tool import planets
 from jwst_tool import runlimit
@@ -74,6 +76,13 @@ def _fig_png(fig, dpi: int = 200) -> bytes:
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight",
                 facecolor="white")
+    return buf.getvalue()
+
+
+def _fig_pdf(fig) -> bytes:
+    """Vector PDF export (proposal-ready; text and lines stay vector)."""
+    buf = io.BytesIO()
+    fig.savefig(buf, format="pdf", bbox_inches="tight", facecolor="white")
     return buf.getvalue()
 
 
@@ -150,7 +159,11 @@ st.markdown(
     "4. **Observation**: select instrument modes and noise assumptions.\n\n"
     "The tool computes a forward "
     "spectrum and a Pandeia noise forecast, ranks the selected modes, and "
-    "reports how many transits or eclipses reach your target.")
+    "reports how many transits or eclipses reach your target.\n\n"
+    "**Beta**: the mode-combination builder, the simulated mock "
+    "observation, and the proposal summary figure are new in this release. "
+    "Sanity-check any forecast from this tool against a full retrieval "
+    "before submitting a proposal.")
 
 with st.expander("How the model works, and its limits"):
     st.markdown(
@@ -525,6 +538,49 @@ _apply_pending_archive_fill()
 def _queue_archive_fill() -> None:
     st.session_state["_archive_fill_pending"] = \
         st.session_state.get(K("custom_arch_name"))
+
+
+def _bump_seed() -> None:
+    """'New realization' control: step the mock-observation seed. The seed
+    stays visible in its widget, so the realization is always reproducible."""
+    st.session_state[K("seed")] = (
+        int(st.session_state.get(K("seed"), 0)) + 1) % 10000
+
+
+def _combo_add() -> None:
+    """Add a named mode combination (results-area builder). Callbacks run
+    before widgets instantiate, so writing the name widget's key back to ""
+    here is allowed. The note key is un-namespaced on purpose: a reset's
+    session_state.clear() must kill it (same pattern as the archive fill)."""
+    name = str(st.session_state.get(K("cb_name")) or "").strip()
+    modes = list(st.session_state.get(K("cb_modes")) or [])
+    if not name:
+        st.session_state["_combo_note"] = (
+            "error", "The combination needs a name.")
+        return
+    combos = st.session_state.setdefault(K("combos"), [])
+    if any(c["name"] == name for c in combos):
+        st.session_state["_combo_note"] = (
+            "error", f"A combination named {name!r} already exists; choose "
+                     "another name.")
+        return
+    if not modes:
+        st.session_state["_combo_note"] = (
+            "error", "Select at least one instrument mode for the "
+                     "combination.")
+        return
+    combos.append(dict(name=name, modes=modes))
+    st.session_state[K("cb_name")] = ""
+    st.session_state["_combo_note"] = (
+        "success", f"Added the combination {name!r}.")
+
+
+def _combo_remove(i: int) -> None:
+    combos = st.session_state.get(K("combos")) or []
+    if 0 <= i < len(combos):
+        removed = combos.pop(i)
+        st.session_state["_combo_note"] = (
+            "info", f"Removed the combination {removed['name']!r}.")
 
 
 # Chemistry-engine choice, read EARLY from session state so widgets that
@@ -1570,9 +1626,31 @@ with st.sidebar:
                  "validated value here. 0.2 is ExoJAX's own default.")
 
     with st.expander("Display & reproducibility"):
-        show_noise = st.checkbox("Show simulated noise realization",
-                                 value=False, key=K("shownoise"))
-        seed = st.number_input("Random-noise seed", 0, 9999, 0, key=K("seed"))
+        # Mock-observation layer: generated AFTER the forward model and the
+        # noise model (posteriors.mock_realization), never inside them.
+        # Display only -- no jittered value may enter detection or Fisher
+        # scores, caches, or downloaded result CSVs (the mock data itself is
+        # downloadable, clearly named with its seed).
+        show_noise = st.checkbox(
+            "Show a simulated mock observation (one noise realization)",
+            value=False, key=K("shownoise"),
+            help="Adds one random noise draw per bin on top of the binned "
+                 "model, at each mode's final per-bin uncertainty (noise "
+                 "floor included) -- what a single real observation could "
+                 "look like. Display only: every quoted precision, the "
+                 "conditional template S/N, and all result downloads are "
+                 "computed from the noiseless model and never include "
+                 "this draw.")
+        seed = st.number_input(
+            "Mock-observation seed", 0, 9999, 0, key=K("seed"),
+            help="The same seed reproduces the identical mock observation. "
+                 "The seed is displayed with the results and saved in the "
+                 "configuration download.")
+        st.button("New realization", key=K("reroll"), on_click=_bump_seed,
+                  disabled=not show_noise,
+                  help="Draws a new mock observation by stepping the seed. "
+                       "The new seed stays visible above, so any "
+                       "realization can be reproduced.")
 
     # Reset sits behind a confirmation step: one click must not clear a long
     # configuration and the current results.
@@ -1731,7 +1809,10 @@ with st.expander("Run summary & configuration"):
                         for k in mode_keys},
                 noise_infl={k: float(infl[k]) for k in mode_keys},
                 show_noise=bool(show_noise),
-                seed=int(seed)),
+                seed=int(seed),
+                combos=[dict(name=str(c["name"]),
+                             modes=[str(m) for m in c["modes"]])
+                        for c in (st.session_state.get(K("combos")) or [])]),
             tp_table_text=(Path(tp_file_path).read_text()
                            if tp_file_path else None),
             floor_table=(np.asarray(floor_table).tolist()
@@ -1983,6 +2064,29 @@ fisher_names = ([str(x) for x in model["jac_names"][:-1]]
                 if "jac_names" in model else [])
 ok = [r for r in results if not r["saturated"]]
 
+# --- named mode combinations (results-side builder) -------------------------
+# Evaluated through posteriors.combo_forecast (the SAME combination math as
+# the "ALL USABLE (combined)" row -- never reimplemented here). A combo that
+# cannot be evaluated (mode not run, all modes saturated) is reported as an
+# error next to the builder; the others still render.
+_results_by_mode = {r["mode_key"]: r for r in results
+                    if r.get("jac_bins") is not None}
+_combos_cfg = st.session_state.get(K("combos")) or []
+combo_recs, combo_errs = [], []
+if _combos_cfg and fisher_names and _results_by_mode:
+    for _c in _combos_cfg:
+        try:
+            combo_recs.append(posteriors.combo_forecast(
+                str(_c["name"]), list(_c["modes"]), _results_by_mode,
+                fisher_names, co_eval=co_eval))
+        except ValueError as _e:
+            combo_errs.append((str(_c["name"]), str(_e)))
+elif _combos_cfg:
+    combo_errs = [(str(_c["name"]),
+                   "no parameter constraints in this run: combinations "
+                   "need a run with free parameters (a Fisher forecast)")
+                  for _c in _combos_cfg]
+
 # --- verdict (first; success = target met, warning = valid result that
 # misses the target, error = only for failed calculations) ------------------
 if goal_r == "detect":
@@ -2150,14 +2254,22 @@ if goal_r == "detect":
     d_wo_s = model["depth_wo"][mols.index(meta["target"])][order] * 1e6
     ax.plot(wl_s, _display_smooth(d_wo_s), color="#888888", lw=1.1, ls="--",
             zorder=1, label=f"model without {meta['target']}")
-rng = np.random.default_rng(int(meta["seed"]))
+# Mock-observation layer (display only): one seeded N(0, sigma_i) draw per
+# bin ON TOP of the binned noiseless model, generated AFTER the forward
+# model and the noise model (posteriors.mock_realization). The LIVE widget
+# state drives it (not the stored run meta), so "New realization" re-rolls
+# without recomputing anything; the seed is displayed and reproducible.
+# HARD RULE: nothing from this layer enters detection/Fisher scores, caches,
+# or the result CSVs -- only the clearly-named mock download below.
+_mock = (posteriors.mock_realization(results, int(seed))
+         if show_noise else None)
 pt_lo, pt_hi = [], []            # plotted point extents (keep error bars in view)
 for r in results:
     c = ins.MODE_COLOR[r["mode_key"]]
     mk = ins.MODE_MARKER.get(r["mode_key"], "o")
     y = r["depth"] * 1e6
-    if meta["show_noise"]:
-        y = y + rng.normal(0.0, r["sigma"] * 1e6)
+    if _mock is not None:
+        y = _mock["modes"][r["mode_key"]]["depth_mock"] * 1e6
     label = r["label"] + (" (saturated!)" if r["saturated"] else "")
     # plot at the response-weighted effective wavelength (matters near
     # detector gaps); marker + color together identify the mode
@@ -2202,7 +2314,15 @@ st.caption(
     f"the shared analysis resolution R = λ/Δλ = {meta['r_bin']}, for "
     f"{meta['n_transits']} {_ev}"
     f"{'s' if meta['n_transits'] > 1 else ''}. Each mode is first "
-    "simulated at its instrument's native resolution, then binned.")
+    "simulated at its instrument's native resolution, then binned."
+    + (f" The plotted points are one simulated mock observation "
+       f"(seed {int(seed)}): the binned model plus one random draw per bin "
+       "at the final per-bin uncertainty, added after the forward model "
+       "and the noise model. A single realization can be lucky or unlucky; "
+       "every quoted precision and the conditional template S/N are "
+       "computed from the noiseless model and never include this draw. "
+       "Use 'New realization' (More settings → Display & reproducibility) "
+       "to re-roll." if _mock is not None else ""))
 
 # downloads: the figure + the plotted numbers (binned points, native model)
 _bin_df = pd.concat([
@@ -2217,7 +2337,7 @@ _bin_df = pd.concat([
 _native = {"wl_um": wl_s, "depth_ppm": d_s}
 if d_wo_s is not None:
     _native[f"depth_without_{meta['target']}_ppm"] = d_wo_s
-_d1, _d2, _d3, _ = st.columns([1.2, 1.5, 1.5, 2.8])
+_d1, _d2, _d3, _d4 = st.columns([1.2, 1.5, 1.5, 2.8])
 _d1.download_button("Figure (PNG)", _spec_png,
                     f"{_fname_base}_spectrum.png", "image/png",
                     key=K("dl_spec_png"))
@@ -2227,6 +2347,26 @@ _d2.download_button("Binned points (CSV)", _csv_bytes(_bin_df),
 _d3.download_button("Native model (CSV)", _csv_bytes(pd.DataFrame(_native)),
                     f"{_fname_base}_model_spectrum.csv", "text/csv",
                     key=K("dl_spec_native"))
+if _mock is not None:
+    # the mock data is downloadable, but ONLY under a name that says what it
+    # is (a seeded mock realization) -- the result CSVs above stay noiseless
+    _mock_df = pd.concat([
+        pd.DataFrame({
+            "mode": r["mode_key"], "label": r["label"],
+            "wl_um": np.asarray(r["wl"], dtype=float),
+            "depth_mock_ppm": np.asarray(
+                _mock["modes"][r["mode_key"]]["depth_mock"],
+                dtype=float) * 1e6,
+            "sigma_ppm": np.asarray(r["sigma"], dtype=float) * 1e6,
+            "seed": int(seed),
+        }) for r in results], ignore_index=True)
+    _d4.download_button(
+        "Mock observation (CSV)", _csv_bytes(_mock_df),
+        f"{_fname_base}_mock_realization_seed{int(seed)}.csv", "text/csv",
+        key=K("dl_spec_mock"),
+        help="One simulated noise realization (the plotted points), with "
+             "its seed. Not a forecast product: the binned-points and "
+             "model CSVs stay noiseless.")
 
 # --- goal chart + T-P profile ----------------------------------------------
 col1, col2 = st.columns([2.6, 1.4])
@@ -2254,6 +2394,15 @@ with col1:
             names.append("ALL USABLE (combined)")
             vals.append(comb)
             cols.append("#555555")
+        # named combinations: same math as the combined row
+        # (posteriors.combo_forecast), scaled to the same tsig
+        for _rec in combo_recs:
+            _v = tsig * float(_rec["sigma_marginalized_display"].get(
+                gp, np.inf))
+            if np.isfinite(_v):
+                names.append(f"COMBO: {_rec['name']}")
+                vals.append(_v)
+                cols.append("#777777")
         # no parenthetical: it pushed the label past the axes width, and the
         # count and direction are already on the page
         xrefs, xlabel = (), f"expected ±{forward.param_axis(gp)} at {tsig:g}σ"
@@ -2449,6 +2598,81 @@ else:
         "modes are excluded from all forecasts."
     )
 
+# --- mode combinations (builder) --------------------------------------------
+# Named combinations of the modes that were run, evaluated through
+# posteriors.combo_forecast / compare_combos (the same combination math as
+# the "ALL USABLE (combined)" row). They add rows to the Fisher table below
+# and bars to the comparison chart above.
+if fisher_names and "jac" in model:
+    st.subheader("Mode combinations")
+    st.caption(
+        "Compare named combinations of the modes in this run, e.g. "
+        "\"SOSS + G395H\" against \"SOSS + G395H + MIRI\". Each "
+        "combination is forecast jointly (shared reference radius, one "
+        "depth offset per detector segment), exactly like the ALL USABLE "
+        "row. Saturated modes contribute no usable data and are excluded "
+        "from each combination, with the exclusion noted. Combinations "
+        "are saved in the configuration download.")
+    _cb_opts = [r["mode_key"] for r in results
+                if r.get("jac_bins") is not None]
+    # a stored selection can reference a mode absent from this run's results
+    # (Streamlit crashes at widget instantiation on off-menu session state)
+    _cb_stale = st.session_state.get(K("cb_modes"))
+    if _cb_stale is not None:
+        _cb_kept = [m for m in _cb_stale if m in _cb_opts]
+        if _cb_kept != list(_cb_stale):
+            st.session_state[K("cb_modes")] = _cb_kept
+    _note = st.session_state.pop("_combo_note", None)
+    if _note is not None:
+        getattr(st, _note[0])(_note[1])
+    _cbc1, _cbc2, _cbc3 = st.columns([1.6, 2.2, 1.0])
+    _cbc1.text_input("Combination name", key=K("cb_name"),
+                     placeholder="e.g. SOSS + G395H")
+    _cbc2.multiselect("Modes in the combination", _cb_opts,
+                      key=K("cb_modes"),
+                      format_func=lambda k: ins.MODES[k]["label"])
+    _cbc3.button("Add combination", key=K("cb_add"), on_click=_combo_add)
+    _usable_keys = [r["mode_key"] for r in results
+                    if r.get("jac_bins") is not None and not r["saturated"]]
+
+    def _combo_add_all_usable() -> None:
+        combos = st.session_state.setdefault(K("combos"), [])
+        if any(c["name"] == "All usable" for c in combos):
+            st.session_state["_combo_note"] = (
+                "info", "The 'All usable' combination already exists.")
+            return
+        combos.append(dict(name="All usable", modes=list(_usable_keys)))
+        st.session_state["_combo_note"] = (
+            "success", "Added the 'All usable' combination.")
+
+    if len(_usable_keys) >= 2:
+        st.button("Add preset: all usable modes", key=K("cb_add_all"),
+                  on_click=_combo_add_all_usable,
+                  help="One combination holding every usable (unsaturated) "
+                       "mode of this run -- the same mode set as the ALL "
+                       "USABLE row.")
+    for _i, _c in enumerate(st.session_state.get(K("combos")) or []):
+        _cc1, _cc2 = st.columns([4.0, 1.0])
+        _cc1.markdown(
+            f"- **{_c['name']}**: "
+            + ", ".join(ins.MODES[m]["label"] if m in ins.MODES else m
+                        for m in _c["modes"]))
+        _cc2.button("Remove", key=K(f"cb_rm_{_i}"), on_click=_combo_remove,
+                    args=(_i,))
+    for _cname, _cerr in combo_errs:
+        st.error(f"Combination {_cname!r} could not be forecast: {_cerr}")
+    for _rec in combo_recs:
+        if _rec["excluded"]:
+            st.warning(
+                f"Combination {_rec['name']!r}: "
+                + ", ".join(ins.MODES[e["mode_key"]]["label"]
+                            if e["mode_key"] in ins.MODES else e["mode_key"]
+                            for e in _rec["excluded"])
+                + " excluded (saturated at the shortest ramp tried -- "
+                  "unusable data). The forecast uses "
+                + (", ".join(ins.MODES[m]["label"]
+                             for m in _rec["usable_modes"])) + ".")
+
 # --- parameter constraint forecast (Fisher) --------------------------------
 # authoritative parameter order = the Jacobian rows as cached (canonical/sorted),
 # NOT the multiselect order
@@ -2494,6 +2718,24 @@ if fisher_names and "jac" in model:
         sig = fisher_mod.combined_forecast(usable_f, fisher_names, diag=fdiag,
                                            conditional=cond)
         frows.extend(_param_rows("ALL USABLE (combined)", sig, cond))
+    # named combinations: long-format rows from the SAME records feeding the
+    # comparison chart (posteriors.combo_forecast; display units already
+    # applied, so the rows re-scale to tsig directly)
+    for _rec in combo_recs:
+        for n in fisher_names:
+            _sm = tsig_f * float(_rec["sigma_marginalized_display"][n])
+            _sc = tsig_f * float(_rec["sigma_conditional_display"][n])
+            frows.append({
+                "mode": f"COMBO: {_rec['name']}",
+                "parameter": forward.PARAM_LABELS[n],
+                _marg_col: ("unconstrained"
+                            if not np.isfinite(_sm) or _sm > 1e4
+                            else f"{_sm:.3g}"),
+                _cond_col: ("unconstrained"
+                            if not np.isfinite(_sc) or _sc > 1e4
+                            else f"{_sc:.3g}"),
+                "unit": forward.PARAM_UNITS[n] or (
+                    "C/O ratio" if n == "dlnCO" else "dimensionless")})
     st.dataframe(frows, width="stretch", hide_index=True)
     st.caption(
         "One row per mode and parameter. **Marginalized**: joint fit; all "
@@ -2556,3 +2798,309 @@ if fisher_names and "jac" in model:
 elif out.get("fisher_names"):
     st.info("A constraint forecast was requested but the cached model has "
             "no Jacobian. Press Run to compute it.")
+
+
+# --- marginalized forecast posteriors + proposal summary figure ------------
+def _param_center(name: str, cpj: dict):
+    """Input-model value of ``name`` in DISPLAY units (the Gaussian's
+    center), or None when the run's stored parameters define no single value
+    (e.g. lnKzz under a non-constant mixing profile, or a field the cached
+    run predates). A None center draws no curve -- the panel says so
+    explicitly instead of guessing a center."""
+    if name == "lnZ":
+        v = cpj.get("met_x_solar")
+        return None if v in (None, "") else float(np.log10(float(v)))
+    if name == "dlnCO":
+        return float(cpj.get("co_ratio", forward.CO_BASELINE))
+    if name == "lnKzz":
+        v = cpj.get("kzz_const")
+        if str(cpj.get("kzz_mode", "const")) == "const" and v not in (None, ""):
+            return float(np.log10(float(v)))
+        return None
+    direct = {"Tirr": "Tirr", "Tint": "Tint", "log_kappa": "log_kappa",
+              "log_gamma": "log_gamma", "Tint_cl": "tint_cl",
+              "log_kappa_cloud": "log_kappa_cloud",
+              "alpha_cloud": "alpha_cloud", "mie_log_rg": "mie_log_rg",
+              "mie_sigmag": "mie_sigmag", "mie_log_mmr": "mie_log_mmr"}
+    k = direct.get(name)
+    if k is not None and cpj.get(k) is not None:
+        return float(cpj[k])
+    return None
+
+
+_post_panels: list[dict] = []       # summary_figure-compatible panel dicts
+_post_sel: list[str] = []
+_have_fisher = bool(fisher_names) and "jac" in model
+if _have_fisher:
+    st.subheader("Marginalized forecast posteriors")
+    st.caption(posteriors.FORECAST_LABEL)
+
+    _usable_post = [r for r in results
+                    if r.get("jac_bins") is not None and not r["saturated"]]
+    # forecast sources: each usable mode, the all-usable combination, and
+    # every named combination from the builder above
+    _sources: dict[str, list] = {}
+    for r in _usable_post:
+        _sources[r["label"]] = [r]
+    if len(_usable_post) >= 2:
+        _sources["ALL USABLE (combined)"] = list(_usable_post)
+    for _rec in combo_recs:
+        _sources[f"COMBO: {_rec['name']}"] = [
+            _results_by_mode[k] for k in _rec["usable_modes"]]
+
+    if not _sources:
+        st.info("No usable mode carries a Jacobian, so there is no "
+                "forecast to draw.")
+    else:
+        _centers_all = {n: _param_center(n, _cpj) for n in fisher_names}
+        _pp_key = K("post_params_" + "_".join(fisher_names))
+        # a stored selection can go stale across runs (different free set)
+        if any(p not in fisher_names
+               for p in st.session_state.get(_pp_key, [])):
+            st.session_state.pop(_pp_key, None)
+        _post_sel = st.multiselect(
+            "Parameters to draw (up to two)", fisher_names,
+            default=fisher_names[:2], key=_pp_key, max_selections=2,
+            format_func=lambda n: forward.PARAM_LABELS[n])
+        # record per source (sigmas always; curves for centered params)
+        _curve_params = [p for p in _post_sel
+                         if _centers_all.get(p) is not None]
+        _centers = {p: _centers_all[p] for p in _curve_params}
+        _recs_by_src = {}
+        for _lbl, _rl in _sources.items():
+            _recs_by_src[_lbl] = posteriors.marginalized_posteriors(
+                _rl, fisher_names, _centers,
+                params=_curve_params, co_eval=co_eval)
+
+        def _src_score(lbl: str) -> float:
+            if not _post_sel:
+                return np.inf
+            v = _recs_by_src[lbl]["sigma_marginalized"].get(_post_sel[0],
+                                                            np.inf)
+            return float(v) if np.isfinite(v) else np.inf
+
+        _best_lbl = min(_sources, key=_src_score)
+        _ov_opts = ["none"] + [s for s in _sources if s != _best_lbl]
+        _ov_key = K("post_overlay")
+        if st.session_state.get(_ov_key) not in _ov_opts:
+            st.session_state.pop(_ov_key, None)
+        _overlay = st.selectbox(
+            "Compare against (drawn dashed)", _ov_opts, index=0,
+            key=_ov_key,
+            help="Overlays a second, usually weaker, mode or combination "
+                 "for comparison. The best source (smallest marginalized "
+                 "uncertainty on the first drawn parameter) is drawn "
+                 "solid.")
+
+        _mock_rec = {}
+        if _mock is not None and _post_sel:
+            # linearized single-realization recovery on the SAME stacked
+            # system as the forecast (posteriors.mock_recovery)
+            for _lbl in ([_best_lbl] + ([_overlay] if _overlay != "none"
+                                        else [])):
+                _mock_rec[_lbl] = posteriors.mock_recovery(
+                    _sources[_lbl], fisher_names, _mock, co_eval=co_eval)
+
+        def _src_color(lbl: str) -> str:
+            for r in _usable_post:
+                if r["label"] == lbl:
+                    return ins.MODE_COLOR[r["mode_key"]]
+            return "#555555"
+
+        for _p in _post_sel:
+            _curves, _notes = [], []
+            for _lbl, _ls, _lw in (((_best_lbl, "-", 1.8),)
+                                   + (((_overlay, "--", 1.4),)
+                                      if _overlay != "none" else ())):
+                _pr = _recs_by_src[_lbl]["params"].get(_p)
+                if _pr is None:
+                    _sig = _recs_by_src[_lbl]["sigma_marginalized"][_p]
+                    if np.isfinite(_sig):
+                        _notes.append(f"{_lbl}: no input-model center is "
+                                      "defined for this parameter under "
+                                      "the run's settings, so no curve is "
+                                      "drawn (its forecast width is in the "
+                                      "table above)")
+                    else:
+                        _notes.append(f"{_lbl}: unconstrained (no curve)")
+                    continue
+                if _pr["constrained"]:
+                    _curves.append(dict(
+                        label=_lbl, theta=_pr["theta"], pdf=_pr["pdf"],
+                        color=_src_color(_lbl), ls=_ls, lw=_lw))
+                    _mr = _mock_rec.get(_lbl)
+                    if _mr is not None and _mr["recovered"].get(_p):
+                        _d = float(_mr["delta_display"][_p])
+                        _mc = posteriors.gaussian_curve(
+                            _pr["center"] + _d, _pr["sigma_display"])
+                        _curves.append(dict(
+                            label=f"{_lbl}: one mock realization "
+                                  f"(seed {int(seed)})",
+                            theta=_mc["theta"], pdf=_mc["pdf"],
+                            color="#883333", ls=":", lw=1.2))
+                else:
+                    _notes.append(f"{_lbl}: unconstrained -- this "
+                                  "direction carries no information in "
+                                  "the fitted band (no curve, by design)")
+            _post_panels.append(dict(axis_label=forward.param_axis(_p),
+                                     curves=_curves, notes=_notes,
+                                     center=_centers_all.get(_p)))
+
+        if _post_panels:
+            _npan = len(_post_panels)
+            fig_p, axs_p = plt.subplots(
+                1, _npan, figsize=(4.6 * _npan, 3.2), dpi=200,
+                squeeze=False)
+            for _ax, _pan in zip(axs_p[0], _post_panels):
+                for _c in _pan["curves"]:
+                    _ax.plot(_c["theta"], _c["pdf"], color=_c["color"],
+                             ls=_c["ls"], lw=_c["lw"], label=_c["label"])
+                if _pan["center"] is not None:
+                    _ax.axvline(_pan["center"], color="#999999", lw=0.7,
+                                ls=":")
+                _ax.set_xlabel(_pan["axis_label"])
+                _ax.set_yticks([])
+                _ax.set_ylabel("forecast density", fontsize=8)
+                if _pan["curves"]:
+                    _ax.legend(loc="upper right", frameon=False, fontsize=7)
+                for _ki, _note in enumerate(_pan["notes"]):
+                    _ax.text(0.5, 0.5 - 0.16 * _ki, _note,
+                             transform=_ax.transAxes, ha="center",
+                             va="center", fontsize=7, color="#883333",
+                             wrap=True)
+                _ax.grid(alpha=0.15)
+            fig_p.tight_layout()
+            st.pyplot(fig_p, width="stretch")
+            _post_png = _fig_png(fig_p)
+            plt.close(fig_p)
+            st.download_button("Figure (PNG)", _post_png,
+                               f"{_fname_base}_forecast_posteriors.png",
+                               "image/png", key=K("dl_post_png"))
+            st.caption(
+                "Each curve is the Gaussian implied by the marginalized "
+                "Fisher width, centered on the input model -- a linearized "
+                "Cramer-Rao forecast, not a sampled retrieval posterior."
+                + (" The dotted curve marks the parameters a linearized fit "
+                   "would recover from the plotted mock observation (seed "
+                   f"{int(seed)}): same width, center shifted by that one "
+                   "noise draw. A single realization can be lucky or "
+                   "unlucky; the shift has zero mean over realizations, and "
+                   "no quoted precision includes it."
+                   if _mock is not None and _post_sel else ""))
+
+# --- proposal summary figure -------------------------------------------------
+st.subheader("Proposal summary figure")
+st.caption(
+    "One graphic for a proposal: the simulated spectra (left), the "
+    "marginalized forecast posteriors (center), and the expected "
+    "per-mode / per-combination performance (right).")
+_sum_points = []
+for r in results:
+    _y = (np.asarray(_mock["modes"][r["mode_key"]]["depth_mock"], float)
+          if _mock is not None else np.asarray(r["depth"], float)) * 1e6
+    _sum_points.append(dict(
+        label=r["label"] + (" (saturated!)" if r["saturated"] else ""),
+        color=ins.MODE_COLOR[r["mode_key"]],
+        marker=ins.MODE_MARKER.get(r["mode_key"], "o"),
+        wl_um=np.asarray(r.get("wl_eff", r["wl"]), float),
+        depth_ppm=_y,
+        sigma_ppm=np.asarray(r["sigma"], float) * 1e6))
+_sum_spectrum = dict(wl_um=wl_s, depth_ppm=d_plot,
+                     depth_label=_depth_lbl,
+                     model_label="model (smoothed for display)",
+                     points=_sum_points)
+
+_sum_rank = None
+if goal_r == "detect":
+    _rank_rs = sorted([r for r in results if np.isfinite(r["sigma_detect"])],
+                      key=lambda r: r["sigma_detect"])
+    if _rank_rs:
+        _sum_rank = dict(
+            xlabel=f"{meta['target']} conditional template S/N "
+                   f"({meta['n_transits']} {_ev}"
+                   f"{'s' if meta['n_transits'] > 1 else ''})",
+            entries=[dict(label=r["label"]
+                          + (" (saturated)" if r["saturated"] else ""),
+                          value=float(r["sigma_detect"]),
+                          color=ins.MODE_COLOR[r["mode_key"]])
+                     for r in _rank_rs],
+            target=float(meta.get("target_sig") or 3.0),
+            value_fmt="{:.1f}σ")
+elif _have_fisher:
+    _rk_key = K("sum_rank_param_" + "_".join(fisher_names))
+    if st.session_state.get(_rk_key) not in fisher_names:
+        st.session_state.pop(_rk_key, None)
+    _gp_default = meta.get("goal_param")
+    _rk_param = st.selectbox(
+        "Ranking parameter (right panel)", fisher_names,
+        index=(fisher_names.index(_gp_default)
+               if _gp_default in fisher_names else 0),
+        key=_rk_key, format_func=lambda n: forward.PARAM_LABELS[n])
+    _tsig_s = float(meta.get("target_sig") or 3.0)
+    _entries = []
+    for r in [x for x in results if x.get("jac_bins") is not None
+              and not x["saturated"]]:
+        _v = _tsig_s * fisher_mod.display_sigma(
+            _rk_param, fisher_mod.mode_forecast(r, fisher_names)[_rk_param],
+            co_eval=co_eval)
+        if np.isfinite(_v):
+            _entries.append(dict(label=r["label"], value=float(_v),
+                                 color=ins.MODE_COLOR[r["mode_key"]]))
+    _usable_r = [x for x in results if x.get("jac_bins") is not None
+                 and not x["saturated"]]
+    if len(_usable_r) >= 2:
+        _v = _tsig_s * fisher_mod.display_sigma(
+            _rk_param,
+            fisher_mod.combined_forecast(_usable_r, fisher_names)[_rk_param],
+            co_eval=co_eval)
+        if np.isfinite(_v):
+            _entries.append(dict(label="ALL USABLE (combined)",
+                                 value=float(_v), color="#555555"))
+    for _rec in combo_recs:
+        _v = _tsig_s * float(_rec["sigma_marginalized_display"][_rk_param])
+        if np.isfinite(_v):
+            _entries.append(dict(label=f"COMBO: {_rec['name']}",
+                                 value=float(_v), color="#777777"))
+    if _entries:
+        _entries.sort(key=lambda e: -e["value"])   # best (smallest) at top
+        _tgt = (float(meta["target_prec"])
+                if (goal_r == "constrain"
+                    and meta.get("goal_param") == _rk_param
+                    and meta.get("target_prec") is not None) else None)
+        _sum_rank = dict(
+            xlabel=f"expected ±{forward.param_axis(_rk_param)} "
+                   f"at {_tsig_s:g}σ",
+            entries=_entries, target=_tgt, value_fmt="{:.3g}")
+
+_sum_foot = (
+    "Forecasts are linearized Fisher (Cramer-Rao) bounds under the quoted "
+    "noise model -- Gaussian by construction, local, best-case; not sampled "
+    "retrieval posteriors. σ_detect is a conditional template S/N, not a "
+    "retrieval detection."
+    + (f" Plotted data points are one simulated mock observation "
+       f"(seed {int(seed)}); quoted precisions never include that draw."
+       if _mock is not None else ""))
+fig_sum = summary_figure.compose_summary_figure(
+    _sum_spectrum, posterior_panels=_post_panels or None,
+    ranking=_sum_rank,
+    title=f"{meta.get('planet', 'planet')} -- "
+          f"{_cpj.get('science_mode', 'transmission')} forecast summary",
+    footnote=_sum_foot)
+st.pyplot(fig_sum, width="stretch")
+_sum_png = _fig_png(fig_sum)
+_sum_pdf = _fig_pdf(fig_sum)
+plt.close(fig_sum)
+_s1, _s2, _ = st.columns([1.2, 1.2, 2.6])
+_s1.download_button("Figure (PDF, vector)", _sum_pdf,
+                    f"{_fname_base}_proposal_summary.pdf",
+                    "application/pdf", key=K("dl_summary_pdf"))
+_s2.download_button("Figure (PNG)", _sum_png,
+                    f"{_fname_base}_proposal_summary.png", "image/png",
+                    key=K("dl_summary_png"))
+st.caption(
+    "Left: the model spectrum with each mode's simulated data. Center: "
+    "marginalized Fisher-Gaussian forecast posteriors (drawn above). "
+    "Right: expected performance per mode and combination. Rankings "
+    "compare expected science information under this tool's fixed detector "
+    "configurations; verify any chosen configuration in APT before "
+    "proposing.")

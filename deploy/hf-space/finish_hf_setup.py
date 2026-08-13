@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """One-shot Hugging Face setup, run AFTER `hf auth login`.
 
-Does everything the browser/CLI sequence in SETUP.md steps 2-6 does:
+Does everything the browser/CLI sequence in notes.md's Deployment runbooks section
+(Hugging Face Space runbook) steps 2-6 does:
 creates the private dataset + Space repos, uploads the Space shim files,
 sets the HF_TOKEN secret (+ DATASET_REPO variable if non-default), requests
 persistent storage / CPU Upgrade hardware / 1 h sleep (these three need

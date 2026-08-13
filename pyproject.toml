@@ -63,7 +63,7 @@ Repository = "https://github.com/imalsky/vulcan-jwst-tool"
 gui = ["streamlit>=1.49", "pandas"]
 # Opt-in PICASO equilibrium provider + climate T-P mode (v18). The reference
 # tree is separate user-supplied science data (JWST_TOOL_PICASO_REFDATA;
-# `jwst-tool data` reports each piece; docs/physics_and_conventions.md, PICASO section has the scope).
+# `jwst-tool data` reports each piece; README.md, PICASO engine section has the scope).
 picaso = ["picaso==4.0.1"]
 dev = ["ruff>=0.11", "build>=1.2", "twine>=5"]
 

@@ -9,7 +9,7 @@ file alone. It does NOT pin the software or science data: package versions
 are recorded in the file as information only (`software`, ignored on load),
 and reproducing a result exactly also requires the same vulcan-forward /
 vulcan-jax / exojax / line-list state (the cache-identity trade is S2-05 in
-docs/decision_records.md).
+notes.md, Decision records section).
 
 `widget_state` is the inverse: it maps such a file (or a bare canonical-params
 dict from an older download) onto Streamlit session-state widget keys. It
@@ -395,5 +395,31 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
             state[key("seed")] = int(obs["seed"])
         if obs.get("show_noise") is not None:
             state[key("shownoise")] = bool(obs["show_noise"])
+        # named mode combinations (results-side builder; K("combos") is a
+        # plain session key, applied like any widget key before widgets)
+        combos_in = obs.get("combos") or []
+        combos_ok = []
+        for c in combos_in:
+            if not isinstance(c, dict) or not str(c.get("name", "")).strip():
+                notes.append("a saved mode combination without a name was "
+                             "not restored")
+                continue
+            cname = str(c["name"]).strip()
+            cmodes = [m for m in (c.get("modes") or []) if m in ins.MODES]
+            cdropped = [m for m in (c.get("modes") or []) if m not in ins.MODES]
+            if cdropped:
+                notes.append(f"combination {cname!r}: unknown instrument "
+                             f"mode(s) {cdropped} were dropped")
+            if not cmodes:
+                notes.append(f"combination {cname!r} has no valid instrument "
+                             "modes and was not restored")
+                continue
+            if any(x["name"] == cname for x in combos_ok):
+                notes.append(f"duplicate combination name {cname!r}: only "
+                             "the first was restored")
+                continue
+            combos_ok.append(dict(name=cname, modes=cmodes))
+        if combos_ok:
+            state[key("combos")] = combos_ok
 
     return state, notes

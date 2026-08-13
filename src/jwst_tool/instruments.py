@@ -193,7 +193,12 @@ def engine_mode(instrument: str, mode: str) -> str:
 # the set passes the dataviz palette validator in wavelength-adjacency order;
 # MODE_MARKER is the secondary, color-independent encoding.
 _COLORS = ["#2a78d6", "#199e70", "#a35a00", "#007a00",
-           "#4a3aa7", "#d43f3e", "#a83a9e", "#c2571f"]
+           "#4a3aa7", "#d43f3e", "#a83a9e", "#006c8e"]
+# The 8th slot (nirspec_g395m) was re-chosen 2026-08-12 while still unused:
+# the original "#c2571f" sat at deltaE(Lab) ~16 from the G235H orange and ~24
+# from wavelength-neighbor F444W; "#006c8e" holds 5.94:1 on white and
+# deltaE >= 38 to every existing color (the palette's own internal minimum
+# is 32.6), >= 54 to its wavelength-adjacent neighbors (G395H, F444W).
 
 # Fixed marker shape per mode: series must never rely on color alone
 # (grayscale print, color-vision deficiency).
@@ -246,7 +251,7 @@ PANDEXO_UNBOUNDED_NGROUP = 65535
 # calibrate accurately, 5+ recommended). History: through 0.24.0 the tool
 # floored NIR at 2 / MIRI at 5 and reported bright targets "saturated at the
 # shortest ramp" where PandExo passed at 1 group (closed 2026-08-09; see
-# docs/decision_records.md).
+# notes.md, Decision records section).
 # Instrument-specific reason a short ramp is cautioned (composed into the
 # detect warning). Sources: jwst-docs, verified 2026-08-09 -- NIRSpec
 # Detector Recommended Strategies; NIRISS SOSS Recommended Strategies;
@@ -343,6 +348,30 @@ MODES = {
         floor_ppm_suggested=40.0, noise_infl=1.0, ngroup_min=2,
         ngroup_warn_below=6, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
+    # Appended LAST on purpose (2026-08-12): MODE_COLOR/MODE_MARKER key by
+    # enumeration order, and per-mode colors are never re-assigned, so a new
+    # mode may only be appended, never inserted mid-registry. Same band as
+    # G395H at ~4x lower R; the medium-resolution grating trades resolving
+    # power for a brighter saturation limit than PRISM while keeping the full
+    # 3-5 um band on one detector pair (the G395M-vs-G395H duty-cycle /
+    # saturation trade). Tokens verified against
+    # pandeia_data-2026.7-jwst/jwst/nirspec/config.json (and the 2026.2
+    # tree): bots dispersers include "g395m"; config_constraints allow
+    # f290lp + sub2048 for it; readout_patterns include "nrsrapid";
+    # range.s1600a1.f290lp spans 2.87-5.27 um (wl_max below is the G395M
+    # usable science bandpass, jwst-docs 2.87-5.10).
+    "nirspec_g395m": dict(
+        label="NIRSpec G395M",
+        instrument="nirspec", mode="bots",
+        config=dict(instrument=dict(disperser="g395m", filter="f290lp"),
+                    detector=dict(subarray="sub2048",
+                                  readout_pattern="nrsrapid")),
+        strategy=dict(aperture_size=0.7, sky_annulus=[0.75, 1.5]),
+        background="ecliptic", background_level="medium",
+        wl_min=2.87, wl_max=5.10,
+        floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=1,
+        ngroup_warn_below=2, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
+    ),
 }
 
 # Literature achieved-vs-predicted noise ratios: reference points only, never
@@ -355,6 +384,7 @@ LITERATURE_NOISE_FACTORS = {
     "nirspec_prism": 1.0,
     "nirspec_g395h": 1.10,
     "nirspec_g235h": 1.10,
+    "nirspec_g395m": 1.10,   # extrapolated from G395H (no published number)
     "niriss_soss": 1.20,
     "nircam_f322w2": 1.05,
     "nircam_f444w": 1.05,
@@ -384,7 +414,7 @@ MODE_MARKER = {key: _MARKERS[i % len(_MARKERS)] for i, key in enumerate(MODES)}
 # GUI default selection (speed-first trio, 2026-08-10 maintainer decision):
 # PRISM + G395H cover 0.6-5.25 um including the 4.05 um SO2 band (G395H is
 # the default detect-SO2 goal's workhorse), MIRI LRS keeps the mid-IR
-# 7-8.5 um SO2 band. All seven modes stay selectable. Since 0.27.0 the ETC
+# 7-8.5 um SO2 band. All registry modes stay selectable. Since 0.27.0 the ETC
 # computes ONLY the selected modes and caches each mode separately, so the
 # default run costs three modes and adding a mode later costs exactly that
 # mode (the old design computed all seven every first run; the five-mode
