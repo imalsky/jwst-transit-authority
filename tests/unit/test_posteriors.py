@@ -363,12 +363,17 @@ def test_mock_realization_never_mutates_the_inputs():
 
 
 def test_scoring_modules_never_reference_the_mock_layer():
-    """Structural pin of the display-only rule: the scoring/forecast/export
-    modules must carry NO reference to the mock-observation layer -- no
-    `posteriors` import, no mock_realization/mock_recovery/depth_mock name.
-    Only app.py may consume the mock layer, and only for display and the
-    clearly-named mock CSV. Checks the parsed AST, not raw text, so this
-    docstring cannot trip it.
+    """Structural pin of the ONE-DIRECTIONAL rule (not "display only": the
+    draw IS fitted by mock_recovery, whose recovered-parameter shift the GUI
+    overlays on the posterior panels).
+
+    What this pins is the direction of the dependency: the scoring, forecast
+    and export modules must carry NO reference to the mock-observation layer
+    -- no `posteriors` import, no mock_realization/mock_recovery/depth_mock
+    name. The draw is consumed only in app.py, for the plotted points, the
+    recovery overlay, and the clearly-named mock CSV; it can never flow back
+    into a score, a cache, or a noiseless export. Checks the parsed AST, not
+    raw text, so this docstring cannot trip it.
     """
     import ast
     import pathlib
@@ -393,9 +398,9 @@ def test_scoring_modules_never_reference_the_mock_layer():
             elif isinstance(node, ast.Attribute) and node.attr in banned:
                 hit = node.attr
             assert hit is None, (
-                f"{mod}:{node.lineno} references {hit!r} -- mock draws are "
-                "display-only and must never enter scores, caches, or "
-                "result exports")
+                f"{mod}:{node.lineno} references {hit!r} -- the mock draw "
+                "must never enter scores, caches, or result exports (it is "
+                "fitted only by mock_recovery, consumed in app.py)")
 
 
 def test_compare_combos_orders_and_rejects_duplicates():
