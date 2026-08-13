@@ -71,36 +71,59 @@ def _slug(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "_", str(s)).strip("_").lower()
 
 
-def _fig_png(fig, dpi: int = 200) -> bytes:
+# bbox_inches="tight" crops each figure to ITS OWN ink, so two figures built
+# on the same canvas come out different sizes whenever one carries a legend
+# the other lacks. The T-P and mixing-ratio panels must match exactly, so they
+# render UNCROPPED (tight=False) on the shared canvas plotting.py defines.
+# Everything else (the wide summary figure, standing alone) still crops.
+def _full_bbox(fig):
+    """The whole canvas as an explicit Bbox (defeats savefig.bbox: tight).
+
+    bbox_inches=None does NOT mean "no crop": matplotlib reads it as "use
+    rcParams['savefig.bbox']", and science.mplstyle sets that to `tight`.
+    Passing the figure's own bbox is the only way to force the full canvas.
+    """
+    return fig.bbox_inches
+
+
+def _fig_png(fig, dpi: int = 200, tight: bool = True) -> bytes:
     """Rasterize a figure for download (PNG, dpi 200 -- house convention).
 
-    Under plotting.render_lock: savefig measures text through the
-    process-global mathtext parser (see plotting.py).
+    ``tight=False`` keeps the full canvas, which is what makes paired panels
+    the same size. Under plotting.render_lock: savefig measures text through
+    the process-global mathtext parser (see plotting.py).
     """
     buf = io.BytesIO()
     with plotting.render_lock:
-        fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight",
+        fig.savefig(buf, format="png", dpi=dpi,
+                    bbox_inches=("tight" if tight else None),
                     facecolor="white")
     return buf.getvalue()
 
 
-def _fig_pdf(fig) -> bytes:
+def _fig_pdf(fig, tight: bool = True) -> bytes:
     """Vector PDF export (proposal-ready; text and lines stay vector)."""
     buf = io.BytesIO()
     with plotting.render_lock:
-        fig.savefig(buf, format="pdf", bbox_inches="tight", facecolor="white")
+        fig.savefig(buf, format="pdf",
+                    bbox_inches=("tight" if tight else None),
+                    facecolor="white")
     return buf.getvalue()
 
 
-def _show_fig(fig) -> None:
+def _show_fig(fig, tight: bool = True) -> None:
     """Render a figure into the page under the render lock, then close it.
 
     st.pyplot rasterizes, so it enters the same shared mathtext parser as
     layout does -- it belongs inside the lock like every other materialization
-    (plotting.py has the full argument).
+    (plotting.py has the full argument). ``tight=False`` forwards the
+    figure's own bbox so the full canvas is shown at a fixed size.
     """
     with plotting.render_lock:
-        st.pyplot(fig, width="stretch")
+        if tight:
+            st.pyplot(fig, width="stretch")
+        else:
+            st.pyplot(fig, width="stretch", bbox_inches=_full_bbox(fig))
         plt.close(fig)
 
 
@@ -177,11 +200,7 @@ st.markdown(
     "4. **Observation**: select instrument modes and noise assumptions.\n\n"
     "The tool computes a forward "
     "spectrum and a Pandeia noise forecast, ranks the selected modes, and "
-    "reports how many transits or eclipses reach your target.\n\n"
-    "**Beta**: the mode-combination builder, the simulated mock "
-    "observation, and the proposal summary figure are new in this release. "
-    "Sanity-check any forecast from this tool against a full retrieval "
-    "before submitting a proposal.")
+    "reports how many transits or eclipses reach your target.")
 
 # The Run row renders HERE (above the explainers). Its widgets depend on
 # sidebar state that is read further down, so the slot is reserved now and
@@ -211,8 +230,6 @@ Each run computes a spectrum live, for exactly the atmosphere you configure:
    parameter forecasts, and a floor-aware count of the transits or eclipses
    needed to reach your target.
 
-If a calculation does not pass its numerical quality checks, the tool stops
-and shows an error instead of returning an uncertified spectrum.
         """)
 
 # ---------------------------------------------------------------------------
@@ -1981,7 +1998,12 @@ if goal_r == "detect":
         verdict = (f"**{best['label']}**: {bsig:.1f}σ in {ntr} "
                    f"{_ev}{'s' if ntr > 1 else ''} (target {tsig:g}σ).")
         if bsig >= tsig:
-            st.success(verdict + "  Meets the target.")
+            # No banner when the target is met (maintainer, 2026-08-13): the
+            # figure and the mode table already carry the number, and a green
+            # bar restating it is the redundant UI prose the house policy
+            # forbids. A SHORTFALL still gets a bar -- the transit count it
+            # quotes is information that appears nowhere else.
+            pass
         elif bsig > 0:
             # floor-aware transit solver: the photon term averages down with
             # N, the systematic floor does not -- a plain 1/sqrt(N) law is
@@ -2044,7 +2066,7 @@ else:
                f"{tsig:g}σ in {ntr} {_ev}{'s' if ntr > 1 else ''} "
                f"(target ±{target:g}{usp}).")
     if bs <= target:
-        st.success(verdict + "  Meets the target.")
+        pass                      # see the detect-goal note: no banner on success
     elif np.isfinite(comb) and comb <= target:
         st.warning(verdict + f"  No single mode reaches the target, but the "
                    f"combination of all usable selected modes does "
@@ -2135,8 +2157,10 @@ with st.expander("Physical structure (T-P profile, mixing ratios)"):
         # streamlit) so the threaded regression test exercises this exact
         # code; the whole lifecycle stays under plotting.render_lock
         fig3, ax3_ylim = plotting.build_tp_figure(model["p_bar"], model["T"])
-        _tp_png = _fig_png(fig3)
-        _show_fig(fig3)
+        # tight=False: identical canvas -> identical on-page size as the
+        # mixing-ratio panel beside it (see _fig_png)
+        _tp_png = _fig_png(fig3, tight=False)
+        _show_fig(fig3, tight=False)
         _p_arr = np.asarray(model["p_bar"], dtype=float)
         _T_arr = np.asarray(model["T"], dtype=float)
         if _cpj.get("science_mode") == "emission":
@@ -2187,8 +2211,8 @@ with st.expander("Physical structure (T-P profile, mixing ratios)"):
                      if _i < _ymix.shape[1]]
             _cols.sort(key=lambda kv: -float(np.nanmax(kv[1])))
             fig4 = plotting.build_vmr_figure(_p_arr, _cols, ylim=ax3_ylim)
-            _vmr_png = _fig_png(fig4)
-            _show_fig(fig4)
+            _vmr_png = _fig_png(fig4, tight=False)
+            _show_fig(fig4, tight=False)
             _vmr_df = pd.DataFrame({"p_bar": _p_arr}
                                    | {m: y for m, y in _cols})
             _v1, _v2 = st.columns(2)
@@ -2413,7 +2437,20 @@ with st.expander("Parameter constraint forecast (Fisher)"):
                                 else f"{_sc:.3g}"),
                     "unit": forward.PARAM_UNITS[n] or (
                         "C/O ratio" if n == "dlnCO" else "dimensionless")})
-        st.dataframe(frows, width="stretch", hide_index=True)
+        # Repeated mode names blanked for READING only (maintainer,
+        # 2026-08-13): each mode spans one row per free parameter, and the
+        # repetition made the mode boundaries hard to see. The CSV below is
+        # built from the UNBLANKED rows -- a machine-readable file must carry
+        # the mode on every row.
+        _disp, _prev = [], None
+        for _r in frows:
+            _r2 = dict(_r)
+            if _r2["mode"] == _prev:
+                _r2["mode"] = ""
+            else:
+                _prev = _r2["mode"]
+            _disp.append(_r2)
+        st.dataframe(_disp, width="stretch", hide_index=True)
         st.download_button("Constraint forecast (CSV)",
                            _csv_bytes(pd.DataFrame(frows)),
                            f"{_fname_base}_fisher_forecast.csv", "text/csv",
@@ -2610,6 +2647,7 @@ if _have_fisher:
                                   "direction carries no information in "
                                   "the fitted band (no curve, by design)")
             _post_panels.append(dict(axis_label=forward.param_axis(_p),
+                                     axis_unit=forward.PARAM_UNITS.get(_p, ""),
                                      curves=_curves, notes=_notes,
                                      center=_centers_all.get(_p)))
 
@@ -2664,7 +2702,12 @@ for r in results:
     _sum_points.append(dict(
         label=_lbl,
         color=ins.MODE_COLOR[r["mode_key"]],
-        marker=ins.MODE_MARKER.get(r["mode_key"], "o"),
+        # Uniform TRIANGLE for every mode (maintainer, 2026-08-13): the
+        # per-mode marker shapes (o/s/D/^/v/P/X/*) are indistinguishable at
+        # the ~3.6 pt size these points render at -- they read as noise, not
+        # as an encoding. Modes are distinguished by color plus the legend
+        # entry, which names each mode explicitly.
+        marker="^",
         wl_um=np.asarray(r.get("wl_eff", r["wl"]), float),
         depth_ppm=_y,
         sigma_ppm=np.asarray(r["sigma"], float) * 1e6))

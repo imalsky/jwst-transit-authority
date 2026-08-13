@@ -194,29 +194,69 @@ def _plot_spectrum(ax, spec: dict) -> None:
 
 
 
-def _plot_posterior_panel(axp, pan: dict) -> None:
-    """Render one marginalized forecast posterior panel."""
-    for c in pan["curves"]:
-        axp.plot(c["theta"], c["pdf"], color=c["color"], ls=c["ls"],
-                 lw=c["lw"], label=c["label"])
-    if pan["center"] is not None:
-        axp.axvline(pan["center"], color="#999999", lw=0.7, ls=":")
-    axp.set_xlabel(pan["axis_label"], fontsize=_AX_LBL)
+# One color per PARAMETER in the merged forecast box. Chosen to stay
+# distinguishable in grayscale and for the common forms of color blindness
+# (blue vs vermillion, Okabe-Ito).
+_PARAM_COLORS = ("#0072b2", "#d55e00")
+
+
+def _plot_posterior_box(axp, panels: list[dict]) -> None:
+    """Both marginalized forecast posteriors in ONE box, twin x-axes.
+
+    Maintainer, 2026-08-13: replaces the two separate square panels. The two
+    posteriors are DIFFERENT PARAMETERS in different units (metallicity in
+    dex, C/O a bare ratio), so they cannot share one x-axis without putting
+    unlike quantities on the same numbers. Instead the first parameter reads
+    off the BOTTOM axis and the second off the TOP, with each axis, its tick
+    labels and its curves drawn in that parameter's color -- so the
+    axis-to-curve mapping is unambiguous without a lookup.
+
+    Y AXIS: each curve is scaled to unit peak, so the axis is a RELATIVE
+    density and is dimensionless. That is deliberate. A marginalized
+    posterior density carries units of 1/[parameter], i.e. dex^-1 for
+    metallicity and (C/O)^-1 for the ratio, so with two parameters in one box
+    there is no single honest y unit to label. Normalizing removes the unit
+    question and keeps the readable content -- the WIDTH of each curve, which
+    is the forecast -- fully intact.
+    """
+    axes = [axp, axp.twiny()]
+    for i, (pan, ax_i) in enumerate(zip(panels, axes)):
+        col = _PARAM_COLORS[i % len(_PARAM_COLORS)]
+        for c in pan["curves"]:
+            pdf = np.asarray(c["pdf"], dtype=float)
+            peak = float(np.max(pdf)) if pdf.size else 0.0
+            if peak > 0.0:
+                pdf = pdf / peak          # unit peak: see the y-axis note
+            ax_i.plot(c["theta"], pdf, color=col, ls=c["ls"], lw=c["lw"],
+                      label=f"{pan['axis_label']} -- {c['label']}")
+        if pan["center"] is not None:
+            ax_i.axvline(pan["center"], color=col, lw=0.7, ls=":", alpha=0.6)
+        ax_i.set_xlabel(pan["axis_label"], fontsize=_AX_LBL, color=col)
+        ax_i.tick_params(axis="x", labelsize=_TICK, colors=col)
+        ax_i.xaxis.label.set_color(col)
+        ax_i.set_ylim(0.0, 1.10)
+
     axp.set_yticks([])
-    axp.tick_params(labelsize=_TICK)
-    axp.set_ylabel("forecast density", fontsize=_AX_LBL)
-    if pan["curves"]:
-        # outside the axes, below -- same reasoning as the spectrum panel: no
-        # y-limit inflation, so the curve height is the curve height
-        axp.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16),
-                   frameon=False, fontsize=_LEG, ncol=1,
-                   handletextpad=0.5, borderaxespad=0.0,
-                   labelspacing=0.3)
-    for k, note in enumerate(pan["notes"]):
+    axp.set_ylabel("relative forecast density", fontsize=_AX_LBL)
+    axp.grid(alpha=0.15)
+
+    # ONE legend for the whole box, outside and below, carrying every curve
+    # from both axes (twiny() otherwise gives each axis its own).
+    handles, labels = [], []
+    for ax_i in axes:
+        h, l = ax_i.get_legend_handles_labels()
+        handles += h
+        labels += l
+    if handles:
+        axp.legend(handles, labels, loc="upper center",
+                   bbox_to_anchor=(0.5, -0.16), frameon=False,
+                   fontsize=_LEG, ncol=1, handletextpad=0.5,
+                   borderaxespad=0.0, labelspacing=0.3)
+    notes = [n for pan in panels for n in pan["notes"]]
+    for k, note in enumerate(notes):
         axp.text(0.5, 0.5 - 0.18 * k, note, transform=axp.transAxes,
                  ha="center", va="center", fontsize=7,
                  color="#883333", wrap=True)
-    axp.grid(alpha=0.15)
 
 
 
@@ -253,31 +293,32 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
     # argument). Reentrant, so a caller holding it already is fine.
     with plotting.render_lock, \
             plt.style.context([str(_STYLE_FILE), _STYLE_OVERRIDES]):
-        # three EQUAL, SQUARE panels side by side: spectrum, then up to two
-        # marginalized forecast posteriors. set_box_aspect(1.0) below pins
-        # the panels square, so the figure is made TALLER than the panel row
-        # needs and the extra height is given to the axes-external legends
-        # underneath (bottom margin), which is why bottom is generous.
+        # TWO panels (maintainer, 2026-08-13): the spectrum is the subject of
+        # this figure, so it gets 2x the width of the forecast box beside it.
+        # The two marginalized posteriors that used to occupy separate square
+        # panels are now ONE box with twin x-axes (see _plot_posterior_box).
+        #
+        # The spectrum is no longer square -- a 2:1 wavelength panel is the
+        # right shape for a spectrum and matches how these appear in papers.
+        # The forecast box stays square.
         fig = plt.figure(figsize=(12.0, 5.0), dpi=200)
-        gs = fig.add_gridspec(1, 3, width_ratios=[1.0, 1.0, 1.0],
-                              wspace=0.16,
-                              left=0.075, right=0.99,
+        gs = fig.add_gridspec(1, 2, width_ratios=[2.0, 1.0],
+                              wspace=0.20,
+                              left=0.065, right=0.985,
                               top=(0.93 if title else 0.97),
                               bottom=(0.30 if footnote else 0.26))
 
-        # -- LEFT: spectrum with per-mode simulated points ------------------
+        # -- LEFT: spectrum with per-mode simulated points (2x width) -------
         ax = fig.add_subplot(gs[0, 0])
-        ax.set_box_aspect(1.0)
         _plot_spectrum(ax, spec)
 
-        # -- CENTER/RIGHT: up to two marginalized forecast posteriors -------
-        for i in range(2):
-            axp = fig.add_subplot(gs[0, i + 1])
-            axp.set_box_aspect(1.0)
-            if i >= len(panels):
-                axp.set_axis_off()
-                continue
-            _plot_posterior_panel(axp, panels[i])
+        # -- RIGHT: both marginalized forecast posteriors in ONE box --------
+        axp = fig.add_subplot(gs[0, 1])
+        axp.set_box_aspect(1.0)
+        if panels:
+            _plot_posterior_box(axp, panels)
+        else:
+            axp.set_axis_off()
 
         if title:
             fig.suptitle(str(title), fontsize=11)

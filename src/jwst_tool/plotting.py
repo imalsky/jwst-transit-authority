@@ -48,21 +48,44 @@ import threading
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.ticker import LogLocator, NullFormatter, NullLocator
+from matplotlib.ticker import (LogLocator, MaxNLocator, NullFormatter,
+                               NullLocator)
 
 # Reentrant so a build_* call nested inside a caller's `with render_lock:`
 # block does not deadlock.
 render_lock = threading.RLock()
 
-# Square figures, house convention (2026-08-13): every figure the tool shows
-# is square, so panels compare like-for-like across the page.
-FIG_SIDE_IN = 4.0
+# IDENTICAL GEOMETRY for the T-P and mixing-ratio figures (2026-08-13): same
+# canvas, same axes rectangle, so the two render at exactly the same size
+# side by side. The canvas is WIDER than the square plot box on purpose --
+# the surplus on the right is the mixing-ratio legend strip, and the T-P
+# figure simply leaves it blank rather than growing its plot box to fill it.
+#
+# The rect below is chosen so the allocated box is EXACTLY square
+# (0.579 * 5.6 in = 3.24 in wide, 0.81 * 4.0 in = 3.24 in tall), which means
+# set_box_aspect(1.0) is satisfied with no shrink-to-fit -- if these numbers
+# drift apart, matplotlib silently shrinks the axes and the two figures stop
+# matching.
+#
+# NOTE the figure CANVAS is deliberately NOT square here (5.6 x 4.0); only
+# the axes box is. An earlier revision made the whole canvas square, so do
+# not "restore" that -- the surplus width is the legend strip, and equal
+# canvases are what make the two panels the same on-page size.
+# test_plotting.py::test_tp_and_vmr_panels_share_one_geometry pins it.
+FIG_W_IN = 5.6
+FIG_H_IN = 4.0
 FIG_DPI = 200
+AXES_RECT = dict(left=0.130, right=0.709, bottom=0.160, top=0.970)
 
 # Tick-label crowding: a decade-per-tick log axis overruns a small square
 # panel, so cap the number of labelled decades and let the locator thin to
 # every 2nd/3rd/... decade. Minor labels are suppressed outright.
 MAX_LOG_TICKS = 7
+
+# Linear axes (temperature): 4-digit labels on a ~3 in box collide at the
+# matplotlib default, which is what "the temperature ticks overlap a ton"
+# was. Cap the count and let the locator pick round values.
+MAX_LIN_TICKS = 5
 
 
 def _thin_log_axis(ax, which: str) -> None:
@@ -83,6 +106,21 @@ def _thin_log_axis(ax, which: str) -> None:
     axis.set_minor_formatter(NullFormatter())
 
 
+def _new_panel():
+    """A figure + axes at the shared geometry: identical canvas and identical
+    axes rectangle for every panel built here.
+
+    Uses an EXPLICIT rect rather than tight_layout, because tight_layout sizes
+    the axes from the labels each figure happens to carry -- which is exactly
+    how the T-P and mixing-ratio plots drifted to different sizes.
+    """
+    fig = plt.figure(figsize=(FIG_W_IN, FIG_H_IN), dpi=FIG_DPI)
+    ax = fig.add_subplot(111)
+    fig.subplots_adjust(**AXES_RECT)
+    ax.set_box_aspect(1.0)
+    return fig, ax
+
+
 def build_tp_figure(p_bar, T_K):
     """T-P profile: pressure (log, inverted) vs temperature. Square.
 
@@ -95,8 +133,7 @@ def build_tp_figure(p_bar, T_K):
         raise ValueError(f"build_tp_figure: p_bar {p.shape} and T_K {T.shape} "
                          "must be matching non-empty 1-D arrays")
     with render_lock:
-        fig, ax = plt.subplots(figsize=(FIG_SIDE_IN, FIG_SIDE_IN), dpi=FIG_DPI)
-        ax.set_box_aspect(1.0)
+        fig, ax = _new_panel()
         ax.plot(T, p, color="#2a78d6", lw=1.6)
         # the chemistry grid's validated temperature span
         for tlim in (320.0, 2980.0):
@@ -105,10 +142,13 @@ def build_tp_figure(p_bar, T_K):
         ax.set_yscale("log")
         ax.invert_yaxis()
         _thin_log_axis(ax, "y")
+        # 4-digit temperature labels collide on a ~3 in box at the default
+        # locator; cap the count instead of rotating them
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=MAX_LIN_TICKS,
+                                               steps=[1, 2, 5, 10]))
         ax.set_xlabel("temperature (K)")
         ax.set_ylabel("pressure (bar)")
         ax.grid(alpha=0.25)
-        fig.tight_layout()
         return fig, ax.get_ylim()
 
 
@@ -119,16 +159,15 @@ def build_vmr_figure(p_bar, columns, ylim=None):
     peak-abundance order makes the legend read top-down). ``ylim``: pressure
     range to share with the T-P panel.
 
-    The legend sits OUTSIDE the axes (below), so it can never cover a profile
-    and needs no y-limit padding.
+    The legend sits OUTSIDE the axes, in the strip to the RIGHT, so it can
+    never cover a profile and needs no y-limit padding.
     """
     p = np.asarray(p_bar, dtype=float)
     cols = list(columns)
     if not cols:
         raise ValueError("build_vmr_figure: columns is empty")
     with render_lock:
-        fig, ax = plt.subplots(figsize=(FIG_SIDE_IN, FIG_SIDE_IN), dpi=FIG_DPI)
-        ax.set_box_aspect(1.0)
+        fig, ax = _new_panel()
         for m, y in cols:
             ya = np.asarray(y, dtype=float)
             if ya.shape != p.shape:
@@ -148,20 +187,14 @@ def build_vmr_figure(p_bar, columns, ylim=None):
         ax.set_xlabel("volume mixing ratio")
         ax.set_ylabel("pressure (bar)")
         ax.grid(alpha=0.25)
-        # Legend below the axes. The anchor must clear the x tick labels AND
-        # the x axis label -- tight_layout does not know about an artist
-        # anchored outside the axes, so it is placed in FIGURE coordinates
-        # after the layout runs (bbox_inches="tight" then includes it,
-        # because the legend is registered on the axes).
-        ncol = min(4, max(2, int(np.ceil(len(cols) / 2))))
-        fig.tight_layout()
-        leg = ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.02),
-                        bbox_transform=fig.transFigure,
-                        frameon=False, fontsize=7, ncol=ncol,
-                        handletextpad=0.5, columnspacing=1.0,
-                        borderaxespad=0.0)
-        # make room so the saved figure is not just cropped larger
-        fig.canvas.draw()
-        lh = leg.get_window_extent(fig.canvas.get_renderer()).height
-        fig.subplots_adjust(bottom=(lh / fig.bbox.height) + 0.16)
+        # Legend to the RIGHT of the axes (maintainer, 2026-08-13), in the
+        # strip AXES_RECT leaves free. Species read top-down in the same
+        # peak-abundance order the caller sorted them into, which a single
+        # column preserves and a multi-column block does not. Anchored just
+        # outside the axes' right edge, so it cannot touch a profile and
+        # needs no y-limit padding. Placed WITHOUT tight_layout: the whole
+        # point of the shared rect is that neither panel resizes itself.
+        ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0),
+                  frameon=False, fontsize=7, ncol=1,
+                  handletextpad=0.5, borderaxespad=0.0, labelspacing=0.35)
         return fig

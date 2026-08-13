@@ -5,6 +5,7 @@ Uses Streamlit's AppTest; no forward-model run is launched.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -239,8 +240,13 @@ def test_constant_floor_prefill_renders_per_mode_inputs():
 
 
 def test_emission_results_use_eclipse_terms():
-    """An emission run's verdict and spectrum header say "eclipse", never
-    "transit", and an above-target result renders as success."""
+    """An emission run says "eclipse" throughout, never "transit".
+
+    An above-target result renders NO banner as of 2026-08-13 (maintainer):
+    the figure and the mode table already carry the number, so a green bar
+    restating it was redundant. The eclipse/transit wording is what this test
+    is for, and it is checked across the whole rendered page.
+    """
     out, out_meta = _synthetic_out(science_mode="emission",
                                    sigma_detect=8.0, n_transits=3)
     at = AppTest.from_file(str(APP), default_timeout=60)
@@ -248,13 +254,19 @@ def test_emission_results_use_eclipse_terms():
     at.session_state["out_meta"] = out_meta
     at.run()
     assert not at.exception, at.exception
-    succ = [s.value for s in at.success]
-    assert succ, "expected a success verdict for an above-target score"
-    assert any("3 eclipses" in s for s in succ), succ
-    assert not any("transit" in s for s in succ), succ
+    assert not at.success, \
+        f"an above-target result must render no banner: {[s.value for s in at.success]}"
     subs = [s.value for s in at.subheader]
     assert any("eclipse emission spectrum" in s for s in subs), subs
     assert not any(s == "Proposal summary figure" for s in subs)
+    # Scope to the RESULTS text: the sidebar/intro copy is written for the
+    # general case and legitimately says "transit" there.
+    results = " ".join(
+        [w.value for w in at.warning] + [e.value for e in at.error]
+        + [c.value for c in at.get("caption") if "eclipse" in c.value.lower()
+           or "transit" in c.value.lower()] + subs)
+    assert "eclipse" in results.lower(), results[:300]
+    assert not re.search(r"\b\d+ transits?\b", results), results[:300]
 
 
 def test_all_saturated_state_has_no_best_mode():
@@ -447,14 +459,21 @@ def test_custom_sflux_nearest_caption_discloses_and_never_flips():
         "sflux-W39b_Tsai2023.txt"
 
 
-def test_beta_statement_on_intro():
-    """The intro carries the beta disclaimer: new feature set, sanity-check
-    against a full retrieval before proposing."""
+def test_intro_carries_no_beta_or_quality_check_prose():
+    """Both paragraphs were REMOVED 2026-08-13 (maintainer): the beta
+    disclaimer and the numerical-quality-checks sentence.
+
+    Inverted rather than deleted -- the removal is the requirement now, and a
+    future edit that reintroduces either should fail here. The caveats they
+    carried live in README.md, per the standing GUI prose policy.
+    """
     at = _run_app()
     assert not at.exception, at.exception
     md = " ".join(m.value for m in at.markdown)
-    assert "Beta" in md
-    assert "full retrieval" in md
+    assert "Beta" not in md
+    assert "full retrieval" not in md
+    assert "numerical quality checks" not in md
+    assert "uncertified spectrum" not in md
 
 
 def test_mock_observation_controls():

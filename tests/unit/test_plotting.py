@@ -211,23 +211,79 @@ def test_app_materializes_figures_only_through_locked_helpers():
 # Square panels + tick hygiene
 # ---------------------------------------------------------------------------
 
-def test_tp_and_vmr_panels_are_square():
+def test_tp_and_vmr_panels_share_one_geometry():
+    """Both panels: square AXES BOX on an identical (non-square) canvas.
+
+    2026-08-13 (maintainer: "make the pt figure and the volume mixing figure
+    the same size"). The canvas is 5.6 x 4.0 in and only the axes box is
+    square; the surplus width is the mixing-ratio legend strip, which the T-P
+    figure leaves blank so the two render at the same on-page size. An earlier
+    revision made the whole canvas square -- that is what this replaces.
+
+    Rendered size is checked in test_paired_panels_render_at_identical_size;
+    here we pin the geometry the builders declare.
+    """
     p, T = _tp()
     fig, ylim = plotting.build_tp_figure(p, T)
-    assert fig.axes[0].get_box_aspect() == 1.0
-    w, h = fig.get_size_inches()
-    assert w == h, (w, h)
-    plt.close(fig)
     g = plotting.build_vmr_figure(p, _vmr_cols(p), ylim=ylim)
-    assert g.axes[0].get_box_aspect() == 1.0
-    assert g.get_size_inches()[0] == g.get_size_inches()[1]
-    plt.close(g)
+    try:
+        for name, f in (("tp", fig), ("vmr", g)):
+            ax = f.axes[0]
+            assert ax.get_box_aspect() == 1.0, name
+            assert tuple(f.get_size_inches()) == (plotting.FIG_W_IN,
+                                                  plotting.FIG_H_IN), name
+        # identical canvas AND identical axes rectangle in pixels
+        fig.canvas.draw()
+        g.canvas.draw()
+        a = fig.axes[0].get_window_extent()
+        b = g.axes[0].get_window_extent()
+        assert (round(a.width, 3), round(a.height, 3)) == \
+               (round(b.width, 3), round(b.height, 3)), (a, b)
+        # the rect must ALLOCATE a square box, or set_box_aspect silently
+        # shrinks the axes and the panels stop matching
+        alloc_w = (plotting.AXES_RECT["right"]
+                   - plotting.AXES_RECT["left"]) * plotting.FIG_W_IN
+        alloc_h = (plotting.AXES_RECT["top"]
+                   - plotting.AXES_RECT["bottom"]) * plotting.FIG_H_IN
+        assert abs(alloc_w - alloc_h) < 0.01, (alloc_w, alloc_h)
+        assert abs(a.width - a.height) < 1.0, (a.width, a.height)
+    finally:
+        plt.close(fig)
+        plt.close(g)
 
 
-def test_summary_panels_stay_square():
-    fig = _summary_fig()
-    assert [ax.get_box_aspect() for ax in fig.axes] == [1.0, 1.0, 1.0]
-    plt.close(fig)
+@pytest.mark.parametrize("n_species", [3, 8])
+def test_paired_panels_render_at_identical_size(n_species):
+    """The rendered PNGs must match, whatever the legend contains.
+
+    This is the invariant the maintainer actually asked for. It only holds on
+    the uncropped path: bbox_inches="tight" crops each figure to its own ink,
+    so the legend strip makes the mixing-ratio panel wider. app.py renders
+    both with tight=False for exactly this reason.
+    """
+    p, T = _tp()
+    fig, ylim = plotting.build_tp_figure(p, T)
+    g = plotting.build_vmr_figure(p, _vmr_cols(p)[:n_species], ylim=ylim)
+    try:
+        sizes = []
+        for f in (fig, g):
+            buf = io.BytesIO()
+            with plotting.render_lock:
+                # f.bbox_inches, NOT None: science.mplstyle sets
+                # savefig.bbox=tight and None means "use the rcParam"
+                f.savefig(buf, format="png", dpi=100, bbox_inches=f.bbox_inches)
+            sizes.append(len(buf.getvalue()) and _png_size(buf.getvalue()))
+        assert sizes[0] == sizes[1], sizes
+    finally:
+        plt.close(fig)
+        plt.close(g)
+
+
+def _png_size(data: bytes) -> tuple[int, int]:
+    """(width, height) from a PNG IHDR -- avoids a Pillow dependency."""
+    assert data[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"
+    return (int.from_bytes(data[16:20], "big"),
+            int.from_bytes(data[20:24], "big"))
 
 
 @pytest.mark.parametrize("which", ["tp", "vmr", "summary"])
@@ -291,9 +347,12 @@ def test_every_legend_sits_outside_its_axes_and_inside_the_figure():
         fig.canvas.draw()
         renderer = fig.canvas.get_renderer()
         boxes = []
-        for i, ax in enumerate(fig.axes):
+        # spectrum + forecast box. The forecast box's TWIN axis carries no
+        # legend of its own -- one merged legend covers both x-axes.
+        legended = [ax for ax in fig.axes if ax.get_legend() is not None]
+        assert len(legended) == 2, f"expected 2 legends, got {len(legended)}"
+        for i, ax in enumerate(legended):
             leg = ax.get_legend()
-            assert leg is not None, f"axes{i} lost its legend"
             lb = leg.get_window_extent(renderer)
             ab = ax.get_window_extent()
             assert not lb.overlaps(ab), f"axes{i} legend overlaps its axes"
