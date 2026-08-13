@@ -94,7 +94,31 @@ def _validate_spectrum(spectrum: dict) -> dict:
                              f"wl_um {wl.shape} shapes differ")
         depth2 = depth2[order]
     _lt = spectrum.get("legend_title")
+
+    def _pair(key, positive):
+        """Optional (lo, hi) axis window -- validated, never silently ignored."""
+        v = spectrum.get(key)
+        if v is None:
+            return None
+        try:
+            lo, hi = (float(v[0]), float(v[1]))
+        except (TypeError, ValueError, IndexError, KeyError):
+            raise ValueError(f"spectrum: {key} must be a (lo, hi) pair, "
+                             f"got {v!r}")
+        if not (np.isfinite(lo) and np.isfinite(hi)):
+            raise ValueError(f"spectrum: {key} must be finite, got {(lo, hi)}")
+        if lo >= hi:
+            raise ValueError(f"spectrum: {key} needs lo < hi, got {(lo, hi)}")
+        if positive and lo <= 0.0:
+            raise ValueError(f"spectrum: {key} is plotted on a log axis, so "
+                             f"lo must be > 0, got {lo}")
+        return (lo, hi)
+
     return dict(wl_um=wl[order], depth_ppm=depth[order],
+                # optional caller-chosen axis windows; depth_range=None means
+                # "fit to whatever is visible inside wl_range"
+                wl_range=_pair("wl_range", positive=True),
+                depth_range=_pair("depth_range", positive=False),
                 depth2_ppm=depth2,
                 depth2_label=str(spectrum.get("depth2_label", "comparison")),
                 depth_label=str(spectrum.get("depth_label",
@@ -144,6 +168,53 @@ def _validate_panels(posterior_panels) -> list[dict]:
     return out
 
 
+def _wl_ticks(lo: float, hi: float, max_n: int = 7) -> list[float]:
+    """"Nice" wavelength ticks inside [lo, hi] on a log axis.
+
+    The old fixed list (1, 1.5, 2, 3, ... 12) is right for a full-range
+    spectrum and wrong for a zoom: a 3.0-3.5 um window landed a single tick.
+    This falls back to progressively finer steps until the window carries
+    enough of them, so a user-chosen range is always readable.
+    """
+    for step in (1.0, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01):
+        first = np.ceil(lo / step) * step
+        cand = [round(float(t), 4)
+                for t in np.arange(first, hi + step * 0.5, step)
+                if lo <= t <= hi]
+        if len(cand) >= 3:
+            # thin from the middle out rather than truncating the range
+            while len(cand) > max_n:
+                cand = cand[::2]
+            return cand
+    return [round(float(lo), 4), round(float(hi), 4)]
+
+
+def _visible_ylim(spec: dict, lo: float, hi: float):
+    """Depth range of the data actually INSIDE the wavelength window.
+
+    Without this a zoom keeps the full-range y limits, so a narrow window
+    renders as a flat line in the middle of mostly empty axes. Error bars are
+    included so a point's whisker is never clipped.
+    """
+    vals = []
+    m = (spec["wl_um"] >= lo) & (spec["wl_um"] <= hi)
+    if m.any():
+        vals.append(spec["depth_ppm"][m])
+        if spec["depth2_ppm"] is not None:
+            vals.append(spec["depth2_ppm"][m])
+    for p in spec["points"]:
+        pm = (p["wl_um"] >= lo) & (p["wl_um"] <= hi)
+        if pm.any():
+            vals.append(p["depth_ppm"][pm] - p["sigma_ppm"][pm])
+            vals.append(p["depth_ppm"][pm] + p["sigma_ppm"][pm])
+    if not vals:
+        return None                       # nothing visible; leave autoscale
+    allv = np.concatenate(vals)
+    y0, y1 = float(np.min(allv)), float(np.max(allv))
+    pad = 0.06 * (y1 - y0) if y1 > y0 else max(1.0, abs(y0) * 0.01)
+    return (y0 - pad, y1 + pad)
+
+
 def _plot_spectrum(ax, spec: dict) -> None:
     """Render the model spectrum and each mode's simulated points."""
     ax.plot(spec["wl_um"], spec["depth_ppm"], color="#444444", lw=1.1,
@@ -157,21 +228,26 @@ def _plot_spectrum(ax, spec: dict) -> None:
                     ecolor=p["color"], elinewidth=0.7, capsize=0,
                     zorder=3, label=p["label"])
     ax.set_xscale("log")
-    lo = float(min(spec["wl_um"].min(),
-                   min((p["wl_um"].min() for p in spec["points"]),
-                       default=spec["wl_um"].min())))
-    hi = float(max(spec["wl_um"].max(),
-                   max((p["wl_um"].max() for p in spec["points"]),
-                       default=spec["wl_um"].max())))
-    ticks = [t for t in (1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 7.0, 10.0, 12.0)
-             if lo * 0.97 <= t <= hi * 1.03]
-    # 10 and 12 collide on a square panel; keep the decade
-    if 10.0 in ticks and 12.0 in ticks:
-        ticks.remove(12.0)
+    if spec["wl_range"] is not None:
+        # Caller-chosen window (the GUI defaults it to the span the SELECTED
+        # modes actually cover, so the figure is not mostly empty spectrum).
+        lo, hi = spec["wl_range"]
+    else:
+        lo = float(min(spec["wl_um"].min(),
+                       min((p["wl_um"].min() for p in spec["points"]),
+                           default=spec["wl_um"].min())))
+        hi = float(max(spec["wl_um"].max(),
+                       max((p["wl_um"].max() for p in spec["points"]),
+                           default=spec["wl_um"].max())))
+        lo, hi = lo * 0.97, hi * 1.03
+    ticks = _wl_ticks(lo, hi)
     if ticks:
         ax.set_xticks(ticks)
         ax.set_xticklabels([f"{t:g}" for t in ticks])
-    ax.set_xlim(lo * 0.97, hi * 1.03)
+    ax.set_xlim(lo, hi)
+    ylim = spec["depth_range"] or _visible_ylim(spec, lo, hi)
+    if ylim is not None:
+        ax.set_ylim(*ylim)
     ax.set_xlabel("wavelength (µm)", fontsize=_AX_LBL)
     ax.set_ylabel(spec["depth_label"], fontsize=_AX_LBL)
     ax.tick_params(labelsize=_TICK)

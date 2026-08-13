@@ -2687,6 +2687,57 @@ elif _have_fisher:
         if np.isfinite(_v):
             _leg_num[r["mode_key"]] = f"±{_v:.3g}"
 
+# --- figure controls (maintainer, 2026-08-13) -------------------------------
+# The figure re-renders from the CACHED run: which series are drawn and what
+# wavelength window is shown are display choices, so none of this recomputes
+# a spectrum or an ETC job. forward.params_key excludes the mode selection
+# and the Pandeia cache is per-mode, so re-rendering is free.
+_usable = [r for r in results if not r["saturated"]]
+_series_opts = [("mode", r["mode_key"], r["label"]) for r in _usable]
+# custom sets from the combination builder: scored through Fisher, with no
+# spectrum of their own, so a combo's series is its members' points merged
+# onto one line (disclosed in the label).
+_combo_members = {str(c["name"]): [m for m in c["modes"]
+                                   if any(r["mode_key"] == m for r in _usable)]
+                  for c in (st.session_state.get(K("combos")) or [])}
+_series_opts += [("combo", n, f"{n} (combined)")
+                 for n, mem in _combo_members.items() if mem]
+_series_ids = [f"{kind}:{key}" for kind, key, _ in _series_opts]
+_series_lbl = {f"{kind}:{key}": lbl for kind, key, lbl in _series_opts}
+
+_fc1, _fc2 = st.columns([2.0, 1.6])
+with _fc1:
+    _sel_series = st.multiselect(
+        "Series on the spectrum", _series_ids,
+        default=[i for i in _series_ids if i.startswith("mode:")],
+        format_func=lambda i: _series_lbl[i], key=K("sum_series"))
+with _fc2:
+    # Default window = the span the SELECTED modes actually cover, so the
+    # figure is not mostly empty spectrum. Recomputed from the selection.
+    _cov = [(ins.MODES[k]["wl_min"], ins.MODES[k]["wl_max"])
+            for i in _sel_series for k in
+            ([i.split(":", 1)[1]] if i.startswith("mode:")
+             else _combo_members.get(i.split(":", 1)[1], []))
+            if k in ins.MODES]
+    _grid_lo, _grid_hi = float(wl_s[0]), float(wl_s[-1])
+    if _cov:
+        _fit = (max(_grid_lo, min(c[0] for c in _cov) * 0.97),
+                min(_grid_hi, max(c[1] for c in _cov) * 1.03))
+    else:
+        _fit = (_grid_lo, _grid_hi)
+    _wl_mode = st.radio(
+        "Wavelength range", ["Fit to selected modes", "Full model", "Custom"],
+        horizontal=True, key=K("sum_wlmode"))
+if _wl_mode == "Custom":
+    _wl_range = st.slider(
+        "Wavelength window (µm)", _grid_lo, _grid_hi,
+        value=(round(_fit[0], 2), round(_fit[1], 2)), step=0.05,
+        key=K("sum_wlrange"))
+elif _wl_mode == "Full model":
+    _wl_range = (_grid_lo, _grid_hi)
+else:
+    _wl_range = _fit
+
 _sum_points = []
 for r in results:
     # saturated modes are excluded from every ranking, combination and
@@ -2694,6 +2745,8 @@ for r in results:
     # scientific weight. The saturation itself is reported in Mode details.
     if r["saturated"]:
         continue
+    if f"mode:{r['mode_key']}" not in _sel_series:
+        continue                      # deselected in the controls above
     _y = (np.asarray(_mock["modes"][r["mode_key"]]["depth_mock"], float)
           if _mock is not None else np.asarray(r["depth"], float)) * 1e6
     _lbl = r["label"]
@@ -2722,10 +2775,40 @@ if _leg_num:
         if goal_r == "detect" else
         f"expected ±{forward.param_axis(_rk_param)} per mode "
         f"at {_target_sig:g}σ")
+# Custom sets as ONE series each. A combo has no spectrum of its own (it is
+# scored through Fisher), so its line is its member modes' simulated points
+# merged and sorted by wavelength, drawn in a single distinct color. Where two
+# members overlap in wavelength the merged line carries a point from each --
+# the label says "combined" so that is not read as one instrument's sampling.
+_COMBO_COLORS = ("#6a3d9a", "#117733", "#882255", "#88ccee")
+for _ci, (_cname, _members) in enumerate(_combo_members.items()):
+    if f"combo:{_cname}" not in _sel_series:
+        continue
+    _cw, _cd, _cs = [], [], []
+    for _mk in _members:
+        _rr = next((x for x in _usable if x["mode_key"] == _mk), None)
+        if _rr is None:
+            continue
+        _cw.append(np.asarray(_rr.get("wl_eff", _rr["wl"]), float))
+        _cd.append((np.asarray(_mock["modes"][_mk]["depth_mock"], float)
+                    if _mock is not None
+                    else np.asarray(_rr["depth"], float)) * 1e6)
+        _cs.append(np.asarray(_rr["sigma"], float) * 1e6)
+    if not _cw:
+        continue
+    _cw, _cd, _cs = (np.concatenate(_cw), np.concatenate(_cd),
+                     np.concatenate(_cs))
+    _o = np.argsort(_cw)
+    _sum_points.append(dict(
+        label=f"{_cname} (combined)", marker="^",
+        color=_COMBO_COLORS[_ci % len(_COMBO_COLORS)],
+        wl_um=_cw[_o], depth_ppm=_cd[_o], sigma_ppm=_cs[_o]))
+
 _sum_spectrum = dict(wl_um=wl_s, depth_ppm=d_plot,
                      depth_label=_depth_lbl,
                      model_label="model (smoothed for display)",
                      legend_title=_leg_note,
+                     wl_range=_wl_range,
                      points=_sum_points)
 if d_wo_s is not None:
     # detect goal: the same without-target comparison curve the old
