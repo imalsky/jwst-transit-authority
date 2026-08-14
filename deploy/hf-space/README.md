@@ -26,7 +26,9 @@ Operational notes:
 - A forward model run takes minutes of CPU (photochemical kinetics to
   steady state); Fisher forecasts take 10-25 min depending on method.
   The in-app status panel reports data availability and progress.
-- To update the code: push to GitHub, then Settings -> Factory rebuild
-  (a factory rebuild avoids a stale cached clone layer).
+- To update the code: push to GitHub, bump the three `*_SHA` ARG defaults in
+  the Dockerfile (and `deploy/pins.env` with them), then upload the Space
+  files. Changing an ARG default busts the layers that clone the repos, so no
+  factory rebuild is needed.
 - Setup runbook: the Deployment runbooks section (Hugging Face Space runbook)
   of the main repo's local notes.md.
