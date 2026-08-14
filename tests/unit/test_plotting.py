@@ -37,9 +37,11 @@ def _vmr_cols(p):
             for i, m in enumerate(MOLS)]
 
 
-def _summary_fig(n_points: int = 3):
+def _summary_fig(n_points: int = 3, with_sigma: bool = False):
     """The composed summary figure. ``n_points`` sets how many mode series
-    are drawn, which is what makes the spectrum legend grow."""
+    are drawn, which is what makes the spectrum legend grow. ``with_sigma``
+    attaches mu/sigma to each posterior curve, which is what makes the panel
+    quote its width and shade the 1-sigma interval."""
     wl = np.linspace(1.0, 12.0, 300)
     _palette = ["#1f4e9c", "#8c2d04", "#0f6b4f", "#6a3d9a", "#117733",
                 "#882255"]
@@ -50,12 +52,16 @@ def _summary_fig(n_points: int = 3):
                 sigma_ppm=np.full(25, 60.0))
            for i in range(n_points)]
     th = np.linspace(-1.0, 1.0, 200)
+    _extra1 = dict(mu=0.02, sigma=0.1) if with_sigma else {}
+    _extra2 = dict(mu=-0.01, sigma=0.2) if with_sigma else {}
     pans = [dict(axis_label="log Z",
                  curves=[dict(label="PRISM 0.044", theta=th,
-                              pdf=np.exp(-th ** 2 / 0.02))], center=0.0),
+                              pdf=np.exp(-th ** 2 / 0.02), **_extra1)],
+                 center=0.0),
             dict(axis_label="C/O",
                  curves=[dict(label="G395H 0.11", theta=th,
-                              pdf=np.exp(-th ** 2 / 0.08))], center=0.0)]
+                              pdf=np.exp(-th ** 2 / 0.08), **_extra2)],
+                 center=0.0)]
     spec = dict(wl_um=wl, depth_ppm=20000.0 + 300.0 * np.sin(wl * 3),
                 depth_label="transit depth (ppm)",
                 model_label="model (smoothed for display)",
@@ -361,8 +367,9 @@ def test_summary_legends_sit_inside_their_axes_and_cover_no_data():
                 renderer = fig.canvas.get_renderer()
                 legends = [ax for ax in fig.axes
                            if ax.get_legend() is not None]
-                assert len(legends) == 2, \
-                    f"expected 2 legends, got {len(legends)}"
+                # spectrum + one per posterior panel (2 in the fixture)
+                assert len(legends) == 3, \
+                    f"expected 3 legends, got {len(legends)}"
                 for ax in legends:
                     lb = ax.get_legend().get_window_extent(renderer)
                     ab = ax.get_window_extent()
@@ -465,3 +472,54 @@ def test_builders_validate_their_inputs_loudly():
         plotting.build_vmr_figure(p, [])
     with pytest.raises(ValueError, match="does not match the pressure grid"):
         plotting.build_vmr_figure(p, [("H2O", np.array([1e-3, 1e-4]))])
+
+
+def test_summary_layout_is_wide_spectrum_plus_one_panel_per_parameter():
+    """Spectrum at 2x width, then ONE SQUARE PANEL PER PARAMETER.
+
+    The single merged twin-axis box this replaced could not work: each
+    parameter's grid is center +/- 5 sigma, so its axis auto-scaled to its own
+    width and peak-normalizing left exactly one possible outline -- the two
+    curves landed within 2e-12 px of each other, one hidden under the other.
+    Separate panels give each parameter its own axis back.
+    """
+    fig = _summary_fig()
+    try:
+        fig.canvas.draw()
+        assert len(fig.axes) == 3, [ax.get_ylabel() for ax in fig.axes]
+        spec, p1, p2 = (ax.get_window_extent() for ax in fig.axes)
+        assert abs(spec.width / p1.width - 2.0) < 0.06, (spec.width, p1.width)
+        for bb in (p1, p2):
+            # square, and therefore SHORTER than the spectrum: set_box_aspect
+            # shrinks each panel to its own width, and the gridspec centers it
+            # vertically in the row. The panels match EACH OTHER exactly.
+            assert abs(bb.width - bb.height) < 1.0, bb
+            assert bb.height <= spec.height + 1.0, (bb.height, spec.height)
+        assert (round(p1.width, 3), round(p1.height, 3)) == \
+               (round(p2.width, 3), round(p2.height, 3)), (p1, p2)
+        assert abs(p1.y0 - p2.y0) < 1.0, "panels must share a baseline"
+        for ax in fig.axes[1:]:
+            assert ax.get_box_aspect() == 1.0
+        # NOT superimposed: the whole point of the revert
+        curves = [ax.get_lines()[0] for ax in fig.axes[1:]]
+        px = [ax.transData.transform(
+                  np.column_stack(ln.get_data()))
+              for ax, ln in zip(fig.axes[1:], curves)]
+        assert np.abs(px[0] - px[1]).max() > 1.0, \
+            "posterior curves are pixel-identical -- the merged-box bug is back"
+    finally:
+        plt.close(fig)
+
+
+def test_each_posterior_panel_reports_its_width():
+    """The width cannot be read from a normalized curve's shape, so it is
+    QUOTED in the panel title and shaded as a 1-sigma band -- how corner.py
+    and published marginalized posteriors report it."""
+    fig = _summary_fig(with_sigma=True)
+    try:
+        for ax in fig.axes[1:]:
+            title = ax.get_title()
+            assert "±" in title, f"panel title quotes no width: {title!r}"
+            assert ax.collections, "no shaded 1-sigma band"
+    finally:
+        plt.close(fig)

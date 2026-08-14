@@ -149,8 +149,27 @@ def _validate_panels(posterior_panels) -> list[dict]:
             if theta.shape != pdf.shape:
                 raise ValueError(f"{cw}: theta {theta.shape} and pdf "
                                  f"{pdf.shape} shapes differ")
+            # mu/sigma are the curve's center and 1-sigma width in DISPLAY
+            # units. Optional, but when present the panel shades the 1-sigma
+            # interval and quotes the width -- which is how a marginalized
+            # posterior is conventionally reported (corner.py annotates the
+            # median and 68% interval above each histogram; papers mark the
+            # 1-sigma range with shading or vertical lines). Without them the
+            # curve's SHAPE carries no width information at all, because each
+            # parameter's axis is auto-scaled to its own +/-5 sigma.
+            _mu, _sg = c.get("mu"), c.get("sigma")
+            if _sg is not None:
+                _sg = float(_sg)
+                if not (np.isfinite(_sg) and _sg > 0.0):
+                    raise ValueError(f"{cw}: sigma must be finite and > 0, "
+                                     f"got {_sg!r}")
+            if _mu is not None:
+                _mu = float(_mu)
+                if not np.isfinite(_mu):
+                    raise ValueError(f"{cw}: mu must be finite, got {_mu!r}")
             curves.append(dict(label=str(_req(c, "label", cw)),
                                theta=theta, pdf=pdf,
+                               mu=_mu, sigma=_sg,
                                kind=(None if c.get("kind") is None
                                      else str(c["kind"])),
                                color=str(c.get("color", "#333333")),
@@ -165,6 +184,7 @@ def _validate_panels(posterior_panels) -> list[dict]:
         out.append(dict(axis_label=str(_req(pan, "axis_label", where)),
                         curves=curves, notes=notes,
                         center=(None if center is None else float(center))))
+
     return out
 
 
@@ -287,94 +307,87 @@ def _plot_spectrum(ax, spec: dict) -> None:
 
 
 
+def _fmt_val(v: float) -> str:
+    """Round a value/uncertainty for a legend entry: 3 significant figures,
+    no exponent for the ranges these parameters live in."""
+    a = abs(float(v))
+    if a == 0.0:
+        return "0"
+    if a < 1e-3 or a >= 1e4:
+        return f"{v:.2e}"
+    return f"{float(v):.3g}"
+
+
 # One color per PARAMETER in the merged forecast box. Chosen to stay
 # distinguishable in grayscale and for the common forms of color blindness
 # (blue vs vermillion, Okabe-Ito).
 _PARAM_COLORS = ("#0072b2", "#d55e00")
 
 
-def _plot_posterior_box(axp, panels: list[dict]) -> None:
-    """Both marginalized forecast posteriors in ONE box, twin x-axes.
+def _plot_posterior_panel(axp, pan: dict, color: str) -> None:
+    """One marginalized forecast posterior: curve, shaded 1-sigma band, and
+    the width QUOTED in the panel title.
 
-    Maintainer, 2026-08-13: replaces the two separate square panels. The two
-    posteriors are DIFFERENT PARAMETERS in different units (metallicity in
-    dex, C/O a bare ratio), so they cannot share one x-axis without putting
-    unlike quantities on the same numbers. Instead the first parameter reads
-    off the BOTTOM axis and the second off the TOP, with each axis, its tick
-    labels and its curves drawn in that parameter's color -- so the
-    axis-to-curve mapping is unambiguous without a lookup.
+    2026-08-13: this replaces a single merged box with twin x-axes. That merge
+    was geometrically self-defeating -- ``gaussian_curve`` builds its grid as
+    center +/- 5 sigma, so each parameter's axis auto-scales to its own width;
+    peak-normalizing then leaves exactly ONE possible outline. Measured: FWHM
+    = 0.230 of the axis width for sigma 0.001, 0.035 and 5.0 alike, and the
+    two curves landed within 2e-12 px of each other -- one hidden exactly
+    under the other. Separate panels give each parameter its own axis back.
 
-    Y AXIS: each curve is scaled to unit peak, so the axis is a RELATIVE
-    density and is dimensionless. That is deliberate. A marginalized
-    posterior density carries units of 1/[parameter], i.e. dex^-1 for
-    metallicity and (C/O)^-1 for the ratio, so with two parameters in one box
-    there is no single honest y unit to label. Normalizing removes the unit
-    question and keeps the readable content -- the WIDTH of each curve, which
-    is the forecast -- fully intact.
+    The width therefore cannot be read from the curve's shape and is reported
+    the way marginalized posteriors are published: as a number above the panel
+    (corner.py annotates the median and 68% interval over each histogram) and
+    as a shaded 1-sigma interval against real tick values.
     """
-    axes = [axp, axp.twiny()]
-    _src_labels: list[str] = []
-    for i, (pan, ax_i) in enumerate(zip(panels, axes)):
-        col = _PARAM_COLORS[i % len(_PARAM_COLORS)]
-        for c in pan["curves"]:
-            pdf = np.asarray(c["pdf"], dtype=float)
-            peak = float(np.max(pdf)) if pdf.size else 0.0
-            if peak > 0.0:
-                pdf = pdf / peak          # unit peak: see the y-axis note
-            ax_i.plot(c["theta"], pdf, color=col, ls=c["ls"], lw=c["lw"],
-                      label=f"{pan['axis_label']} -- {c['label']}")
-            _src_labels.append(str(c["label"]))
-        if pan["center"] is not None:
-            ax_i.axvline(pan["center"], color=col, lw=0.7, ls=":", alpha=0.6)
-        ax_i.set_xlabel(pan["axis_label"], fontsize=_AX_LBL, color=col)
-        ax_i.tick_params(axis="x", labelsize=_TICK, colors=col)
-        ax_i.xaxis.label.set_color(col)
-        # Headroom above the unit-peak curves for the in-axes legend. The
-        # curves fill the box's width, so loc="best" has no empty corner to
-        # find -- without this the legend lands ON the posteriors. Costs
-        # nothing readable: the y axis is a normalized relative density with
-        # no ticks, so the extra space carries no information either way.
-        ax_i.set_ylim(0.0, 1.42)
-
+    for c in pan["curves"]:
+        theta = np.asarray(c["theta"], dtype=float)
+        pdf = np.asarray(c["pdf"], dtype=float)
+        peak = float(np.max(pdf)) if pdf.size else 0.0
+        if peak > 0.0:
+            pdf = pdf / peak              # unit peak: see the y-axis note
+        if c["sigma"] is not None:
+            mu = c["mu"] if c["mu"] is not None else pan["center"]
+            if mu is not None:
+                band = (theta >= mu - c["sigma"]) & (theta <= mu + c["sigma"])
+                if band.any():
+                    axp.fill_between(theta[band], 0.0, pdf[band], color=color,
+                                     alpha=0.16, lw=0, zorder=1,
+                                     label="1σ")
+        axp.plot(theta, pdf, color=color, ls=c["ls"], lw=c["lw"], zorder=2,
+                 label=str(c["label"]))
+    if pan["center"] is not None:
+        # the input value the forecast is centered on: with a jitter draw the
+        # curve sits OFF it, and that offset is the realization's luck
+        axp.axvline(pan["center"], color="#666666", lw=0.8, ls=":", zorder=3,
+                    label="input value")
+    # width in the TITLE, where corner.py puts it
+    _q = next((c for c in pan["curves"] if c["sigma"] is not None), None)
+    if _q is not None:
+        _mu = _q["mu"] if _q["mu"] is not None else pan["center"]
+        axp.set_title(
+            f"{pan['axis_label']} = {_fmt_val(_mu)} ± {_fmt_val(_q['sigma'])}"
+            if _mu is not None
+            else f"{pan['axis_label']}: ± {_fmt_val(_q['sigma'])}",
+            fontsize=_AX_LBL)
+    axp.set_xlabel(pan["axis_label"], fontsize=_AX_LBL)
     axp.set_yticks([])
+    axp.tick_params(labelsize=_TICK)
     axp.set_ylabel("relative forecast density", fontsize=_AX_LBL)
+    # headroom for the in-axes legend (see the spectrum panel's note)
+    axp.set_ylim(0.0, 1.42)
     axp.grid(alpha=0.15)
-
-    # ONE legend for the whole box, outside and below, carrying every curve
-    # from both axes (twiny() otherwise gives each axis its own).
-    handles, labels = [], []
-    for ax_i in axes:
-        h, l = ax_i.get_legend_handles_labels()
-        handles += h
-        labels += l
-    # Every curve now comes from ONE source, so repeating its name in each
-    # entry is noise: hoist it to the legend title and label each entry by
-    # its parameter. (When sources ever differ again, the labels stay full.)
-    title = None
-    if len(set(_src_labels)) == 1 and len(_src_labels) == len(labels):
-        title = _src_labels[0]
-        labels = [l.split(" -- ", 1)[0] for l in labels]
-    if handles:
-        # INSIDE the axes, same as the spectrum panel. The box carries one
-        # curve per parameter (two entries at most), so it fits in a corner
-        # without covering a posterior. Attached to the base axes, not the
-        # twin, so one legend covers both x-axes.
-        # "upper center" not "best": the headroom reserved above the curves
-        # is where it belongs, and loc="best" would still score a corner that
-        # a wide posterior reaches into.
-        leg = axp.legend(handles, labels, loc="upper center", frameon=True,
-                         framealpha=0.82, edgecolor="none",
-                         fontsize=_LEG, ncol=1, handletextpad=0.5,
-                         borderaxespad=0.4, labelspacing=0.3, title=title)
+    if pan["curves"]:
+        leg = axp.legend(loc="upper left", frameon=True, framealpha=0.82,
+                         edgecolor="none", fontsize=_LEG, ncol=1,
+                         handletextpad=0.5, borderaxespad=0.4,
+                         labelspacing=0.3)
         leg.set_zorder(5)
-        if title:
-            leg.get_title().set_fontsize(_LEG)
-    notes = [n for pan in panels for n in pan["notes"]]
-    for k, note in enumerate(notes):
+    for k, note in enumerate(pan["notes"]):
         axp.text(0.5, 0.5 - 0.18 * k, note, transform=axp.transAxes,
                  ha="center", va="center", fontsize=7,
                  color="#883333", wrap=True)
-
 
 
 def compose_summary_figure(spectrum: dict, posterior_panels=None,
@@ -410,35 +423,36 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
     # argument). Reentrant, so a caller holding it already is fine.
     with plotting.render_lock, \
             plt.style.context([str(_STYLE_FILE), _STYLE_OVERRIDES]):
-        # TWO panels (maintainer, 2026-08-13): the spectrum is the subject of
-        # this figure, so it gets 2x the width of the forecast box beside it.
-        # The two marginalized posteriors that used to occupy separate square
-        # panels are now ONE box with twin x-axes (see _plot_posterior_box).
-        #
-        # The spectrum is no longer square -- a 2:1 wavelength panel is the
-        # right shape for a spectrum and matches how these appear in papers.
-        # The forecast box stays square.
+        # Spectrum at 2x width (maintainer), then ONE PANEL PER PARAMETER.
+        # The single merged twin-axis box this replaces could not work: see
+        # _plot_posterior_panel for the measurement. A 2:1 wavelength panel is
+        # the right shape for a spectrum and matches how these appear in
+        # papers; the posterior panels stay square.
         # Legends are INSIDE the axes now, so the generous bottom margin
         # they used to occupy is reclaimed: the panels get the height back
         # instead of reserving a legend strip under them.
         fig = plt.figure(figsize=(12.0, 4.6), dpi=200)
-        gs = fig.add_gridspec(1, 2, width_ratios=[2.0, 1.0],
-                              wspace=0.20,
-                              left=0.065, right=0.985,
-                              top=(0.91 if title else 0.965),
-                              bottom=(0.155 if footnote else 0.115))
+        _npan = max(1, len(panels))
+        gs = fig.add_gridspec(1, 1 + _npan,
+                              width_ratios=[2.0] + [1.0] * _npan,
+                              wspace=0.26,
+                              left=0.055, right=0.988,
+                              top=(0.87 if title else 0.925),
+                              bottom=(0.165 if footnote else 0.125))
 
         # -- LEFT: spectrum with per-mode simulated points (2x width) -------
         ax = fig.add_subplot(gs[0, 0])
         _plot_spectrum(ax, spec)
 
-        # -- RIGHT: both marginalized forecast posteriors in ONE box --------
-        axp = fig.add_subplot(gs[0, 1])
-        axp.set_box_aspect(1.0)
-        if panels:
-            _plot_posterior_box(axp, panels)
-        else:
-            axp.set_axis_off()
+        # -- RIGHT: one square panel per marginalized forecast posterior ----
+        for i in range(_npan):
+            axp = fig.add_subplot(gs[0, i + 1])
+            axp.set_box_aspect(1.0)
+            if i >= len(panels):
+                axp.set_axis_off()
+                continue
+            _plot_posterior_panel(axp, panels[i],
+                                  _PARAM_COLORS[i % len(_PARAM_COLORS)])
 
         if title:
             fig.suptitle(str(title), fontsize=11)

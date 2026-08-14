@@ -2636,6 +2636,10 @@ if _have_fisher:
                     _curves.append(dict(
                         label=f"{_lbl}: fit to this jitter draw",
                         theta=_mc["theta"], pdf=_mc["pdf"],
+                        # mu/sigma make the figure REPORT the forecast width:
+                        # the curve's outline cannot, since each axis
+                        # auto-scales to its own +/-5 sigma (summary_figure)
+                        mu=_pr["center"] + _d, sigma=_pr["sigma_display"],
                         ls="-", lw=1.8,
                         kind=posteriors.MOCK_RECOVERY_KIND))
                 else:
@@ -2643,7 +2647,8 @@ if _have_fisher:
                     # unshifted forecast, labelled so the difference is plain
                     _curves.append(dict(
                         label=f"{_lbl}: forecast", theta=_pr["theta"],
-                        pdf=_pr["pdf"], ls="-", lw=1.8))
+                        pdf=_pr["pdf"], mu=_pr["center"],
+                        sigma=_pr["sigma_display"], ls="-", lw=1.8))
             else:
                 _notes.append(f"{_lbl}: unconstrained -- this "
                               "direction carries no information in "
