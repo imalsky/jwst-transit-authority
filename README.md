@@ -944,7 +944,6 @@ climate smoke matrix (W39b x rfacv {0, 0.5, 1}, solar node, HD 189733 b,
 WASP-107 b). The native-RT CROSS-MODEL report (outside target, not a parity
 result) lives in `tests/parity_picaso/outputs/REPORT.md`.
 
-### v18.1 (tool 0.12.1, model-cache v19): review-response hardening
 ## Chemistry config vs upstream VULCAN
 
 The tool's effective chemistry config vs upstream VULCAN master (W39b).
