@@ -523,3 +523,62 @@ def test_each_posterior_panel_reports_its_width():
             assert ax.collections, "no shaded 1-sigma band"
     finally:
         plt.close(fig)
+
+
+@pytest.mark.parametrize("x_log,y_log", [(True, False), (True, True),
+                                         (False, False), (False, True)])
+def test_spectrum_axis_scales_all_label_and_never_collide(x_log, y_log):
+    """Both spectrum axes take log or linear (GUI checkboxes), and EVERY
+    combination must produce labelled, non-overlapping ticks.
+
+    Two defects found by rendering rather than by assertion:
+    a transit depth spans ~0.02 decades, so the decade locator put all four
+    of its ticks OUTSIDE the view and the log y axis drew with no labels at
+    all; and the 6%-of-range padding was additive, which on a wide span
+    reached below zero and tripped the positive-range guard on data that was
+    entirely positive.
+    """
+    wl = np.linspace(0.6, 12.0, 400)
+    depth = 20000.0 + 320.0 * np.sin(wl * 2.6)
+    w = np.linspace(0.85, 5.18, 25)
+    pts = [dict(label="PRISM: 4.2s", color="#1f4e9c", marker="^", wl_um=w,
+                depth_ppm=np.interp(w, wl, depth),
+                sigma_ppm=np.full(25, 55.0))]
+    fig = summary_figure.compose_summary_figure(
+        dict(wl_um=wl, depth_ppm=depth, depth_label="transit depth (ppm)",
+             model_label="model", points=pts, x_log=x_log, y_log=y_log))
+    try:
+        with plotting.render_lock:
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+            ax = fig.axes[0]
+            assert ax.get_xscale() == ("log" if x_log else "linear")
+            assert ax.get_yscale() == ("log" if y_log else "linear")
+            for axis in (ax.xaxis, ax.yaxis):
+                lo, hi = (ax.get_xlim() if axis is ax.xaxis
+                          else ax.get_ylim())
+                shown = [t for t, v in zip(axis.get_ticklabels(),
+                                           axis.get_ticklocs())
+                         if lo <= v <= hi and t.get_text()]
+                assert len(shown) >= 3, (
+                    f"{axis.axis_name} axis labels only {len(shown)} ticks "
+                    f"inside [{lo:.4g}, {hi:.4g}] "
+                    f"(x_log={x_log}, y_log={y_log})")
+                boxes = [t.get_window_extent(renderer) for t in shown]
+                for i in range(len(boxes) - 1):
+                    assert not boxes[i].overlaps(boxes[i + 1]), \
+                        f"{axis.axis_name} tick labels overlap"
+    finally:
+        plt.close(fig)
+
+
+def test_log_depth_axis_refuses_a_non_positive_range():
+    """A log depth axis with a non-positive visible range fails LOUDLY rather
+    than rendering an empty panel (matplotlib drops those points silently).
+    Eclipse depths and low-S/N jitter draws can go negative."""
+    wl = np.linspace(0.6, 12.0, 200)
+    depth = np.linspace(-400.0, 900.0, 200)
+    with pytest.raises(ValueError, match="positive depth range"):
+        summary_figure.compose_summary_figure(
+            dict(wl_um=wl, depth_ppm=depth, depth_label="eclipse depth (ppm)",
+                 model_label="model", points=[], y_log=True))

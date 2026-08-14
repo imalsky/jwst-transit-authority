@@ -28,6 +28,8 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.ticker import (MaxNLocator, NullLocator,
+                              ScalarFormatter)
 
 from jwst_tool import plotting
 
@@ -119,6 +121,11 @@ def _validate_spectrum(spectrum: dict) -> dict:
                 # "fit to whatever is visible inside wl_range"
                 wl_range=_pair("wl_range", positive=True),
                 depth_range=_pair("depth_range", positive=False),
+                # axis scales (GUI checkboxes). x defaults to log, which is
+                # the wavelength convention here; y defaults to linear,
+                # because transit depth spans a narrow range.
+                x_log=bool(spectrum.get("x_log", True)),
+                y_log=bool(spectrum.get("y_log", False)),
                 depth2_ppm=depth2,
                 depth2_label=str(spectrum.get("depth2_label", "comparison")),
                 depth_label=str(spectrum.get("depth_label",
@@ -215,6 +222,11 @@ def _visible_ylim(spec: dict, lo: float, hi: float):
     Without this a zoom keeps the full-range y limits, so a narrow window
     renders as a flat line in the middle of mostly empty axes. Error bars are
     included so a point's whisker is never clipped.
+
+    The padding is MULTIPLICATIVE when the axis is logarithmic. Additive
+    padding is 6% of the linear range, which over a wide span reaches below
+    zero (measured: a 300-75000 ppm emission range padded to -4224 ppm) and
+    then trips the positive-range guard on data that is entirely positive.
     """
     vals = []
     m = (spec["wl_um"] >= lo) & (spec["wl_um"] <= hi)
@@ -231,6 +243,10 @@ def _visible_ylim(spec: dict, lo: float, hi: float):
         return None                       # nothing visible; leave autoscale
     allv = np.concatenate(vals)
     y0, y1 = float(np.min(allv)), float(np.max(allv))
+    if spec["y_log"] and y0 > 0.0:
+        # pad by a fixed FRACTION of the span in log space
+        f = (y1 / y0) ** 0.06 if y1 > y0 else 1.05
+        return (y0 / f, y1 * f)
     pad = 0.06 * (y1 - y0) if y1 > y0 else max(1.0, abs(y0) * 0.01)
     return (y0 - pad, y1 + pad)
 
@@ -247,7 +263,7 @@ def _plot_spectrum(ax, spec: dict) -> None:
                     fmt=p["marker"], ms=3.6, lw=0.9, color=p["color"],
                     ecolor=p["color"], elinewidth=0.7, capsize=0,
                     zorder=3, label=p["label"])
-    ax.set_xscale("log")
+    ax.set_xscale("log" if spec["x_log"] else "linear")
     if spec["wl_range"] is not None:
         # Caller-chosen window (the GUI defaults it to the span the SELECTED
         # modes actually cover, so the figure is not mostly empty spectrum).
@@ -260,10 +276,15 @@ def _plot_spectrum(ax, spec: dict) -> None:
                        max((p["wl_um"].max() for p in spec["points"]),
                            default=spec["wl_um"].max())))
         lo, hi = lo * 0.97, hi * 1.03
-    ticks = _wl_ticks(lo, hi)
-    if ticks:
-        ax.set_xticks(ticks)
-        ax.set_xticklabels([f"{t:g}" for t in ticks])
+    if spec["x_log"]:
+        # _wl_ticks picks "nice" values for a LOG axis; on a linear axis
+        # matplotlib's own locator is already even-spaced and correct.
+        ticks = _wl_ticks(lo, hi)
+        if ticks:
+            ax.set_xticks(ticks)
+            ax.set_xticklabels([f"{t:g}" for t in ticks])
+    else:
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=7, steps=[1, 2, 5, 10]))
     ax.set_xlim(lo, hi)
     ylim = spec["depth_range"] or _visible_ylim(spec, lo, hi)
     if ylim is not None:
@@ -280,6 +301,30 @@ def _plot_spectrum(ax, spec: dict) -> None:
             y0, y1 = ylim
             ylim = (y0, y0 + (y1 - y0) / (1.0 - _frac))
         ax.set_ylim(*ylim)
+    if spec["y_log"]:
+        _y0, _y1 = ax.get_ylim()
+        if _y0 <= 0.0:
+            # Fail loudly rather than render an empty panel: matplotlib drops
+            # non-positive data on a log axis without saying so. Eclipse depths
+            # or a jitter draw can go negative at low S/N.
+            raise ValueError(
+                f"spectrum: y_log=True needs a positive depth range, but the "
+                f"visible range starts at {_y0:.4g} ppm. Use a linear depth "
+                "axis for this data, or set depth_range explicitly.")
+        ax.set_yscale("log")
+        # A transit depth spans a tiny fraction of a decade (measured: 0.021
+        # decades for a 19.6-20.6 kppm range), so the decade locator puts every
+        # tick OUTSIDE the view and the axis renders with NO labels at all.
+        # Place ticks by value and format them as plain numbers whenever the
+        # span is under ~1.5 decades; the decade locator is right only for a
+        # genuinely wide range.
+        _y0, _y1 = ax.get_ylim()
+        if np.log10(_y1 / _y0) < 1.5:
+            ax.yaxis.set_major_locator(MaxNLocator(nbins=6,
+                                                   steps=[1, 2, 2.5, 5, 10]))
+            ax.yaxis.set_minor_locator(NullLocator())
+            ax.yaxis.set_major_formatter(ScalarFormatter())
+            ax.ticklabel_format(axis="y", style="plain", useOffset=False)
     ax.set_xlabel("wavelength (µm)", fontsize=_AX_LBL)
     ax.set_ylabel(spec["depth_label"], fontsize=_AX_LBL)
     ax.tick_params(labelsize=_TICK)

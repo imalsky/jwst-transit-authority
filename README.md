@@ -143,6 +143,33 @@ derivatives and reports local Cramer-Rao lower bounds. Those are not posterior
 widths: they are local, likelihood-based approximations, and informative priors
 or external data can make a real posterior narrower.
 
+### How the Fisher bounds are computed
+
+(This detail sat in the GUI's "How to read this table" expander until the
+2026-08-13 cleanup. The interface now states only what changes how you read a
+number; the methodology lives here.)
+
+The sensitivities d(spectrum)/d(parameter) use the differentiation method you
+select in the science-goal step. **Central finite differences** is the default:
+each perturbed solve re-converges independently, and composition rows
+re-initialize the chemistry at the perturbed elemental abundances, which is the
+standard VULCAN workflow. **Warm-started forward-mode automatic
+differentiation** is the alternative; its metallicity row holds the structural
+hydrostatic grid fixed, a stated 1.6%-level difference from finite differences
+in the earlier benchmark.
+
+Each per-mode row also fits and marginalizes over a reference-radius nuisance
+`lnR0`, plus one absolute-depth offset per detector segment. The two-detector
+NIRSpec gratings (G395H, G235H) therefore float independent NRS1 and NRS2
+steps, as every real G395H fit does (Moran et al. 2023, Madhusudhan et al.
+2023). The combined row shares `lnR0` across modes and keeps one offset per
+segment across all of them, which is what keeps a multi-instrument combination
+honest.
+
+C/O is reported as the absolute carbon/oxygen number ratio N_C/N_O. The default
+is approximately 0.55, the network's WASP-39 b elemental set from Tsai et al.
+2023.
+
 **Treat the mode rankings as more robust than the absolute ppm numbers.** The
 systematic effects the tool leaves out -- time-correlated noise, the
 conditional-atmosphere assumption behind the detection score, the linearization

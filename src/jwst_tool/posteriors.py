@@ -26,7 +26,7 @@ user-facing name plus a list of registry mode keys, evaluated against the
 per-mode result dicts of a run through the EXISTING ``combined_forecast``
 (single-mode combos equal ``mode_forecast`` -- that identity is pinned
 upstream). Saturated modes are excluded with the same policy as the
-"ALL USABLE (combined)" row (a saturated mode is unusable data) and the
+"All usable modes" row (a saturated mode is unusable data) and the
 exclusion is disclosed per combo; a combo with zero usable modes raises.
 """
 from __future__ import annotations
@@ -245,7 +245,7 @@ def combo_forecast(name: str, mode_keys: list[str], results_by_mode: dict,
     ``results_by_mode``: {mode_key: evaluate_mode result with Jacobians} from
     a run; every requested key must be present.
 
-    Saturation policy is EXACTLY the "ALL USABLE (combined)" row's: a
+    Saturation policy is EXACTLY the "All usable modes" row's: a
     saturated mode is unusable data, excluded from the Fisher sum, and the
     exclusion is disclosed in the returned record (``excluded``, with the
     reason). A combo whose every mode is excluded raises -- there is no

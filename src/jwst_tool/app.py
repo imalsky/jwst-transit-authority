@@ -76,6 +76,14 @@ def _slug(s: str) -> str:
 # the other lacks. The T-P and mixing-ratio panels must match exactly, so they
 # render UNCROPPED (tight=False) on the shared canvas plotting.py defines.
 # Everything else (the wide summary figure, standing alone) still crops.
+# Display label for the every-usable-mode combination (maintainer,
+# 2026-08-13: "ALL USABLE (combined)" replaced). A saturated mode is unusable
+# data and is excluded from every combination -- that exclusion is disclosed
+# in Mode details and per combo, not encoded in this label. Display only:
+# never a stored config key, so no share-config migration is involved.
+_ALL_USABLE = "All usable modes"
+
+
 def _full_bbox(fig):
     """The whole canvas as an explicit Bbox (defeats savefig.bbox: tight).
 
@@ -207,28 +215,24 @@ st.markdown(
 # filled once those values exist.
 _run_slot = st.container()
 
-with st.expander("How the model works, and its limits"):
+with st.expander("How the model works"):
+    # STE (house WRITING rules): active voice, present tense, one idea per
+    # sentence, <= 25 words. Engine names and the live Pandeia version stay;
+    # the parenthetical asides and restatements are cut.
     st.markdown(
         f"""
-Each run computes a spectrum live, for exactly the atmosphere you configure:
+Each run computes a spectrum for the atmosphere you configure.
 
-1. **Chemistry**: the engine you select computes the abundances.
-   **VULCAN** solves steady-state photochemical kinetics (run through its
-   JAX port, VULCAN-JAX); **PICASO** reads chemical equilibrium from
-   precomputed tables.
-2. **Temperature profile**: VULCAN supports a Guillot profile, an uploaded
-   table, or a PICASO radiative-convective climate profile. PICASO
-   equilibrium chemistry supports a Guillot profile or a PICASO climate
-   profile.
-3. **Spectrum**: ExoJAX radiative transfer computes the transit depth or
-   the dayside eclipse depth against a PHOENIX stellar model.
-4. **Noise**: the STScI Pandeia ETC engine
-   ({ins.BACKEND_STATUS.split(' /')[0]} on this instance) predicts the
-   uncertainty per instrument mode, with a PandExo-style minimum noise
-   floor.
-5. **Scores**: a conditional template S/N per molecule, Fisher (Cramer-Rao)
-   parameter forecasts, and a floor-aware count of the transits or eclipses
-   needed to reach your target.
+1. **Chemistry**: VULCAN solves photochemical kinetics through its JAX port.
+   PICASO reads equilibrium abundances from tables.
+2. **Temperature profile**: select a Guillot profile, a PICASO climate
+   profile, or upload a table. The chemistry engine sets which are offered.
+3. **Spectrum**: ExoJAX computes the transit or eclipse depth against a
+   PHOENIX stellar model.
+4. **Noise**: Pandeia ({ins.BACKEND_STATUS.split(' /')[0]} here) predicts the
+   uncertainty per mode, with a PandExo-style noise floor.
+5. **Scores**: template S/N per molecule, Fisher parameter forecasts, and the
+   number of transits or eclipses that reaches your target.
 
         """)
 
@@ -1958,7 +1962,7 @@ ok = [r for r in results if not r["saturated"]]
 
 # --- named mode combinations (results-side builder) -------------------------
 # Evaluated through posteriors.combo_forecast (the SAME combination math as
-# the "ALL USABLE (combined)" row -- never reimplemented here). A combo that
+# the all-usable-modes row -- never reimplemented here). A combo that
 # cannot be evaluated (mode not run, all modes saturated) is reported as an
 # error next to the builder; the others still render.
 _results_by_mode = {r["mode_key"]: r for r in results
@@ -2310,7 +2314,7 @@ with st.expander("Mode combinations"):
     # --- mode combinations (builder) --------------------------------------------
     # Named combinations of the modes that were run, evaluated through
     # posteriors.combo_forecast / compare_combos (the same combination math as
-    # the "ALL USABLE (combined)" row). They add rows to the Fisher table below
+    # the all-usable-modes row). They add rows to the Fisher table below
     # and bars to the comparison chart above.
     if fisher_names and "jac" in model:
         _cb_opts = [r["mode_key"] for r in results
@@ -2418,7 +2422,7 @@ with st.expander("Parameter constraint forecast (Fisher)"):
             cond = {}
             sig = fisher_mod.combined_forecast(usable_f, fisher_names, diag=fdiag,
                                                conditional=cond)
-            frows.extend(_param_rows("ALL USABLE (combined)", sig, cond))
+            frows.extend(_param_rows(_ALL_USABLE, sig, cond))
         # named combinations: long-format rows from the SAME records feeding the
         # comparison chart (posteriors.combo_forecast; display units already
         # applied, so the rows re-scale to tsig directly)
@@ -2427,7 +2431,9 @@ with st.expander("Parameter constraint forecast (Fisher)"):
                 _sm = tsig_f * float(_rec["sigma_marginalized_display"][n])
                 _sc = tsig_f * float(_rec["sigma_conditional_display"][n])
                 frows.append({
-                    "mode": f"COMBO: {_rec['name']}",
+                    # the user's own name for the set, unprefixed
+                    # (maintainer, 2026-08-13)
+                    "mode": str(_rec["name"]),
                     "parameter": forward.PARAM_LABELS[n],
                     _marg_col: ("unconstrained"
                                 if not np.isfinite(_sm) or _sm > 1e4
@@ -2437,20 +2443,41 @@ with st.expander("Parameter constraint forecast (Fisher)"):
                                 else f"{_sc:.3g}"),
                     "unit": forward.PARAM_UNITS[n] or (
                         "C/O ratio" if n == "dlnCO" else "dimensionless")})
+        # Custom combinations FIRST (maintainer, 2026-08-13): they are what
+        # the user built, so they lead the table instead of trailing the
+        # per-mode rows. Order within each group is preserved.
+        _combo_names = {str(_rec["name"]) for _rec in combo_recs}
+        frows = ([_r for _r in frows if _r["mode"] in _combo_names]
+                 + [_r for _r in frows if _r["mode"] not in _combo_names])
+
         # Repeated mode names blanked for READING only (maintainer,
         # 2026-08-13): each mode spans one row per free parameter, and the
         # repetition made the mode boundaries hard to see. The CSV below is
         # built from the UNBLANKED rows -- a machine-readable file must carry
-        # the mode on every row.
+        # the mode on every row. _is_combo rides along for the highlight and
+        # is dropped before display.
         _disp, _prev = [], None
         for _r in frows:
             _r2 = dict(_r)
+            _r2["_is_combo"] = _r2["mode"] in _combo_names
             if _r2["mode"] == _prev:
                 _r2["mode"] = ""
             else:
                 _prev = _r2["mode"]
             _disp.append(_r2)
-        st.dataframe(_disp, width="stretch", hide_index=True)
+        _disp_df = pd.DataFrame(_disp)
+        _combo_mask = _disp_df.pop("_is_combo")
+        if _combo_mask.any():
+            # tint the custom-combination rows so they read as a group
+            # distinct from the per-mode rows above/below them
+            st.dataframe(
+                _disp_df.style.apply(
+                    lambda row: ["background-color: #ece4f5"
+                                 if _combo_mask.loc[row.name] else ""
+                                 for _ in row], axis=1),
+                width="stretch", hide_index=True)
+        else:
+            st.dataframe(_disp_df, width="stretch", hide_index=True)
         st.download_button("Constraint forecast (CSV)",
                            _csv_bytes(pd.DataFrame(frows)),
                            f"{_fname_base}_fisher_forecast.csv", "text/csv",
@@ -2463,41 +2490,23 @@ with st.expander("Parameter constraint forecast (Fisher)"):
                 + (" **Rank-deficient: degenerate directions are reported as "
                    "unconstrained, not as fake finite numbers.**" if rank < dim else ""))
         with st.expander("How to read this table"):
+            # STE, four bullets (maintainer, 2026-08-13). The differentiation
+            # method, the lnR0/per-segment nuisance design with its citations,
+            # and the elemental-set provenance moved to README.md -- they are
+            # methodology, and the house policy keeps methodology out of the
+            # GUI. What stays is what changes how you READ a number.
             st.markdown(
-                f"- Each bound is the **expected ±uncertainty at {tsig_f:g}σ** "
-                f"(= {tsig_f:g} × the Fisher 1σ) on that parameter if you fitted "
-                "all listed parameters *simultaneously* to that mode's simulated "
-                "data. It is a linearized, local best case (Cramer-Rao bound) "
-                "with no priors: nonlinear responses and degeneracies can make "
-                "a real posterior wider, and informative priors can make it "
-                "narrower.\n"
-                "- The sensitivities d(spectrum)/d(parameter) use the "
-                "differentiation method selected in the science-goal step: "
-                "**central finite differences** of independently re-converged "
-                "solves (default; composition rows re-initialize the chemistry "
-                "at the perturbed elemental abundances, the standard VULCAN "
-                "workflow), or **warm-started forward-mode automatic "
-                "differentiation** (the AD metallicity row holds the "
-                "structural hydrostatic grid fixed, a stated 1.6%-level "
-                "difference from FD in the earlier benchmark).\n"
-                "- Each per-mode row also fits (and marginalizes over) a reference-"
-                "radius nuisance **lnR0** plus one absolute-depth **offset per "
-                "detector segment**, so the two-detector NIRSpec gratings (G395H, "
-                "G235H) float independent **NRS1 and NRS2** steps, as every real "
-                "G395H fit does (Moran+2023, Madhusudhan+2023). The combined row "
-                "shares lnR0 across modes and keeps one offset per segment across "
-                "all of them; that is what keeps multi-instrument combinations "
-                "honest.\n"
-                "- **No priors** are applied: a parameter with no spectral response "
-                "in a mode's band reads *unconstrained* rather than a fake number.\n"
-                "- Metallicity **[M/H]** and vertical mixing **log Kzz** are reported "
-                "in **dex** (factors of 10); **C/O** is the absolute carbon/oxygen "
-                "number ratio N_C/N_O (default ≈ 0.55, the network's WASP-39b "
-                "elemental set from Tsai et al. 2023).\n"
-                f"- σ is evaluated at the {_ev} count you set. Only the "
-                "photon/detector term averages down with more of them; the "
-                f"systematic floor does not. Use the '{_tt_col}' column, "
-                "not a 1/√N extrapolation."
+                f"- Each bound is the expected ±uncertainty at {tsig_f:g}σ "
+                f"(= {tsig_f:g} × the Fisher 1σ). It assumes you fit all "
+                "listed parameters at once. It is a linearized best case "
+                "with no priors, so a real posterior is usually wider.\n"
+                "- *unconstrained* means the parameter has no spectral "
+                "response in that band. It is not a missing number.\n"
+                "- **[M/H]** and **log Kzz** are in dex. **C/O** is the "
+                "absolute number ratio N_C/N_O.\n"
+                f"- σ applies to the {_ev} count you set. Only the photon "
+                "term averages down; the noise floor does not. Read the "
+                f"'{_tt_col}' column instead of scaling by 1/√N."
             )
     elif out.get("fisher_names"):
         st.info("A constraint forecast was requested but the cached model has "
@@ -2547,9 +2556,9 @@ if _have_fisher:
     for r in _usable_post:
         _sources[r["label"]] = [r]
     if len(_usable_post) >= 2:
-        _sources["ALL USABLE (combined)"] = list(_usable_post)
+        _sources[_ALL_USABLE] = list(_usable_post)
     for _rec in combo_recs:
-        _sources[f"COMBO: {_rec['name']}"] = [
+        _sources[str(_rec["name"])] = [
             _results_by_mode[k] for k in _rec["usable_modes"]]
 
     if not _sources:
@@ -2732,18 +2741,17 @@ with _fc2:
                 min(_grid_hi, max(c[1] for c in _cov) * 1.03))
     else:
         _fit = (_grid_lo, _grid_hi)
+    # Two options only (maintainer, 2026-08-13): the Custom slider is gone.
     _wl_mode = st.radio(
-        "Wavelength range", ["Fit to selected modes", "Full model", "Custom"],
+        "Wavelength range", ["Fit to selected modes", "Full model"],
         horizontal=True, key=K("sum_wlmode"))
-if _wl_mode == "Custom":
-    _wl_range = st.slider(
-        "Wavelength window (µm)", _grid_lo, _grid_hi,
-        value=(round(_fit[0], 2), round(_fit[1], 2)), step=0.05,
-        key=K("sum_wlrange"))
-elif _wl_mode == "Full model":
-    _wl_range = (_grid_lo, _grid_hi)
-else:
-    _wl_range = _fit
+    _ax1, _ax2 = st.columns(2)
+    # x defaults to log (the wavelength convention here); y to linear, since
+    # transit depth spans a narrow range where log adds nothing.
+    _x_log = _ax1.checkbox("Log wavelength axis", value=True,
+                           key=K("sum_xlog"))
+    _y_log = _ax2.checkbox("Log depth axis", value=False, key=K("sum_ylog"))
+_wl_range = (_grid_lo, _grid_hi) if _wl_mode == "Full model" else _fit
 
 _sum_points = []
 for r in results:
@@ -2816,6 +2824,7 @@ _sum_spectrum = dict(wl_um=wl_s, depth_ppm=d_plot,
                      model_label="model (smoothed for display)",
                      legend_title=_leg_note,
                      wl_range=_wl_range,
+                     x_log=_x_log, y_log=_y_log,
                      points=_sum_points)
 if d_wo_s is not None:
     # detect goal: the same without-target comparison curve the old
@@ -2824,11 +2833,29 @@ if d_wo_s is not None:
     _sum_spectrum["depth2_label"] = f"model without {meta['target']}"
 
 _sum_foot = None
-fig_sum = summary_figure.compose_summary_figure(
-    _sum_spectrum, posterior_panels=_post_panels or None,
-    title=f"{meta.get('planet', 'planet')} -- "
-          f"{_cpj.get('science_mode', 'transmission')} forecast summary",
-    footnote=_sum_foot)
+
+
+def _compose(spec):
+    return summary_figure.compose_summary_figure(
+        spec, posterior_panels=_post_panels or None,
+        title=f"{meta.get('planet', 'planet')} -- "
+              f"{_cpj.get('science_mode', 'transmission')} forecast summary",
+        footnote=_sum_foot)
+
+
+try:
+    fig_sum = _compose(_sum_spectrum)
+except ValueError as _e:
+    # A log DEPTH axis is refused when the visible range reaches zero or below
+    # (eclipse depths and low-S/N jitter draws can). That is a widget choice,
+    # not a broken run: say why, fall back to linear, and keep the page alive.
+    # Any other ValueError is a real defect and must not be swallowed.
+    if "y_log=True" not in str(_e):
+        raise
+    st.warning(f"Log depth axis unavailable: {_e} Showing a linear depth "
+               "axis instead.")
+    _sum_spectrum["y_log"] = False
+    fig_sum = _compose(_sum_spectrum)
 _sum_png = _fig_png(fig_sum)
 _sum_pdf = _fig_pdf(fig_sum)
 _show_fig(fig_sum)

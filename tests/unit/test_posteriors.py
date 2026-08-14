@@ -4,7 +4,7 @@ Pins: the honesty labeling on every record, the no-fake-finite-curve rule for
 null Fisher directions, fail-fast input validation, the display-unit
 conventions (dlnCO's absolute-C/O transform), the single-mode-combo ==
 mode_forecast identity, and the saturated-mode exclusion policy (same as the
-"ALL USABLE (combined)" row, disclosed per combo, loud on zero usable).
+"All usable modes" row, disclosed per combo, loud on zero usable).
 """
 import numpy as np
 import pytest

@@ -62,20 +62,29 @@ render_lock = threading.RLock()
 # figure simply leaves it blank rather than growing its plot box to fill it.
 #
 # The rect below is chosen so the allocated box is EXACTLY square
-# (0.579 * 5.6 in = 3.24 in wide, 0.81 * 4.0 in = 3.24 in tall), which means
+# (0.6135 * 7.4 in = 4.54 in wide, 0.8566 * 5.3 in = 4.54 in tall), which means
 # set_box_aspect(1.0) is satisfied with no shrink-to-fit -- if these numbers
 # drift apart, matplotlib silently shrinks the axes and the two figures stop
-# matching.
+# matching. Recompute BOTH if you change the canvas: the margins are held at
+# their original inch sizes so the labels keep the same physical room.
 #
 # NOTE the figure CANVAS is deliberately NOT square here (5.6 x 4.0); only
 # the axes box is. An earlier revision made the whole canvas square, so do
 # not "restore" that -- the surplus width is the legend strip, and equal
 # canvases are what make the two panels the same on-page size.
 # test_plotting.py::test_tp_and_vmr_panels_share_one_geometry pins it.
-FIG_W_IN = 5.6
-FIG_H_IN = 4.0
+# Canvas enlarged 5.6x4.0 -> 7.4x5.3 in (maintainer, 2026-08-13: "make the
+# figure size larger for the physical structure figures, i.e. make the text
+# smaller relative to the figures"). Font sizes are UNCHANGED house-style
+# points, so growing the canvas is exactly what shrinks the text relative to
+# the plot: the square plot box goes 3.24 -> 4.54 in on a side (1.40x linear,
+# 1.96x area) while a tick label stays the same number of points. Streamlit
+# stretches both panels to the column width, so they still render at equal
+# on-page size -- and the PNG/PDF downloads gain the detail.
+FIG_W_IN = 7.4
+FIG_H_IN = 5.3
 FIG_DPI = 200
-AXES_RECT = dict(left=0.130, right=0.709, bottom=0.160, top=0.970)
+AXES_RECT = dict(left=0.0984, right=0.7119, bottom=0.1208, top=0.9774)
 
 # Tick-label crowding: a decade-per-tick log axis overruns a small square
 # panel, so cap the number of labelled decades and let the locator thin to

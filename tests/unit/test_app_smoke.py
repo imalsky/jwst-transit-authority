@@ -555,7 +555,7 @@ def test_combo_builder_and_summary_figure_render_with_jacobians():
     import pandas as pd
     tables = [pd.DataFrame(d.value) for d in at.get("dataframe")]
     assert any(t.astype(str)
-               .apply(lambda c: c.str.contains("COMBO: PRISM \\+ G395H"))
+               .apply(lambda c: c.str.contains("PRISM \\+ G395H"))
                .any().any() for t in tables), \
         "combo rows missing from the Fisher table"
     # remove works
@@ -660,3 +660,78 @@ def test_more_settings_widgets_carry_no_help_tooltips():
             continue
         assert not getattr(found[0], "help", None), \
             f"{key} regained a help tooltip"
+
+
+def test_intro_prose_is_short_and_carries_no_methodology():
+    """2026-08-13 (maintainer): the model expander is retitled and its five
+    steps rewritten in STE; the Fisher caveat block drops to four bullets.
+
+    Inverted assertions -- the REMOVAL is the requirement, so a future edit
+    that restores the long form fails here. The displaced methodology (the
+    differentiation method, the lnR0/per-segment nuisance design with its
+    citations, the elemental-set provenance) lives in README.md.
+    """
+    at = _run_app()
+    assert not at.exception, at.exception
+    page = " ".join(m.value for m in at.markdown)
+    assert "and its limits" not in page
+    # cut phrasings
+    for gone in ("steady-state photochemical kinetics",
+                 "radiative-convective climate profile",
+                 "conditional template S/N per molecule"):
+        assert gone not in page, f"long-form intro phrase survived: {gone!r}"
+    # kept: engine names and the LIVE Pandeia version (never hardcoded)
+    for kept in ("VULCAN", "PICASO", "ExoJAX", "PHOENIX", "Pandeia",
+                 "PandExo"):
+        assert kept in page, f"engine name lost: {kept!r}"
+    import re as _re
+    # ins.BACKEND_STATUS.split(" /")[0] == "Pandeia 2026.7": a live version,
+    # never a hardcoded one. Match the year so a literal string would fail.
+    assert _re.search(r"Pandeia \d{4}\.\d", page), \
+        "the live Pandeia version is no longer interpolated"
+
+
+def test_summary_axis_controls_replace_the_custom_slider():
+    """The wavelength radio carries two options and the Custom slider is gone;
+    log/linear checkboxes for both spectrum axes take its place."""
+    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["out"] = out
+    at.session_state["out_meta"] = out_meta
+    at.run()
+    assert not at.exception, at.exception
+    radio = at.radio(key="n0_sum_wlmode")
+    assert list(radio.options) == ["Fit to selected modes", "Full model"], \
+        radio.options
+    assert not [s for s in at.slider if s.key == "n0_sum_wlrange"], \
+        "the Custom wavelength slider should be gone"
+    assert at.checkbox(key="n0_sum_xlog").value is True    # log wavelength
+    assert at.checkbox(key="n0_sum_ylog").value is False   # linear depth
+
+
+def test_all_usable_row_is_renamed_and_combos_lead_the_table():
+    """'ALL USABLE (combined)' reads 'All usable modes', a custom set shows the
+    user's own name with no 'COMBO: ' prefix, and combination rows sort to the
+    TOP of the constraint table."""
+    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["out"] = out
+    at.session_state["out_meta"] = out_meta
+    at.session_state["n0_combos"] = [dict(name="My set",
+                                          modes=["nirspec_g395h",
+                                                 "nirspec_prism"])]
+    at.run()
+    assert not at.exception, at.exception
+    # the CONSTRAINT table specifically -- Mode details also has a "mode"
+    # column and renders first, so identify by the parameter column
+    tables = [df.value for df in at.dataframe
+              if "mode" in getattr(df.value, "columns", [])
+              and "parameter" in getattr(df.value, "columns", [])]
+    assert tables, "no constraint-forecast table rendered"
+    modes = [str(v) for v in tables[0]["mode"]]
+    assert not any("ALL USABLE" in m for m in modes), modes[:8]
+    assert not any(m.startswith("COMBO:") for m in modes), modes[:8]
+    assert any("All usable modes" == m for m in modes), modes[:8]
+    # combos lead: the first non-blank mode label is the combination
+    first = next(m for m in modes if m.strip())
+    assert "My set" in first, f"combos should lead the table, got {first!r}"
