@@ -252,6 +252,45 @@ def test_constant_floor_prefill_renders_per_mode_inputs():
     assert any(k and k.startswith("n0_floor_") for k in keys)
 
 
+def test_removed_tooltips_and_table_guidance_are_gone():
+    """Prose the maintainer removed 2026-08-13 must not come back.
+
+    Every "?" tooltip in step 3 (Science goal), the R-binning tooltip, the
+    "How to read this table" expander, and the parameter-panel tooltip. The
+    displaced content that changes how a number is READ lives in README.md
+    (the R section and the Fisher-bounds section), which the house policy
+    prefers over GUI prose.
+    """
+    # Strip comment lines first: the removals left behind comments that NAME
+    # what was removed (deliberately -- they explain why the code is absent),
+    # and matching those would make this test unfixable.
+    src = "\n".join(l for l in APP.read_text().splitlines()
+                    if not l.lstrip().startswith("#"))
+    for phrase in ("Width of the final analysis bins",
+                   "How to read this table",
+                   "One panel per parameter in the summary figure",
+                   "linearized best case",
+                   "Detect: compare the full spectrum with one that omits",
+                   "The forecast is a local Fisher (Cramer-Rao) bound from",
+                   "AD (the default) differentiates the numerical model",
+                   "Scales the reported bounds"):
+        assert phrase not in src, f"removed GUI prose is back: {phrase!r}"
+
+    # step 3 (Science goal) carries NO tooltips at all
+    lines = src.splitlines()
+    lo = next(i for i, l in enumerate(lines)
+              if 'st.markdown("### 3 \u00b7 Science goal")' in l)
+    hi = next(i for i, l in enumerate(lines)
+              if i > lo and 'st.markdown("### 4 \u00b7 Observation")' in l)
+    offenders = [i + 1 for i in range(lo, hi) if "help=" in lines[i]]
+    assert not offenders, f"step 3 regained tooltips at lines {offenders}"
+
+    # the README keeps what the R tooltip used to say
+    readme = (APP.parent.parent.parent / "README.md").read_text()
+    assert "Analysis resolving power (the R control)" in readme
+    assert "not the instrument's resolving power" in readme
+
+
 def test_emission_results_use_eclipse_terms():
     """An emission run says "eclipse" throughout, never "transit".
 
@@ -269,15 +308,18 @@ def test_emission_results_use_eclipse_terms():
     assert not at.exception, at.exception
     assert not at.success, \
         f"an above-target result must render no banner: {[s.value for s in at.success]}"
-    subs = [s.value for s in at.subheader]
-    assert any("eclipse emission spectrum" in s for s in subs), subs
-    assert not any(s == "Proposal summary figure" for s in subs)
+    # the figure section is an EXPANDER now (maintainer, 2026-08-13): it was
+    # the last st.subheader on the results page
+    _exps = [e.label for e in at.get("expander")]
+    assert any("eclipse emission spectrum" in e for e in _exps), _exps
+    assert not any(e == "Proposal summary figure" for e in _exps)
     # Scope to the RESULTS text: the sidebar/intro copy is written for the
     # general case and legitimately says "transit" there.
     results = " ".join(
         [w.value for w in at.warning] + [e.value for e in at.error]
         + [c.value for c in at.get("caption") if "eclipse" in c.value.lower()
-           or "transit" in c.value.lower()] + subs)
+           or "transit" in c.value.lower()]
+        + [s.value for s in at.subheader] + _exps)
     assert "eclipse" in results.lower(), results[:300]
     assert not re.search(r"\b\d+ transits?\b", results), results[:300]
 
@@ -554,7 +596,8 @@ def test_combo_builder_and_summary_figure_render_with_jacobians():
     assert "Physical structure (T-P profile, mixing ratios)" in exps, exps
     assert "Marginalized forecast posteriors" in exps, exps
     assert "Marginalized forecast posteriors" not in subs, subs
-    assert any("forecast summary" in s for s in subs), subs
+    assert any("forecast summary" in e for e in exps), exps
+    assert not any("forecast summary" in s for s in subs), subs
     dl = {b.label for b in at.get("download_button")}
     assert "Figure (PDF, vector)" in dl
     # add a named combination through the builder widgets
@@ -615,8 +658,8 @@ def test_posterior_panel_mock_recovery_overlay_renders():
     assert not at.exception, at.exception
     dl = {b.label for b in at.get("download_button")}
     assert "Mock observation (CSV)" in dl
-    subs = [s.value for s in at.subheader]
-    assert any("forecast summary" in s for s in subs), subs
+    _exps = [e.label for e in at.get("expander")]
+    assert any("forecast summary" in e for e in _exps), _exps
 
 
 def test_emission_mode_archive_fill_skips_transit_duration():

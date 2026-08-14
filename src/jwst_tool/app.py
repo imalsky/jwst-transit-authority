@@ -1230,13 +1230,7 @@ with st.sidebar:
     goal = st.radio(
         "Goal", ["detect", "constrain"], horizontal=True, key=K("goal"),
         format_func={"detect": "Detect a molecule",
-                     "constrain": "Constrain a parameter"}.get,
-        help="Detect: compare the full spectrum with one that omits the "
-             "selected molecule. The score is a conditional template "
-             "signal-to-noise ratio, not a retrieval detection. "
-             "Constrain: a local Fisher (Cramer-Rao) bound from the "
-             "spectrum derivatives, not a posterior uncertainty. "
-             "Constraints cost minutes per free parameter.")
+                     "constrain": "Constrain a parameter"}.get)
     goal_param, target_prec, marginalize = None, None, True
     do_fisher = False
     if goal == "detect":
@@ -1255,17 +1249,10 @@ with st.sidebar:
             "Parameter to constrain", avail_free,
             key=K(f"gp_{chem_provider}_{tp_mode}_{int(cloud_on)}_"
                   f"{int(bool(mie_condensate))}"),
-            format_func=lambda n: forward.PARAM_LABELS[n],
-            help="The forecast is a local Fisher (Cramer-Rao) bound from "
-                 "the spectrum derivatives. It is not a posterior "
-                 "uncertainty.")
+            format_func=lambda n: forward.PARAM_LABELS[n])
         marginalize = st.checkbox(
             "Marginalize over the other parameters", value=True,
-            key=K("marg"),
-            help="On (default): the other selected parameters and "
-                 "calibration terms are free. Off: they are held fixed, "
-                 "which gives a narrower, more optimistic bound. Neither "
-                 "option is a posterior uncertainty.")
+            key=K("marg"))
         if not marginalize:
             st.warning(
                 "Marginalization is off: every other parameter is held "
@@ -1286,9 +1273,7 @@ with st.sidebar:
                                           key=K(f"tgt_{goal_param}"))
         target_sig = st.number_input(
             "Report bounds at significance (σ)", 1.0, 10.0, 3.0, 0.5,
-            key=K("tsig"),
-            help="Scales the reported bounds: 3 means the tables and the "
-                 "verdict quote 3σ half-widths.")
+            key=K("tsig"))
 
     # Constraint settings render only when the run will compute derivatives.
     fisher_params: list = []
@@ -1296,10 +1281,7 @@ with st.sidebar:
     if goal == "detect":
         do_fisher = st.checkbox(
             "Also calculate parameter constraints", value=True,
-            key=K("dofish"),
-            help="Adds a Fisher parameter forecast to the detection run. "
-                 "Each free parameter costs extra solves (see the cost "
-                 "note in Constraint settings).")
+            key=K("dofish"))
     if goal == "constrain" or do_fisher:
         with st.expander("Constraint settings", expanded=(goal == "constrain")):
             if goal == "constrain" and marginalize:
@@ -1315,10 +1297,7 @@ with st.sidebar:
                              if p in avail_free],
                     key=K(f"fx_{chem_provider}_{tp_mode}_{int(cloud_on)}_"
                           f"{int(bool(mie_condensate))}"),
-                    format_func=lambda n: forward.PARAM_LABELS[n],
-                    help="The goal parameter is always included. More free "
-                         "parameters give a wider, more honest forecast. "
-                         "Each adds minutes.")
+                    format_func=lambda n: forward.PARAM_LABELS[n])
                 fisher_params = sorted(set(fisher_extra) | {goal_param})
             elif goal == "constrain":
                 st.caption(
@@ -1339,15 +1318,7 @@ with st.sidebar:
                 key=K("jacm"), disabled=_pic,
                 format_func={"fd": "Finite differences",
                              "ad": "Automatic differentiation "
-                                   "(forward-mode, default)"}.get,
-                help="AD (the default) differentiates the numerical model "
-                     "directly: about 1.7-4x faster per row, needs "
-                     "photochemistry on, and stops with an error on the "
-                     "C/O row for carbon-rich compositions. Finite "
-                     "differences re-run the model at shifted parameter "
-                     "values and check two step sizes against each other; "
-                     "they work everywhere. Every result row is labeled "
-                     "with the method that produced it.")
+                                   "(forward-mode, default)"}.get)
             if _pic:
                 st.caption("Locked to finite differences: PICASO's "
                            "chemistry is table interpolation, with no "
@@ -1418,15 +1389,7 @@ with st.sidebar:
             help="Group selection keeps the brightest pixel below this "
                  "full-well fraction.")
         r_bin = st.number_input(
-            "Analysis resolving power, R", 25, 500, 100, 25, key=K("rbin"),
-            help="Width of the final analysis bins, shared by all modes "
-                 "(R = 100 is the standard planning convention). This is "
-                 "not the instrument's resolving power: the model is "
-                 "separately blurred with a Gaussian approximation of each "
-                 "mode's tabulated native resolution R(λ). "
-                 "Not display-only: one binning operator at this R computes "
-                 "the noise, the scores, the forecasts, and the plotted "
-                 "spectrum. 50-200 is the usual range.")
+            "Analysis resolving power, R", 25, 500, 100, 25, key=K("rbin"))
 
     with st.expander("Noise model (Pandeia)"):
         st.markdown("**Minimum noise floor** (PandExo convention)")
@@ -2508,25 +2471,13 @@ with st.expander("Parameter constraint forecast (Fisher)"):
                 f"number {fdiag['condition_number']:.2g}."
                 + (" **Rank-deficient: degenerate directions are reported as "
                    "unconstrained, not as fake finite numbers.**" if rank < dim else ""))
-        with st.expander("How to read this table"):
-            # STE, four bullets (maintainer, 2026-08-13). The differentiation
-            # method, the lnR0/per-segment nuisance design with its citations,
-            # and the elemental-set provenance moved to README.md -- they are
-            # methodology, and the house policy keeps methodology out of the
-            # GUI. What stays is what changes how you READ a number.
-            st.markdown(
-                f"- Each bound is the expected ±uncertainty at {tsig_f:g}σ "
-                f"(= {tsig_f:g} × the Fisher 1σ). It assumes you fit all "
-                "listed parameters at once. It is a linearized best case "
-                "with no priors, so a real posterior is usually wider.\n"
-                "- *unconstrained* means the parameter has no spectral "
-                "response in that band. It is not a missing number.\n"
-                "- **[M/H]** and **log Kzz** are in dex. **C/O** is the "
-                "absolute number ratio N_C/N_O.\n"
-                f"- σ applies to the {_ev} count you set. Only the photon "
-                "term averages down; the noise floor does not. Read the "
-                f"'{_tt_col}' column instead of scaling by 1/√N."
-            )
+        # The "How to read this table" expander was REMOVED (maintainer,
+        # 2026-08-13). Its four bullets -- the 3-sigma convention, what
+        # "unconstrained" means, the dex/ratio units, and why sigma does not
+        # scale as 1/sqrt(N) once the floor dominates -- are in README.md
+        # under the Fisher table section. The units are also in the column
+        # headers, and the "transits to target" column is what the scaling
+        # bullet pointed at.
     elif out.get("fisher_names"):
         st.info("A constraint forecast was requested but the cached model has "
                 "no Jacobian. Press Run to compute it.")
@@ -2618,11 +2569,7 @@ if _have_fisher:
                 "Parameters to draw", fisher_names,
                 default=fisher_names[:2], key=_pp_key,
                 max_selections=_MAX_POST_PANELS,
-                format_func=lambda n: forward.PARAM_LABELS[n],
-                help="One panel per parameter in the summary figure, capped "
-                     f"at {_MAX_POST_PANELS} so each panel stays readable. "
-                     "Every free parameter's width is in the Fisher table "
-                     "above, whether or not it is drawn.")
+                format_func=lambda n: forward.PARAM_LABELS[n])
         # record per source (sigmas always; curves for centered params)
         _curve_params = [p for p in _post_sel
                          if _centers_all.get(p) is not None]
@@ -2741,9 +2688,15 @@ if _have_fisher:
 # --- the results figure (spectrum + forecast posteriors, rendered once) -----
 # one target significance for every number on this page
 _target_sig = float(meta.get("target_sig") or 3.0)
-st.subheader("Simulated eclipse emission spectrum & forecast summary"
-             if str(_cpj.get("science_mode", "transmission")) == "emission"
-             else "Simulated transmission spectrum & forecast summary")
+# An EXPANDER like every other results section (maintainer, 2026-08-13) --
+# the last st.subheader on the results page. Expanded by DEFAULT: it holds the
+# figure the whole page builds toward, so it should be visible on arrival,
+# unlike the supporting sections above it.
+_fig_box = st.expander(
+    "Simulated eclipse emission spectrum & forecast summary"
+    if str(_cpj.get("science_mode", "transmission")) == "emission"
+    else "Simulated transmission spectrum & forecast summary",
+    expanded=True)
 
 # Per-mode expected performance, rendered IN the legend label of each
 # point series (replaces the retired right-hand ranking panel): the
@@ -2761,11 +2714,12 @@ elif _have_fisher:
     if st.session_state.get(_rk_key) not in fisher_names:
         st.session_state.pop(_rk_key, None)
     _gp_default = meta.get("goal_param")
-    _rk_param = st.selectbox(
-        "Legend parameter (per-mode expected ±)", fisher_names,
-        index=(fisher_names.index(_gp_default)
-               if _gp_default in fisher_names else 0),
-        key=_rk_key, format_func=lambda n: forward.PARAM_LABELS[n])
+    with _fig_box:
+        _rk_param = st.selectbox(
+            "Legend parameter (per-mode expected ±)", fisher_names,
+            index=(fisher_names.index(_gp_default)
+                   if _gp_default in fisher_names else 0),
+            key=_rk_key, format_func=lambda n: forward.PARAM_LABELS[n])
     for r in [x for x in results if x.get("jac_bins") is not None
               and not x["saturated"]]:
         _v = _target_sig * fisher_mod.display_sigma(
@@ -2799,7 +2753,8 @@ if len(_usable) >= 2:
 _series_ids = [f"{kind}:{key}" for kind, key, _ in _series_opts]
 _series_lbl = {f"{kind}:{key}": lbl for kind, key, lbl in _series_opts}
 
-_fc1, _fc2 = st.columns([2.0, 1.6])
+_fig_ctx = _fig_box.container()
+_fc1, _fc2 = _fig_ctx.columns([2.0, 1.6])
 with _fc1:
     _sel_series = st.multiselect(
         "Series on the spectrum", _series_ids,
@@ -2863,7 +2818,7 @@ for r in results:
         # the ~3.6 pt size these points render at -- they read as noise, not
         # as an encoding. Modes are distinguished by color plus the legend
         # entry, which names each mode explicitly.
-        marker="^",
+        marker=ins.MODE_MARKER.get(r["mode_key"], "o"),
         wl_um=np.asarray(r.get("wl_eff", r["wl"]), float),
         depth_ppm=_y,
         sigma_ppm=np.asarray(r["sigma"], float) * 1e6))
@@ -2897,7 +2852,7 @@ for _ci, (_cname, _members) in enumerate(_combo_members.items()):
                      np.concatenate(_cs))
     _o = np.argsort(_cw)
     _sum_points.append(dict(
-        label=f"{_cname} (combined)", marker="^",
+        label=f"{_cname} (combined)", marker="d",
         color=_COMBO_COLORS[_ci % len(_COMBO_COLORS)],
         wl_um=_cw[_o], depth_ppm=_cd[_o], sigma_ppm=_cs[_o]))
 
@@ -2935,14 +2890,15 @@ except ValueError as _e:
     # Any other ValueError is a real defect and must not be swallowed.
     if "y_log=True" not in str(_e):
         raise
-    st.warning(f"Log depth axis unavailable: {_e} Showing a linear depth "
+    _fig_box.warning(f"Log depth axis unavailable: {_e} Showing a linear depth "
                "axis instead.")
     _sum_spectrum["y_log"] = False
     fig_sum = _compose(_sum_spectrum)
 _sum_png = _fig_png(fig_sum)
 _sum_pdf = _fig_pdf(fig_sum)
-_show_fig(fig_sum)
-_s1, _s2, _s3, _s4, _s5 = st.columns([1.5, 1.2, 1.5, 1.5, 1.9])
+with _fig_box:
+    _show_fig(fig_sum)
+_s1, _s2, _s3, _s4, _s5 = _fig_box.columns([1.5, 1.2, 1.5, 1.5, 1.9])
 _s1.download_button("Figure (PDF, vector)", _sum_pdf,
                     f"{_fname_base}_proposal_summary.pdf",
                     "application/pdf", key=K("dl_summary_pdf"))

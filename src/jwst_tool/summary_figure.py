@@ -270,8 +270,13 @@ def _plot_spectrum(ax, spec: dict) -> None:
         # swallows the fill -- every mode's marker rendered black and the
         # per-mode color was invisible. That color is now the series identity
         # shared with the forecast panels, so it has to read.
+        # ms 5.0, not 3.8: the summary figure now uses instruments.MODE_MARKER
+        # per mode, and at 3.8 pt the thin-stroke shapes (P, X, *) read as
+        # error-bar artifacts rather than as distinct markers. Rendered and
+        # compared at 3.8 / 5.5 / 7.0 -- 5.0 is where all eight are
+        # distinguishable without the points crowding the model line.
         ax.errorbar(p["wl_um"], p["depth_ppm"], yerr=p["sigma_ppm"],
-                    fmt=p["marker"], ms=3.8, lw=0.9, color=p["color"],
+                    fmt=p["marker"], ms=5.0, lw=0.9, color=p["color"],
                     markerfacecolor=p["color"], markeredgecolor=p["color"],
                     markeredgewidth=0.4,
                     ecolor=p["color"], elinewidth=0.7, capsize=0,

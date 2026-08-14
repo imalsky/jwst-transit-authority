@@ -424,6 +424,25 @@ in the untracked `VULCAN-JAX/notes.md` (autodiff-guide section); the
 reference-depth material is in `VULCAN-JAX/README.md` (Differentiability
 section).
 
+### Analysis resolving power (the R control)
+
+The sidebar's **Analysis resolving power, R** sets the width of the final
+analysis bins, shared by every mode; R = 100 is the standard planning
+convention and 50-200 is the usual range.
+
+Two points that the control's own label cannot carry (this detail sat in its
+tooltip until the 2026-08-13 GUI prose cleanup):
+
+- **R is not the instrument's resolving power.** The model is separately
+  blurred with a Gaussian approximation of each mode's tabulated native
+  resolution R(λ) before this binning is applied. Lowering R does not undo
+  that blur, and raising it does not recover resolution the instrument never
+  had.
+- **The binning is not a display setting.** One binning operator at this R
+  computes the noise, the detection scores, the Fisher forecasts, and the
+  plotted spectrum. Changing R changes every number on the results page, not
+  just the figure.
+
 ### Composition scaling
 
 Any metallicity or C/O knob must pick a convention, because C/O and metallicity
