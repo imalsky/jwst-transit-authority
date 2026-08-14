@@ -624,10 +624,10 @@ rather than reported.
 The forward engine converts pressure to column mass with an inverse-square
 gravity profile, `g(r) = g_btm (R_btm/r)^2`, evaluated at layer midpoints, so the
 chord heights and the opacity columns share one geometry. Emission is
-plane-parallel and keeps the constant bottom gravity. The profile and its
-measured accuracy live in the sibling engine, `vulcan-retrieval`
-(`docs/forward_model.md`, "Height-dependent gravity"); this tool only selects it
-by importing that engine.
+plane-parallel and keeps the constant bottom gravity. The profile lives in the
+shared engine (`vulcan_forward.exojax_rt`); its measured accuracy is written up
+in `vulcan-retrieval/README.md`, "Height-dependent gravity". This tool only
+selects it by importing the engine.
 
 It is recorded here because it is cache-visible. The change moves every
 transmission spectrum at the tens-of-ppm level, so `forward._VERSION` was bumped
@@ -1018,8 +1018,10 @@ with reasoning; accepted limitations are listed below under
 ## Open gaps and accepted limitations
 
 The one live list of everything known to be missing, approximate, or
-deferred in this tool. Updated 2026-08-13 (0.29.3: MIRI native-R ordering
-fix, post-push audit response).
+deferred in this tool. Keep it current: close items here when they land, add
+new ones as they are found. The reasoning behind every decision lives in
+notes.md, Decision records; scope and conventions live in
+[Physics and conventions](#physics-and-conventions).
 
 * `app.py`'s post-run section is still one long top-level block sharing
   implicit variables; extracting pure result builders (mode performance,
@@ -1028,10 +1030,7 @@ fix, post-push audit response).
   most-frequently-changed file and does not belong in a UI release.
 * `science.mplstyle` is a vendored copy of an older matplotlib defaults file
   rather than a minimal set of intentional overrides, so it will keep
-  surfacing upstream deprecations one at a time. Keep this section current: close items here when they
-land, add new ones as they are found. The reasoning behind every decision
-lives in notes.md, Decision records; scope and conventions live in
-[Physics and conventions](#physics-and-conventions).
+  surfacing upstream deprecations one at a time.
 
 ### Opened by the 2026-08-14 audit
 
@@ -1072,12 +1071,6 @@ lives in notes.md, Decision records; scope and conventions live in
 
 ### Validation gaps (absence of evidence, not defects)
 
-- The PandExo parity harness does not cover NIRSpec G395M: the committed
-  parity artifact is a frozen seven-mode experiment, and extending it means
-  regenerating the whole matrix. G395M's registry tokens are verified
-  against the pandeia reference data and a live WASP-39 b noise run
-  selected a sane unsaturated ramp, but no cross-tool comparison exists
-  for the mode.
 - The G395M literature noise factor (achieved-vs-predicted 1.10) is an
   extrapolation from G395H; no published G395M measurement backs the
   digit. Like every entry in that table it is a reference point, never
@@ -1086,8 +1079,9 @@ lives in notes.md, Decision records; scope and conventions live in
 - CI runs the numpy-only suite; the slow forward model, the PandExo
   parity harness, and the deployed full stack are not exercised per
   commit. The scheduled full-stack smoke mostly covers chemistry.
-- Per-pixel saturation-mask parity against PandExo has never been
-  compared (only configuration-level saturation agreement).
+- Per-pixel saturation-mask parity is compared and gated
+  (`min_sat_mask_matched_pixel_frac` 0.99, `min_sat_mask_equal_frac` 1.0),
+  but on one machine only, like the rest of the matrix.
 - The PICASO-native RT cross-model report
   (tests/parity_picaso/outputs/REPORT.md) is a FAIL and its numbers are
   STALE (they predate the inverse-square-gravity change). Rerun pending;
