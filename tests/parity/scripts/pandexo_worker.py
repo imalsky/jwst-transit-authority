@@ -145,7 +145,54 @@ def _provenance():
     }
 
 
-def _exo_dict(jdi, job):
+def _shared_star(job):
+    """One PHOENIX spectrum, normalized to the tool's 2MASS Ks input.
+
+    PandExo interprets ``ref_wave=2.22`` through Bessell K, whereas the tool's
+    user input is explicitly 2MASS Ks.  Convert the Ks-normalized spectrum to
+    its equivalent Bessell-K magnitude, then pass it as a user spectrum so
+    both Pandeia calculations receive the same wavelength/flux arrays.
+    """
+    import stsynphot
+    from synphot import Observation, units
+    from pandexo.engine.synphot_compat import (
+        load_bandpass_from_file, load_phoenix_spectrum,
+        renormalize_to_vegamag, sample_spectrum_micron_mjy)
+    from pandexo.engine.create_input import outTrans
+
+    star = job["star"]
+    root = os.path.join(job["cdbs"], "comp", "nonhst")
+    ks = load_bandpass_from_file(
+        os.path.join(root, "2mass_ks_001_syn.fits"))
+    bessell_k = load_bandpass_from_file(
+        os.path.join(root, "bessell_k_003_syn.fits"))
+    raw = load_phoenix_spectrum(
+        float(star["teff"]), float(star["metal"]), float(star["logg"]))
+    normalized = renormalize_to_vegamag(raw, float(star["kmag"]), ks)
+    k_mag = Observation(normalized, bessell_k, force="extrap").effstim(
+        units.VEGAMAG, vegaspec=stsynphot.Vega)
+    wave, flux = sample_spectrum_micron_mjy(normalized)
+    # Record the spectrum *after* PandExo's own user-input normalization and
+    # sampling. Feeding this exact array to the tool side prevents a second
+    # resampling implementation from masquerading as an estimator difference.
+    pandexo_source = outTrans({
+        "type": "user",
+        "starpath": {"w": np.asarray(wave, float),
+                     "f": np.asarray(flux, float) * 1e-3},
+        "w_unit": "um", "f_unit": "Jy", "ref_wave": 2.22,
+        "mag": float(k_mag.value),
+    })
+    return {
+        "wave_um": np.asarray(pandexo_source["wave"], float).tolist(),
+        "flux_mjy": np.asarray(
+            pandexo_source["flux_out_trans"], float).tolist(),
+        "pandexo_k_mag": float(k_mag.value),
+        "normalization": "2MASS Ks vegamag",
+        "ks_mag": float(star["kmag"]),
+    }
+
+
+def _exo_dict(jdi, job, shared_star):
     exo = jdi.load_exo_dict()
     exo["observation"]["sat_level"] = float(job["sat_level_pct"])
     exo["observation"]["sat_unit"] = "%"
@@ -156,8 +203,16 @@ def _exo_dict(jdi, job):
     exo["observation"]["noise_floor"] = 0          # random noise only
 
     star = job["star"]
-    exo["star"]["type"] = "phoenix"
-    exo["star"]["mag"] = float(star["kmag"])
+    exo["star"]["type"] = "user"
+    exo["star"]["starpath"] = {
+        "w": shared_star["wave_um"],
+        # PandExo accepts Jy, while the shared artifact records mJy because
+        # that is the Pandeia input-spectrum unit.
+        "f": (np.asarray(shared_star["flux_mjy"], float) * 1e-3).tolist(),
+    }
+    exo["star"]["w_unit"] = "um"
+    exo["star"]["f_unit"] = "Jy"
+    exo["star"]["mag"] = float(shared_star["pandexo_k_mag"])
     exo["star"]["ref_wave"] = 2.22                 # K normalization branch
     exo["star"]["temp"] = float(star["teff"])
     exo["star"]["metal"] = float(star["metal"])
@@ -177,8 +232,8 @@ def _exo_dict(jdi, job):
     return exo
 
 
-def _one_mode(jdi, job, m):
-    exo = _exo_dict(jdi, job)
+def _one_mode(jdi, job, m, shared_star):
+    exo = _exo_dict(jdi, job, shared_star)
     inst = jdi.load_mode_dict(m["pandexo_name"])
     for section, kv in (m.get("config_overrides") or {}).items():
         inst["configuration"][section].update(kv)
@@ -186,7 +241,22 @@ def _one_mode(jdi, job, m):
 
     fs = res["FinalSpectrum"]
     raw = res["RawData"]
+    pout = res["PandeiaOutTrans"]
     cfg = res["PandeiaOutTrans"]["input"]["configuration"]
+    sat_wave = np.asarray(pout["1d"]["sn"][0], float)
+    n_part_sat = np.asarray(pout["1d"]["n_partial_saturated"][1], float)
+    n_full_sat = np.asarray(pout["1d"]["n_full_saturated"][1], float)
+    pandeia_star = np.asarray(
+        pout["input"]["scene"][0]["spectrum"]["sed"]["spectrum"], float)
+    if pandeia_star.ndim != 2 or pandeia_star.shape[0] != 2:
+        raise RuntimeError(
+            "PandExo did not submit a 2 x N input spectrum to Pandeia; "
+            f"got shape {pandeia_star.shape}")
+    if n_part_sat.shape != sat_wave.shape or n_full_sat.shape != sat_wave.shape:
+        raise RuntimeError(
+            "PandExo Pandeia saturation curves are not aligned with the "
+            f"native wavelength grid: wave={sat_wave.shape}, "
+            f"partial={n_part_sat.shape}, full={n_full_sat.shape}")
     return {
         "wave": np.asarray(fs["wave"], float).tolist(),
         "error": np.asarray(fs["error_w_floor"], float).tolist(),
@@ -196,6 +266,15 @@ def _one_mode(jdi, job, m):
         "var_out": np.asarray(raw["var_out"], float).tolist(),
         "var_in": np.asarray(raw["var_in"], float).tolist(),
         "e_rate_out": np.asarray(raw["e_rate_out"], float).tolist(),
+        "sat_wave": sat_wave.tolist(),
+        "n_partial_saturated": n_part_sat.tolist(),
+        "n_full_saturated": n_full_sat.tolist(),
+        "_pandeia_star": {
+            "wave_um": pandeia_star[0].tolist(),
+            "flux_mjy": pandeia_star[1].tolist(),
+            "normalization": "2MASS Ks vegamag; PandExo-resampled input",
+            "ks_mag": float(job["star"]["kmag"]),
+        },
         "timing": {k: (float(v) if isinstance(v, (int, float, np.floating))
                        else str(v)) for k, v in res["timing"].items()},
         "ngroup": int(cfg["detector"]["ngroup"]),
@@ -225,6 +304,7 @@ def main():
         raise RuntimeError(f"stsynphot failed to load Vega from {vega}")
     import pandexo.engine.justdoit as jdi
 
+    shared_star = _shared_star(job)
     out = {"__provenance__": _provenance()}
     print(f"[pandexo] engine {out['__provenance__']['pandeia_engine_version']}",
           flush=True)
@@ -232,7 +312,14 @@ def main():
         key = m["key"]
         print(f"[pandexo] {key} ({m['pandexo_name']}) ...", flush=True)
         try:
-            out[key] = _one_mode(jdi, job, m)
+            out[key] = _one_mode(jdi, job, m, shared_star)
+            submitted = out[key].pop("_pandeia_star")
+            if "__shared_star__" not in out:
+                out["__shared_star__"] = submitted
+            elif submitted != out["__shared_star__"]:
+                raise RuntimeError(
+                    "PandExo submitted different stellar spectra across modes; "
+                    "a single fixed-source parity comparison is impossible")
             print(f"[pandexo] {key}: ngroup={out[key]['ngroup']} "
                   f"npix={len(out[key]['wave'])}", flush=True)
         except Exception:

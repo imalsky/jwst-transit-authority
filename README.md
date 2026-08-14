@@ -51,10 +51,11 @@ extracted flux and noise. All three versions are recorded in each result's
 2026.7 is the release STScI supports; it labels older releases archival and
 unsuitable for planning new proposals
 ([installation page](https://outerspace.stsci.edu/spaces/PEN/pages/77530136/Pandeia%2BEngine%2BInstallation)).
-The previous 2026.2 tuple is still selectable for reproducibility as
-`JWST_TOOL_BACKEND=archival_2026_2` (renamed, not repointed, so older caches and
-artifacts recorded as `current` cannot pass for current-release output). The
-pinned Pandeia 3.0 `legacy` backend was removed. The full policy is in
+`current` is the only selectable backend as of the 2026-08-14 collaborator
+audit: the previous 2026.2 tuple and the pinned Pandeia 3.0 `legacy` backend
+were removed because this release neither ships nor validates their complete
+matched data triples. Reproducing an older run requires checking out a commit
+that still carries its backend. The full policy is in
 [Backend configuration](#backend-configuration) below.
 
 3. Tell the tool where to keep data and caches. Add these to your shell profile so
@@ -169,6 +170,46 @@ honest.
 C/O is reported as the absolute carbon/oxygen number ratio N_C/N_O. The default
 is approximately 0.55, the network's WASP-39 b elemental set from Tsai et al.
 2023.
+
+#### The equations, written out
+
+For native pixel `i`, extracted stellar count rate `F_i`, one-integration
+extracted noise `s_i`, in/out integration counts `N_in` and `N_out`, and
+`N_tr` independent transits, the box-depth approximation is
+
+```text
+var(d_i) = (s_i / F_i)^2 (1/N_in + 1/N_out) / N_tr.
+```
+
+Integration counts use complete cycles that fit inside each requested
+baseline, and in/out durations are independent inputs. Model, Jacobian, and
+uncertainty vectors all go through ONE count-weighted binning operator:
+
+```text
+d_bin   = sum(F_i d_i) / sum(F_i)
+var_bin = sum(F_i^2 var(d_i)) / sum(F_i)^2.
+```
+
+The selected floor is evaluated at final-bin wavelengths and applied as
+`sigma_final = max(sqrt(var_random), floor)`. It is an effective diagonal
+minimum: it does NOT represent a time- or wavelength-correlated covariance,
+and it does not average down with more transits.
+
+With `J` the binned model Jacobian, `C` the diagonal forecast variance, and
+`A` the nuisance matrix (shared `lnR0` + one offset per detector segment), the
+weighted projection and Fisher matrix are
+
+```text
+P = I - A (A^T C^-1 A)^+ A^T C^-1
+F = J^T C^-1 P J.
+```
+
+The pseudoinverse uses a documented rank decision (`fisher._marg_sigmas`, on
+the Jacobi-whitened matrix). Marginalized precision comes from `F^+`;
+conditional precision uses the relevant diagonal curvature without
+marginalizing the other requested rows. Combining modes adds their Fisher
+matrices only after parameters are aligned by name. Detection applies the same
+weighted nuisance projection to the molecule-removal template.
 
 **Treat the mode rankings as more robust than the absolute ppm numbers.** The
 systematic effects the tool leaves out -- time-correlated noise, the
@@ -311,9 +352,12 @@ comparison is for: run the candidate modes at the intended final binning
 and compare. For scale, on WASP-39 b (Ks = 10.2) the tool's live noise runs
 select unsaturated ramps of 1 group for PRISM (at the ramp minimum, 65%
 full well), 32 groups for G395M, and 82 for G395H -- numbers specific to
-that target and these fixed configurations. G395M is not part of the frozen
-PandExo parity benchmark, and its literature noise factor is an
-extrapolation from G395H -- both are listed under
+that target and these fixed configurations. As of the 2026-08-14 collaborator
+audit G395M IS part of the PandExo parity benchmark: the committed matrix
+covers all eight modes on all three stars (24 rows), and G395M passes on every
+one, including the new per-pixel saturation-mask gate. Its literature noise
+factor remains an extrapolation from G395H (no published number), and the
+matrix itself has been produced on one machine only -- both are listed under
 [Open gaps](#open-gaps-and-accepted-limitations).
 
 ## Scope and limits
@@ -641,16 +685,15 @@ only when the next integer measured unsafe or the cap is reached); a
 budget-exhausted search is disclosed in the results, never presented as
 optimal. The public Space runs this backend.
 
-`JWST_TOOL_BACKEND=archival_2026_2` selects the previous 2026.2 tuple under its
-honest archival name, for reproducing older results only. Its own parity
-artifact predates the fail-closed gate and was never gate-evaluated. STScI
-labels 2026.2 archival and unsuitable for planning new proposals. See
-the decision records in `notes.md` (its S2-04
-"stay on 2026.2" decision is superseded by the 2026.7 migration).
-
-The pinned pandeia 3.0 / `pandeia_data-3.0rc3` `legacy` backend was removed.
-Reproducing a pre-2026.2 (3.0-era) run now requires checking out a commit
-that still carries it.
+`current` is the ONLY backend token (2026-08-14 collaborator audit). The
+`archival_2026_2` tuple and the pinned pandeia 3.0 / `pandeia_data-3.0rc3`
+`legacy` backend were both removed: this release does not ship or validate
+their complete matched data triples, and the 2026.2 parity artifact predated
+the fail-closed gate and was never gate-evaluated. `JWST_TOOL_BACKEND` set to
+anything else raises at import, naming the supported release. Reproducing a
+2026.2- or 3.0-era run requires checking out a commit that still carries that
+backend. See the decision records in `notes.md` (its S2-04 "stay on 2026.2"
+decision is superseded by the 2026.7 migration).
 
 Three guarantees hold across backends. The worker refuses to run a mismatched
 engine and reference-data pair. Every result and cache file records the exact
@@ -663,6 +706,17 @@ with loud failures. The PICASO reference tree is selected by
 `JWST_TOOL_PICASO_REFDATA`.
 
 ## PICASO engine
+
+**DISABLED BY DEFAULT AND UNCERTIFIED FOR THIS RELEASE (2026-08-14
+collaborator audit).** PICASO 4.0.1 requires NumPy >= 2 while the validated
+ExoJAX 2.2.3 stack requires NumPy < 2, so the two cannot share an environment,
+and the native-RT cross-model artifact is stale and failing. `canonical_params`
+raises for `chem_provider="picaso"` or `tp_mode="picaso_climate"` unless
+`JWST_TOOL_ENABLE_UNCERTIFIED_PICASO=1` is set, and the GUI hides both options
+otherwise. That escape hatch is for maintainer investigation only: its output
+must not enter collaborator results. Everything below documents what the
+integration DOES when enabled, and remains the versioned record for the work
+needed to re-certify it.
 
 The PICASO provider + climate T-P mode: scope, limits, and roadmap.
 Status: v18 (tool 0.12.0, 2026-07-20). This is the versioned record of what
@@ -1000,6 +1054,25 @@ land, add new ones as they are found. The reasoning behind every decision
 lives in notes.md, Decision records; scope and conventions live in
 [Physics and conventions](#physics-and-conventions).
 
+### Opened by the 2026-08-14 collaborator audit
+
+- PICASO chemistry/climate is disabled and uncertified: its dependency
+  requirements conflict with the validated ExoJAX environment and its
+  native-RT cross-model artifact is stale and failing. Re-certifying it needs
+  a dependency-compatible live run plus a passing cross-model gate.
+- The eight-mode Pandeia/PandExo matrix (G395M included) passes its gate but
+  has been produced on ONE machine only. It is not independently reproduced,
+  and the 2026.7 JWST refdata is absent from the maintainer workstation.
+- Feeding PandExo's own stellar spectrum into our worker (`star_spectrum`,
+  worker v11) makes the sigma comparison a clean estimator-vs-estimator test,
+  but it also removes the parity harness's only independent check on the
+  PRODUCTION source setup (phoenix SED + band-integrated 2MASS Ks
+  normalization), which production still uses. A row that builds both SEDs
+  independently should be kept alongside the shared-source row.
+- Third-party reference data are not redistributed in the collaborator
+  bundle; the manifest records source identifiers and checksums and
+  recipients must acquire the data from the providers.
+
 ### Deferred from the 2026-08-13 external review
 
 - No deterministic proposal-export seed policy yet: the mock-observation
@@ -1112,13 +1185,19 @@ sibling-repo data the forward model needs), with per-item download remedies.
 - `data/cdbs/calspec/alpha_lyr_stis_011.fits` -- CALSPEC Vega for the vegamag
   normalization (288 KB; required, preflighted). Source:
   https://ssb.stsci.edu/trds/calspec/alpha_lyr_stis_011.fits
-- `data/pandeia_data-2026.2-jwst/` -- Pandeia JWST reference data for the default
-  "current" backend (~15 MiB download / 30 MB extracted; must carry
-  VERSION_DATA matching the engine release).
-  Source: https://stsci.box.com/v/pandeia-data-v2026p2-jwst
-- `data/pandeia_psfs-2026.2-jwst/` -- the split PSF library (pandeia_data >= 2026;
+- `data/pandeia_data-2026.7-jwst/` -- Pandeia JWST reference data for the only
+  supported "current" backend (must carry VERSION_DATA matching the engine
+  release; the worker refuses a mixed triple).
+  Source: https://stsci.box.com/v/pandeia-data-v2026p7-jwst
+- `data/pandeia_psfs-2026.7-jwst/` -- the split PSF library (pandeia_data >= 2026;
   ~4 GiB; must contain VERSION_PSF).
-  Source: https://stsci.box.com/v/pandeia-psfs-v2026p2-jwst
+  Source: https://stsci.box.com/v/pandeia-psfs-v2026p7-jwst
+
+  These two are browser-only downloads (STScI Box shared links refuse
+  programmatic requests), so `jwst-tool fetch` reports them as manual steps
+  rather than pretending to script them. Third-party reference data is NOT
+  redistributed in the collaborator bundle: the manifest records source
+  identifiers and checksums and recipients acquire the data from the providers.
 
 The forward model's own data (HITRAN line lists, CIA tables, CO ExoMol cache,
 stellar UV spectra) lives in the SIBLING repos (vulcan-retrieval `data/`,
@@ -1135,6 +1214,51 @@ Two deployment runbooks (merged here from `deploy/DEPLOY.md` and
 `deploy/hf-space/SETUP.md` in the 2026-08 doc consolidation). The scripts and
 configs they reference live in `deploy/` and `deploy/hf-space/`. Caches
 self-invalidate by version keys in both deployments.
+
+## Release gate and required evidence
+
+A passing unit suite is not a scientific release. This table is what a
+collaborator bundle must be able to show; thresholds are declared BEFORE a run,
+and a failed observation is investigated or the feature is excluded, never
+resolved by widening the threshold.
+
+| Claim | Independent check | Release artifact |
+|---|---|---|
+| Pandeia units and transit propagation | literal analytic count/rate oracles, unequal baselines, multiple transits | unit log and equation mapping |
+| Count-weighted binning | hand-computed bins, descending grids, partial saturation | unit log |
+| Ramp and saturation policy | native per-pixel masks and maximal-safe ramp search | fixed-source PandExo parity JSON/report |
+| Instrument coverage | bright, WASP-39-like, and faint stars across all eight modes | 3 x 8 matrix |
+| Operational policy | unmodified PandExo templates, warnings fail closed | default-policy report |
+| Fisher implementation | analytic full-rank/singular cases, whitened-design SVD, direct likelihood curvature, reorder/rescale tests | unit log and benchmark JSON |
+| Jacobians | predeclared multi-step finite-difference closure against AD | closure report |
+| VULCAN-JAX chemistry | exact frozen upstream oracle plus shipped planet cases | parity report |
+| Forward RT | transmission/emission golden outputs and optical-depth checks | benchmark tables/plots |
+| PICASO | dependency-compatible live run and current native-RT cross-model gate | currently excluded |
+| Packaging | wheel build and install into an empty environment | build/install log |
+
+The hard gate additionally requires: exact, clean repository revisions and
+dependency/data checksums; Pandeia engine, refdata, and PSF markers from one
+supported release; no failed, skipped-required, stale, truncated, or
+unattributed validation; no open critical/high scientific finding; no
+unexplained numerical change from the frozen pre-refactor golden output; no
+operational warning described as a valid recommended configuration; and no
+claim whose equation, test, artifact, limitation, and provenance cannot be
+traced in the bundle.
+
+### Current status (2026-08-14 collaborator audit)
+
+**This is not yet a passing release, and the package must preserve that as a
+finding rather than copy an older green banner.** Open items:
+
+- PICASO is excluded (dependency conflict + stale failing native-RT artifact).
+- The committed Pandeia/PandExo matrix was regenerated for the eight-mode,
+  per-pixel saturation gate and PASSES it, but it was produced on the audit
+  machine (Python 3.12 / NumPy 2.5.2 / `../audit-data/`). It has NOT been
+  reproduced independently, and the JWST 2026.7 refdata needed to re-run it is
+  not present on the maintainer workstation.
+- The strict VULCAN-JAX suite needs one pinned oracle revision per declared
+  parity family plus a built FastChem executable; a mixed-oracle run is not
+  valid evidence.
 
 ## Parity testing
 

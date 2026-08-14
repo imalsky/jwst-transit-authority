@@ -146,7 +146,44 @@ def _result_nuisance(result: dict) -> list[np.ndarray]:
     return _segment_rows(result["seg"]) if "seg" in result else []
 
 
-def transits_to_target(result: dict, target_sig: float) -> dict:
+def _detection_nuisance(result: dict, projected: bool) -> list[np.ndarray]:
+    """Calibration rows, plus local physical nuisance rows when requested."""
+    rows = _result_nuisance(result)
+    if not projected:
+        return rows
+    names = [str(x) for x in result.get("jac_names", [])]
+    jac = result.get("jac_bins")
+    if jac is None or not names:
+        raise ValueError(
+            "projected detection score requires jac_bins and jac_names")
+    jac = np.asarray(jac, float)
+    if jac.ndim != 2 or jac.shape[0] != len(names):
+        raise ValueError(
+            "projected detection score: jac_bins rows must match jac_names")
+    return rows + [jac[i] for i, name in enumerate(names)
+                   if name in _NUISANCE_JAC]
+
+
+def detection_score(result: dict, sigma: np.ndarray | None = None,
+                    *, projected: bool = False) -> float:
+    """Recompute a result's matched-template score with one explicit metric.
+
+    ``projected=False`` preserves the historical calibration-profiled score.
+    ``projected=True`` additionally profiles the available local T-P,
+    reference-radius, and cloud/Mie Jacobian directions. The latter is the
+    collaborator-facing score whenever those Jacobians are available.
+    """
+    if result.get("depth_wo") is None:
+        return float("nan")
+    signal = np.asarray(result["depth"]) - np.asarray(result["depth_wo"])
+    use_sigma = np.asarray(result["sigma"] if sigma is None else sigma)
+    return detection_significance(
+        signal, use_sigma,
+        nuisance=_detection_nuisance(result, projected=projected))
+
+
+def transits_to_target(result: dict, target_sig: float, *,
+                       projected: bool = False) -> dict:
     """Smallest transit count reaching ``target_sig`` for the detect goal.
 
     Returns dict(n=int|None, reachable=bool, sig_inf=float). ``sig_inf`` is
@@ -158,21 +195,19 @@ def transits_to_target(result: dict, target_sig: float) -> dict:
     """
     if result.get("depth_wo") is None:
         return dict(n=None, reachable=False, sig_inf=float("nan"))
-    signal = np.asarray(result["depth"]) - np.asarray(result["depth_wo"])
-    nuis = _result_nuisance(result)
     floor = np.asarray(result["floor"])
     if not np.any(floor > 0.0):
         # no floor: the limit is genuinely INFINITE (report inf, not the
         # ~1e26 the 1e-30 clip would give)
         sig_inf = float("inf")
     else:
-        sig_inf = detection_significance(signal, np.maximum(floor, 1e-30),
-                                         nuisance=nuis)
+        sig_inf = detection_score(result, np.maximum(floor, 1e-30),
+                                  projected=projected)
     if target_sig > sig_inf:
         return dict(n=None, reachable=False, sig_inf=sig_inf)
     for n in range(1, N_TRANSITS_CAP + 1):
-        if detection_significance(signal, sigma_at_transits(result, n),
-                                  nuisance=nuis) >= target_sig:
+        if detection_score(result, sigma_at_transits(result, n),
+                           projected=projected) >= target_sig:
             return dict(n=n, reachable=True, sig_inf=sig_inf)
     return dict(n=None, reachable=False, sig_inf=sig_inf)
 
@@ -198,6 +233,73 @@ def _native_pixel_counts(mode_result: dict) -> dict:
             for k in _NATIVE_PIXEL_KEYS}
 
 
+def _removed_spectrum(model: dict, mols: list[str], target_mol,
+                      order: np.ndarray) -> np.ndarray | None:
+    if target_mol is None:
+        return None
+    if target_mol not in mols:
+        raise ValueError(
+            f"target molecule {target_mol!r} is not in the cached model's RT "
+            f"set {mols} -- re-run the forward model with it enabled "
+            "(extra_mols)")
+    index = mols.index(target_mol)
+    if (str(model.get("science_mode", "transmission")) == "emission"
+            and "emis_tau_bottom_min_wo" in model):
+        tau_bottom = float(np.asarray(model["emis_tau_bottom_min_wo"])[index])
+        if tau_bottom < 3.0:
+            raise ValueError(
+                f"{target_mol} emission detection is not supported for this "
+                f"atmosphere: with {target_mol} removed, the emission RT "
+                f"column bottom is optically thin (min tau {tau_bottom:.2f} "
+                "< 3), so its eclipse detection contrast would be overstated. "
+                "Detect a molecule with deeper opacity, or use transmission.")
+    return np.asarray(model["depth_wo"])[index][order]
+
+
+def _mode_warnings(mode: dict, mode_result: dict, t_in_s: float,
+                   lsf_skip_note: str | None) -> dict:
+    warnings = dict(mode_result.get("warnings", {}))
+    n_cycles = t_in_s / float(mode_result["t_cycle_s"])
+    if n_cycles < 3.0:
+        warnings[f"only {n_cycles:.1f} integration cycles fit in transit "
+                 "(PandExo enforces >= 3 by shortening the ramp)"] = True
+    if lsf_skip_note:
+        warnings[lsf_skip_note] = True
+    ngroup = int(mode_result["ngroup"])
+    if ngroup < int(mode["ngroup_warn_below"]):
+        reason = ins.NGROUP_WARN_REASON[mode["instrument"]]
+        warnings[f"ramp uses {ngroup} group(s) per integration, below this "
+                 f"mode's STScI-recommended ramp ({reason}); verify in APT"] = True
+    if mode_result.get("ramp_search_complete") is False:
+        warnings["the group search hit its calculation budget; the reported "
+                 "ramp is measured-safe but may not be the longest possible "
+                 "(costs sensitivity, never validity)"] = True
+    if (mode["instrument"] == "miri"
+            and ngroup == int(mode["ngroup_min"])
+            and not bool(mode_result.get("saturated", False))):
+        warnings["MIRI floor ramp: 2 groups/integration is MIRI's shortest "
+                 "permitted ramp and is very difficult to calibrate "
+                 "accurately; confirm in APT whether this configuration "
+                 "needs special approval before proposing"] = True
+    return warnings
+
+
+def _usable_pixels(mode_key: str, mode_result: dict) -> tuple:
+    wl = np.asarray(mode_result["wl"])
+    flux = np.asarray(mode_result["flux"])
+    full = np.asarray(mode_result.get("n_full_sat", np.zeros(wl.size)))
+    partial = np.asarray(mode_result.get("n_part_sat", np.zeros(wl.size)))
+    degenerate = binning.degenerate_wl_mask(wl)
+    usable = (full == 0) & ~degenerate
+    if not usable.any():
+        raise ValueError(
+            f"{mode_key}: no usable pixels -- all {wl.size} are fully "
+            f"saturated ({int((full > 0).sum())}) or wavelength-degenerate "
+            f"({int(degenerate.sum())}). Reduce ngroup / pick a fainter-star "
+            "configuration, or check the worker's wavelength grid")
+    return wl, flux, full, partial, degenerate, usable
+
+
 def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
                   R_bin: float, t_in_s: float, t_out_s: float, n_transits: int,
                   floor_spec, noise_inflation: float = 1.0) -> dict:
@@ -215,47 +317,11 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
     wl_model = wl_model[order]
     depth = model["depth"][order]
     mols = [str(x) for x in model["mols"]]
-    if target_mol is not None and target_mol not in mols:
-        raise ValueError(
-            f"target molecule {target_mol!r} is not in the cached model's RT set "
-            f"{mols} -- re-run the forward model with it enabled (extra_mols)")
-    depth_wo = (model["depth_wo"][mols.index(target_mol)][order]
-                if target_mol is not None else None)
-    # Emission only: if THIS target's removed-molecule spectrum went optically
-    # thin at the RT column bottom (emis_tau_bottom_min_wo < 3), its eclipse
-    # contrast is overstated -- refuse this target's detection only; the
-    # spectrum, constraints, and other molecules stay usable.
-    if (target_mol is not None
-            and str(model.get("science_mode", "transmission")) == "emission"
-            and "emis_tau_bottom_min_wo" in model):
-        _tau_wo = float(np.asarray(model["emis_tau_bottom_min_wo"])[
-            mols.index(target_mol)])
-        if _tau_wo < 3.0:
-            raise ValueError(
-                f"{target_mol} emission detection is not supported for this "
-                f"atmosphere: with {target_mol} removed, the emission RT column "
-                f"bottom is optically thin (min tau {_tau_wo:.2f} < 3), so its "
-                "eclipse detection contrast would be overstated. Detect a "
-                "molecule with deeper opacity (e.g. SO2/CO2), or use "
-                "transmission.")
+    depth_wo = _removed_spectrum(model, mols, target_mol, order)
 
-    wl_pix = np.asarray(mode_result["wl"])
-    flux_pix = np.asarray(mode_result["flux"])
-    # fully saturated pixels are excluded from the estimator; partially
-    # saturated ones kept but counted
-    n_full_sat = np.asarray(mode_result.get("n_full_sat", np.zeros(wl_pix.size)))
-    n_part_sat = np.asarray(mode_result.get("n_part_sat", np.zeros(wl_pix.size)))
-    # degenerate-wavelength pixels (pandeia grid artifacts) claim spectral
-    # information that does not exist -- drop them and report the count
-    degen = binning.degenerate_wl_mask(wl_pix)
-    usable = (n_full_sat == 0) & ~degen
-    if not usable.any():
-        raise ValueError(
-            f"{mode_key}: no usable pixels -- all {wl_pix.size} are fully "
-            f"saturated ({int((n_full_sat > 0).sum())}) or wavelength-"
-            f"degenerate ({int(degen.sum())}). Reduce ngroup / pick a "
-            "fainter-star configuration, or check the worker's wavelength "
-            "grid")
+    wl_pix, flux_pix, n_full_sat, n_part_sat, degen, usable = _usable_pixels(
+        mode_key, mode_result
+    )
 
     lo = max(m["wl_min"], float(wl_model.min()), float(wl_pix[usable].min()))
     hi = min(m["wl_max"], float(wl_model.max()), float(wl_pix[usable].max()))
@@ -349,54 +415,11 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
     else:
         d_wo_b, sigma_detect, sigma_detect_proj = None, float("nan"), float("nan")
 
-    # PandExo guarantees >= 3 in-transit integrations by restructuring the
-    # ramp; this worker's ramp is deliberately transit-independent (the noise
-    # cache is per star+mode, never per event), so warn loudly instead of
-    # silently accepting 1-2 cycles. DELIBERATE, decision recorded as S2-10 in
-    # notes.md, Decision records section: the box-depth variance stays valid
-    # at 1-2 cycles; the result is NOT re-run with a shortened ramp, and
-    # reviews that flag this are re-finding an accepted trade, not a bug.
-    warnings = dict(mode_result.get("warnings", {}))
-    n_cyc_in = t_in_s / float(mode_result["t_cycle_s"])
-    if n_cyc_in < 3.0:
-        warnings[f"only {n_cyc_in:.1f} integration cycles fit in transit "
-                 "(PandExo enforces >= 3 by shortening the ramp)"] = True
-    if _lsf_skip_note:
-        warnings[_lsf_skip_note] = True
-    # Disclosure, not a bound: since 0.25.0 the ramp search reaches pandeia's
-    # permitted minimum (1 group NIR / 2 MIRI), so a very short selected ramp
-    # ranks normally but is flagged against the mode's STScI-recommended ramp
-    # with the instrument's own reason (thresholds and sources in
-    # instruments.py: NGROUP_WARN_REASON + the ngroup_warn_below comment).
-    if int(mode_result["ngroup"]) < int(m["ngroup_warn_below"]):
-        _reason = ins.NGROUP_WARN_REASON[m["instrument"]]
-        warnings[f"ramp uses {int(mode_result['ngroup'])} group(s) per "
-                 "integration, below this mode's STScI-recommended ramp "
-                 f"({_reason}); verify in APT"] = True
-    # A budget-exhausted group search is disclosed, never presented as
-    # optimal (worker v10 field; older payloads without it made no such
-    # claim, so absence stays silent).
-    if mode_result.get("ramp_search_complete") is False:
-        warnings["the group search hit its calculation budget; the reported "
-                 "ramp is measured-safe but may not be the longest possible "
-                 "(costs sensitivity, never validity)"] = True
-    # The MIRI floor (2 groups) gets a DISTINCT operational warning: STScI
-    # calls 2-5 group MIRI ramps very difficult to calibrate, and a
-    # 2026-08-09 review reported (unconfirmed on retrievable jwst-docs
-    # pages; see notes.md, Decision records section) that APT treats 2-group FASTR1 as a
-    # limited-access configuration -- so the user is told to confirm
-    # approval requirements rather than assured either way.
-    if (m["instrument"] == "miri"
-            and int(mode_result["ngroup"]) == int(m["ngroup_min"])
-            and not bool(mode_result.get("saturated", False))):
-        warnings["MIRI floor ramp: 2 groups/integration is MIRI's shortest "
-                 "permitted ramp and is very difficult to calibrate "
-                 "accurately; confirm in APT whether this configuration "
-                 "needs special approval before proposing"] = True
+    warnings = _mode_warnings(m, mode_result, t_in_s, _lsf_skip_note)
 
     keep = op["keep"]
     return dict(
-        jac_bins=jac_bins,
+        jac_bins=jac_bins, jac_names=jac_names,
         mode_key=mode_key, label=m["label"],
         wl=nz["wl_center"],
         wl_eff=binning.bin_values(op, wl_pix),

@@ -80,14 +80,11 @@ def main() -> int:
               "Run `jwst-tool data` for the full data-availability report.",
               file=sys.stderr)
 
-    if not os.environ.get("JWST_TOOL_PICASO_REFDATA", "").strip():
-        print("jwst-tool: JWST_TOOL_PICASO_REFDATA is not set -- the opt-in "
-              "PICASO forward-model provider and the PICASO climate T-P mode "
-              "will stop with an error (the VULCAN-JAX provider is "
-              "unaffected). "
-              "Point it at a PICASO v4.0 reference tree to enable them; "
-              "`jwst-tool data` reports each required piece.",
-              file=sys.stderr)
+    if os.environ.get("JWST_TOOL_ENABLE_UNCERTIFIED_PICASO") == "1":
+        print("jwst-tool: WARNING: the uncertified PICASO research path is "
+              "enabled. Its dependency stack conflicts with the validated "
+              "ExoJAX environment and its native-RT gate is failing; do not "
+              "use PICASO output in collaborator results.", file=sys.stderr)
 
     app = Path(__file__).parent / "app.py"
     cmd = [sys.executable, "-m", "streamlit", "run", str(app)] + sys.argv[1:]

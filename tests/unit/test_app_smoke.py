@@ -484,22 +484,25 @@ def test_valid_below_target_result_is_warning_not_error():
 def test_picaso_provider_renders(monkeypatch):
     # Switching the engine to PICASO must render; canonical_params failures
     # surface through the params_error caption, never an exception.
+    monkeypatch.setenv("JWST_TOOL_ENABLE_UNCERTIFIED_PICASO", "1")
     at = _run_app()
     at.selectbox(key="n0_provider").set_value("picaso")
     at.run()
     assert not at.exception, at.exception
 
 
-def test_picaso_climate_mode_renders():
+def test_picaso_climate_mode_renders(monkeypatch):
+    monkeypatch.setenv("JWST_TOOL_ENABLE_UNCERTIFIED_PICASO", "1")
     at = _run_app()
     at.selectbox(key="n0_wasp39b_tp").set_value("picaso_climate")
     at.run()
     assert not at.exception, at.exception
 
 
-def test_picaso_constrain_goal_renders():
+def test_picaso_constrain_goal_renders(monkeypatch):
     # Regression: the constrain-goal Fisher multiselect crashed under PICASO
     # (default lnKzz not in the menu) -- both switch orders must render.
+    monkeypatch.setenv("JWST_TOOL_ENABLE_UNCERTIFIED_PICASO", "1")
     at = _run_app()
     at.radio(key="n0_goal").set_value("constrain")
     at.run()
@@ -564,8 +567,9 @@ def test_ad_selection_locks_photochemistry_on():
     assert not at.checkbox(key="n0_photo").disabled
 
 
-def test_picaso_detect_fisher_checkbox_renders():
+def test_picaso_detect_fisher_checkbox_renders(monkeypatch):
     # same defect on the detect goal's "Compute parameter constraints too"
+    monkeypatch.setenv("JWST_TOOL_ENABLE_UNCERTIFIED_PICASO", "1")
     at = _run_app()
     at.selectbox(key="n0_provider").set_value("picaso")
     at.run()
@@ -580,7 +584,7 @@ def test_custom_archive_fill_updates_the_form():
     at = _run_app()
     at.selectbox(key="n0_planet").set_value("custom").run()
     assert not at.exception, at.exception
-    at.selectbox(key="n0_custom_arch_name").set_value("HD 189733 b")
+    at.selectbox(key="n0_custom_arch_name").set_value("HD 189733 b").run()
     at.button(key="n0_custom_arch_fill").click().run()
     assert not at.exception, at.exception
     from jwst_tool import archive
@@ -771,7 +775,7 @@ def test_emission_mode_archive_fill_skips_transit_duration():
     at.selectbox(key="n0_planet").set_value("custom").run()
     at.radio(key="n0_scimode").set_value("emission").run()
     t14_before = at.number_input(key="n0_custom_t14").value
-    at.selectbox(key="n0_custom_arch_name").set_value("HD 189733 b")
+    at.selectbox(key="n0_custom_arch_name").set_value("HD 189733 b").run()
     at.button(key="n0_custom_arch_fill").click().run()
     assert not at.exception, at.exception
     from jwst_tool import archive

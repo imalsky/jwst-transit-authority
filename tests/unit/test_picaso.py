@@ -19,11 +19,18 @@ from jwst_tool import picaso_climate as pcl
 
 @pytest.fixture(autouse=True)
 def _fp(monkeypatch):
+    monkeypatch.setenv(forward.PICASO_EXPERIMENTAL_ENV, "1")
     monkeypatch.setattr(forward, "_picaso_fingerprint",
                         lambda: {"picaso_version": "4.0.1",
                                  "chemgrid_sha1": "deadbeefdeadbeef"})
     monkeypatch.setattr(forward, "_picaso_climate_fingerprint",
                         lambda node, tio_vo: "cafecafecafecafe")
+
+
+def test_picaso_is_disabled_by_default(monkeypatch):
+    monkeypatch.delenv(forward.PICASO_EXPERIMENTAL_ENV, raising=False)
+    with pytest.raises(RuntimeError, match="uncertified"):
+        forward.canonical_params(_pp())
 
 
 def _p(**kw):

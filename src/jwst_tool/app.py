@@ -193,6 +193,14 @@ def _has_floor(r: dict) -> bool:
     return bool(np.any(np.asarray(r["floor"]) > 0.0))
 
 
+def _detection_metric(r: dict) -> tuple[float, bool]:
+    """Collaborator-facing score and whether physical nuisances were used."""
+    projected = float(r.get("sigma_detect_proj", float("nan")))
+    if np.isfinite(projected):
+        return projected, True
+    return float(r["sigma_detect"]), False
+
+
 def _mode_cfg(mode_key: str) -> str:
     """The exact fixed detector configuration (subarray/readout) a registry
     mode evaluates -- shown next to headline labels so a "mode" is never
@@ -815,19 +823,30 @@ with st.sidebar:
     # -----------------------------------------------------------------------
     st.divider()
     st.markdown("### 2 · Atmosphere")
+    _picaso_enabled = forward.picaso_experimental_enabled()
+    _providers = (["vulcan", "picaso"] if _picaso_enabled else ["vulcan"])
     chem_provider = st.selectbox(
-        "Chemistry engine", ["vulcan", "picaso"], index=0, key=K("provider"),
+        "Chemistry engine", _providers, index=0, key=K("provider"),
         format_func={"vulcan": "VULCAN (photochemical kinetics)",
-                     "picaso": "PICASO (chemical equilibrium)"}.get)
+                     "picaso": "PICASO (UNCERTIFIED experiment)"}.get)
     _pic = chem_provider == "picaso"
     if _pic:
         st.session_state[K("jacm")] = "fd"   # tables are not differentiable
+        st.error(
+            "PICASO is an uncertified maintainer-only path. Its NumPy "
+            "requirements conflict with the validated ExoJAX environment, "
+            "and the native-RT cross-model gate is failing. Do not use these "
+            "outputs in collaborator results.")
 
     with st.expander("Temperature-pressure profile"):
         # canonical_params refuses tp_mode='file' under PICASO; hide it here
         # too (GUI gating is convenience, canonical_params is the hard guard).
-        _tp_opts = (["guillot", "picaso_climate"] if _pic
-                    else ["guillot", "file", "picaso_climate"])
+        if _pic:
+            _tp_opts = ["guillot", "picaso_climate"]
+        else:
+            _tp_opts = ["guillot", "file"]
+            if _picaso_enabled:
+                _tp_opts.append("picaso_climate")
         # Mirror canonical_params' default so GUI and API defaults agree.
         _tp_default = forward._default_tp_mode(
             {"planet": planet_key, "chem_provider": chem_provider})
@@ -840,7 +859,7 @@ with st.sidebar:
             format_func={"guillot": "Guillot (2010)",
                          "file": "Tabulated table (T-P, optional Kzz)",
                          "picaso_climate":
-                             "PICASO radiative-convective (climate solve)"}.get)
+                             "PICASO radiative-convective (UNCERTIFIED)"}.get)
         tp_kwargs = {}
         tp_file, tp_file_path, tp_file_ok = "", None, True
         if tp_mode == "guillot":
@@ -2025,11 +2044,13 @@ if goal_r == "detect":
             "modes or a different target; only raise the saturation limit "
             "(step 4) if that is scientifically justified.")
     else:
-        ranked = sorted(ok, key=lambda r: -r["sigma_detect"])
+        ranked = sorted(ok, key=lambda r: -_detection_metric(r)[0])
         best = ranked[0]
-        bsig = best["sigma_detect"]
+        bsig, _best_projected = _detection_metric(best)
         verdict = (f"**{best['label']}**: {bsig:.1f}σ in {ntr} "
-                   f"{_ev}{'s' if ntr > 1 else ''} (target {tsig:g}σ).")
+                   f"{_ev}{'s' if ntr > 1 else ''} (target {tsig:g}σ; "
+                   + ("local physical nuisances profiled)."
+                      if _best_projected else "calibration offsets profiled)."))
         if bsig >= tsig:
             # No banner when the target is met (maintainer, 2026-08-13): the
             # figure and the mode table already carry the number, and a green
@@ -2041,7 +2062,8 @@ if goal_r == "detect":
             # floor-aware transit solver: the photon term averages down with
             # N, the systematic floor does not -- a plain 1/sqrt(N) law is
             # optimistic exactly where it matters
-            tt = detect.transits_to_target(best, tsig)
+            tt = detect.transits_to_target(
+                best, tsig, projected=_best_projected)
             if tt["reachable"]:
                 st.warning(verdict + f"  Below the target; {tt['n']} {_ev}s "
                            f"of {best['label']} would reach it (floor-aware "
@@ -2260,7 +2282,7 @@ with st.expander("Physical structure (T-P profile, mixing ratios)"):
 with st.expander("Mode details"):
     # --- mode details table ------------------------------------------------------
     rows = []
-    key_order = (lambda r: -r["sigma_detect"]) if goal_r == "detect" else (
+    key_order = (lambda r: -_detection_metric(r)[0]) if goal_r == "detect" else (
         lambda r: per_mode.get(r["mode_key"], np.inf))
     for r in sorted(results, key=key_order):
         notes = []
@@ -2296,13 +2318,13 @@ with st.expander("Mode details"):
         if r.get("n_segments", 1) > 1:
             notes.append(f"{r['n_segments']} detector segments (offset per segment)")
         if goal_r == "detect":
-            row["σ_detect"] = round(r["sigma_detect"], 1)
-            _proj = r.get("sigma_detect_proj", float("nan"))
-            if np.isfinite(_proj):
-                row["σ_detect (proj)"] = round(_proj, 1)
+            _score, _is_projected = _detection_metric(r)
+            row["σ_detect (nuisance-profiled)"] = round(_score, 1)
+            row["σ_detect (calibration-only)"] = round(r["sigma_detect"], 1)
             _t = float(meta.get("target_sig") or 3.0)
-            if r["sigma_detect"] > 0:
-                _tt = detect.transits_to_target(r, _t)
+            if _score > 0:
+                _tt = detect.transits_to_target(
+                    r, _t, projected=_is_projected)
                 _fl = _has_floor(r)
                 row[_tt_col] = _transits_cell(
                     _tt, f"{_tt['sig_inf']:.1f}σ" if _fl else "", _fl, _ev)
@@ -2792,8 +2814,9 @@ if goal_r == "detect":
     # saturated modes carry no usable data anywhere else (rankings,
     # combinations, forecasts); they get no score in the legend either
     for r in results:
-        if not r["saturated"] and np.isfinite(r["sigma_detect"]):
-            _leg_num[r["mode_key"]] = f"{float(r['sigma_detect']):.1f}σ"
+        _score, _ = _detection_metric(r)
+        if not r["saturated"] and np.isfinite(_score):
+            _leg_num[r["mode_key"]] = f"{_score:.1f}σ"
 elif _have_fisher:
     _rk_key = K("sum_rank_param_" + "_".join(fisher_names))
     if st.session_state.get(_rk_key) not in fisher_names:
@@ -3019,4 +3042,3 @@ if _mock is not None:
         f"{_fname_base}_mock_realization_seed{int(seed)}.csv", "text/csv",
         key=K("dl_spec_mock"),
         help=posteriors.MOCK_SHORT_LABEL)
-

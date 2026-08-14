@@ -71,7 +71,11 @@ _BACKEND_FINGERPRINT = None
 # reached; v9's predictor-stall exit could sit one integer low on offset
 # ramps), and the payload gains ramp_search_complete (budget exhaustion is
 # reported, never presented as maximal).
-WORKER_VERSION = 10
+# v11 (2026-08-14 collaborator audit): retain the native wavelength grid and
+# partial/full saturation curves before the finite-noise filter.  The parity
+# gate now compares those masks pixel by pixel; aggregate counts alone could
+# hide an alignment or report-key error.
+WORKER_VERSION = 11
 
 
 def backend_fingerprint() -> dict:

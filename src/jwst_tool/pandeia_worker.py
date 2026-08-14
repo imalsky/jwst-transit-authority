@@ -61,7 +61,7 @@ import traceback
 import numpy as np
 
 
-def _make_calc(build_default_calc, m, star):
+def _make_calc(build_default_calc, m, star, star_spectrum=None):
     calc = build_default_calc("jwst", m["instrument"], m["mode"])
     for section, kv in (m.get("config") or {}).items():
         calc["configuration"][section].update(kv)
@@ -78,13 +78,29 @@ def _make_calc(build_default_calc, m, star):
                 f"mode {m['key']}: background={m['background']!r} without "
                 "background_level -- the engine needs both (e.g. 'medium')")
         calc["background_level"] = m["background_level"]
-    calc["scene"][0]["spectrum"]["sed"] = {
-        "sed_type": "phoenix", "teff": float(star["teff"]),
-        "log_g": float(star["log_g"]), "metallicity": float(star["metallicity"])}
-    # band-integrated 2MASS Ks vegamag normalization (module docstring)
-    calc["scene"][0]["spectrum"]["normalization"] = {
-        "type": "photsys", "bandpass": "2mass,ks",
-        "norm_flux": float(star["ks_mag"]), "norm_fluxunit": "vegamag"}
+    spectrum = calc["scene"][0]["spectrum"]
+    if star_spectrum is None:
+        spectrum["sed"] = {
+            "sed_type": "phoenix", "teff": float(star["teff"]),
+            "log_g": float(star["log_g"]),
+            "metallicity": float(star["metallicity"])}
+        # band-integrated 2MASS Ks vegamag normalization (module docstring)
+        spectrum["normalization"] = {
+            "type": "photsys", "bandpass": "2mass,ks",
+            "norm_flux": float(star["ks_mag"]), "norm_fluxunit": "vegamag"}
+    else:
+        wave = np.asarray(star_spectrum.get("wave_um"), dtype=float)
+        flux = np.asarray(star_spectrum.get("flux_mjy"), dtype=float)
+        if (wave.ndim != 1 or wave.size < 2 or flux.shape != wave.shape
+                or not np.all(np.isfinite(wave))
+                or not np.all(np.isfinite(flux))
+                or np.any(np.diff(wave) <= 0.0) or np.any(flux <= 0.0)):
+            raise ValueError(
+                "star_spectrum must contain aligned, finite, positive wave_um "
+                "and flux_mjy arrays on a strictly increasing grid")
+        spectrum["sed"] = {
+            "sed_type": "input", "spectrum": [wave.tolist(), flux.tolist()]}
+        spectrum["normalization"] = {"type": "none"}
     return calc
 
 
@@ -157,8 +173,8 @@ def _sat_curve(rpt, key, n_pix):
 
 
 def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
-              refdata):
-    calc = _make_calc(build_default_calc, m, star)
+              refdata, star_spectrum=None):
+    calc = _make_calc(build_default_calc, m, star, star_spectrum)
     ng_min, ng_max = int(m["ngroup_min"]), int(m["ngroup_max"])
 
     probe = _run(perform_calculation, calc, ng_min)
@@ -230,6 +246,12 @@ def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
         "n_pix_part_sat_native": int((n_part > 0).sum()),
         "n_pix_full_sat_native": int((n_full > 0).sum()),
     }
+    native_masks = {
+        "wl_native": wl.tolist(),
+        "usable_native": good.tolist(),
+        "n_part_sat_native_curve": n_part.tolist(),
+        "n_full_sat_native_curve": n_full.tolist(),
+    }
 
     if not good.any():
         # pandeia returned no usable pixels (e.g. NIRSpec PRISM on a bright star:
@@ -245,6 +267,7 @@ def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
             "saturated": True,
             "ramp_search_complete": bool(search_complete),
             **native_counts,
+            **native_masks,
             "warnings": {k: str(v) for k, v in rpt["warnings"].items()},
         }
 
@@ -281,6 +304,7 @@ def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
         "saturated": bool(saturated),
         "ramp_search_complete": bool(search_complete),
         **native_counts,
+        **native_masks,
         "engine_version": str(getattr(pandeia.engine, "__version__", "unknown")),
         "warnings": {k: str(v) for k, v in rpt["warnings"].items()},
     }
@@ -474,7 +498,7 @@ def main():
         try:
             out[key] = _one_mode(build_default_calc, perform_calculation,
                                  m, job["star"], float(job.get("sat_limit", 0.8)),
-                                 job["refdata"])
+                                 job["refdata"], job.get("star_spectrum"))
             if out[key].get("unusable"):
                 print(f"[pandeia] {key}: UNUSABLE ({out[key]['reason']})", flush=True)
             else:

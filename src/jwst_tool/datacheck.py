@@ -451,7 +451,7 @@ def check_synphot_cdbs(cdbs: str | Path = None) -> list[Item]:
 
 
 def check_picaso_data(deep: bool = False) -> list[Item]:
-    """PICASO provider + climate reference data (opt-in, all
+    """Uncertified PICASO research data (optional, all
     ``required=False``): the tree selected by ``JWST_TOOL_PICASO_REFDATA``.
 
     Light checks only (stat/listdir; picaso itself is never imported here).
@@ -468,7 +468,9 @@ def check_picaso_data(deep: bool = False) -> list[Item]:
         items.append(Item(
             key="picaso:package", label="picaso package",
             status=MISSING, required=False, detail=str(exc),
-            remedy="pip install picaso==4.0.1"))
+            remedy=("PICASO is excluded from collaborator results. For an "
+                    "isolated maintainer investigation only, create a separate "
+                    "NumPy-2 environment and install picaso==4.0.1.")))
     try:
         root = pe.refdata_root()
     except RuntimeError as exc:
@@ -614,7 +616,8 @@ def full_report(base_mols: list[str] = None, extra_mols: list[str] = None,
         f"Pandeia noise backend ({ins.JWST_TOOL_BACKEND})":
             check_pandeia_backend(),
         "Star normalization data (synphot CDBS)": check_synphot_cdbs(),
-        "PICASO provider data (opt-in)": check_picaso_data(deep=deep),
+        "PICASO research data (optional; uncertified)": check_picaso_data(
+            deep=deep),
     }
     for name, items in sections.items():
         for it in items:

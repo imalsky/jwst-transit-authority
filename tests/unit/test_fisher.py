@@ -21,6 +21,44 @@ def test_well_conditioned_matches_analytic():
     assert diag["condition_number"] < 1e6
 
 
+def test_full_rank_covariance_matches_whitened_design_svd():
+    """Independent SVD oracle on the noise-whitened design matrix."""
+    rng = np.random.default_rng(42)
+    design = rng.normal(size=(4, 30))
+    sigma = np.linspace(0.7, 1.3, 30)
+    whitened = (design / sigma[None, :]).T
+    _u, singular, vt = np.linalg.svd(whitened, full_matrices=False)
+    covariance = (vt.T / singular[None, :] ** 2) @ vt
+    fisher_matrix = whitened.T @ whitened
+    got = fisher._marg_sigmas(fisher_matrix, 4)
+    assert np.allclose(got, np.sqrt(np.diag(covariance)), rtol=1e-11)
+
+
+def test_fisher_matrix_matches_direct_likelihood_curvature():
+    """Finite curvature of the Gaussian likelihood, not a Fisher helper."""
+    design = np.array([[0.4, -0.2, 0.7, 0.1],
+                       [0.3, 0.8, -0.1, 0.5]])
+    sigma = np.array([0.8, 1.1, 0.9, 1.3])
+
+    def nll(theta):
+        residual = theta @ design
+        return 0.5 * np.sum((residual / sigma) ** 2)
+
+    step = 1e-4
+    curvature = np.empty((2, 2))
+    zero = np.zeros(2)
+    for i in range(2):
+        for j in range(2):
+            ei = np.eye(2)[i] * step
+            ej = np.eye(2)[j] * step
+            curvature[i, j] = (
+                nll(zero + ei + ej) - nll(zero + ei - ej)
+                - nll(zero - ei + ej) + nll(zero - ei - ej)
+            ) / (4.0 * step ** 2)
+    expected = (design / sigma[None, :] ** 2) @ design.T
+    assert np.allclose(curvature, expected, rtol=1e-9, atol=1e-10)
+
+
 def test_duplicated_parameters_flagged_unconstrained():
     """Two identical Jacobian rows = a perfect degeneracy: both must come back
     inf, never a finite number."""
@@ -121,6 +159,22 @@ def test_combined_forecast_counts_offsets_per_segment():
     fisher.combined_forecast([r1, r2], ["p0"], diag=diag)
     # 1 free + lnR0 + (2 + 1) segment offsets = 5
     assert diag["fisher_dimension"] == 1 + 1 + 3
+
+
+def test_combined_forecast_is_invariant_to_mode_and_parameter_order():
+    rng = np.random.default_rng(14)
+    r1 = dict(jac_bins=rng.normal(size=(3, 25)), sigma=np.linspace(1, 2, 25),
+              seg=np.zeros(25, int))
+    r2 = dict(jac_bins=rng.normal(size=(3, 31)), sigma=np.linspace(2, 1, 31),
+              seg=np.array([0] * 15 + [1] * 16))
+    base = fisher.combined_forecast([r1, r2], ["p0", "p1"])
+    assert fisher.combined_forecast([r2, r1], ["p0", "p1"]) == \
+        pytest.approx(base)
+    swapped = [dict(r, jac_bins=np.asarray(r["jac_bins"])[[1, 0, 2]])
+               for r in (r1, r2)]
+    reordered = fisher.combined_forecast(swapped, ["p1", "p0"])
+    assert reordered["p0"] == pytest.approx(base["p0"])
+    assert reordered["p1"] == pytest.approx(base["p1"])
 
 
 def test_mode_forecast_equals_combined_single_result():
