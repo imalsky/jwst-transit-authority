@@ -81,6 +81,14 @@ def _slug(s: str) -> str:
 # data and is excluded from every combination -- that exclusion is disclosed
 # in Mode details and per combo, not encoded in this label. Display only:
 # never a stored config key, so no share-config migration is involved.
+# On-screen width of every rendered figure, in CSS pixels. A FIXED width, not
+# "stretch" (st.pyplot's default): see _show_fig. 1100 px is inside the usual
+# Streamlit main-column range, so a normal window looks the same as before --
+# it simply stops rescaling as the window changes. Streamlit clamps this to the
+# container width on a narrower screen, so nothing overflows. Module level
+# because _show_fig runs long before the results-area constants are defined.
+_FIG_DISPLAY_PX = 1100
+
 _ALL_USABLE = "All usable modes"
 
 # How many forecast-posterior panels the summary figure will draw. A LAYOUT
@@ -139,12 +147,27 @@ def _show_fig(fig, tight: bool = True) -> None:
     layout does -- it belongs inside the lock like every other materialization
     (plotting.py has the full argument). ``tight=False`` forwards the
     figure's own bbox so the full canvas is shown at a fixed size.
+
+    FIXED DISPLAY WIDTH (maintainer, 2026-08-13: "the whole thing wiggles when
+    I change the size of the screen, if I make it too big").
+
+    st.pyplot's width DEFAULTS to "stretch", so the figure was re-scaled to the
+    container on every resize -- it grew without bound on a wide monitor, and
+    because each figure's text is baked in at fixed POINTS, the labels, ticks
+    and legend changed size relative to everything else around them as the
+    window moved. An explicit pixel width pins it: Streamlit caps the element
+    at the container width when the window is NARROWER, so the figure still
+    fits a small screen, but it stops growing once the window passes
+    _FIG_DISPLAY_PX. _FIG_DISPLAY_PX sits inside the usual main-column range,
+    so this is close to what a normal window already showed -- the change is
+    that it no longer moves.
     """
     with plotting.render_lock:
         if tight:
-            st.pyplot(fig, width="stretch")
+            st.pyplot(fig, width=_FIG_DISPLAY_PX)
         else:
-            st.pyplot(fig, width="stretch", bbox_inches=_full_bbox(fig))
+            st.pyplot(fig, width=_FIG_DISPLAY_PX,
+                      bbox_inches=_full_bbox(fig))
         plt.close(fig)
 
 
@@ -2689,7 +2712,11 @@ if _have_fisher:
                         _mc = posteriors.gaussian_curve(
                             _pr["center"] + _d, _pr["sigma_display"])
                         _curves.append(dict(
-                            label=str(_lbl),
+                            # says it is a FIT to one draw, not a forecast:
+                            # its center moved off the input value, and a
+                            # forecast's center cannot (external review,
+                            # 2026-08-14)
+                            label=f"{_lbl} (one draw)",
                             theta=_mc["theta"], pdf=_mc["pdf"],
                             # mu/sigma make the figure REPORT the width: the
                             # curve's outline cannot, since each axis
@@ -2708,10 +2735,25 @@ if _have_fisher:
                     _notes.append(f"{_lbl}: unconstrained -- this "
                                   "direction carries no information in "
                                   "the fitted band (no curve, by design)")
-            _post_panels.append(dict(axis_label=forward.param_axis(_p),
-                                     axis_unit=forward.PARAM_UNITS.get(_p, ""),
-                                     curves=_curves, notes=_notes,
-                                     center=_centers_all.get(_p)))
+            # A panel whose curves are FITS to the jitter draw is not a
+            # forecast: its centers move with the realization, and a forecast's
+            # center is the input value by construction. External review
+            # (2026-08-14) read curves sitting 2.7 sigma off the injected value
+            # under a "forecast density" axis as a likely bug -- correctly, had
+            # they been forecasts. Verified it is not: the recovery shift is
+            # linear in the noise, so over realizations its mean is 0 and its
+            # spread is exactly the Fisher sigma (measured 1.01x and 1.00x over
+            # 4000 draws). One draw at 2.7 sigma is ~0.7% likely, not wrong.
+            # The axis now names which of the two the reader is looking at.
+            _fitted = any(c.get("kind") == posteriors.MOCK_RECOVERY_KIND
+                          for c in _curves)
+            _post_panels.append(dict(
+                axis_label=forward.param_axis(_p),
+                axis_unit=forward.PARAM_UNITS.get(_p, ""),
+                density_label=("relative density, fit to one noise draw"
+                               if _fitted else "relative forecast density"),
+                curves=_curves, notes=_notes,
+                center=_centers_all.get(_p)))
 
 # --- the results figure (spectrum + forecast posteriors, rendered once) -----
 # one target significance for every number on this page

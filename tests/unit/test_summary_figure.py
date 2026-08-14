@@ -110,7 +110,10 @@ def test_validation_is_loud():
         summary_figure.compose_summary_figure(
             _spectrum(with_points=False),
             posterior_panels=[dict(axis_label="x", curves=[], notes=[])])
-    with pytest.raises(ValueError, match="at most two"):
+    # the cap is THREE (2026-08-13), matching the GUI's _MAX_POST_PANELS --
+    # it was 2 here while the widget already allowed 3, so a three-parameter
+    # selection raised instead of rendering
+    with pytest.raises(ValueError, match="at most three"):
         summary_figure.compose_summary_figure(
             _spectrum(with_points=False),
-            posterior_panels=[_panel(), _panel(), _panel()])
+            posterior_panels=[_panel() for _ in range(4)])

@@ -284,6 +284,32 @@ def test_global_noise_multiplier_composes_and_round_trips():
         "the global scale is not recorded, so a run cannot be reproduced"
 
 
+def test_figures_render_at_a_fixed_width_not_stretched():
+    """Every figure gets an explicit pixel width (maintainer, 2026-08-13: "the
+    whole thing wiggles when I change the size of the screen").
+
+    st.pyplot's width DEFAULTS to "stretch", so simply omitting the argument
+    does NOT stop the rescaling -- the value has to be passed. Each figure's
+    text is baked in at fixed points, so a stretched raster changes its label
+    sizes relative to everything else on every resize. Streamlit clamps an
+    explicit width to the container on a narrower window, so nothing overflows.
+    """
+    src = APP.read_text()
+    assert "st.pyplot(fig, width=_FIG_DISPLAY_PX)" in src, \
+        "the tight branch no longer pins the display width"
+    assert "st.pyplot(fig, width=_FIG_DISPLAY_PX,\n" in src, \
+        "the full-canvas branch no longer pins the display width"
+    assert 'st.pyplot(fig, width="stretch"' not in src, src[:0]
+    # defined BEFORE _show_fig uses it (a later definition is a NameError on
+    # the first figure -- the same ordering bug _COMBO_COLORS hit)
+    lines = src.splitlines()
+    define = next(i for i, l in enumerate(lines)
+                  if l.startswith("_FIG_DISPLAY_PX"))
+    use = next(i for i, l in enumerate(lines)
+               if "st.pyplot(fig, width=_FIG_DISPLAY_PX)" in l)
+    assert define < use, (define, use)
+
+
 def test_removed_tooltips_and_table_guidance_are_gone():
     """Prose the maintainer removed 2026-08-13 must not come back.
 

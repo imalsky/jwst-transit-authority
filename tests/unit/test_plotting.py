@@ -753,3 +753,77 @@ def test_posterior_headroom_scales_with_the_legend(n_src):
                 f"legend covers {covered} vertices with {n_src} sources"
     finally:
         plt.close(fig)
+
+
+def test_a_fitted_panel_is_not_labelled_a_forecast():
+    """A panel whose curves are FITS to the jitter draw must not call itself a
+    forecast (external review, 2026-08-14).
+
+    A Fisher forecast is centered on the input value by construction, so a
+    curve sitting 2.7 sigma away under a "forecast density" axis reads as a
+    bug. It is not one -- the recovery shift is linear in the noise, mean zero
+    over realizations with spread equal to the Fisher sigma -- but the label
+    invited the wrong reading, so the axis now names which of the two it is.
+    """
+    from jwst_tool import posteriors
+    wl = np.linspace(0.6, 12.0, 200)
+    base = dict(wl_um=wl, depth_ppm=20000.0 + 300.0 * np.sin(wl),
+                depth_label="transit depth (ppm)", model_label="model",
+                points=[])
+
+    def _panel(kind):
+        c = posteriors.gaussian_curve(1.75 if kind else 1.0, 0.28)
+        return dict(axis_label="[M/H] [dex]", center=1.0,
+                    density_label=("relative density, fit to one noise draw"
+                                   if kind else "relative forecast density"),
+                    curves=[dict(label="PRISM", theta=c["theta"],
+                                 pdf=c["pdf"], mu=1.75 if kind else 1.0,
+                                 sigma=0.28, color="#1f4e9c", ls="-", lw=1.8,
+                                 kind=kind)])
+
+    fig = summary_figure.compose_summary_figure(
+        base, posterior_panels=[_panel(posteriors.MOCK_RECOVERY_KIND),
+                                _panel(None)])
+    try:
+        fitted, forecast = fig.axes[1].get_ylabel(), fig.axes[2].get_ylabel()
+        assert "one noise draw" in fitted, fitted
+        assert "forecast" not in fitted, \
+            f"a fitted panel still calls itself a forecast: {fitted!r}"
+        assert forecast == "relative forecast density", forecast
+    finally:
+        plt.close(fig)
+
+
+def test_three_posterior_panels_render():
+    """The GUI's _MAX_POST_PANELS is 3, so the composer must accept 3.
+
+    It capped at 2 until 2026-08-13 -- raised in the widget without raising the
+    guard, so a three-parameter selection would have raised instead of drawing.
+    """
+    wl = np.linspace(0.6, 12.0, 200)
+    th = np.linspace(0.5, 1.5, 200)
+    pdf = np.exp(-(th - 1.0) ** 2 / (2 * 0.1 ** 2))
+    panel = dict(axis_label="p", center=1.0,
+                 curves=[dict(label="PRISM", theta=th, pdf=pdf, mu=1.0,
+                              sigma=0.1, color="#1f4e9c", ls="-", lw=1.8)])
+    fig = summary_figure.compose_summary_figure(
+        dict(wl_um=wl, depth_ppm=20000.0 + 300.0 * np.sin(wl),
+             depth_label="transit depth (ppm)", model_label="model",
+             points=[]),
+        posterior_panels=[dict(panel) for _ in range(3)])
+    try:
+        with plotting.render_lock:
+            fig.canvas.draw()
+        boxes = [ax.get_window_extent() for ax in fig.axes]
+        assert len(boxes) == 4, len(boxes)
+        assert abs(boxes[0].width / boxes[0].height - 1.618) < 0.005
+        for bb in boxes[1:]:
+            assert abs(bb.width - bb.height) < 1.0, (bb.width, bb.height)
+    finally:
+        plt.close(fig)
+
+    with pytest.raises(ValueError, match="at most three"):
+        summary_figure.compose_summary_figure(
+            dict(wl_um=wl, depth_ppm=20000.0 + 300.0 * np.sin(wl),
+                 depth_label="d", model_label="model", points=[]),
+            posterior_panels=[dict(panel) for _ in range(4)])

@@ -141,8 +141,11 @@ def _validate_spectrum(spectrum: dict) -> dict:
 
 def _validate_panels(posterior_panels) -> list[dict]:
     panels = list(posterior_panels or [])
-    if len(panels) > 2:
-        raise ValueError("compose_summary_figure: at most two posterior "
+    if len(panels) > 3:
+        # 3, not 2 (2026-08-13): the GUI's _MAX_POST_PANELS was raised to 3 and
+        # this guard was not, so a three-parameter selection would have raised
+        # here instead of rendering.
+        raise ValueError("compose_summary_figure: at most three posterior "
                          f"panels are supported, got {len(panels)}")
     out = []
     for i, pan in enumerate(panels):
@@ -189,8 +192,14 @@ def _validate_panels(posterior_panels) -> list[dict]:
                              "panel says nothing; annotate unconstrained "
                              "directions explicitly)")
         center = pan.get("center")
+        # density_label overrides the y axis text. The validator REBUILDS each
+        # panel dict, so any key not listed here is silently dropped -- which is
+        # why this has to be threaded explicitly rather than left to pan.get()
+        # in the plotting function.
+        _dl = pan.get("density_label")
         out.append(dict(axis_label=str(_req(pan, "axis_label", where)),
                         curves=curves, notes=notes,
+                        density_label=(None if _dl is None else str(_dl)),
                         center=(None if center is None else float(center))))
 
     return out
@@ -532,7 +541,15 @@ def _plot_posterior_panel(axp, pan: dict, color: str) -> None:
     axp.set_xlabel(pan["axis_label"], fontsize=_AX_LBL)
     axp.set_yticks([])
     axp.tick_params(labelsize=_TICK)
-    axp.set_ylabel("relative forecast density", fontsize=_AX_LBL)
+    # The y label distinguishes a FORECAST (centered on the input by
+    # construction) from a RETRIEVAL on one noise draw (whose center moves).
+    # External review, 2026-08-14: with jitter on, curves sat 2.7 sigma off the
+    # injected value while the axis still read "forecast density" -- and a
+    # forecast centered anywhere but the input would be a bug, so the label
+    # invited exactly that reading. The caller passes density_label; the
+    # forecast wording stays the default.
+    axp.set_ylabel(pan.get("density_label")
+                   or "relative forecast density", fontsize=_AX_LBL)
     # Headroom for the in-axes legend, sized from the legend's ROW COUNT --
     # the same rule the spectrum panel uses, and what CLAUDE.md documents.
     # This replaced a hardcoded 1.42: with one curve per selected series the
