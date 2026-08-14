@@ -139,12 +139,10 @@ def test_share_records_release_provenance_without_machine_paths():
 def test_provenance_reports_every_declared_repository():
     """A repository is never silently ABSENT from the block.
 
-    The first version keyed the lookup on the GitHub repo name (`jax-vulcan`)
-    while the working copy is conventionally `VULCAN-JAX`, and dropped any
-    directory it did not find. The chemistry solver -- the most
-    science-critical revision in the bundle -- was therefore missing from
-    every exported configuration, and the omission was indistinguishable from
-    "there was nothing to record".
+    The first version keyed on the GitHub name (`jax-vulcan`) while the working
+    copy is `VULCAN-JAX`, and dropped what it did not find -- so the solver, the
+    most science-critical revision in the bundle, was missing from every export
+    and the omission looked like "nothing to record".
     """
     from jwst_tool import provenance
     share = share_config.build_share(_canon(), {}, {"seed": 1})

@@ -13,21 +13,17 @@ from jwst_tool import instruments as ins
 from jwst_tool import noise
 
 
-# Repository identity -> the DIRECTORY names it may check out under. The two
-# differ: the chemistry solver's GitHub repo is `jax-vulcan` but its working
-# copy is conventionally `VULCAN-JAX`, so a name-only lookup silently dropped
-# the single most science-critical revision from every exported provenance
-# block. Every entry here is always REPORTED (with an explicit status when it
-# is absent or unversioned) -- an omitted row reads as "nothing to record"
-# rather than "not found", which is the failure this module exists to prevent.
+# Repository identity -> the DIRECTORY names it may sit under; the solver's
+# GitHub repo is `jax-vulcan` but its working copy is usually `VULCAN-JAX`, and
+# a name-only lookup dropped it from every exported block. Every entry is
+# always reported, with an explicit status when absent or unversioned: an
+# omitted row reads as "nothing to record" rather than "not found". The last
+# two are reference oracles, not dependencies.
 REPOSITORIES = {
     "vulcan-jax": ("VULCAN-JAX", "jax-vulcan"),
     "vulcan-forward": ("vulcan-forward",),
     "vulcan-jwst-tool": ("vulcan-jwst-tool",),
     "vulcan-retrieval": ("vulcan-retrieval",),
-    # Reference oracles, not dependencies. VULCAN-master is frequently an
-    # unversioned copy on this project's machines, which is itself worth
-    # recording: a parity claim against it is not traceable to a revision.
     "VULCAN-master": ("VULCAN-master",),
     "VULCAN-vm-branch": ("VULCAN-vm-branch",),
 }
