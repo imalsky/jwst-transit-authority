@@ -13,10 +13,24 @@ from jwst_tool import instruments as ins
 from jwst_tool import noise
 
 
-REPOSITORIES = (
-    "VULCAN-master", "VULCAN-vm-branch", "jax-vulcan",
-    "vulcan-forward", "vulcan-jwst-tool", "vulcan-retrieval",
-)
+# Repository identity -> the DIRECTORY names it may check out under. The two
+# differ: the chemistry solver's GitHub repo is `jax-vulcan` but its working
+# copy is conventionally `VULCAN-JAX`, so a name-only lookup silently dropped
+# the single most science-critical revision from every exported provenance
+# block. Every entry here is always REPORTED (with an explicit status when it
+# is absent or unversioned) -- an omitted row reads as "nothing to record"
+# rather than "not found", which is the failure this module exists to prevent.
+REPOSITORIES = {
+    "vulcan-jax": ("VULCAN-JAX", "jax-vulcan"),
+    "vulcan-forward": ("vulcan-forward",),
+    "vulcan-jwst-tool": ("vulcan-jwst-tool",),
+    "vulcan-retrieval": ("vulcan-retrieval",),
+    # Reference oracles, not dependencies. VULCAN-master is frequently an
+    # unversioned copy on this project's machines, which is itself worth
+    # recording: a parity claim against it is not traceable to a revision.
+    "VULCAN-master": ("VULCAN-master",),
+    "VULCAN-vm-branch": ("VULCAN-vm-branch",),
+}
 
 
 def _sha256(path: Path) -> str:
@@ -40,6 +54,23 @@ def _git(repo: Path) -> dict:
         "branch": run("branch", "--show-current") or "detached",
         "dirty": bool(run("status", "--porcelain")),
     }
+
+
+def _repo_identity(workspace: Path, directories: tuple) -> dict:
+    """Resolve one repository, reporting absence instead of omitting it."""
+    for name in directories:
+        path = workspace / name
+        if (path / ".git").exists():
+            out = _git(path)
+            out["directory"] = name
+            return out
+        if path.exists():
+            # Present but unversioned: its revision CANNOT be recorded, and a
+            # comparison against it is not reproducible. Say so.
+            return {"commit": "unversioned", "branch": "unversioned",
+                    "dirty": None, "directory": name}
+    return {"commit": "absent", "branch": "absent", "dirty": None,
+            "directory": None}
 
 
 def _versions() -> dict:
@@ -121,8 +152,8 @@ def _base_snapshot() -> dict:
     repo_root = Path(__file__).resolve().parents[2]
     workspace = repo_root.parent
     repos = {
-        name: _git(workspace / name)
-        for name in REPOSITORIES if (workspace / name / ".git").exists()
+        name: _repo_identity(workspace, directories)
+        for name, directories in REPOSITORIES.items()
     }
     pandeia = _pandeia_python_identity()
     pandeia.update({

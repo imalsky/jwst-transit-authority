@@ -136,6 +136,47 @@ def test_share_records_release_provenance_without_machine_paths():
     assert "/Users/" not in serialized and "\\Users\\" not in serialized
 
 
+def test_provenance_reports_every_declared_repository():
+    """A repository is never silently ABSENT from the block.
+
+    The first version keyed the lookup on the GitHub repo name (`jax-vulcan`)
+    while the working copy is conventionally `VULCAN-JAX`, and dropped any
+    directory it did not find. The chemistry solver -- the most
+    science-critical revision in the bundle -- was therefore missing from
+    every exported configuration, and the omission was indistinguishable from
+    "there was nothing to record".
+    """
+    from jwst_tool import provenance
+    share = share_config.build_share(_canon(), {}, {"seed": 1})
+    repos = share["provenance"]["repositories"]
+    assert set(repos) == set(provenance.REPOSITORIES), (
+        "every declared repository must appear, even when absent")
+    for name, rec in repos.items():
+        assert rec["commit"], f"{name} carries no commit field"
+
+
+def test_provenance_finds_the_solver_under_either_directory_name(tmp_path):
+    """VULCAN-JAX and jax-vulcan are the same repository."""
+    from jwst_tool import provenance
+    for directory in ("VULCAN-JAX", "jax-vulcan"):
+        workspace = tmp_path / directory
+        workspace.mkdir()
+        (workspace / directory).mkdir()
+        (workspace / directory / ".git").mkdir()
+        rec = provenance._repo_identity(
+            workspace, provenance.REPOSITORIES["vulcan-jax"])
+        assert rec["directory"] == directory, rec
+    # An unversioned copy is reported as such, never as a clean checkout.
+    plain = tmp_path / "plain"
+    (plain / "VULCAN-master").mkdir(parents=True)
+    rec = provenance._repo_identity(
+        plain, provenance.REPOSITORIES["VULCAN-master"])
+    assert rec["commit"] == "unversioned", rec
+    # A genuinely missing repository is explicit.
+    rec = provenance._repo_identity(plain, ("nope-not-here",))
+    assert rec["commit"] == "absent" and rec["directory"] is None, rec
+
+
 def test_invalid_embedded_tp_table_leaves_no_file_behind():
     """All-or-nothing includes the filesystem: a config that fails
     validation must not deposit its embedded table in the uploads archive."""
