@@ -252,6 +252,38 @@ def test_constant_floor_prefill_renders_per_mode_inputs():
     assert any(k and k.startswith("n0_floor_") for k in keys)
 
 
+def test_global_noise_multiplier_composes_and_round_trips():
+    """One "Noise multiplier" knob beside Jitter scales EVERY mode's random
+    noise (maintainer, 2026-08-13: "a simple knob to increase jitter").
+
+    It scales the NOISE MODEL, not the draw: posteriors.mock_realization
+    refuses a draw-only factor, because a 2x draw beside 1x error bars is not a
+    realization of the plotted model. Two things this pins:
+
+    1. the global knob COMPOSES with the per-mode multipliers rather than
+       overriding them (neither control is a hidden override), and
+    2. the recorded config stores the PER-MODE values plus the global scale
+       separately -- writing the product into noise_infl would re-multiply by
+       the global scale on every restore, since share_config restores
+       noise_infl into the per-mode widgets.
+    """
+    at = _run_app()
+    assert not at.exception, at.exception
+    sld = at.slider(key="n0_noisescale")
+    assert sld.value == 1.0, sld.value
+    assert sld.label == "Noise multiplier", sld.label
+
+    src = APP.read_text()
+    # composition, not replacement
+    assert "infl = {k: float(noise_scale) * float(_infl_mode[k])" in src, \
+        "the global multiplier no longer composes with the per-mode ones"
+    # the recorded config keeps the two factors apart
+    assert "noise_infl={k: float(_infl_mode[k]) for k in mode_keys}" in src, \
+        "noise_infl must record the PER-MODE widget values, not the product"
+    assert "noise_scale=float(noise_scale)," in src, \
+        "the global scale is not recorded, so a run cannot be reproduced"
+
+
 def test_removed_tooltips_and_table_guidance_are_gone():
     """Prose the maintainer removed 2026-08-13 must not come back.
 
@@ -740,10 +772,15 @@ def test_intro_prose_is_short_and_carries_no_methodology():
                  "radiative-convective climate profile",
                  "conditional template S/N per molecule"):
         assert gone not in page, f"long-form intro phrase survived: {gone!r}"
-    # kept: engine names and the LIVE Pandeia version (never hardcoded)
-    for kept in ("VULCAN", "PICASO", "ExoJAX", "PHOENIX", "Pandeia",
-                 "PandExo"):
+    # kept: engine names and the LIVE Pandeia version (never hardcoded).
+    # PHOENIX left this list 2026-08-13 when the maintainer rewrote the five
+    # steps: "compute a spectrum using ExoJAX" no longer names the stellar
+    # model. It is still disclosed in README.md, which is where the house
+    # policy puts detail that does not change a control's effect.
+    for kept in ("VULCAN", "PICASO", "ExoJAX", "Pandeia", "PandExo"):
         assert kept in page, f"engine name lost: {kept!r}"
+    _readme = (APP.parent.parent.parent / "README.md").read_text()
+    assert "PHOENIX" in _readme, "the stellar model is now disclosed nowhere"
     import re as _re
     # ins.BACKEND_STATUS.split(" /")[0] == "Pandeia 2026.7": a live version,
     # never a hardcoded one. Match the year so a literal string would fail.
@@ -751,22 +788,27 @@ def test_intro_prose_is_short_and_carries_no_methodology():
         "the live Pandeia version is no longer interpolated"
 
 
-def test_summary_axis_controls_replace_the_custom_slider():
-    """The wavelength radio carries two options and the Custom slider is gone;
-    log/linear checkboxes for both spectrum axes take its place."""
+def test_summary_has_no_wavelength_range_control_only_axis_scales():
+    """The window ALWAYS fits the selected modes (maintainer, 2026-08-13): the
+    "Fit to selected modes / Full model" radio is gone, as is the Custom
+    slider before it. Selecting modes is the only wavelength control -- and
+    selecting every mode gives the full span anyway. What remains is the pair
+    of log/linear checkboxes, labelled "Log x" / "Log y".
+    """
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
     at = AppTest.from_file(str(APP), default_timeout=60)
     at.session_state["out"] = out
     at.session_state["out_meta"] = out_meta
     at.run()
     assert not at.exception, at.exception
-    radio = at.radio(key="n0_sum_wlmode")
-    assert list(radio.options) == ["Fit to selected modes", "Full model"], \
-        radio.options
+    assert not [r for r in at.radio if r.key == "n0_sum_wlmode"], \
+        "the wavelength-range radio should be gone"
     assert not [s for s in at.slider if s.key == "n0_sum_wlrange"], \
         "the Custom wavelength slider should be gone"
-    assert at.checkbox(key="n0_sum_xlog").value is True    # log wavelength
-    assert at.checkbox(key="n0_sum_ylog").value is False   # linear depth
+    _x = at.checkbox(key="n0_sum_xlog")
+    _y = at.checkbox(key="n0_sum_ylog")
+    assert _x.value is True and _x.label == "Log x", _x.label
+    assert _y.value is False and _y.label == "Log y", _y.label
 
 
 def test_all_usable_row_is_renamed_and_combos_lead_the_table():

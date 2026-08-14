@@ -17,7 +17,8 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt      # noqa: E402
-import numpy as np                   # noqa: E402
+import numpy as np
+from matplotlib.ticker import LogLocator                   # noqa: E402
 import pytest                        # noqa: E402
 
 from jwst_tool import plotting, summary_figure   # noqa: E402
@@ -599,16 +600,106 @@ def test_spectrum_axis_scales_all_label_and_never_collide(x_log, y_log):
         plt.close(fig)
 
 
-def test_log_depth_axis_refuses_a_non_positive_range():
-    """A log depth axis with a non-positive visible range fails LOUDLY rather
-    than rendering an empty panel (matplotlib drops those points silently).
-    Eclipse depths and low-S/N jitter draws can go negative."""
+def _log_spec(depth, points=()):
     wl = np.linspace(0.6, 12.0, 200)
-    depth = np.linspace(-400.0, 900.0, 200)
-    with pytest.raises(ValueError, match="positive depth range"):
-        summary_figure.compose_summary_figure(
-            dict(wl_um=wl, depth_ppm=depth, depth_label="eclipse depth (ppm)",
-                 model_label="model", points=[], y_log=True))
+    return dict(wl_um=wl, depth_ppm=depth, depth_label="eclipse depth (ppm)",
+                model_label="model", points=list(points), y_log=True)
+
+
+def _log_points(depth, sigma):
+    w = np.linspace(0.85, 5.2, 25)
+    return [dict(label="PRISM: 1.4s", color="#1f4e9c", marker="o", wl_um=w,
+                 depth_ppm=depth, sigma_ppm=np.full(25, float(sigma)))]
+
+
+def test_log_depth_axis_refuses_a_non_positive_DEPTH_range():
+    """A log depth axis whose visible DEPTHS are non-positive fails LOUDLY
+    rather than rendering a partial curve (matplotlib drops the non-positive
+    points silently).
+
+    The 2026-08-13 whisker fix below must not weaken this: an intermediate
+    version filtered every value to the positives and rendered a -400..900 ppm
+    model as its positive 69% with no indication at all.
+    """
+    wl = np.linspace(0.6, 12.0, 200)
+    for name, depth, points in (
+            ("mixed-sign model", np.linspace(-400.0, 900.0, 200), ()),
+            ("all-negative model", np.linspace(-900.0, -100.0, 200), ()),
+            ("mixed-sign point centers", 50.0 + 900.0 * (wl / 12.0) ** 3,
+             _log_points(np.linspace(-200.0, 600.0, 25), 20.0)),
+    ):
+        with pytest.raises(ValueError, match="positive depth range"):
+            summary_figure.compose_summary_figure(
+                _log_spec(depth, points)), name
+
+
+def test_log_depth_axis_allows_a_negative_error_bar():
+    """A negative WHISKER must not refuse the axis (maintainer-reported,
+    2026-08-13: "Log depth axis unavailable ... starts at -288.9 ppm").
+
+    An eclipse depth of 50 +/- 340 ppm has a 1-sigma lower bound below zero --
+    physically ordinary at low S/N. Letting that set the lower limit refused a
+    log axis on data whose DEPTHS were entirely positive and spanned 1.4
+    decades, which is exactly where a log axis earns its keep. The whisker is
+    clipped at the spine instead and visibly runs off the bottom.
+    """
+    wl = np.linspace(0.6, 12.0, 200)
+    w = np.linspace(0.85, 5.2, 25)
+    depth = 50.0 + 900.0 * (wl / 12.0) ** 3
+    pts = _log_points(50.0 + 900.0 * (w / 12.0) ** 3, 340.0)
+    assert (pts[0]["depth_ppm"] - pts[0]["sigma_ppm"]).min() < 0.0, \
+        "fixture no longer exercises a negative whisker"
+    fig = summary_figure.compose_summary_figure(_log_spec(depth, pts))
+    try:
+        ax = fig.axes[0]
+        assert ax.get_yscale() == "log"
+        y0, y1 = ax.get_ylim()
+        assert y0 > 0.0, y0
+        # the limits follow the positive DEPTHS, not the clipped whisker
+        assert y0 < depth.min() and y1 > depth.max(), (y0, y1)
+        # log-spaced ticks, plain-number labels, and at least a few of them
+        with plotting.render_lock:
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+            shown = [t.label1 for t in ax.yaxis.get_major_ticks()
+                     if t.label1.get_visible() and t.label1.get_text()
+                     and y0 <= t.label1.get_position()[1] <= y1]
+            assert len(shown) >= 4, \
+                f"only {len(shown)} y labels on a 1.4-decade log axis"
+            boxes = [t.get_window_extent(renderer) for t in shown]
+            for i in range(len(boxes) - 1):
+                assert not boxes[i].overlaps(boxes[i + 1]), \
+                    "log y tick labels collide"
+    finally:
+        plt.close(fig)
+
+
+def test_log_depth_ticks_are_log_spaced_at_every_span():
+    """Ticks come from a subdivided LogLocator, never a linear locator.
+
+    A MaxNLocator branch used to place LINEARLY spaced ticks below 1.5 decades.
+    It fixed a real problem -- a transit depth spans ~0.019 decades, where a
+    bare decade locator puts every tick outside the view and the axis draws
+    with NO labels -- but equal label steps sat at unequal distances, which
+    misreads on a log axis. subs=(1, 2, 5) covers both regimes.
+    """
+    wl = np.linspace(0.6, 12.0, 200)      # must match _log_spec's grid
+    for name, depth in (("narrow transit", 20000.0 + 320.0 * np.sin(wl * 2.6)),
+                        ("mid span", 300.0 + 600.0 * (wl / 12.0)),
+                        ("wide emission", 50.0 + 900.0 * (wl / 12.0) ** 3)):
+        fig = summary_figure.compose_summary_figure(_log_spec(depth))
+        try:
+            ax = fig.axes[0]
+            assert isinstance(ax.yaxis.get_major_locator(), LogLocator), name
+            y0, y1 = ax.get_ylim()
+            with plotting.render_lock:
+                fig.canvas.draw()
+                n = len([t for t in ax.yaxis.get_majorticklocs()
+                         if y0 <= t <= y1])
+            # the no-labels-at-all failure this replaced
+            assert n >= 4, f"{name}: only {n} ticks inside the view"
+        finally:
+            plt.close(fig)
 
 
 @pytest.mark.parametrize("n_src", [1, 2, 4, 6])

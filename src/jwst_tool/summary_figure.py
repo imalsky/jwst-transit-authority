@@ -29,7 +29,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
-from matplotlib.ticker import (MaxNLocator, NullLocator,
+from matplotlib.ticker import (LogLocator, MaxNLocator, NullLocator,
                               ScalarFormatter)
 
 from jwst_tool import plotting
@@ -229,20 +229,41 @@ def _visible_ylim(spec: dict, lo: float, hi: float):
     zero (measured: a 300-75000 ppm emission range padded to -4224 ppm) and
     then trips the positive-range guard on data that is entirely positive.
     """
-    vals = []
+    # CENTERS (model curves and point depths) and WHISKERS are kept apart,
+    # because a log axis treats them differently -- see below.
+    centers, whiskers = [], []
     m = (spec["wl_um"] >= lo) & (spec["wl_um"] <= hi)
     if m.any():
-        vals.append(spec["depth_ppm"][m])
+        centers.append(spec["depth_ppm"][m])
         if spec["depth2_ppm"] is not None:
-            vals.append(spec["depth2_ppm"][m])
+            centers.append(spec["depth2_ppm"][m])
     for p in spec["points"]:
         pm = (p["wl_um"] >= lo) & (p["wl_um"] <= hi)
         if pm.any():
-            vals.append(p["depth_ppm"][pm] - p["sigma_ppm"][pm])
-            vals.append(p["depth_ppm"][pm] + p["sigma_ppm"][pm])
-    if not vals:
+            centers.append(p["depth_ppm"][pm])
+            whiskers.append(p["depth_ppm"][pm] - p["sigma_ppm"][pm])
+            whiskers.append(p["depth_ppm"][pm] + p["sigma_ppm"][pm])
+    if not centers and not whiskers:
         return None                       # nothing visible; leave autoscale
-    allv = np.concatenate(vals)
+    if spec["y_log"]:
+        # A negative WHISKER may be dropped from the limits; a negative CENTER
+        # may not. An eclipse depth of 50 +/- 340 ppm has a 1-sigma lower bound
+        # below zero -- physically ordinary at low S/N -- and letting that set
+        # y0 tripped the positive-range guard below, refusing a log axis on
+        # data whose depths were entirely positive and spanned 1.4 decades
+        # (exactly where a log axis earns its keep). The whisker is then
+        # clipped at the spine and visibly runs off the bottom, which costs far
+        # less than refusing the axis.
+        #
+        # Model depths are NOT filtered: silently dropping part of the plotted
+        # curve is the failure the guard exists to catch. A first version of
+        # this fix filtered everything and rendered a -400..900 ppm model as
+        # its positive 69% with no indication -- so a mixed-sign model must
+        # still reach the guard and be refused.
+        whiskers = [w[w > 0.0] for w in whiskers]
+    allv = np.concatenate([a for a in centers + whiskers if a.size])
+    if allv.size == 0:
+        return None
     y0, y1 = float(np.min(allv)), float(np.max(allv))
     # ASYMMETRIC padding (maintainer, 2026-08-13: "make the y scale fit a
     # little better by auto"). The old symmetric 6% left the data filling only
@@ -259,8 +280,12 @@ def _visible_ylim(spec: dict, lo: float, hi: float):
 
 def _plot_spectrum(ax, spec: dict) -> None:
     """Render the model spectrum and each mode's simulated points."""
+    # zorder 4: ABOVE the points (zorder 3). The model is the thing the points
+    # are being compared against, so it must stay continuous and unbroken --
+    # with the points on top it was chopped into fragments wherever a mode had
+    # coverage, which is exactly the occlusion the smaller markers address.
     ax.plot(spec["wl_um"], spec["depth_ppm"], color="#444444", lw=1.1,
-            alpha=0.9, zorder=2, label=spec["model_label"])
+            alpha=0.9, zorder=4, label=spec["model_label"])
     if spec["depth2_ppm"] is not None:
         ax.plot(spec["wl_um"], spec["depth2_ppm"], color="#888888",
                 lw=1.0, ls="--", zorder=1, label=spec["depth2_label"])
@@ -270,13 +295,17 @@ def _plot_spectrum(ax, spec: dict) -> None:
         # swallows the fill -- every mode's marker rendered black and the
         # per-mode color was invisible. That color is now the series identity
         # shared with the forecast panels, so it has to read.
-        # ms 5.0, not 3.8: the summary figure now uses instruments.MODE_MARKER
-        # per mode, and at 3.8 pt the thin-stroke shapes (P, X, *) read as
-        # error-bar artifacts rather than as distinct markers. Rendered and
-        # compared at 3.8 / 5.5 / 7.0 -- 5.0 is where all eight are
-        # distinguishable without the points crowding the model line.
+        # ms 3.6, down from 5.0 (maintainer, 2026-08-13: the points were
+        # blocking the model). Two changes address that, and the size is the
+        # smaller of them: the model line is also raised ABOVE the points
+        # (zorder 4, see _plot_spectrum) so it can no longer be chopped into
+        # fragments. That is what allows the markers to stay large enough to
+        # READ -- rendered at 3.0 / 3.6 / 4.2 / 5.0 over the model line, and at
+        # 3.0 the eight shapes all collapse to a dot, which would silently undo
+        # the per-mode marker encoding. 3.6 is the smallest size where D/^/v
+        # and P/X/* still separate.
         ax.errorbar(p["wl_um"], p["depth_ppm"], yerr=p["sigma_ppm"],
-                    fmt=p["marker"], ms=5.0, lw=0.9, color=p["color"],
+                    fmt=p["marker"], ms=3.6, lw=0.9, color=p["color"],
                     markerfacecolor=p["color"], markeredgecolor=p["color"],
                     markeredgewidth=0.4,
                     ecolor=p["color"], elinewidth=0.7, capsize=0,
@@ -332,19 +361,24 @@ def _plot_spectrum(ax, spec: dict) -> None:
                 f"visible range starts at {_y0:.4g} ppm. Use a linear depth "
                 "axis for this data, or set depth_range explicitly.")
         ax.set_yscale("log")
-        # A transit depth spans a tiny fraction of a decade (measured: 0.021
-        # decades for a 19.6-20.6 kppm range), so the decade locator puts every
-        # tick OUTSIDE the view and the axis renders with NO labels at all.
-        # Place ticks by value and format them as plain numbers whenever the
-        # span is under ~1.5 decades; the decade locator is right only for a
-        # genuinely wide range.
-        _y0, _y1 = ax.get_ylim()
-        if np.log10(_y1 / _y0) < 1.5:
-            ax.yaxis.set_major_locator(MaxNLocator(nbins=6,
-                                                   steps=[1, 2, 2.5, 5, 10]))
-            ax.yaxis.set_minor_locator(NullLocator())
-            ax.yaxis.set_major_formatter(ScalarFormatter())
-            ax.ticklabel_format(axis="y", style="plain", useOffset=False)
+        # LOG-SPACED ticks at every span (LogLocator with 1-2-5 subdivisions),
+        # formatted as plain numbers rather than powers of ten.
+        #
+        # This replaces a MaxNLocator branch that placed LINEARLY spaced ticks
+        # whenever the span was under 1.5 decades. That was written to fix a
+        # real problem -- a transit depth spans a tiny fraction of a decade
+        # (measured: 0.019 for a 19.6-20.5 kppm range), and a bare decade
+        # locator puts every tick outside the view, so the axis drew with NO
+        # labels at all. But linear ticks on a log axis are misleading: equal
+        # label steps sit at unequal distances. Measured tick counts inside the
+        # view with subs=(1, 2, 5): 8 at 0.019 decades, 7 at 0.48, 5 at 1.38,
+        # 6 at 1.70, 9 at 2.60 -- so the subdivided log locator solves the
+        # no-labels case that motivated the linear branch, at every span.
+        ax.yaxis.set_major_locator(
+            LogLocator(base=10.0, subs=(1.0, 2.0, 5.0)))
+        ax.yaxis.set_minor_locator(NullLocator())
+        ax.yaxis.set_major_formatter(ScalarFormatter())
+        ax.ticklabel_format(axis="y", style="plain", useOffset=False)
     ax.set_xlabel("wavelength (µm)", fontsize=_AX_LBL)
     ax.set_ylabel(spec["depth_label"], fontsize=_AX_LBL)
     ax.tick_params(labelsize=_TICK)
@@ -568,7 +602,10 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
         _npan = max(1, len(panels))
         _top = 0.965 if title is None else 0.905
         _bottom = 0.165 if footnote else 0.135
-        _left, _right, _wspace = 0.055, 0.988, 0.24
+        # wspace 0.16, was 0.24 (maintainer, 2026-08-13): a narrower gap. The
+        # y tick labels on each posterior panel are what set the floor here --
+        # below ~0.13 they start colliding with the panel to their left.
+        _left, _right, _wspace = 0.055, 0.988, 0.16
         # fig_w = axes_h * sum(width_ratios) * (1 + npan*wspace/ncols)
         #                / (right - left);  solve for the height that makes
         # the panels square at a fixed total width.

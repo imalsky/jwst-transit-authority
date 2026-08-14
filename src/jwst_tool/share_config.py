@@ -405,6 +405,13 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
         for m, v in (obs.get("noise_infl") or {}).items():
             if m in ins.MODES and isinstance(v, (int, float)):
                 state[key(f"infl_{m}")] = float(v)
+        # global noise multiplier (2026-08-13). noise_infl above holds the
+        # PER-MODE widget values; the effective factor is their product with
+        # this. A config written before this key existed restores 1.0, which
+        # reproduces the old behavior exactly.
+        _ns = obs.get("noise_scale")
+        if isinstance(_ns, (int, float)) and float(_ns) > 0.0:
+            state[key("noisescale")] = float(_ns)
         # correlated-floor noise scenarios were removed 2026-08-11 (0.28.0);
         # a config saved before that may still carry the key
         if obs.get("scenario") not in (None, "random"):

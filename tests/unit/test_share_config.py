@@ -263,3 +263,45 @@ def test_nondefault_removed_physics_is_refused_not_silently_dropped(over,
         share_config.widget_state(canon, _key)
     with pytest.raises(ValueError, match="programmatic interface"):
         share_config.widget_state(canon, _key)
+
+
+def test_global_noise_scale_round_trips_separately_from_per_mode():
+    """The global "Noise multiplier" and the per-mode multipliers are recorded
+    as SEPARATE factors, and a restore reproduces each exactly once.
+
+    The app composes them (effective = global x per-mode). If the download had
+    written the product into ``noise_infl``, a restore would put the product
+    into the per-mode widget and multiply by the global scale AGAIN.
+    """
+    share = share_config.build_share(
+        _canon(),
+        goal=dict(goal="detect", goal_mol="H2O", target_sig=3.0),
+        observation=dict(ks_mag=9.0, t14=2.8, t_base=2.8, sat_limit=0.8,
+                         modes=["nirspec_g395h"], n_transits=1, r_bin=100,
+                         floor_mode="constant",
+                         floors={"nirspec_g395h": 15.0},
+                         noise_infl={"nirspec_g395h": 1.5},
+                         noise_scale=2.0, show_noise=True, seed=0))
+    state, notes = share_config.widget_state(share, _key)
+    assert not notes, notes
+    assert state[_key("infl_nirspec_g395h")] == 1.5, state
+    assert state[_key("noisescale")] == 2.0, state
+
+
+def test_a_config_predating_the_noise_scale_key_restores_unscaled():
+    """A file written before the global knob existed must restore the OLD
+    behavior (no global scale), not fail and not invent one."""
+    share = share_config.build_share(
+        _canon(),
+        goal=dict(goal="detect", goal_mol="H2O", target_sig=3.0),
+        observation=dict(ks_mag=9.0, t14=2.8, t_base=2.8, sat_limit=0.8,
+                         modes=["nirspec_g395h"], n_transits=1, r_bin=100,
+                         floor_mode="constant",
+                         floors={"nirspec_g395h": 15.0},
+                         noise_infl={"nirspec_g395h": 1.5},
+                         show_noise=True, seed=0))
+    share["observation"].pop("noise_scale", None)
+    state, notes = share_config.widget_state(share, _key)
+    assert not notes, notes
+    assert state[_key("infl_nirspec_g395h")] == 1.5, state
+    assert _key("noisescale") not in state, state

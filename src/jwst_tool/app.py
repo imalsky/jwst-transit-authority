@@ -236,15 +236,13 @@ with st.expander("How the model works"):
         f"""
 Each run computes a spectrum for the atmosphere you configure.
 
-1. **Chemistry**: VULCAN solves photochemical kinetics through its JAX port.
-   PICASO reads equilibrium abundances from tables.
-2. **Temperature profile**: select a Guillot profile, a PICASO climate
-   profile, or upload a table. The chemistry engine sets which are offered.
-3. **Spectrum**: ExoJAX computes the transit or eclipse depth against a
-   PHOENIX stellar model.
-4. **Noise**: Pandeia ({ins.BACKEND_STATUS.split(' /')[0]} here) predicts the
-   uncertainty per mode, with a PandExo-style noise floor.
-5. **Scores**: template S/N per molecule, Fisher parameter forecasts, and the
+1. **Chemistry**: run a forward model with PICASO or VULCAN.
+2. **Temperature profile**: select a fixed P-T profile, or run a climate model
+   in PICASO.
+3. **Spectrum**: compute a spectrum using ExoJAX.
+4. **Noise**: use Pandeia ({ins.BACKEND_STATUS.split(' /')[0]}) to get the
+   uncertainty per mode and a PandExo-like noise floor.
+5. **Scores**: get the observational S/N, Fisher parameter forecasts, and the
    number of transits or eclipses that reaches your target.
 
         """)
@@ -690,8 +688,8 @@ with st.sidebar:
     science_mode = st.radio(
         "Observation type", ["transmission", "emission"], horizontal=True,
         key=K("scimode"),
-        format_func={"transmission": "Transmission (transit)",
-                     "emission": "Emission (secondary eclipse)"}.get)
+        format_func={"transmission": "Transmission",
+                     "emission": "Emission"}.get)
     # Event word for observation-facing labels: only the vocabulary changes
     # with the observation type, not the calculation.
     _evw = "eclipse" if science_mode == "emission" else "transit"
@@ -1376,6 +1374,20 @@ with st.sidebar:
         "Seed", 0, 9999, 0, key=K("seed"), disabled=not show_noise,
         help="The same seed reproduces the identical draw and the identical "
              "recovered parameters.")
+    # ONE knob for "more jitter" (maintainer, 2026-08-13). It scales the NOISE
+    # MODEL, not the draw: posteriors.mock_realization deliberately refuses a
+    # draw-only scale factor, because a 2x draw beside 1x error bars is not a
+    # realization of the plotted model, and the S/N and Fisher numbers would
+    # still assume the unscaled sigma. Scaling the noise model instead moves
+    # the error bars, the scores, the forecast widths and the draw together,
+    # so the figure stays internally consistent and the value is recorded with
+    # the run. Composes with (multiplies) the per-mode multipliers in the
+    # Noise model expander, which stay for mode-specific tuning.
+    noise_scale = st.slider(
+        "Noise multiplier", 0.5, 3.0, 1.0, 0.05, key=K("noisescale"),
+        help="Scales every mode's random noise. 1.0 is the Pandeia "
+             "prediction as-is. Moves the error bars, the S/N, the forecast "
+             "widths and the jitter draw together.")
 
     with st.expander("Timing, saturation & binning (Pandeia)"):
         t_base = st.number_input(
@@ -1467,11 +1479,21 @@ with st.sidebar:
                              or floor_mode == "constant"
                              or (floor_mode == "file" and floor_table is not None))
 
-        infl = {k: st.number_input(
+        # per-mode multipliers; the global "Noise multiplier" above scales all
+        # of them (composed below, so neither control is a hidden override)
+        _infl_mode = {k: st.number_input(
             f"{ins.MODES[k]['label']} random-noise multiplier", 1.0, 3.0,
             float(ins.MODES[k].get("noise_infl", 1.0)),
             0.05, key=K(f"infl_{k}"))
             for k in mode_keys}
+        infl = {k: float(noise_scale) * float(_infl_mode[k])
+                for k in mode_keys}
+        if abs(float(noise_scale) - 1.0) > 1e-9:
+            st.caption(
+                f"Global noise multiplier {float(noise_scale):g}x is applied "
+                "on top of these, so the effective factors are "
+                + ", ".join(f"{ins.MODES[k]['label']} {infl[k]:.2f}x"
+                            for k in mode_keys) + ".")
 
     # -----------------------------------------------------------------------
     # More settings: solver grid and advanced RT, behind one entry point.
@@ -1679,7 +1701,13 @@ with st.expander("Run summary & configuration"):
                             else (float(floors[k]) if np.isscalar(floors[k])
                                   else "wavelength table"))
                         for k in mode_keys},
-                noise_infl={k: float(infl[k]) for k in mode_keys},
+                # the PER-MODE widget values, not the composed product: the
+                # global scale is recorded separately below, and
+                # share_config restores noise_infl into the per-mode widgets
+                # -- writing the product here would re-multiply by the global
+                # scale on every restore.
+                noise_infl={k: float(_infl_mode[k]) for k in mode_keys},
+                noise_scale=float(noise_scale),
                 show_noise=bool(show_noise),
                 seed=int(seed),
                 combos=[dict(name=str(c["name"]),
@@ -2757,7 +2785,7 @@ _fig_ctx = _fig_box.container()
 _fc1, _fc2 = _fig_ctx.columns([2.0, 1.6])
 with _fc1:
     _sel_series = st.multiselect(
-        "Series on the spectrum", _series_ids,
+        "Modes", _series_ids,
         default=[i for i in _series_ids if i.startswith("mode:")],
         format_func=lambda i: _series_lbl[i], key=K("sum_series"))
 with _fc2:
@@ -2783,17 +2811,16 @@ with _fc2:
                 min(_grid_hi, max(c[1] for c in _cov) * 1.03))
     else:
         _fit = (_grid_lo, _grid_hi)
-    # Two options only (maintainer, 2026-08-13): the Custom slider is gone.
-    _wl_mode = st.radio(
-        "Wavelength range", ["Fit to selected modes", "Full model"],
-        horizontal=True, key=K("sum_wlmode"))
+    # ALWAYS fit to the selected modes (maintainer, 2026-08-13): the
+    # "Full model" option and the Custom slider before it are both gone. The
+    # window is derived from the selection, so choosing modes is the only
+    # wavelength control -- selecting every mode gives the full span anyway.
     _ax1, _ax2 = st.columns(2)
     # x defaults to log (the wavelength convention here); y to linear, since
     # transit depth spans a narrow range where log adds nothing.
-    _x_log = _ax1.checkbox("Log wavelength axis", value=True,
-                           key=K("sum_xlog"))
-    _y_log = _ax2.checkbox("Log depth axis", value=False, key=K("sum_ylog"))
-_wl_range = (_grid_lo, _grid_hi) if _wl_mode == "Full model" else _fit
+    _x_log = _ax1.checkbox("Log x", value=True, key=K("sum_xlog"))
+    _y_log = _ax2.checkbox("Log y", value=False, key=K("sum_ylog"))
+_wl_range = _fit          # always the selected modes' coverage
 
 _sum_points = []
 for r in results:
