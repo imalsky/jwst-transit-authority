@@ -441,11 +441,7 @@ gitignored `notes.md` at the repo root.
 ## Physics and conventions
 
 The modeling conventions this tool adopts, the defaults it ships, and why.
-(History: moved out of the README in 2026-07 as `docs/physics_and_conventions.md`,
-which absorbed `docs/picaso_roadmap.md` and `docs/jwst_tool_upstream_deviations.md`
-in the 2026-08-05 consolidation, and was merged back into this README in the
-2026-08 three-doc consolidation. The PICASO and config-deviation parts are the
-next two sections; the decision records follow them.)
+The PICASO and config-deviation parts are the next two sections.
 
 The end-to-end guided tour of the pipeline, including the noise model
 described carefully (formerly the project-level autodiff guide PDF, Part 6,
@@ -1019,6 +1015,7 @@ upstream report) live in `notes.md` (local, gitignored), "Decision records"
 section. Summary: every finding is dispositioned FIXED / DELIBERATE / ACCEPTED
 with reasoning; accepted limitations are listed below under
 [Open gaps](#open-gaps-and-accepted-limitations).
+
 ## Open gaps and accepted limitations
 
 The one live list of everything known to be missing, approximate, or
