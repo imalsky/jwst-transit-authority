@@ -486,8 +486,9 @@ def test_builders_validate_their_inputs_loudly():
         plotting.build_vmr_figure(p, [("H2O", np.array([1e-3, 1e-4]))])
 
 
-def test_summary_layout_is_wide_spectrum_plus_one_panel_per_parameter():
-    """Spectrum at 2x width, then ONE SQUARE PANEL PER PARAMETER.
+def test_summary_layout_is_golden_spectrum_plus_square_panels():
+    """Spectrum at the GOLDEN RATIO (1.618:1), then one SQUARE panel per
+    parameter (maintainer, 2026-08-13).
 
     The single merged twin-axis box this replaced could not work: each
     parameter's grid is center +/- 5 sigma, so its axis auto-scaled to its own
@@ -500,19 +501,26 @@ def test_summary_layout_is_wide_spectrum_plus_one_panel_per_parameter():
         fig.canvas.draw()
         assert len(fig.axes) == 3, [ax.get_ylabel() for ax in fig.axes]
         spec, p1, p2 = (ax.get_window_extent() for ax in fig.axes)
-        assert abs(spec.width / p1.width - 2.0) < 0.06, (spec.width, p1.width)
-        # EQUAL HEIGHT (maintainer, 2026-08-13), superseding square panels:
-        # set_box_aspect(1.0) shrank each panel to its own width -- half the
-        # spectrum's -- so they sat short and vertically centered against it.
+        # the figure HEIGHT is solved from the panel count so that a square
+        # panel exactly fills the row; both shapes are then also pinned by
+        # set_box_aspect, so they hold under margin drift.
+        assert abs(spec.width / spec.height - 1.618) < 0.005, \
+            f"spectrum ratio {spec.width / spec.height:.4f} != 1.618"
+        # SQUARE, and still the spectrum's height: solving the figure height
+        # for the panel count makes those the same requirement, which is why
+        # the earlier equal-height attempt needed set_box_aspect(None) and
+        # this one does not.
         for bb in (p1, p2):
+            assert abs(bb.width - bb.height) < 1.0, \
+                f"panel {bb.width:.1f}x{bb.height:.1f} is not square"
             assert abs(bb.height - spec.height) < 1.0, \
                 f"panel height {bb.height:.1f} != spectrum {spec.height:.1f}"
         assert (round(p1.width, 3), round(p1.height, 3)) == \
                (round(p2.width, 3), round(p2.height, 3)), (p1, p2)
         assert abs(p1.y0 - p2.y0) < 1.0, "panels must share a baseline"
         for ax in fig.axes[1:]:
-            assert ax.get_box_aspect() is None, \
-                "a fixed box aspect would break the equal-height rule"
+            assert ax.get_box_aspect() == 1.0
+        assert abs(fig.axes[0].get_box_aspect() - 1.0 / 1.618) < 1e-6
         # NOT superimposed: the whole point of the revert
         curves = [ax.get_lines()[0] for ax in fig.axes[1:]]
         px = [ax.transData.transform(
@@ -524,16 +532,22 @@ def test_summary_layout_is_wide_spectrum_plus_one_panel_per_parameter():
         plt.close(fig)
 
 
-def test_each_posterior_panel_reports_its_width():
+def test_each_posterior_panel_reports_its_width_as_a_number_not_a_band():
     """The width cannot be read from a normalized curve's shape, so it is
-    QUOTED in the panel title and shaded as a 1-sigma band -- how corner.py
-    and published marginalized posteriors report it."""
+    QUOTED -- in the panel title with one curve, per legend entry with several.
+
+    The shaded 1-sigma band this used to also assert was REMOVED (maintainer,
+    2026-08-13): with one curve per selected series the overlapping fills
+    muddied the panel, and the number carries the same information exactly.
+    Asserting its absence keeps it from creeping back.
+    """
     fig = _summary_fig(with_sigma=True)
     try:
-        for ax in fig.axes[1:]:
+        for i, ax in enumerate(fig.axes[1:], 1):
             title = ax.get_title()
             assert "±" in title, f"panel title quotes no width: {title!r}"
-            assert ax.collections, "no shaded 1-sigma band"
+            assert not ax.collections, \
+                f"axes{i} regained a shaded band ({len(ax.collections)})"
     finally:
         plt.close(fig)
 

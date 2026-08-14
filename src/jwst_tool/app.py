@@ -83,6 +83,13 @@ def _slug(s: str) -> str:
 # never a stored config key, so no share-config migration is involved.
 _ALL_USABLE = "All usable modes"
 
+# How many forecast-posterior panels the summary figure will draw. A LAYOUT
+# limit, not a science one: up to 13 parameters can be free, and every one of
+# their widths is reported in the Fisher table regardless. The figure solves
+# its height so each panel is square at a fixed total width, so each extra
+# panel shrinks all of them -- 3 is where a panel stops being readable.
+_MAX_POST_PANELS = 3
+
 # Custom-combination palette, deliberately disjoint from instruments.MODE_COLOR
 # so a combo line never collides with a member mode's color. Module level
 # because _series_color() (results section) needs it, and it used to be defined
@@ -2318,7 +2325,7 @@ with st.expander("Mode details"):
                        key=K("dl_modes_csv"))
 
 
-with st.expander("Mode combinations"):
+with st.expander("Add a custom mode set"):
     # --- mode combinations (builder) --------------------------------------------
     # Named combinations of the modes that were run, evaluated through
     # posteriors.combo_forecast / compare_combos (the same combination math as
@@ -2558,7 +2565,9 @@ _post_panels: list[dict] = []       # summary_figure-compatible panel dicts
 _post_sel: list[str] = []
 _have_fisher = bool(fisher_names) and "jac" in model
 if _have_fisher:
-    st.subheader("Marginalized forecast posteriors")
+    # An EXPANDER, matching every other results section (maintainer,
+    # 2026-08-13) -- it was the only st.subheader among them.
+    _post_box = st.expander("Marginalized forecast posteriors")
 
     # ONE color per series, shared by the spectrum and the forecast panels
     # (maintainer, 2026-08-13). A mode keeps instruments.MODE_COLOR so its
@@ -2594,8 +2603,9 @@ if _have_fisher:
             _results_by_mode[k] for k in _rec["usable_modes"]]
 
     if not _sources:
-        st.info("No usable mode carries a Jacobian, so there is no "
-                "forecast to draw.")
+        with _post_box:
+            st.info("No usable mode carries a Jacobian, so there is no "
+                    "forecast to draw.")
     else:
         _centers_all = {n: _param_center(n, _cpj) for n in fisher_names}
         _pp_key = K("post_params_" + "_".join(fisher_names))
@@ -2603,10 +2613,16 @@ if _have_fisher:
         if any(p not in fisher_names
                for p in st.session_state.get(_pp_key, [])):
             st.session_state.pop(_pp_key, None)
-        _post_sel = st.multiselect(
-            "Parameters to draw (up to two)", fisher_names,
-            default=fisher_names[:2], key=_pp_key, max_selections=2,
-            format_func=lambda n: forward.PARAM_LABELS[n])
+        with _post_box:
+            _post_sel = st.multiselect(
+                "Parameters to draw", fisher_names,
+                default=fisher_names[:2], key=_pp_key,
+                max_selections=_MAX_POST_PANELS,
+                format_func=lambda n: forward.PARAM_LABELS[n],
+                help="One panel per parameter in the summary figure, capped "
+                     f"at {_MAX_POST_PANELS} so each panel stays readable. "
+                     "Every free parameter's width is in the Fisher table "
+                     "above, whether or not it is drawn.")
         # record per source (sigmas always; curves for centered params)
         _curve_params = [p for p in _post_sel
                          if _centers_all.get(p) is not None]
@@ -2650,9 +2666,11 @@ if _have_fisher:
                     _want.append(_key)
             _sources = {k: v for k, v in _sources.items() if k in _want}
         if not _sources:
-            st.info("No selected series carries a Jacobian, so there is no "
-                    "forecast curve to draw. Widen 'Series on the spectrum' "
-                    "below, or read the widths from the table above.")
+            with _post_box:
+                st.info("No selected series carries a Jacobian, so there is "
+                        "no forecast curve to draw. Widen 'Series on the "
+                        "spectrum' below, or read the widths from the table "
+                        "above.")
         _src_labels_drawn = list(_sources)
 
         _mock_rec = {}

@@ -1,4 +1,4 @@
-"""summary_figure: the proposal summary figure (spectrum + up to two posterior panels) composes headless.
+"""summary_figure: the proposal summary figure (golden-ratio spectrum + up to three square posterior panels) composes headless.
 
 Pure matplotlib (Agg): no Streamlit, no engine, no noise backend. Pins the
 loud input validation, the no-silent-empty-panel rule, and that the figure

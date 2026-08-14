@@ -543,13 +543,17 @@ def test_combo_builder_and_summary_figure_render_with_jacobians():
     at.run()
     assert not at.exception, at.exception
     subs = [s.value for s in at.subheader]
-    # results sections are collapsible groups now; the combo builder lives
-    # inside the "Mode combinations" expander
+    # EVERY results section is a collapsible expander (maintainer,
+    # 2026-08-13): the combo builder is "Add a custom mode set" (renamed from
+    # "Mode combinations"), and the forecast posteriors moved from the one
+    # remaining st.subheader into an expander like the rest.
     exps = [e.label for e in at.get("expander")]
-    assert "Mode combinations" in exps, exps
+    assert "Add a custom mode set" in exps, exps
+    assert "Mode combinations" not in exps, exps
     assert "Parameter constraint forecast (Fisher)" in exps, exps
     assert "Physical structure (T-P profile, mixing ratios)" in exps, exps
-    assert "Marginalized forecast posteriors" in subs
+    assert "Marginalized forecast posteriors" in exps, exps
+    assert "Marginalized forecast posteriors" not in subs, subs
     assert any("forecast summary" in s for s in subs), subs
     dl = {b.label for b in at.get("download_button")}
     assert "Figure (PDF, vector)" in dl

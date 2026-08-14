@@ -187,7 +187,7 @@ GUI: the mode-combination builder, the marginalized forecast posteriors, the
 simulated mock observation, and the proposal summary figure. Sanity-check any
 forecast from this tool against a full retrieval before submitting a proposal.
 
-### Mode combinations
+### Custom mode sets
 
 The results page can compare named combinations of instrument modes -- for
 example "SOSS + G395H" against "SOSS + G395H + MIRI" -- to answer the
@@ -251,7 +251,7 @@ covariance -- it is a visualization of realization scatter, not a retrieval.
 
 The results page renders one composed, proposal-ready graphic (no figure
 appears twice): the model spectrum with each mode's simulated data points
-on the left, and up to two marginalized forecast posterior panels (best
+on the left at the golden ratio, and up to three SQUARE marginalized forecast posterior panels (best
 mode or combination, with an optional dashed comparison) on the right.
 Each mode's expected performance -- its conditional template S/N for a
 detection goal, its expected ± for a constraint goal -- rides in that

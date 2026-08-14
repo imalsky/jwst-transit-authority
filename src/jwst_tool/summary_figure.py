@@ -28,6 +28,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.lines import Line2D
 from matplotlib.ticker import (MaxNLocator, NullLocator,
                               ScalarFormatter)
 
@@ -351,18 +352,53 @@ def _plot_spectrum(ax, spec: dict) -> None:
         # padding distorted the visible depth range purely for the legend's
         # benefit, and is what the outside placement originally fixed).
         # A translucent frame keeps it readable if it must sit over gridlines.
-        _n_leg = len(spec["points"]) + 1 + (spec["depth2_ppm"] is not None)
+        # TWO COLUMNS BY GROUP (maintainer, 2026-08-13): model curves in the
+        # first, instrument modes in the second. matplotlib fills a legend
+        # COLUMN-MAJOR (verified: with ncol=2 and 6 entries, entries 0-2 land
+        # in column 1), so the handle list is ordered models-then-modes and the
+        # SHORTER group is padded with invisible entries -- otherwise the
+        # column break lands mid-group and the grouping is lost.
+        _h, _l = ax.get_legend_handles_labels()
+        _mode_labels = {str(p["label"]) for p in spec["points"]}
+        _models = [(h, l) for h, l in zip(_h, _l) if l not in _mode_labels]
+        _modes = [(h, l) for h, l in zip(_h, _l) if l in _mode_labels]
+        if _models and _modes:
+            _rows = max(len(_models), len(_modes))
+            _blank = Line2D([], [], linestyle="none", marker="none")
+            _models += [(_blank, " ")] * (_rows - len(_models))
+            _modes += [(_blank, " ")] * (_rows - len(_modes))
+            _h = [h for h, _ in _models + _modes]
+            _l = [l for _, l in _models + _modes]
+            _ncol = 2
+        else:
+            _ncol = 1
         # "upper left" into the reserved headroom, not "best": with a wide
         # spectrum every corner touches data at some wavelength.
         # No legend TITLE (maintainer, 2026-08-13): the entries carry their own
         # numbers, so the title was a second caption inside the legend.
-        _leg = ax.legend(loc="upper left", frameon=True, framealpha=0.82,
+        _leg = ax.legend(_h, _l, loc="upper left", frameon=True,
+                         framealpha=0.82,
                          edgecolor="none", fontsize=_LEG,
-                         ncol=(1 if _n_leg <= 4 else 2), handletextpad=0.5,
+                         ncol=_ncol, handletextpad=0.5,
                          borderaxespad=0.4, columnspacing=1.0,
                          labelspacing=0.3)
         _leg.set_zorder(5)
 
+
+
+# Golden ratio for the spectrum panel, and the figure's fixed total width.
+# The HEIGHT is solved from these plus the panel count (compose_summary_figure).
+_PHI = 1.618
+_FIG_W_IN = 13.0
+
+# Forecast-panel x window: +/-N sigma about the widest drawn curve. 3 keeps
+# >99.7% of the mass and fills the panel; the grid's own +/-5 sigma left the
+# curve visually flat across most of the axis.
+# 3.5 sigma, not 3: at 3 sigma the curve is still at 1.1% of peak when it
+# meets the spine, so it reads as CLIPPED rather than as a tail going to zero.
+# At 3.5 it is 0.2% -- visually on the axis -- and >99.95% of the mass is in
+# frame either way.
+_XLIM_SIGMA = 3.5
 
 
 def _fmt_val(v: float) -> str:
@@ -411,15 +447,9 @@ def _plot_posterior_panel(axp, pan: dict, color: str) -> None:
         # ``color`` (the per-parameter fallback) applies only when there is one
         # unlabelled curve and no caller color.
         _c = c.get("color") or color
-        if c["sigma"] is not None:
-            mu = c["mu"] if c["mu"] is not None else pan["center"]
-            if mu is not None:
-                band = (theta >= mu - c["sigma"]) & (theta <= mu + c["sigma"])
-                if band.any():
-                    # no legend entry: one "1σ" row per curve doubled the
-                    # legend and said nothing the shading does not
-                    axp.fill_between(theta[band], 0.0, pdf[band], color=_c,
-                                     alpha=0.16, lw=0, zorder=1)
+        # No shaded 1-sigma band (maintainer, 2026-08-13): with one curve per
+        # selected series the overlapping fills muddied the panel, and every
+        # entry already quotes its sigma as a number.
         # With several sources the title cannot quote one width without
         # silently picking a source, so each ENTRY carries its own.
         _lab = str(c["label"])
@@ -442,6 +472,24 @@ def _plot_posterior_panel(axp, pan: dict, color: str) -> None:
             if _mu is not None
             else f"{pan['axis_label']}: ± {_fmt_val(_q['sigma'])}",
             fontsize=_AX_LBL)
+    # NARROWER x bounds (maintainer, 2026-08-13: "hard to read right now").
+    # posteriors.gaussian_curve builds its grid as center +/- 5 sigma, and at
+    # +/-5 sigma the curve is visually zero across most of the axis, which
+    # squeezes the informative part into the middle fifth. Clip to the widest
+    # drawn curve at +/-_XLIM_SIGMA, which still contains >99.7% of every
+    # curve's mass. The grid itself is untouched (it is MC-pinned elsewhere).
+    _spans = [(c["mu"], c["sigma"]) for c in pan["curves"]
+              if c["mu"] is not None and c["sigma"] is not None]
+    if _spans:
+        _lo = min(m - _XLIM_SIGMA * sg for m, sg in _spans)
+        _hi = max(m + _XLIM_SIGMA * sg for m, sg in _spans)
+        if pan["center"] is not None:
+            # never crop the input-value line out of frame
+            _lo, _hi = min(_lo, pan["center"]), max(_hi, pan["center"])
+        if _hi > _lo:
+            axp.set_xlim(_lo, _hi)
+    # a narrow window needs a tick count that fits the panel's width
+    axp.xaxis.set_major_locator(MaxNLocator(nbins=5, steps=[1, 2, 2.5, 5, 10]))
     axp.set_xlabel(pan["axis_label"], fontsize=_AX_LBL)
     axp.set_yticks([])
     axp.tick_params(labelsize=_TICK)
@@ -505,32 +553,47 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
         # _plot_posterior_panel for the measurement. A 2:1 wavelength panel is
         # the right shape for a spectrum and matches how these appear in
         # papers; the posterior panels stay square.
-        # Legends are INSIDE the axes now, so the generous bottom margin
-        # they used to occupy is reclaimed: the panels get the height back
-        # instead of reserving a legend strip under them.
-        fig = plt.figure(figsize=(12.0, 4.6), dpi=200)
+        # ASPECT RATIOS (maintainer, 2026-08-13): the spectrum is golden
+        # ratio (PHI:1 wide) and every forecast panel is SQUARE. Both are
+        # enforced twice over -- the figure size is SOLVED so each gridspec
+        # cell already has the target shape, and set_box_aspect pins the axes
+        # regardless of margin drift. Without the solve, box_aspect would
+        # shrink an axes inside an ill-shaped cell and leave dead whitespace;
+        # without box_aspect, a margin tweak would silently skew the ratios.
         _npan = max(1, len(panels))
-        gs = fig.add_gridspec(1, 1 + _npan,
-                              width_ratios=[2.0] + [1.0] * _npan,
-                              wspace=0.26,
-                              left=0.055, right=0.988,
-                              top=(0.87 if title else 0.925),
-                              bottom=(0.165 if footnote else 0.125))
+        _top = 0.965 if title is None else 0.905
+        _bottom = 0.165 if footnote else 0.135
+        _left, _right, _wspace = 0.055, 0.988, 0.24
+        # fig_w = axes_h * sum(width_ratios) * (1 + npan*wspace/ncols)
+        #                / (right - left);  solve for the height that makes
+        # the panels square at a fixed total width.
+        _ncols = 1 + _npan
+        _k = ((_PHI + _npan) * (1.0 + _npan * _wspace / _ncols)
+              / (_right - _left))
+        _axes_h = _FIG_W_IN / _k
+        fig = plt.figure(figsize=(_FIG_W_IN, _axes_h / (_top - _bottom)),
+                         dpi=200)
+        gs = fig.add_gridspec(1, _ncols,
+                              width_ratios=[_PHI] + [1.0] * _npan,
+                              wspace=_wspace,
+                              left=_left, right=_right,
+                              top=_top, bottom=_bottom)
 
         # -- LEFT: spectrum with per-mode simulated points (2x width) -------
         ax = fig.add_subplot(gs[0, 0])
+        ax.set_box_aspect(1.0 / _PHI)      # PHI:1 wide, golden ratio
         _plot_spectrum(ax, spec)
 
         # -- RIGHT: one square panel per marginalized forecast posterior ----
         for i in range(_npan):
             axp = fig.add_subplot(gs[0, i + 1])
-            # Same HEIGHT as the spectrum (maintainer, 2026-08-13). This
-            # replaces set_box_aspect(1.0): a square panel shrank to its own
-            # WIDTH, which is half the spectrum's, so the panels sat short and
-            # vertically centered against it. Filling the gridspec cell makes
-            # all three share the top and bottom edge; the panels are no
-            # longer square, which is the trade the equal height requires.
-            axp.set_box_aspect(None)
+            # SQUARE (maintainer, 2026-08-13). The equal-height rule this
+            # replaces is preserved anyway: the figure height is solved so a
+            # square panel exactly fills the row, so square and
+            # same-height-as-the-spectrum are the same thing here -- which is
+            # why the earlier attempt needed set_box_aspect(None) and this one
+            # does not.
+            axp.set_box_aspect(1.0)
             if i >= len(panels):
                 axp.set_axis_off()
                 continue
