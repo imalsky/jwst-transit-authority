@@ -83,6 +83,12 @@ def _slug(s: str) -> str:
 # never a stored config key, so no share-config migration is involved.
 _ALL_USABLE = "All usable modes"
 
+# Custom-combination palette, deliberately disjoint from instruments.MODE_COLOR
+# so a combo line never collides with a member mode's color. Module level
+# because _series_color() (results section) needs it, and it used to be defined
+# further DOWN the script than that call -- a NameError on every results page.
+_COMBO_COLORS = ("#6a3d9a", "#117733", "#882255", "#88ccee")
+
 
 def _full_bbox(fig):
     """The whole canvas as an explicit Bbox (defeats savefig.bbox: tight).
@@ -1417,19 +1423,21 @@ with st.sidebar:
 
     with st.expander("Noise model (Pandeia)"):
         st.markdown("**Minimum noise floor** (PandExo convention)")
-        # NO PRESELECTION (index=None): a 15-40 ppm floor dominates the
-        # reported precision and a zero floor claims undemonstrated precision
-        # -- neither is neutral, so the user must own the choice.
+        # DEFAULTS TO CONSTANT (maintainer, 2026-08-13: "start with constant
+        # ppm noise on by default"), superseding the earlier no-preselection
+        # gate. The reason a default is acceptable in ONE direction only:
+        # preselecting "No floor" would claim undemonstrated precision on the
+        # user's behalf, but a constant floor at the per-mode suggested values
+        # claims LESS precision than the alternatives, so the default is the
+        # conservative side of the choice rather than a flattering one. The
+        # floor is still recorded with the run and still shown per mode below,
+        # so it is disclosed rather than hidden.
         floor_mode = st.radio(
             "Floor type", ["constant", "none", "file"], horizontal=True,
-            index=None, key=K("floormode"),
+            index=0, key=K("floormode"),
             format_func={"constant": "Constant (ppm)", "none": "No floor",
                          "file": "Wavelength table"}.get)
         floor_table = None
-        if floor_mode is None:
-            st.info(
-                "Choose a floor type to continue. The choice changes the "
-                "reported precision and is saved with the run.")
         floors = {k: None for k in mode_keys}
         if floor_mode == "constant":
             floors = {k: st.number_input(
@@ -2470,9 +2478,13 @@ with st.expander("Parameter constraint forecast (Fisher)"):
         if _combo_mask.any():
             # tint the custom-combination rows so they read as a group
             # distinct from the per-mode rows above/below them
+            # TEXT color, not a background tint (maintainer, 2026-08-13):
+            # a filled row reads as a highlight/alert. Colored text marks the
+            # group without shouting. #5b3a8e is the combo palette's purple,
+            # dark enough for body text on white.
             st.dataframe(
                 _disp_df.style.apply(
-                    lambda row: ["background-color: #ece4f5"
+                    lambda row: ["color: #5b3a8e; font-weight: 600"
                                  if _combo_mask.loc[row.name] else ""
                                  for _ in row], axis=1),
                 width="stretch", hide_index=True)
@@ -2548,6 +2560,26 @@ _have_fisher = bool(fisher_names) and "jac" in model
 if _have_fisher:
     st.subheader("Marginalized forecast posteriors")
 
+    # ONE color per series, shared by the spectrum and the forecast panels
+    # (maintainer, 2026-08-13). A mode keeps instruments.MODE_COLOR so its
+    # points and its posterior match; a custom set draws from _COMBO_COLORS,
+    # which never collides with a member mode's color; the all-usable row gets
+    # a neutral gray, since it is every mode at once and no single mode's hue
+    # would be honest.
+    _ALL_USABLE_COLOR = "#444444"
+
+    def _series_color(label: str) -> str:
+        if label == _ALL_USABLE:
+            return _ALL_USABLE_COLOR
+        for _r in results:
+            if _r["label"] == label:
+                return ins.MODE_COLOR.get(_r["mode_key"], "#333333")
+        _names = [str(c["name"]) for c in
+                  (st.session_state.get(K("combos")) or [])]
+        if label in _names:
+            return _COMBO_COLORS[_names.index(label) % len(_COMBO_COLORS)]
+        return "#333333"
+
     _usable_post = [r for r in results
                     if r.get("jac_bins") is not None and not r["saturated"]]
     # forecast sources: each usable mode, the all-usable combination, and
@@ -2593,75 +2625,96 @@ if _have_fisher:
             return float(v) if np.isfinite(v) else np.inf
 
         # ONE curve per parameter (maintainer, 2026-08-13). This box used to
-        # draw best-source + optional overlay, each with its jitter-draw fit
-        # beside it -- 2 parameters x 2 sources x 2 curves = 8 lines, in two
-        # colors, which was unreadable. Now: the user picks ONE source and
-        # gets one line per parameter, in that parameter's color.
-        _best_lbl = min(_sources, key=_src_score)
-        _src_opts = list(_sources)
-        _src_key = K("post_source")
-        if st.session_state.get(_src_key) not in _src_opts:
-            st.session_state.pop(_src_key, None)
-        _post_src = st.selectbox(
-            "Forecast source", _src_opts,
-            index=_src_opts.index(_best_lbl), key=_src_key,
-            help="Which mode or custom combination the drawn posteriors "
-                 "come from. Defaults to the tightest one (smallest "
-                 "marginalized uncertainty on the first drawn parameter). "
-                 "Every source's width is in the table above.")
+        # SOURCES FOLLOW THE SPECTRUM SERIES (maintainer, 2026-08-13: "I want
+        # them to match the ones I'm showing for the series on the spectrum").
+        # There is no separate "Forecast source" control any more: the figure's
+        # series multiselect drives both halves of the figure, so the panels
+        # can never show a mode the spectrum is not displaying.
+        #
+        # That multiselect renders LATER in the script (it belongs beside the
+        # figure), so read its committed state here -- the same cross-section
+        # read the sidebar already uses. On the very first render the key is
+        # absent and every source is drawn, which matches the multiselect's own
+        # default of all modes.
+        _sel_ids = st.session_state.get(K("sum_series"))
+        if _sel_ids:
+            _by_key = {r["mode_key"]: r["label"] for r in _usable_post}
+            _want = []
+            for _i in _sel_ids:
+                _kind, _key = _i.split(":", 1)
+                if _kind == "allusable":
+                    _want.append(_ALL_USABLE)
+                elif _kind == "mode" and _key in _by_key:
+                    _want.append(_by_key[_key])       # saturated/Jacobian-less
+                elif _kind == "combo":                # modes drop out here
+                    _want.append(_key)
+            _sources = {k: v for k, v in _sources.items() if k in _want}
+        if not _sources:
+            st.info("No selected series carries a Jacobian, so there is no "
+                    "forecast curve to draw. Widen 'Series on the spectrum' "
+                    "below, or read the widths from the table above.")
+        _src_labels_drawn = list(_sources)
 
         _mock_rec = {}
         if _mock is not None and _post_sel:
             # linearized single-realization recovery on the SAME stacked
-            # system as the forecast (posteriors.mock_recovery)
-            _mock_rec[_post_src] = posteriors.mock_recovery(
-                _sources[_post_src], fisher_names, _mock, co_eval=co_eval)
+            # system as the forecast (posteriors.mock_recovery), per source
+            for _lbl in _src_labels_drawn:
+                _mock_rec[_lbl] = posteriors.mock_recovery(
+                    _sources[_lbl], fisher_names, _mock, co_eval=co_eval)
 
         for _p in _post_sel:
             _curves, _notes = [], []
-            _lbl = _post_src
-            _pr = _recs_by_src[_lbl]["params"].get(_p)
-            if _pr is None:
-                _sig = _recs_by_src[_lbl]["sigma_marginalized"][_p]
-                if np.isfinite(_sig):
-                    _notes.append(f"{_lbl}: no input-model center is "
-                                  "defined for this parameter under "
-                                  "the run's settings, so no curve is "
-                                  "drawn (its forecast width is in the "
-                                  "table above)")
+            for _lbl in _src_labels_drawn:
+                # one curve per SELECTED SERIES, colored to match its series
+                # on the spectrum so the two halves of the figure read
+                # together (see _series_color below for the shared mapping)
+                _pr = _recs_by_src[_lbl]["params"].get(_p)
+                _col = _series_color(_lbl)
+                if _pr is None:
+                    _sig = _recs_by_src[_lbl]["sigma_marginalized"][_p]
+                    if np.isfinite(_sig):
+                        _notes.append(f"{_lbl}: no input-model center is "
+                                      "defined for this parameter under "
+                                      "the run's settings, so no curve is "
+                                      "drawn (its forecast width is in the "
+                                      "table above)")
+                    else:
+                        _notes.append(f"{_lbl}: unconstrained (no curve)")
+                elif _pr["constrained"]:
+                    _mr = _mock_rec.get(_lbl)
+                    if _mr is not None and _mr["recovered"].get(_p):
+                        # THE JITTERED CURVE is the one drawn: same width as
+                        # the forecast (it is the forecast, recentered on what
+                        # this realization recovers), so no width information
+                        # is lost by dropping the unshifted twin. The dotted
+                        # center line marks the input value, so the offset
+                        # stays legible. The label is the SOURCE NAME only
+                        # (maintainer, 2026-08-13): "fit to this jitter draw"
+                        # described the mechanism, not the series.
+                        _d = float(_mr["delta_display"][_p])
+                        _mc = posteriors.gaussian_curve(
+                            _pr["center"] + _d, _pr["sigma_display"])
+                        _curves.append(dict(
+                            label=str(_lbl),
+                            theta=_mc["theta"], pdf=_mc["pdf"],
+                            # mu/sigma make the figure REPORT the width: the
+                            # curve's outline cannot, since each axis
+                            # auto-scales to its own +/-5 sigma
+                            mu=_pr["center"] + _d,
+                            sigma=_pr["sigma_display"],
+                            color=_col, ls="-", lw=1.8,
+                            kind=posteriors.MOCK_RECOVERY_KIND))
+                    else:
+                        _curves.append(dict(
+                            label=str(_lbl), theta=_pr["theta"],
+                            pdf=_pr["pdf"], mu=_pr["center"],
+                            sigma=_pr["sigma_display"],
+                            color=_col, ls="-", lw=1.8))
                 else:
-                    _notes.append(f"{_lbl}: unconstrained (no curve)")
-            elif _pr["constrained"]:
-                _mr = _mock_rec.get(_lbl)
-                if _mr is not None and _mr["recovered"].get(_p):
-                    # THE JITTERED CURVE is the one drawn: same width as the
-                    # forecast (it is the forecast, recentered on what this
-                    # realization recovers), so no width information is lost
-                    # by dropping the unshifted twin. The dotted center line
-                    # still marks the input value, so the offset stays legible.
-                    _d = float(_mr["delta_display"][_p])
-                    _mc = posteriors.gaussian_curve(
-                        _pr["center"] + _d, _pr["sigma_display"])
-                    _curves.append(dict(
-                        label=f"{_lbl}: fit to this jitter draw",
-                        theta=_mc["theta"], pdf=_mc["pdf"],
-                        # mu/sigma make the figure REPORT the forecast width:
-                        # the curve's outline cannot, since each axis
-                        # auto-scales to its own +/-5 sigma (summary_figure)
-                        mu=_pr["center"] + _d, sigma=_pr["sigma_display"],
-                        ls="-", lw=1.8,
-                        kind=posteriors.MOCK_RECOVERY_KIND))
-                else:
-                    # jitter off (or this parameter not recovered): the
-                    # unshifted forecast, labelled so the difference is plain
-                    _curves.append(dict(
-                        label=f"{_lbl}: forecast", theta=_pr["theta"],
-                        pdf=_pr["pdf"], mu=_pr["center"],
-                        sigma=_pr["sigma_display"], ls="-", lw=1.8))
-            else:
-                _notes.append(f"{_lbl}: unconstrained -- this "
-                              "direction carries no information in "
-                              "the fitted band (no curve, by design)")
+                    _notes.append(f"{_lbl}: unconstrained -- this "
+                                  "direction carries no information in "
+                                  "the fitted band (no curve, by design)")
             _post_panels.append(dict(axis_label=forward.param_axis(_p),
                                      axis_unit=forward.PARAM_UNITS.get(_p, ""),
                                      curves=_curves, notes=_notes,
@@ -2718,6 +2771,13 @@ _combo_members = {str(c["name"]): [m for m in c["modes"]
                   for c in (st.session_state.get(K("combos")) or [])}
 _series_opts += [("combo", n, f"{n} (combined)")
                  for n, mem in _combo_members.items() if mem]
+# The all-usable row is a FORECAST source, not a distinct spectrum: selecting
+# it draws every usable mode's points (which is what those modes already
+# draw), and its value is that its combined posterior can appear in the
+# panels. Labelled so that redundancy is not a surprise.
+if len(_usable) >= 2:
+    _series_opts.append(("allusable", "all",
+                         f"{_ALL_USABLE} (forecast only)"))
 _series_ids = [f"{kind}:{key}" for kind, key, _ in _series_opts]
 _series_lbl = {f"{kind}:{key}": lbl for kind, key, lbl in _series_opts}
 
@@ -2730,10 +2790,19 @@ with _fc1:
 with _fc2:
     # Default window = the span the SELECTED modes actually cover, so the
     # figure is not mostly empty spectrum. Recomputed from the selection.
+    def _series_modes(i: str) -> list:
+        """Mode keys a series id covers. The all-usable entry spans every
+        usable mode; without this it fell through to an empty combo lookup and
+        contributed nothing to the window."""
+        _kind, _key = i.split(":", 1)
+        if _kind == "mode":
+            return [_key]
+        if _kind == "allusable":
+            return [r["mode_key"] for r in _usable]
+        return _combo_members.get(_key, [])
+
     _cov = [(ins.MODES[k]["wl_min"], ins.MODES[k]["wl_max"])
-            for i in _sel_series for k in
-            ([i.split(":", 1)[1]] if i.startswith("mode:")
-             else _combo_members.get(i.split(":", 1)[1], []))
+            for i in _sel_series for k in _series_modes(i)
             if k in ins.MODES]
     _grid_lo, _grid_hi = float(wl_s[0]), float(wl_s[-1])
     if _cov:
@@ -2760,7 +2829,8 @@ for r in results:
     # scientific weight. The saturation itself is reported in Mode details.
     if r["saturated"]:
         continue
-    if f"mode:{r['mode_key']}" not in _sel_series:
+    if (f"mode:{r['mode_key']}" not in _sel_series
+            and "allusable:all" not in _sel_series):
         continue                      # deselected in the controls above
     _y = (np.asarray(_mock["modes"][r["mode_key"]]["depth_mock"], float)
           if _mock is not None else np.asarray(r["depth"], float)) * 1e6
@@ -2790,12 +2860,6 @@ if _leg_num:
         if goal_r == "detect" else
         f"expected ±{forward.param_axis(_rk_param)} per mode "
         f"at {_target_sig:g}σ")
-# Custom sets as ONE series each. A combo has no spectrum of its own (it is
-# scored through Fisher), so its line is its member modes' simulated points
-# merged and sorted by wavelength, drawn in a single distinct color. Where two
-# members overlap in wavelength the merged line carries a point from each --
-# the label says "combined" so that is not read as one instrument's sampling.
-_COMBO_COLORS = ("#6a3d9a", "#117733", "#882255", "#88ccee")
 for _ci, (_cname, _members) in enumerate(_combo_members.items()):
     if f"combo:{_cname}" not in _sel_series:
         continue
@@ -2821,7 +2885,7 @@ for _ci, (_cname, _members) in enumerate(_combo_members.items()):
 
 _sum_spectrum = dict(wl_um=wl_s, depth_ppm=d_plot,
                      depth_label=_depth_lbl,
-                     model_label="model (smoothed for display)",
+                     model_label="model",
                      legend_title=_leg_note,
                      wl_range=_wl_range,
                      x_log=_x_log, y_log=_y_log,
@@ -2836,10 +2900,11 @@ _sum_foot = None
 
 
 def _compose(spec):
+    # No in-figure title (maintainer, 2026-08-13): the section subheader
+    # above already names the figure, so it was a duplicate. The exported
+    # PNG/PDF carry the planet name in their FILENAME.
     return summary_figure.compose_summary_figure(
         spec, posterior_panels=_post_panels or None,
-        title=f"{meta.get('planet', 'planet')} -- "
-              f"{_cpj.get('science_mode', 'transmission')} forecast summary",
         footnote=_sum_foot)
 
 

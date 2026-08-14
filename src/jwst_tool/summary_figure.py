@@ -243,11 +243,16 @@ def _visible_ylim(spec: dict, lo: float, hi: float):
         return None                       # nothing visible; leave autoscale
     allv = np.concatenate(vals)
     y0, y1 = float(np.min(allv)), float(np.max(allv))
+    # ASYMMETRIC padding (maintainer, 2026-08-13: "make the y scale fit a
+    # little better by auto"). The old symmetric 6% left the data filling only
+    # 76% of the axis -- 4.6% dead space below and 19.6% above, and the top
+    # gap is separately reserved for the in-axes legend anyway. 2% below is
+    # enough to keep a whisker off the spine; the legend headroom is added by
+    # the caller, sized from its row count.
     if spec["y_log"] and y0 > 0.0:
-        # pad by a fixed FRACTION of the span in log space
-        f = (y1 / y0) ** 0.06 if y1 > y0 else 1.05
+        f = (y1 / y0) ** 0.02 if y1 > y0 else 1.02
         return (y0 / f, y1 * f)
-    pad = 0.06 * (y1 - y0) if y1 > y0 else max(1.0, abs(y0) * 0.01)
+    pad = 0.02 * (y1 - y0) if y1 > y0 else max(1.0, abs(y0) * 0.01)
     return (y0 - pad, y1 + pad)
 
 
@@ -259,8 +264,15 @@ def _plot_spectrum(ax, spec: dict) -> None:
         ax.plot(spec["wl_um"], spec["depth2_ppm"], color="#888888",
                 lw=1.0, ls="--", zorder=1, label=spec["depth2_label"])
     for p in spec["points"]:
+        # markeredgecolor MUST be set: science.mplstyle leaves it "auto" with
+        # markeredgewidth 1.0, and on a 3.6 pt marker a 1 pt black edge
+        # swallows the fill -- every mode's marker rendered black and the
+        # per-mode color was invisible. That color is now the series identity
+        # shared with the forecast panels, so it has to read.
         ax.errorbar(p["wl_um"], p["depth_ppm"], yerr=p["sigma_ppm"],
-                    fmt=p["marker"], ms=3.6, lw=0.9, color=p["color"],
+                    fmt=p["marker"], ms=3.8, lw=0.9, color=p["color"],
+                    markerfacecolor=p["color"], markeredgecolor=p["color"],
+                    markeredgewidth=0.4,
                     ecolor=p["color"], elinewidth=0.7, capsize=0,
                     zorder=3, label=p["label"])
     ax.set_xscale("log" if spec["x_log"] else "linear")
@@ -296,7 +308,9 @@ def _plot_spectrum(ax, spec: dict) -> None:
             # fixed fudge -- and only when a legend will be drawn at all.
             # An explicit depth_range from the caller is never overridden.
             _rows = len(spec["points"]) + 1 + (spec["depth2_ppm"] is not None)
-            _frac = min(0.42, 0.075 * (_rows if _rows <= 4
+            # ~5.5% of the axis per legend row (was 7.5%, which overshot now
+            # that the data padding is tighter). Two columns above 4 entries.
+            _frac = min(0.38, 0.055 * (_rows if _rows <= 4
                                        else np.ceil(_rows / 2) + 1))
             y0, y1 = ylim
             ylim = (y0, y0 + (y1 - y0) / (1.0 - _frac))
@@ -340,15 +354,14 @@ def _plot_spectrum(ax, spec: dict) -> None:
         _n_leg = len(spec["points"]) + 1 + (spec["depth2_ppm"] is not None)
         # "upper left" into the reserved headroom, not "best": with a wide
         # spectrum every corner touches data at some wavelength.
+        # No legend TITLE (maintainer, 2026-08-13): the entries carry their own
+        # numbers, so the title was a second caption inside the legend.
         _leg = ax.legend(loc="upper left", frameon=True, framealpha=0.82,
                          edgecolor="none", fontsize=_LEG,
                          ncol=(1 if _n_leg <= 4 else 2), handletextpad=0.5,
                          borderaxespad=0.4, columnspacing=1.0,
-                         labelspacing=0.3,
-                         title=spec["legend_title"])
+                         labelspacing=0.3)
         _leg.set_zorder(5)
-        if spec["legend_title"]:
-            _leg.get_title().set_fontsize(_LEG)
 
 
 
@@ -392,23 +405,36 @@ def _plot_posterior_panel(axp, pan: dict, color: str) -> None:
         peak = float(np.max(pdf)) if pdf.size else 0.0
         if peak > 0.0:
             pdf = pdf / peak              # unit peak: see the y-axis note
+        # each curve's OWN color when the caller set one: with the sources
+        # following the spectrum's series, the color IS the series identity, so
+        # a per-parameter color would erase the thing the panel is showing.
+        # ``color`` (the per-parameter fallback) applies only when there is one
+        # unlabelled curve and no caller color.
+        _c = c.get("color") or color
         if c["sigma"] is not None:
             mu = c["mu"] if c["mu"] is not None else pan["center"]
             if mu is not None:
                 band = (theta >= mu - c["sigma"]) & (theta <= mu + c["sigma"])
                 if band.any():
-                    axp.fill_between(theta[band], 0.0, pdf[band], color=color,
-                                     alpha=0.16, lw=0, zorder=1,
-                                     label="1σ")
-        axp.plot(theta, pdf, color=color, ls=c["ls"], lw=c["lw"], zorder=2,
-                 label=str(c["label"]))
+                    # no legend entry: one "1σ" row per curve doubled the
+                    # legend and said nothing the shading does not
+                    axp.fill_between(theta[band], 0.0, pdf[band], color=_c,
+                                     alpha=0.16, lw=0, zorder=1)
+        # With several sources the title cannot quote one width without
+        # silently picking a source, so each ENTRY carries its own.
+        _lab = str(c["label"])
+        if c["sigma"] is not None and len(pan["curves"]) > 1:
+            _lab = f"{_lab}: ±{_fmt_val(c['sigma'])}"
+        axp.plot(theta, pdf, color=_c, ls=c["ls"], lw=c["lw"], zorder=2,
+                 label=_lab)
     if pan["center"] is not None:
         # the input value the forecast is centered on: with a jitter draw the
         # curve sits OFF it, and that offset is the realization's luck
         axp.axvline(pan["center"], color="#666666", lw=0.8, ls=":", zorder=3,
                     label="input value")
     # width in the TITLE, where corner.py puts it
-    _q = next((c for c in pan["curves"] if c["sigma"] is not None), None)
+    _sized = [c for c in pan["curves"] if c["sigma"] is not None]
+    _q = _sized[0] if len(_sized) == 1 else None
     if _q is not None:
         _mu = _q["mu"] if _q["mu"] is not None else pan["center"]
         axp.set_title(
@@ -492,7 +518,13 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
         # -- RIGHT: one square panel per marginalized forecast posterior ----
         for i in range(_npan):
             axp = fig.add_subplot(gs[0, i + 1])
-            axp.set_box_aspect(1.0)
+            # Same HEIGHT as the spectrum (maintainer, 2026-08-13). This
+            # replaces set_box_aspect(1.0): a square panel shrank to its own
+            # WIDTH, which is half the spectrum's, so the panels sat short and
+            # vertically centered against it. Filling the gridspec cell makes
+            # all three share the top and bottom edge; the panels are no
+            # longer square, which is the trade the equal height requires.
+            axp.set_box_aspect(None)
             if i >= len(panels):
                 axp.set_axis_off()
                 continue

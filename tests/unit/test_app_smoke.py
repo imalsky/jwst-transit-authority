@@ -204,10 +204,13 @@ def test_no_intro_gate():
     assert not [b for b in at.button if "I understand" in (b.label or "")]
 
 
-def test_noise_floor_has_no_default_and_blocks_the_run():
-    """No default floor: neither candidate is neutral, so the run is blocked
-    until the user picks one (a 15-40 ppm minimum SETS the reported precision;
-    no floor ignores 1/f and visit-long systematics)."""
+def test_noise_floor_defaults_to_constant_and_file_still_blocks():
+    """The floor type defaults to "constant" (maintainer, 2026-08-13),
+    superseding the earlier no-preselection gate. A 15-40 ppm minimum SETS the
+    reported precision and no floor ignores 1/f and visit-long systematics, so
+    the default is the CONSERVATIVE choice, not a neutral one -- and it is
+    still recorded with the run and editable per mode. "Wavelength table" with
+    no file uploaded is the remaining state that blocks the run."""
     at = AppTest.from_file(str(APP), default_timeout=60)
     at.run()
     assert not at.exception, at.exception
@@ -216,16 +219,26 @@ def test_noise_floor_has_no_default_and_blocks_the_run():
         return [e.value for e in app.error
                 if "minimum noise floor" in (e.value or "").lower()]
 
-    # nothing preselected, run blocked, and the block is explained
-    assert at.radio(key="n0_floormode").value is None
-    assert [b for b in at.button if (b.label or "") == "Run"][0].disabled
-    assert _floor_error(at), [e.value for e in at.error]
+    # 2026-08-13 (maintainer): "constant" is PRESELECTED, so the floor gate is
+    # satisfied on first load and no floor error is shown. A default is
+    # acceptable in this direction only -- a constant floor claims LESS
+    # precision than "No floor" would, so it is the conservative side of the
+    # choice rather than a flattering one.
+    assert at.radio(key="n0_floormode").value == "constant"
+    assert not _floor_error(at), [e.value for e in at.error]
+    # the per-mode floor inputs render with it
+    assert any((w.key or "").startswith("n0_floor_")
+               for w in at.get("number_input"))
 
-    # "No floor" is a valid EXPLICIT choice: the floor gate clears. (Run is
-    # also gated on params_error/modes, which depend on installed engine data.)
+    # "No floor" stays an explicit choice and also clears the gate
     at.radio(key="n0_floormode").set_value("none").run()
     assert not at.exception, at.exception
     assert not _floor_error(at)
+
+    # "Wavelength table" with no upload is the one state that still BLOCKS
+    at.radio(key="n0_floormode").set_value("file").run()
+    assert not at.exception, at.exception
+    assert _floor_error(at), [e.value for e in at.error]
 
 
 def test_constant_floor_prefill_renders_per_mode_inputs():

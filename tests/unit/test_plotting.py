@@ -433,16 +433,28 @@ def test_log_axes_carry_no_minor_ticks(which):
     plt.close(fig)
 
 
-def test_legend_note_is_a_title_not_a_multiline_label():
-    """The broken legend spacing came from folding the note into the model
-    label, which made that entry multi-line. It belongs in the title."""
+def test_legends_carry_no_title_and_no_multiline_entry():
+    """No legend TITLES (maintainer, 2026-08-13): the entries carry their own
+    numbers, so a title was a second caption inside the legend.
+
+    The multi-line check stays and is the older, load-bearing half: the broken
+    legend spacing originally came from folding a note into the model label,
+    which made that entry multi-line. It must not come back in either form.
+    """
     fig = _summary_fig()
-    leg = fig.axes[0].get_legend()
-    assert leg.get_title().get_text() == "SO2 S/N per mode, 1 transit"
-    for txt in leg.get_texts():
-        assert "\n" not in txt.get_text(), \
-            f"multi-line legend entry: {txt.get_text()!r}"
-    plt.close(fig)
+    try:
+        for i, ax in enumerate(fig.axes):
+            leg = ax.get_legend()
+            if leg is None:
+                continue
+            assert not leg.get_title().get_text(), \
+                f"axes{i} legend regained a title: " \
+                f"{leg.get_title().get_text()!r}"
+            for txt in leg.get_texts():
+                assert "\n" not in txt.get_text(), \
+                    f"multi-line legend entry: {txt.get_text()!r}"
+    finally:
+        plt.close(fig)
 
 
 def test_no_y_limit_inflation_for_legend_headroom():
@@ -489,17 +501,18 @@ def test_summary_layout_is_wide_spectrum_plus_one_panel_per_parameter():
         assert len(fig.axes) == 3, [ax.get_ylabel() for ax in fig.axes]
         spec, p1, p2 = (ax.get_window_extent() for ax in fig.axes)
         assert abs(spec.width / p1.width - 2.0) < 0.06, (spec.width, p1.width)
+        # EQUAL HEIGHT (maintainer, 2026-08-13), superseding square panels:
+        # set_box_aspect(1.0) shrank each panel to its own width -- half the
+        # spectrum's -- so they sat short and vertically centered against it.
         for bb in (p1, p2):
-            # square, and therefore SHORTER than the spectrum: set_box_aspect
-            # shrinks each panel to its own width, and the gridspec centers it
-            # vertically in the row. The panels match EACH OTHER exactly.
-            assert abs(bb.width - bb.height) < 1.0, bb
-            assert bb.height <= spec.height + 1.0, (bb.height, spec.height)
+            assert abs(bb.height - spec.height) < 1.0, \
+                f"panel height {bb.height:.1f} != spectrum {spec.height:.1f}"
         assert (round(p1.width, 3), round(p1.height, 3)) == \
                (round(p2.width, 3), round(p2.height, 3)), (p1, p2)
         assert abs(p1.y0 - p2.y0) < 1.0, "panels must share a baseline"
         for ax in fig.axes[1:]:
-            assert ax.get_box_aspect() == 1.0
+            assert ax.get_box_aspect() is None, \
+                "a fixed box aspect would break the equal-height rule"
         # NOT superimposed: the whole point of the revert
         curves = [ax.get_lines()[0] for ax in fig.axes[1:]]
         px = [ax.transData.transform(
