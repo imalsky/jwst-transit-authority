@@ -205,15 +205,9 @@ def test_current_backend_is_the_supported_release_triple():
     assert "pandeia_psfs-2026.7-jwst" in cur["psf"]
 
 
-def test_archival_backend_is_named_and_labeled_unsupported():
-    """The 2026.2 token was renamed, not silently repointed."""
-    arch = ins._BACKENDS["archival_2026_2"]
-    assert arch["release"] == "2026.2"
-    assert arch["supported"] is False
-    assert "ARCHIVAL" in arch["status"]
-    assert "NOT suitable for planning new proposals" in arch["status"]
-    # the Pandeia 3.0 "legacy" backend was removed outright
-    assert "legacy" not in ins._BACKENDS
+def test_unvalidated_archival_backends_are_not_selectable():
+    assert set(ins._BACKENDS) == {"current"}
+    assert set(ins._MODE_RENAMES) == {"current"}
 
 
 def test_no_backend_carries_a_personal_absolute_path():

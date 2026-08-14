@@ -46,14 +46,26 @@ def test_curve_matches_fisher_sigma_and_normalizes():
         assert rec["constrained"]
         assert rec["sigma_display"] == pytest.approx(want, rel=1e-12)
         assert rec["center"] == CENTERS[name]
-        # pdf: peaks at the center, integrates to ~1 on the +/-5 sigma grid
+        # pdf integrates to ~1 on the +/-5-sigma grid. Ordinary display
+        # coordinates stay Gaussian; absolute C/O is the exact positive
+        # transform of the local ln(C/O) Gaussian.
         theta, pdf = rec["theta"], rec["pdf"]
-        assert theta[np.argmax(pdf)] == pytest.approx(CENTERS[name], abs=1e-12)
         # np.trapezoid is NumPy 2.0+; np.trapz was removed in NumPy 2.4
         _trapz = getattr(np, "trapezoid", None) or np.trapz
         assert _trapz(pdf, theta) == pytest.approx(1.0, abs=1e-4)
-        assert theta.min() == pytest.approx(CENTERS[name] - 5 * want)
-        assert theta.max() == pytest.approx(CENTERS[name] + 5 * want)
+        if name == "dlnCO":
+            s_log = sig[name]
+            assert rec["curve_family"] == "lognormal_from_local_ln_gaussian"
+            assert np.all(theta > 0.0)
+            assert theta.min() == pytest.approx(CO * np.exp(-5 * s_log))
+            assert theta.max() == pytest.approx(CO * np.exp(5 * s_log))
+            assert theta[theta.size // 2] == pytest.approx(CO)
+        else:
+            assert rec["curve_family"] == "gaussian"
+            assert theta[np.argmax(pdf)] == pytest.approx(
+                CENTERS[name], abs=1e-12)
+            assert theta.min() == pytest.approx(CENTERS[name] - 5 * want)
+            assert theta.max() == pytest.approx(CENTERS[name] + 5 * want)
 
 
 def test_dlnco_display_transform_is_absolute_co():
@@ -67,6 +79,16 @@ def test_dlnco_display_transform_is_absolute_co():
     # and dlnCO without co_eval raises, exactly like display_sigma
     with pytest.raises(ValueError, match="co_eval"):
         posteriors.marginalized_posteriors(r, FREE, CENTERS)
+
+
+def test_broad_co_curve_respects_boundary_and_is_asymmetric():
+    curve = posteriors.lognormal_ratio_curve(0.55, sigma_log=1.0)
+    theta, pdf = curve["theta"], curve["pdf"]
+    assert np.all(theta > 0.0)
+    assert theta[np.argmax(pdf)] < 0.55       # lognormal mode below median
+    with pytest.raises(ValueError, match="C/O grid"):
+        posteriors.lognormal_ratio_curve(
+            0.55, 1.0, grid=np.linspace(-0.1, 1.0, 30))
 
 
 def test_null_direction_is_flagged_never_a_fake_curve():

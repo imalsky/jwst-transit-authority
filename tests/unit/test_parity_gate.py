@@ -52,6 +52,12 @@ def _ok_row(key, ngroup=100, sat=0.5):
         "config_pandexo": {"subarray": "sub", "readout": "RAPID",
                            "filter": "f", "disperser": "d"},
         "flux_ratio": {"median": 1.001, "max_abs_dev": 0.02},
+        "saturation_mask": {
+            "n_ours": 1000, "n_pandexo": 1000, "n_matched": 1000,
+            "matched_frac": 1.0, "partial_equal_frac": 1.0,
+            "full_equal_frac": 1.0, "partial_disagree": 0,
+            "full_disagree": 0,
+        },
     }
 
 
@@ -100,6 +106,22 @@ def test_worker_version_drift_fails(gate, passing):
     s["stars"]["w39_like"]["provenance_ours"]["worker_version"] = 5
     problems = gate["validate"](s)
     assert any("worker_version=5" in p for p in problems), problems
+
+
+def test_missing_saturation_mask_evidence_fails(gate, passing):
+    s = copy.deepcopy(passing)
+    del s["stars"]["w39_like"]["modes"][0]["saturation_mask"]
+    problems = gate["validate"](s)
+    assert any("saturation grids matched fraction" in p for p in problems), problems
+
+
+def test_per_pixel_saturation_mask_disagreement_fails(gate, passing):
+    s = copy.deepcopy(passing)
+    mask = s["stars"]["w39_like"]["modes"][0]["saturation_mask"]
+    mask["full_equal_frac"] = 0.999
+    mask["full_disagree"] = 1
+    problems = gate["validate"](s)
+    assert any("full-saturation mask agreement" in p for p in problems), problems
 
 
 def test_psf_version_mismatch_fails(gate, passing):
@@ -475,7 +497,13 @@ def _saturated_row(key, fw="% full well>80% (360% > 80%)"):
             "ours_reason": "no unsaturated pixels at the shortest ramp",
             "ngroup_ours": 1, "sat_frac_ours": 3.56,
             "ngroup_pandexo": 1,
-            "pandexo_warnings": {"% full well high?": fw}}
+            "pandexo_warnings": {"% full well high?": fw},
+            "saturation_mask": {
+                "n_ours": 1000, "n_pandexo": 1000, "n_matched": 1000,
+                "matched_frac": 1.0, "partial_equal_frac": 1.0,
+                "full_equal_frac": 1.0, "partial_disagree": 0,
+                "full_disagree": 0,
+            }}
 
 
 def test_saturated_row_claims_are_gated(gate, passing):

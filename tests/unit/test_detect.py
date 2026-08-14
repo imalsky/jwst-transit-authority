@@ -269,6 +269,27 @@ def test_floored_limit_is_finite_and_gates_reachability():
     assert not tt["reachable"]          # target above the floor-capped limit
 
 
+def test_projected_transit_target_uses_the_headline_nuisance_space():
+    """The event forecast must use the same local nuisance projection as the
+    collaborator-facing score, rather than reverting to calibration-only."""
+    r = _result(100.0)
+    signal = np.asarray(r["depth"]) - np.asarray(r["depth_wo"])
+    r["jac_bins"] = signal[None, :]
+    r["jac_names"] = ["lnR0"]
+    raw = detect.transits_to_target(r, 1.0)
+    projected = detect.transits_to_target(r, 1.0, projected=True)
+    assert raw["reachable"]
+    assert not projected["reachable"]
+    assert projected["sig_inf"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_projected_score_requires_named_jacobian_rows():
+    r = _result(100.0)
+    r["sigma"] = detect.sigma_at_transits(r, 1)
+    with pytest.raises(ValueError, match="jac_bins and jac_names"):
+        detect.detection_score(r, projected=True)
+
+
 def test_no_floor_unreachable_target_still_reports_inf_limit():
     """Beyond-cap targets are unreachable with sig_inf = inf: 'ran out of
     transits', not 'a systematic caps it'."""

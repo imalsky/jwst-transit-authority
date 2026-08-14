@@ -4,10 +4,13 @@ Pure numpy, GUI-independent. Everything here is a LINEARIZED forecast read off
 the same nuisance-augmented Fisher matrices as the constraint table
 (``fisher.mode_forecast`` / ``fisher.combined_forecast``): each 1D curve is
 the Gaussian N(theta_input, sigma_marg) with sigma_marg the marginalized
-Cramer-Rao bound, rendered in DISPLAY units (the fisher-table convention:
+Cramer-Rao bound in the fitted coordinate. Curves are rendered in DISPLAY
+units (the fisher-table convention:
 dex for lnZ/lnKzz, absolute C/O number ratio for dlnCO via
 ``fisher.display_sigma``, K for temperatures; a parameter unknown to
 ``forward.PARAM_UNITS`` is already in display units and reports unit "").
+The dlnCO Gaussian is transformed exactly to a positive lognormal C/O curve;
+it is not replaced by a symmetric Gaussian that can cross C/O = 0.
 
 HONESTY (baked into every returned record, keys ``kind``/``label``): these
 are linearized Fisher/Cramer-Rao forecasts around the input model under the
@@ -43,8 +46,10 @@ from jwst_tool import fisher
 FORECAST_KIND = "fisher_gaussian_forecast"
 FORECAST_LABEL = (
     "Linearized Fisher (Cramer-Rao) forecast: a Gaussian approximation "
-    "centered on the input model with the marginalized 1-sigma lower bound "
-    "as width, under the quoted noise model. Not a sampled posterior; a "
+    "in the fitted parameter coordinate, centered on the input model with "
+    "the marginalized 1-sigma lower bound as width, under the quoted noise "
+    "model. Absolute C/O uses the exact positive lognormal transform of its "
+    "local ln(C/O) Gaussian. Not a sampled posterior; a "
     "retrieval freeing more parameters under the same assumptions usually "
     "reports lower significance.")
 
@@ -133,6 +138,50 @@ def gaussian_curve(center: float, sigma: float, grid=None,
     return dict(theta=theta, pdf=pdf)
 
 
+def lognormal_ratio_curve(center: float, sigma_log: float, grid=None,
+                          n_sigma: float = 5.0,
+                          n_points: int = 201) -> dict:
+    """Exact positive transform of N(ln(center), ``sigma_log``).
+
+    ``center`` is the input C/O ratio and therefore the curve's median. An
+    auto grid spans +/- ``n_sigma`` in ln(C/O); caller grids must be strictly
+    positive because the physical number ratio has a hard boundary at zero.
+    """
+    center = float(center)
+    sigma_log = float(sigma_log)
+    if not (np.isfinite(center) and center > 0.0):
+        raise ValueError("lognormal_ratio_curve: center must be finite and > 0")
+    if not (np.isfinite(sigma_log) and sigma_log > 0.0):
+        raise ValueError(
+            "lognormal_ratio_curve: sigma_log must be finite and > 0")
+    if grid is None:
+        n_sigma = float(n_sigma)
+        n_points = int(n_points)
+        if not (np.isfinite(n_sigma) and n_sigma > 0.0):
+            raise ValueError(
+                "lognormal_ratio_curve: n_sigma must be finite and > 0")
+        if n_points < 3:
+            raise ValueError(
+                "lognormal_ratio_curve: n_points must be >= 3")
+        theta = np.geomspace(center * np.exp(-n_sigma * sigma_log),
+                             center * np.exp(n_sigma * sigma_log), n_points)
+    else:
+        theta = np.asarray(grid, float)
+        if theta.ndim != 1 or theta.size < 2:
+            raise ValueError(
+                "lognormal_ratio_curve: grid must be a 1-D array with at least 2 points")
+        if not np.all(np.isfinite(theta)) or np.any(theta <= 0.0):
+            raise ValueError(
+                "lognormal_ratio_curve: C/O grid must be finite and > 0")
+        if not np.all(np.diff(theta) > 0.0):
+            raise ValueError(
+                "lognormal_ratio_curve: grid must be strictly ascending")
+    z = np.log(theta / center) / sigma_log
+    pdf = np.exp(-0.5 * z * z) / (
+        theta * sigma_log * np.sqrt(2.0 * np.pi))
+    return dict(theta=theta, pdf=pdf)
+
+
 def marginalized_posteriors(results, free_names: list[str], centers: dict,
                             params: list[str] | None = None,
                             co_eval: float | None = None,
@@ -212,13 +261,21 @@ def marginalized_posteriors(results, free_names: list[str], centers: dict,
                    unit=_param_unit(name))
         if np.isfinite(s_disp):
             grid = grids.get(name) if grids is not None else None
-            curve = gaussian_curve(rec["center"], s_disp, grid=grid,
-                                   n_sigma=n_sigma, n_points=n_points)
+            if name == "dlnCO":
+                curve = lognormal_ratio_curve(
+                    rec["center"], s_int, grid=grid,
+                    n_sigma=n_sigma, n_points=n_points)
+                rec["curve_family"] = "lognormal_from_local_ln_gaussian"
+            else:
+                curve = gaussian_curve(rec["center"], s_disp, grid=grid,
+                                       n_sigma=n_sigma, n_points=n_points)
+                rec["curve_family"] = "gaussian"
             rec.update(constrained=True, theta=curve["theta"],
                        pdf=curve["pdf"])
         else:
             # null Fisher direction: explicitly unconstrained, no curve
-            rec.update(constrained=False, theta=None, pdf=None)
+            rec.update(constrained=False, theta=None, pdf=None,
+                       curve_family=None)
         out_params[name] = rec
 
     return dict(kind=FORECAST_KIND, label=FORECAST_LABEL,

@@ -88,6 +88,24 @@ def test_default_calculation_is_the_pandeia_random_sigma():
         np.maximum(np.sqrt(nz_floor["var_phot"]), chosen_ppm * 1e-6))
 
 
+def test_pixel_variance_matches_independent_unequal_window_oracle():
+    """Literal hand calculation: whole integration counts, unequal baselines,
+    and multiple transits all enter exactly once."""
+    mode = {
+        "flux": [1000.0, 4000.0],
+        "noise_1int": [20.0, 40.0],
+        "t_cycle_s": 90.0,
+    }
+    actual = noise_mod.pixel_depth_variance(
+        mode, t_in_s=370.0, t_out_s=730.0, n_transits=3)
+    n_in, n_out = 4, 8
+    expected = np.array([
+        (20.0 / 1000.0) ** 2 * (1.0 / n_in + 1.0 / n_out) / 3.0,
+        (40.0 / 4000.0) ** 2 * (1.0 / n_in + 1.0 / n_out) / 3.0,
+    ])
+    assert np.array_equal(actual, expected)
+
+
 # --- floor semantics (PandExo convention) -------------------------------------
 
 def test_no_floor_returns_random_errors_exactly():

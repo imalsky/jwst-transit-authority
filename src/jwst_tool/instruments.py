@@ -9,14 +9,14 @@ Mode tokens are the engine mode names of the supported (2026-era) releases;
 3.0-era ``ssgrism`` token retired with the legacy backend), and both the
 production path (``noise.noise_job``) and the parity harness go through it.
 
-Noise floors (``floor_ppm_suggested``) are ILLUSTRATIVE planning values, never
-defaults: ``detect.evaluate_mode`` and ``noise.depth_error_bins`` require
-``floor_spec`` explicitly and the GUI preselects no floor, so a floor enters a
-result only through a recorded explicit choice. The floor uses PandExo
+Noise floors (``floor_ppm_suggested``) are ILLUSTRATIVE planning values, not
+measured calibrations: ``detect.evaluate_mode`` and ``noise.depth_error_bins``
+require ``floor_spec`` explicitly. The GUI preselects a constant floor using
+these values, displays the selection, and records it in provenance; users can
+choose no floor or upload a wavelength-dependent table. The floor uses PandExo
 semantics (sigma_final = max(sigma_random, floor) on the final bins), so a
-15-40 ppm floor DOMINATES any well-observed target, while zero claims a
-precision nobody has demonstrated -- neither is a neutral default, so the tool
-refuses to pick one. The values are per-mode planning suggestions INFORMED BY
+15-40 ppm floor DOMINATES any well-observed target, while zero assumes a
+precision no program has demonstrated. The values are per-mode planning suggestions INFORMED BY
 the Greene et al. 2016 convention (20/30/50 ppm for NIRISS/NIRCam/MIRI), not
 that convention verbatim (here: NIRSpec 15-20, NIRISS 20, NIRCam 25, MIRI 40);
 no value here is a measured end-to-end floor. Any caption describing the
@@ -73,10 +73,9 @@ NOISE_CACHE = OUTPUT_DIR / "noise_cache"
 # STScI release as a MATCHED TRIPLE (pandeia.engine == 2026.7 +
 # pandeia_data-2026.7-jwst + pandeia_psfs-2026.7-jwst), enforced by
 # `pandeia_worker._check_backend_match` and recorded in "__provenance__" and
-# the cache fingerprint. "archival_2026_2" (the old 2026.2 tuple, kept under
-# its honest name -- never silently repoint "current", or old caches would
-# look like current-release output) is reproducibility-only. Switching
-# backends self-invalidates caches.
+# the cache fingerprint. Older backends are deliberately not selectable: this
+# release neither ships nor validates their complete matched data triples.
+# Switching a future validated backend would self-invalidate caches.
 #
 # PORTABILITY: refdata/psf default under DATA_DIR. There is deliberately NO
 # baked-in interpreter path: the backend env is machine-specific and must come
@@ -94,24 +93,14 @@ _BACKENDS = {
         status="Pandeia 2026.7 / pandeia_data-2026.7-jwst / "
                "pandeia_psfs-2026.7-jwst (the STScI-supported release, "
                "enforced as a matched triple)"),
-    "archival_2026_2": dict(
-        python=None,
-        refdata=str(DATA_DIR / "pandeia_data-2026.2-jwst"),
-        psf=str(DATA_DIR / "pandeia_psfs-2026.2-jwst"),
-        release="2026.2",
-        supported=False,
-        status="ARCHIVAL Pandeia 2026.2 / pandeia_data-2026.2-jwst "
-               "(reproducibility only; STScI supports 2026.7 and labels this "
-               "release archival -- NOT suitable for planning new proposals)"),
 }
 JWST_TOOL_BACKEND = os.environ.get("JWST_TOOL_BACKEND", "current").lower()
 if JWST_TOOL_BACKEND not in _BACKENDS:
     raise RuntimeError(
         f"JWST_TOOL_BACKEND={JWST_TOOL_BACKEND!r} unknown; choose "
-        f"{sorted(_BACKENDS)} -- 'current' is the supported "
-        f"{_SUPPORTED_PANDEIA_RELEASE} triple, 'archival_2026_2' is the "
-        "reproducibility-only backend. (The Pandeia 3.0 'legacy' backend "
-        "was removed.)")
+        f"{sorted(_BACKENDS)}. This release validates only the supported "
+        f"{_SUPPORTED_PANDEIA_RELEASE} matched triple; archival backends are "
+        "not selectable.")
 _BE = _BACKENDS[JWST_TOOL_BACKEND]
 BACKEND_STATUS = _BE["status"]
 BACKEND_RELEASE = _BE["release"]
@@ -164,7 +153,6 @@ PYSYN_CDBS = str(DATA_DIR / "cdbs")
 # assert below forces a decision for every backend.
 _MODE_RENAMES = {
     "current": {},
-    "archival_2026_2": {},
 }
 # Every backend token MUST appear above: a missing entry would submit an
 # unresolved token to an engine that may hard-reject it mid-run.

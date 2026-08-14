@@ -114,19 +114,14 @@ def test_g395m_registry_entry_matches_the_verified_refdata_tokens():
         "a measurement and a decision record")
 
 
-def test_parity_harness_mode_set_is_frozen_without_g395m():
-    """tests/parity is a FROZEN 7-mode experiment (its committed artifact is
-    the release gate); G395M is deliberately not in it, and that gap is
-    disclosed in the README's open-gaps list, not silently closed here."""
+def test_parity_harness_mode_set_covers_every_registered_mode():
+    """The release parity experiment covers every registered mode."""
     sys.path.insert(0, str(SCRIPTS))
     try:
         pg = importlib.import_module("parity_gate")
     finally:
         sys.path.remove(str(SCRIPTS))
-    frozen = {"nirspec_prism", "nirspec_g395h", "nirspec_g235h",
-              "niriss_soss", "nircam_f322w2", "nircam_f444w", "miri_lrs"}
-    assert set(pg.MODE_KEYS) == frozen, (
-        "parity MODE_KEYS changed -- the harness is a frozen experiment; "
-        "extending it invalidates the committed artifact and needs a "
-        "regenerated parity run plus a decision record")
-    assert "nirspec_g395m" not in pg.MODE_KEYS
+    assert set(pg.MODE_KEYS) == set(ins.MODES), (
+        "parity MODE_KEYS must match the registered instrument set; regenerate "
+        "the parity artifact whenever this experiment changes"
+    )

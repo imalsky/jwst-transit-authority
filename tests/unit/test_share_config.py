@@ -124,6 +124,18 @@ def test_unsupported_format_version_is_refused():
         == share_config.SHARE_FORMAT
 
 
+def test_share_records_release_provenance_without_machine_paths():
+    share = share_config.build_share(
+        _canon(), {}, {"seed": 73})
+    prov = share["provenance"]
+    assert prov["random_seed"] == 73
+    assert set(prov["cache_schema"]) == {"model", "pandeia_worker"}
+    assert "vulcan-jwst-tool" in prov["software"]
+    assert "pandeia_stack" in prov and "datasets" in prov
+    serialized = __import__("json").dumps(prov)
+    assert "/Users/" not in serialized and "\\Users\\" not in serialized
+
+
 def test_invalid_embedded_tp_table_leaves_no_file_behind():
     """All-or-nothing includes the filesystem: a config that fails
     validation must not deposit its embedded table in the uploads archive."""

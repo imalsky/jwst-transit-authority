@@ -3,10 +3,10 @@
 # JWST_TOOL_PANDEIA_PYTHON -- it is deliberately NOT a dependency here. The
 # DEFAULT backend is the STScI-supported matched triple pandeia.engine 2026.7 +
 # pandeia_data-2026.7-jwst + pandeia_psfs-2026.7-jwst (JWST_TOOL_BACKEND=current,
-# the default); the previous 2026.2 tuple is kept as "archival_2026_2" for
-# reproducibility only, and the Pandeia 3.0 "legacy" backend was removed (see
-# instruments._BACKENDS). Inputs live at the repo-root data/ (override with
-# JWST_TOOL_DATA_DIR); generated caches at output/ (JWST_TOOL_OUTPUT_DIR).
+# the default). Older backends were removed because this release does not ship
+# or validate their complete matched data triples. Inputs live at the repo-root
+# data/ (override with JWST_TOOL_DATA_DIR); generated caches at output/
+# (JWST_TOOL_OUTPUT_DIR).
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
@@ -61,10 +61,10 @@ Repository = "https://github.com/imalsky/vulcan-jwst-tool"
 # streamlit floor: app.py uses the width="stretch" API on st.button/st.pyplot/
 # st.dataframe, introduced for those widgets by 1.49.0 (2025-08-26).
 gui = ["streamlit>=1.49", "pandas"]
-# Opt-in PICASO equilibrium provider + climate T-P mode (v18). The reference
-# tree is separate user-supplied science data (JWST_TOOL_PICASO_REFDATA;
-# `jwst-tool data` reports each piece; README.md, PICASO engine section has the scope).
-picaso = ["picaso==4.0.1"]
+# PICASO is deliberately not an install extra in this release: PICASO 4.0.1
+# requires NumPy >=2 while ExoJAX 2.2.3 requires NumPy <2. The retained
+# maintainer-only code path is disabled unless explicitly enabled and is not
+# part of collaborator-certified results.
 dev = ["ruff>=0.11", "build>=1.2", "twine>=5"]
 
 [project.scripts]

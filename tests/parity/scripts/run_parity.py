@@ -85,6 +85,10 @@ PANDEXO_MODES = {
                       {"detector": {"subarray": "sub2048",
                                     "readout_pattern": "nrsrapid",
                                     "readmode": "nrsrapid"}}),
+    "nirspec_g395m": ("NIRSpec G395M",
+                      {"detector": {"subarray": "sub2048",
+                                    "readout_pattern": "nrsrapid",
+                                    "readmode": "nrsrapid"}}),
     "niriss_soss": ("NIRISS SOSS",
                     {"detector": {"subarray": "substrip256",
                                   "readout_pattern": "nisrapid",
@@ -128,13 +132,14 @@ assert set(PANDEXO_MODES) == set(pg.MODE_KEYS), (
     "PANDEXO_MODES does not match the declared experiment in parity_gate.py")
 
 
-def run_ours(star: dict, keys: list[str]) -> dict:
+def run_ours(star: dict, keys: list[str], star_spectrum: dict) -> dict:
     # noise_job resolves any engine-generation mode renames via
     # instruments.engine_mode(), so parity exercises the SAME production path
     # as a normal run -- never a parity-only rename (that was the bug: a
     # parity-only patch let NIRCam pass the gate while the production path
     # silently sent a rejected token).
     job = noise.noise_job(star, keys, sat_limit=SAT_LIMIT)
+    job["star_spectrum"] = star_spectrum
     eng = noise.backend_fingerprint()["engine_version"]
     if pg._release_of(eng) != pg.REQUIRED_PANDEIA_RELEASE:
         raise SystemExit(
@@ -193,6 +198,57 @@ def _stats(ratio: np.ndarray) -> dict:
                 max_abs_dev=float(np.max(np.abs(r - 1.0))))
 
 
+def _saturation_mask_stats(ours: dict, px: dict) -> dict:
+    """Pixel-aligned binary saturation-mask comparison on the native grids.
+
+    Curves are compared as masks (count > 0), because the scientific decision
+    is whether a channel is partially or fully saturated.  The raw count
+    arrays remain in the per-run JSON for diagnosis.
+    """
+    required_ours = ("wl_native", "n_part_sat_native_curve",
+                     "n_full_sat_native_curve")
+    required_px = ("sat_wave", "n_partial_saturated", "n_full_saturated")
+    missing = [f"ours.{k}" for k in required_ours if k not in ours]
+    missing += [f"pandexo.{k}" for k in required_px if k not in px]
+    if missing:
+        return {"error": "missing native saturation arrays: " + ", ".join(missing)}
+
+    wo = np.asarray(ours["wl_native"], float)
+    wp = np.asarray(px["sat_wave"], float)
+    po = np.asarray(ours["n_part_sat_native_curve"], float)
+    fo = np.asarray(ours["n_full_sat_native_curve"], float)
+    pp = np.asarray(px["n_partial_saturated"], float)
+    fp = np.asarray(px["n_full_saturated"], float)
+    if po.shape != wo.shape or fo.shape != wo.shape \
+            or pp.shape != wp.shape or fp.shape != wp.shape:
+        return {"error": ("unaligned saturation arrays: "
+                           f"ours wave/partial/full={wo.shape}/{po.shape}/{fo.shape}, "
+                           f"pandexo={wp.shape}/{pp.shape}/{fp.shape}")}
+    order = np.argsort(wo)
+    ws = wo[order]
+    ii = np.searchsorted(ws, wp)
+    ii = np.clip(ii, 0, max(ws.size - 1, 0))
+    exact = (np.abs(ws[ii] - wp) <
+             1e-9 * np.maximum(np.abs(wp), 1e-9)) if ws.size else np.zeros(wp.size, bool)
+    io = order[ii[exact]] if ws.size else np.zeros(0, int)
+    ip = np.flatnonzero(exact)
+    part_equal = (po[io] > 0) == (pp[ip] > 0)
+    full_equal = (fo[io] > 0) == (fp[ip] > 0)
+    return {
+        "n_ours": int(wo.size), "n_pandexo": int(wp.size),
+        "n_matched": int(ip.size),
+        "matched_frac": float(ip.size / wp.size) if wp.size else 0.0,
+        "partial_equal_frac": float(part_equal.mean()) if ip.size else 0.0,
+        "full_equal_frac": float(full_equal.mean()) if ip.size else 0.0,
+        "partial_disagree": int((~part_equal).sum()),
+        "full_disagree": int((~full_equal).sum()),
+        "partial_flagged_ours": int((po > 0).sum()),
+        "partial_flagged_pandexo": int((pp > 0).sum()),
+        "full_flagged_ours": int((fo > 0).sum()),
+        "full_flagged_pandexo": int((fp > 0).sum()),
+    }
+
+
 def _scrub_paths(d: dict) -> dict:
     """Machine-absolute paths stay out of the committed artifact: keep only
     the basename (release/name identity is preserved by the version fields)."""
@@ -217,6 +273,7 @@ def compare_mode(key: str, ours: dict, px: dict) -> dict:
         out["ours_error"] = str(ours.get("error", ""))[-400:]
         out["pandexo_error"] = str(px.get("error", ""))[-400:]
         return out
+    out["saturation_mask"] = _saturation_mask_stats(ours, px)
     if ours.get("unusable"):
         out["status"] = "SATURATED"
         out["ours_reason"] = ours["reason"]
@@ -318,12 +375,17 @@ def main():
         transit_duration_s=T_TRANSIT_S, depth=DEPTH, sat_limit=SAT_LIMIT,
         stars=STARS)}
     for sname, star in STARS.items():
-        print(f"=== {sname}: jwst_tool worker ===", flush=True)
-        ours = run_ours(star, keys)
-        (out_root / f"{sname}_ours.json").write_text(json.dumps(ours))
         print(f"=== {sname}: PandExo ===", flush=True)
         px = run_pandexo(star, keys, out_root, tag=f"{sname}_")
         (out_root / f"{sname}_pandexo.json").write_text(json.dumps(px))
+        shared_star = px.get("__shared_star__")
+        if not isinstance(shared_star, dict):
+            raise SystemExit(
+                f"pandexo worker did not return the shared stellar spectrum "
+                f"for {sname}; estimator parity requires identical source input")
+        print(f"=== {sname}: jwst_tool worker ===", flush=True)
+        ours = run_ours(star, keys, shared_star)
+        (out_root / f"{sname}_ours.json").write_text(json.dumps(ours))
         rows = [compare_mode(k, ours.get(k, {"error": "missing"}),
                              px.get(k, {"error": "missing"})) for k in keys]
         summary["stars"][sname] = {

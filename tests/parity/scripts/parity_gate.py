@@ -46,7 +46,8 @@ STARS = {
 }
 
 MODE_KEYS = ("nirspec_prism", "nirspec_g395h", "nirspec_g235h", "niriss_soss",
-             "nircam_f322w2", "nircam_f444w", "miri_lrs")
+             "nircam_f322w2", "nircam_f444w", "miri_lrs",
+             "nirspec_g395m")
 
 # Modes that MUST produce a valid unsaturated comparison somewhere in the
 # matrix; a silently missing row would otherwise shrink the claim.
@@ -83,6 +84,11 @@ WL_MATCH_RTOL = 1e-9
 # At least this fraction of ALL PandExo pixels must find an exact-wavelength
 # partner on our side (the committed artifact measures 100% on every OK row).
 MIN_MATCHED_PIXEL_FRAC = 0.99
+# Native-grid saturation masks are a scientific exclusion gate, not display
+# metadata.  Require essentially complete wavelength alignment and exact
+# binary partial/full-mask agreement on every aligned pixel.
+MIN_SAT_MASK_MATCHED_PIXEL_FRAC = 0.99
+MIN_SAT_MASK_EQUAL_FRAC = 1.0
 # Group-count agreement. The faint rule passes on EITHER the absolute or the
 # relative tolerance (whichever is looser), on purpose: at ngroup ~500-1000 a
 # 5-group difference is ~1% and rounding to an integer is the only freedom
@@ -135,6 +141,8 @@ def gate_thresholds() -> dict:
     """The thresholds block run_parity.py persists into the artifact."""
     return {
         "min_matched_pixel_frac": MIN_MATCHED_PIXEL_FRAC,
+        "min_sat_mask_matched_pixel_frac": MIN_SAT_MASK_MATCHED_PIXEL_FRAC,
+        "min_sat_mask_equal_frac": MIN_SAT_MASK_EQUAL_FRAC,
         "max_ngroup_abs_diff": MAX_NGROUP_ABS_DIFF,
         "max_ngroup_rel_diff": MAX_NGROUP_REL_DIFF,
         "low_ngroup_exact": LOW_NGROUP_EXACT,
@@ -274,6 +282,26 @@ def validate(summary: dict) -> list[str]:
                     f"{tag}: error row "
                     f"(ours={row.get('ours_error', '')[:120]!r})")
                 continue
+
+            sm = row.get("saturation_mask") or {}
+            if sm.get("error"):
+                problems.append(f"{tag}: {sm['error']}")
+            else:
+                mf = sm.get("matched_frac")
+                pe = sm.get("partial_equal_frac")
+                fe = sm.get("full_equal_frac")
+                if mf is None or float(mf) < MIN_SAT_MASK_MATCHED_PIXEL_FRAC:
+                    problems.append(
+                        f"{tag}: native saturation grids matched fraction "
+                        f"{mf!r} < {MIN_SAT_MASK_MATCHED_PIXEL_FRAC:.0%}")
+                if pe is None or float(pe) < MIN_SAT_MASK_EQUAL_FRAC:
+                    problems.append(
+                        f"{tag}: partial-saturation mask agreement {pe!r}; "
+                        "the per-pixel exclusion evidence differs")
+                if fe is None or float(fe) < MIN_SAT_MASK_EQUAL_FRAC:
+                    problems.append(
+                        f"{tag}: full-saturation mask agreement {fe!r}; "
+                        "the per-pixel exclusion evidence differs")
             if status in ("SATURATED", "SATURATED_ABOVE_LIMIT"):
                 # Never a numerical validation row, but the saturation CLAIM
                 # itself is gated (2026-08-09 review round 2: these rows

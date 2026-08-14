@@ -220,19 +220,16 @@ def main(require_pass: bool = False):
       f"{pg.MAX_FLUX_RATIO_DEV:.0%} of unity). The per-pixel scatter around "
       "each median comes from the two tools' independent extraction of the "
       "same 2D calculation and is disclosed in the tables (5th/95th "
-      "percentiles); it is not gated. The narrow downward spikes in this "
-      "tool's flux are STELLAR ABSORPTION LINES in Pandeia's PHOENIX "
-      "spectrum (hydrogen recombination -- e.g. Brackett-α 4.052 μm, Pfund-δ "
-      "3.297 μm -- plus molecular bands on cool stars); PandExo's "
-      "separately-loaded stellar spectrum smooths them. They are physically "
-      "real, cancel in the in/out transit-depth ratio, and wash out in "
-      "binning.")
-    w("- **Saturation:** compared at the configuration level only -- both "
-      "tools search down to the same pandeia per-detector minimum ramp "
-      "(worker v8: NIR 1 group, MIRI 2), so they flag the same saturating "
-      "star/mode combinations. Rows above the saturation limit are reported "
-      "in the tables but are never validation rows. Per-pixel saturation "
-      "masks are NOT exported or compared.")
+      "percentiles); it is not gated. Both calculations receive the exact "
+      "same sampled stellar spectrum. The remaining wavelength-dependent "
+      "extraction difference has not been assigned a physical cause, so this "
+      "artifact makes no per-pixel flux-parity claim.")
+    w("- **Saturation:** both tools search down to Pandeia's per-detector "
+      "minimum ramp (worker v11: NIR 1 group, MIRI 2). Native partial- and "
+      "full-saturation arrays are wavelength-aligned and compared as binary "
+      "masks; the gate requires complete grid coverage and exact mask "
+      "agreement. Rows above the saturation limit remain diagnostic rows, "
+      "not numerical estimator-validation rows.")
     w("")
     w("**PandExo operational warnings are recorded, not adjudicated.** Under "
       "the pinned RAPID readout, PandExo attaches data-volume-excess "

@@ -5,11 +5,10 @@ assembles: the canonical model parameters (the same dictionary every result
 stores as provenance) plus the science-goal and observation settings, and --
 when the run uses uploaded tables -- the table content itself. That is every
 INPUT the tool takes, so the same tool version reproduces the run from the
-file alone. It does NOT pin the software or science data: package versions
-are recorded in the file as information only (`software`, ignored on load),
-and reproducing a result exactly also requires the same vulcan-forward /
-vulcan-jax / exojax / line-list state (the cache-identity trade is S2-05 in
-notes.md, Decision records section).
+file alone. Exact code revisions, science-data checksums, cache schemas,
+Pandeia/PandExo identity, and the random seed are recorded in ``provenance``.
+They remain informational on load so old configurations stay portable, but a
+collaborator can compare them before claiming an exact reproduction.
 
 `widget_state` is the inverse: it maps such a file (or a bare canonical-params
 dict from an older download) onto Streamlit session-state widget keys. It
@@ -25,7 +24,7 @@ import hashlib
 import math
 import os
 
-from jwst_tool import forward, planets
+from jwst_tool import forward, planets, provenance
 
 SHARE_FORMAT = 1
 
@@ -60,6 +59,7 @@ def build_share(canon: dict, goal: dict, observation: dict,
         # pin -- results depend on these versions, but the file loads on any
         # tool version and widget_state never reads this key.
         "software": _software_versions(),
+        "provenance": provenance.snapshot(observation.get("seed")),
     }
     if tp_table_text:
         share["tp_table_text"] = str(tp_table_text)
@@ -114,209 +114,53 @@ def widget_state(cfg: dict, key) -> tuple[dict, list[str]]:
             "from a current tool version") from e
 
 
-def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
-                  notes: list[str]) -> tuple[dict, list[str]]:
-    planet = str(cp["planet"])
-    provider = str(cp.get("chem_provider", "vulcan"))
-    tp_mode = str(cp.get("tp_mode", "guillot"))
-
-    def pk(name: str) -> str:            # per-planet widget keys
-        return key(f"{planet}_{name}")
-
-    # -- restore an embedded uploaded T-P table BEFORE validation, so the
-    #    canonical re-resolution by content sha can find it. The table is
-    #    validated from a TEMP file and moved into the content-addressed
-    #    archive only after canonical_params accepts the whole mapping, so an
-    #    invalid configuration leaves nothing on disk -- all-or-nothing at
-    #    the filesystem, not just in session state.
-    restored_tp = None
-    pending_tp = None                  # (tmp, final) promoted on success
+def _resolve_embedded_tp(cp: dict, cfg: dict, tp_mode: str) -> str | None:
+    """Validate the full canonical payload and atomically archive its T-P upload."""
+    restored = None
+    pending = None
     validate = dict(cp)
     if tp_mode == "file" and str(cp.get("tp_file", "")) == forward.TP_FILE_UPLOAD:
         text = cfg.get("tp_table_text")
         if text:
             raw = str(text).encode()
             sha = hashlib.sha1(raw).hexdigest()[:16]
-            dst = forward._uploads_dir() / f"{sha}.txt"
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            if dst.exists():
-                restored_tp = str(dst)
+            destination = forward._uploads_dir() / f"{sha}.txt"
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if destination.exists():
+                restored = str(destination)
             else:
-                tmp = dst.with_name(f".{sha}.{os.getpid()}.tmp")
-                tmp.write_bytes(raw)
-                pending_tp = (tmp, dst)
-                restored_tp = str(tmp)
+                temporary = destination.with_name(
+                    f".{sha}.{os.getpid()}.tmp")
+                temporary.write_bytes(raw)
+                pending = (temporary, destination)
+                restored = str(temporary)
         else:
             sha = str(cp.get("tp_file_sha1", ""))
-            cand = forward._uploads_dir() / f"{sha}.txt" if sha else None
-            if cand is not None and cand.exists():
-                restored_tp = str(cand)
+            candidate = forward._uploads_dir() / f"{sha}.txt" if sha else None
+            if candidate is not None and candidate.exists():
+                restored = str(candidate)
             else:
                 raise ValueError(
                     "the configuration uses an uploaded T-P table whose "
                     "content is not embedded in the file and is not in the "
-                    "local uploads archive; upload the table again after "
-                    "loading")
-        validate["tp_file_path"] = restored_tp
-    # the loud gate: an invalid file must fail HERE, before anything applies
+                    "local uploads archive; upload the table again after loading")
+        validate["tp_file_path"] = restored
     try:
         forward.canonical_params(validate)
     except Exception:
-        if pending_tp is not None:
-            pending_tp[0].unlink(missing_ok=True)
+        if pending is not None:
+            pending[0].unlink(missing_ok=True)
         raise
-    if pending_tp is not None:
-        os.replace(pending_tp[0], pending_tp[1])   # atomic same-dir promote
-        restored_tp = str(pending_tp[1])
+    if pending is not None:
+        os.replace(pending[0], pending[1])
+        restored = str(pending[1])
+    return restored
 
-    state: dict = {}
-    state[key("planet")] = planet
-    state[key("scimode")] = str(cp.get("science_mode", "transmission"))
-    state[key("provider")] = provider
 
-    # -- system parameters (step 1; per-planet keys)
-    state[pk("teff")] = float(cp["star_teff"])
-    state[pk("logg")] = float(cp["star_logg"])
-    state[pk("feh")] = float(cp["star_feh"])
-    state[pk("rp")] = float(cp["rp_rjup"])
-    state[pk("g")] = float(cp["gs_cgs"]) / 100.0
-    state[pk("rstar")] = float(cp["rstar_rsun"])
-    state[pk("a")] = float(cp["orbit_au"])
-    if str(cp.get("sflux", "")) in planets.SFLUX_CHOICES:
-        state[pk("sflux")] = str(cp["sflux"])
-    else:
-        # unreachable for a config that passed the canonical_params gate
-        # unless sflux is absent (older file) -- say so, never silently keep
-        # whatever the menu happens to show
-        notes.append("the configuration names no stellar UV spectrum; the "
-                     "menu keeps its current selection")
-
-    # -- temperature-pressure profile (step 2)
-    state[pk("tp")] = tp_mode
-    if tp_mode == "guillot":
-        state[pk("tirr")] = float(cp["Tirr"])
-        # a restored T_irr is user-owned: clear the follow-until-overridden
-        # tracker so the custom planet's derived default does not reclaim it
-        state[pk("tirr_auto")] = None
-        state[pk("tint")] = float(cp["Tint"])
-        state[pk("lk")] = float(cp["log_kappa"])
-        state[pk("lg")] = float(cp["log_gamma"])
-    elif tp_mode == "picaso_climate":
-        state[pk("tintcl")] = float(cp["tint_cl"])
-        # exact assignment, no nearest-choice snapping: canonical_params
-        # (the loud gate above) already refused any off-menu rfacv, and a
-        # silent snap here would be a magic substitution if that gate ever
-        # weakened -- better to crash the selectbox loudly
-        state[pk("rfacv")] = float(cp["rfacv"])
-        state[pk("tiovo")] = bool(cp["tio_vo"])
-        state[pk("rcb")] = int(cp["climate_rcb"])
-    elif tp_mode == "file":
-        state[pk("tpsrc")] = str(cp.get("tp_file", forward.TP_FILE_SHIPPED))
-        if restored_tp:
-            state["restored_tp_path"] = restored_tp
-
-    # -- composition (step 2)
-    met = float(cp["met_x_solar"])
-    co = float(cp["co_ratio"])
-    if tp_mode == "picaso_climate":
-        from jwst_tool import picaso_chem as pchem
-        feh = round(math.log10(met), 1)
-        feh_opts = [x for x in pchem.FEH_NODES if -1.0 <= x <= 2.0]
-        if feh in feh_opts:
-            state[key("metnode")] = feh
-            if co in pchem.CO_NODES:
-                state[key(f"conode_{feh:.1f}")] = co
-        else:
-            notes.append(f"climate metallicity {met:g}x solar is not a "
-                         "selectable node and was not restored")
-    elif provider == "picaso":
-        state[key("met_pic")] = met
-        state[key("co_pic")] = co
-    else:
-        state[key("met")] = met
-        state[key("co")] = co
-
-    # -- kinetics-engine physics (step 2; VULCAN only)
-    if provider == "vulcan":
-        kzz_mode = str(cp.get("kzz_mode", "const"))
-        state[pk("kzzmode")] = kzz_mode
-        if kzz_mode == "const":
-            state[pk("kzz")] = _log10(cp["kzz_const"], "kzz_const")
-        elif kzz_mode == "Pfunc":
-            state[pk("kzkmax")] = _log10(cp["kzz_kmax"], "kzz_kmax")
-            state[pk("kzplev")] = _log10(cp["kzz_plev"], "kzz_plev")
-        elif kzz_mode == "JM16":
-            state[pk("kzkdeep")] = _log10(cp["kzz_kdeep"], "kzz_kdeep")
-        if kzz_mode != "const":
-            state[pk("kzzx")] = _log10(cp.get("kzz_x", 1.0), "kzz_x")
-        state[key("photo")] = bool(cp["use_photo"])
-        state[key("sza")] = float(cp["sl_angle_deg"])
-        state[key("fdiur")] = float(cp["f_diurnal"])
-        state[key("moldiff")] = bool(cp["use_moldiff"])
-        state[key("vmmol")] = bool(cp["use_vm_mol"])
-        # Condensation, gravitational settling, diffusion-limited escape and
-        # the boundary-condition fluxes left the GUI 2026-08-13. They remain
-        # canonical parameters (API/CLI), so a configuration may legitimately
-        # carry them -- but this app can no longer REPRESENT them. Restoring
-        # such a file and silently pinning them off would look like a
-        # successful load while Run computed a different atmosphere than the
-        # file describes, so a non-default value is REFUSED. Defaults
-        # (False/empty) load normally: nothing is lost. Contrast the removed
-        # noise scenarios, which get a note -- those did not change the model.
-        _removed = []
-        if bool(cp.get("use_condense", False)):
-            _removed.append("condensation (use_condense)")
-        if bool(cp.get("use_settling", False)):
-            _removed.append("gravitational settling (use_settling)")
-        if list(cp.get("diff_esc") or []):
-            _removed.append("diffusion-limited escape (diff_esc)")
-        if list(cp.get("top_flux") or []):
-            _removed.append("top-boundary fluxes (top_flux)")
-        if list(cp.get("bot_flux") or []):
-            _removed.append("bottom-boundary fluxes (bot_flux)")
-        if _removed:
-            raise ValueError(
-                "this configuration enables atmospheric physics the "
-                "interface no longer offers -- " + ", ".join(_removed)
-                + ". These settings still exist in the programmatic "
-                "interface (jwst_tool.forward.canonical_params), so run this "
-                "configuration through the API or CLI; loading it here would "
-                "silently compute a different atmosphere than the file "
-                "describes.")
-        state[key("yconv")] = float(cp["yconv_cri"])
-
-    # -- clouds & scattering (step 2)
-    state[key("rayl")] = bool(cp["use_rayleigh"])
-    state[key("cloud")] = bool(cp["cloud_on"])
-    if cp["cloud_on"]:
-        state[key("ck")] = float(cp["log_kappa_cloud"])
-        state[key("ca")] = float(cp["alpha_cloud"])
-    mie = str(cp.get("mie_condensate", "") or "")
-    state[key("miec")] = mie if mie in forward.MIE_CONDENSATES else ""
-    if state[key("miec")]:
-        state[key("mierg")] = float(cp["mie_log_rg"])
-        state[key("miesg")] = float(cp["mie_sigmag"])
-        state[key("miemmr")] = float(cp["mie_log_mmr"])
-
-    # -- opacity & line lists (step 2)
-    if provider == "picaso":
-        from jwst_tool import picaso_chem as pchem
-        extras_all = list(pchem.PICASO_EXTRA_MOLECULES)
-    else:
-        extras_all = list(forward.EXTRA_MOLECULES)
-    extras = [m for m in (cp.get("extra_mols") or []) if m in extras_all]
-    state[key(f"xmols_{provider}")] = extras
-    state[key("broad")] = str(cp.get("broadening", "air"))
-    state[key("nupts")] = int(cp["nu_pts"])
-
-    # -- More settings: solver grid + advanced RT
-    state[key("nz_pic" if provider == "picaso" else "nz")] = int(cp["nz"])
-    state[key("rtptop")] = float(cp["rt_ptop_bar"])
-    state[key("rtint")] = str(cp["rt_integration"])
-    state[key("rtdit")] = float(cp["rt_dit_res"])
-
-    # -- science goal (step 3)
-    cloud_i, mie_i = int(bool(cp["cloud_on"])), int(bool(state[key("miec")]))
+def _restore_goal(state: dict, cp: dict, goal: dict, key, provider: str,
+                  tp_mode: str, notes: list[str]) -> None:
+    cloud_i = int(bool(cp["cloud_on"]))
+    mie_i = int(bool(state[key("miec")]))
     suffix = f"{provider}_{tp_mode}_{cloud_i}_{mie_i}"
     if provider == "picaso":
         chem_free = (["lnZ"] if tp_mode == "picaso_climate"
@@ -330,124 +174,272 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
         avail += list(forward.MIE_FISHER_PARAMS)
     fisher = [p for p in (goal.get("fisher_params")
                           or cp.get("fisher_params") or []) if p in avail]
-    g = str(goal.get("goal", "") or "")
-    if g in ("detect", "constrain"):
-        state[key("goal")] = g
-        if goal.get("target_sig") is not None:
-            state[key("tsig")] = float(goal["target_sig"])
-        jm = str(goal.get("jac_method", cp.get("jac_method", "fd")))
-        if jm in ("fd", "ad"):
-            state[key("jacm")] = jm
-        if g == "detect":
-            mol_opts = forward.active_molecules(
-                {"chem_provider": provider, "extra_mols": extras})
-            tm = goal.get("target_mol")
-            if tm in mol_opts:
-                state[key(f"mol_{provider}_"
-                          + "_".join(sorted(extras)))] = tm
-            elif tm:
-                notes.append(f"detection target {tm} is not in the restored "
-                             "molecule set and was not restored")
-            state[key("dofish")] = bool(goal.get("do_fisher", bool(fisher)))
-            if fisher:
-                state[key(f"fp_{suffix}")] = fisher
-        else:
-            gp = goal.get("goal_param")
-            if gp in avail:
-                state[key(f"gp_{suffix}")] = gp
-                if goal.get("target_prec") is not None:
-                    state[key(f"tgt_{gp}")] = float(goal["target_prec"])
-            elif gp:
-                notes.append(f"constraint parameter {gp} is not available "
-                             "under the restored settings")
-            marg = bool(goal.get("marginalize", True))
-            state[key("marg")] = marg
-            if marg and fisher:
-                state[key(f"fx_{suffix}")] = [p for p in fisher if p != gp]
+    selected_goal = str(goal.get("goal", "") or "")
+    if selected_goal not in ("detect", "constrain"):
+        return
+    state[key("goal")] = selected_goal
+    if goal.get("target_sig") is not None:
+        state[key("tsig")] = float(goal["target_sig"])
+    method = str(goal.get("jac_method", cp.get("jac_method", "fd")))
+    if method in ("fd", "ad"):
+        state[key("jacm")] = method
+    if selected_goal == "detect":
+        extras = state[key(f"xmols_{provider}")]
+        mol_opts = forward.active_molecules(
+            {"chem_provider": provider, "extra_mols": extras})
+        target = goal.get("target_mol")
+        if target in mol_opts:
+            state[key(f"mol_{provider}_" + "_".join(sorted(extras)))] = target
+        elif target:
+            notes.append(f"detection target {target} is not in the restored "
+                         "molecule set and was not restored")
+        state[key("dofish")] = bool(goal.get("do_fisher", bool(fisher)))
+        if fisher:
+            state[key(f"fp_{suffix}")] = fisher
+        return
+    goal_param = goal.get("goal_param")
+    if goal_param in avail:
+        state[key(f"gp_{suffix}")] = goal_param
+        if goal.get("target_prec") is not None:
+            state[key(f"tgt_{goal_param}")] = float(goal["target_prec"])
+    elif goal_param:
+        notes.append(f"constraint parameter {goal_param} is not available "
+                     "under the restored settings")
+    marginalize = bool(goal.get("marginalize", True))
+    state[key("marg")] = marginalize
+    if marginalize and fisher:
+        state[key(f"fx_{suffix}")] = [p for p in fisher if p != goal_param]
 
-    # -- observation (step 4)
-    if obs:
-        from jwst_tool import instruments as ins
-        if obs.get("ks_mag") is not None:
-            state[pk("ks")] = float(obs["ks_mag"])
-        if obs.get("t14") is not None:
-            state[pk("t14")] = float(obs["t14"])
-        if obs.get("t_base") is not None:
-            state[pk("tbase")] = float(obs["t_base"])
-        modes = [m for m in (obs.get("modes") or []) if m in ins.MODES]
-        dropped = [m for m in (obs.get("modes") or []) if m not in ins.MODES]
+
+def _restore_combos(obs: dict, valid_modes: dict,
+                    notes: list[str]) -> list[dict]:
+    combos = []
+    for candidate in obs.get("combos") or []:
+        if not isinstance(candidate, dict) \
+                or not str(candidate.get("name", "")).strip():
+            notes.append("a saved mode combination without a name was not restored")
+            continue
+        name = str(candidate["name"]).strip()
+        modes = [m for m in (candidate.get("modes") or []) if m in valid_modes]
+        dropped = [m for m in (candidate.get("modes") or []) if m not in valid_modes]
         if dropped:
-            notes.append(f"unknown instrument mode(s) {dropped} were not "
-                         "restored")
-        if modes:
-            state[key("modes")] = modes
-        if obs.get("n_transits") is not None:
-            state[key("ntr")] = int(obs["n_transits"])
-        if obs.get("sat_limit") is not None:
-            state[key("sat")] = float(obs["sat_limit"])
-        if obs.get("r_bin") is not None:
-            state[key("rbin")] = int(obs["r_bin"])
-        fm = obs.get("floor_mode")
-        if fm in ("constant", "none", "file"):
-            state[key("floormode")] = fm
-            if fm == "constant":
-                for m, v in (obs.get("floors") or {}).items():
-                    if m in ins.MODES and isinstance(v, (int, float)):
-                        state[key(f"floor_{m}")] = float(v)
-            if fm == "file":
-                tab = cfg.get("floor_table")
-                if tab:
-                    state["restored_floor_table"] = [
-                        [float(a), float(b)] for a, b in tab]
-                else:
-                    notes.append("the wavelength-table noise floor is not "
-                                 "embedded in this file; upload it again")
-        for m, v in (obs.get("noise_infl") or {}).items():
-            if m in ins.MODES and isinstance(v, (int, float)):
-                state[key(f"infl_{m}")] = float(v)
-        # global noise multiplier (2026-08-13). noise_infl above holds the
-        # PER-MODE widget values; the effective factor is their product with
-        # this. A config written before this key existed restores 1.0, which
-        # reproduces the old behavior exactly.
-        _ns = obs.get("noise_scale")
-        if isinstance(_ns, (int, float)) and float(_ns) > 0.0:
-            state[key("noisescale")] = float(_ns)
-        # correlated-floor noise scenarios were removed 2026-08-11 (0.28.0);
-        # a config saved before that may still carry the key
-        if obs.get("scenario") not in (None, "random"):
-            notes.append(
-                f"this configuration selected the removed experimental "
-                f"noise scenario {obs['scenario']!r}; the standard "
-                "(diagonal) noise model is used instead")
-        if obs.get("seed") is not None:
-            state[key("seed")] = int(obs["seed"])
-        if obs.get("show_noise") is not None:
-            state[key("shownoise")] = bool(obs["show_noise"])
-        # named mode combinations (results-side builder; K("combos") is a
-        # plain session key, applied like any widget key before widgets)
-        combos_in = obs.get("combos") or []
-        combos_ok = []
-        for c in combos_in:
-            if not isinstance(c, dict) or not str(c.get("name", "")).strip():
-                notes.append("a saved mode combination without a name was "
-                             "not restored")
-                continue
-            cname = str(c["name"]).strip()
-            cmodes = [m for m in (c.get("modes") or []) if m in ins.MODES]
-            cdropped = [m for m in (c.get("modes") or []) if m not in ins.MODES]
-            if cdropped:
-                notes.append(f"combination {cname!r}: unknown instrument "
-                             f"mode(s) {cdropped} were dropped")
-            if not cmodes:
-                notes.append(f"combination {cname!r} has no valid instrument "
-                             "modes and was not restored")
-                continue
-            if any(x["name"] == cname for x in combos_ok):
-                notes.append(f"duplicate combination name {cname!r}: only "
-                             "the first was restored")
-                continue
-            combos_ok.append(dict(name=cname, modes=cmodes))
-        if combos_ok:
-            state[key("combos")] = combos_ok
+            notes.append(f"combination {name!r}: unknown instrument mode(s) "
+                         f"{dropped} were dropped")
+        if not modes:
+            notes.append(f"combination {name!r} has no valid instrument "
+                         "modes and was not restored")
+        elif any(item["name"] == name for item in combos):
+            notes.append(f"duplicate combination name {name!r}: only the "
+                         "first was restored")
+        else:
+            combos.append({"name": name, "modes": modes})
+    return combos
+
+
+def _restore_observation(state: dict, obs: dict, cfg: dict, key, pk,
+                         notes: list[str]) -> None:
+    if not obs:
+        return
+    from jwst_tool import instruments as ins
+    for source, widget, cast in (
+            ("ks_mag", "ks", float), ("t14", "t14", float),
+            ("t_base", "tbase", float)):
+        if obs.get(source) is not None:
+            state[pk(widget)] = cast(obs[source])
+    modes = [m for m in (obs.get("modes") or []) if m in ins.MODES]
+    dropped = [m for m in (obs.get("modes") or []) if m not in ins.MODES]
+    if dropped:
+        notes.append(f"unknown instrument mode(s) {dropped} were not restored")
+    if modes:
+        state[key("modes")] = modes
+    for source, widget, cast in (
+            ("n_transits", "ntr", int), ("sat_limit", "sat", float),
+            ("r_bin", "rbin", int), ("seed", "seed", int),
+            ("show_noise", "shownoise", bool)):
+        if obs.get(source) is not None:
+            state[key(widget)] = cast(obs[source])
+    floor_mode = obs.get("floor_mode")
+    if floor_mode in ("constant", "none", "file"):
+        state[key("floormode")] = floor_mode
+        if floor_mode == "constant":
+            for mode, value in (obs.get("floors") or {}).items():
+                if mode in ins.MODES and isinstance(value, (int, float)):
+                    state[key(f"floor_{mode}")] = float(value)
+        elif floor_mode == "file":
+            table = cfg.get("floor_table")
+            if table:
+                state["restored_floor_table"] = [
+                    [float(a), float(b)] for a, b in table]
+            else:
+                notes.append("the wavelength-table noise floor is not embedded "
+                             "in this file; upload it again")
+    for mode, value in (obs.get("noise_infl") or {}).items():
+        if mode in ins.MODES and isinstance(value, (int, float)):
+            state[key(f"infl_{mode}")] = float(value)
+    scale = obs.get("noise_scale")
+    if isinstance(scale, (int, float)) and float(scale) > 0.0:
+        state[key("noisescale")] = float(scale)
+    if obs.get("scenario") not in (None, "random"):
+        notes.append(
+            f"this configuration selected the removed experimental noise "
+            f"scenario {obs['scenario']!r}; the standard (diagonal) noise "
+            "model is used instead")
+    combos = _restore_combos(obs, ins.MODES, notes)
+    if combos:
+        state[key("combos")] = combos
+
+
+def _restore_system_profile(cp: dict, key, pk, planet: str, provider: str,
+                            tp_mode: str, restored_tp: str | None,
+                            notes: list[str]) -> dict:
+    state = {
+        key("planet"): planet,
+        key("scimode"): str(cp.get("science_mode", "transmission")),
+        key("provider"): provider,
+        pk("teff"): float(cp["star_teff"]),
+        pk("logg"): float(cp["star_logg"]),
+        pk("feh"): float(cp["star_feh"]),
+        pk("rp"): float(cp["rp_rjup"]),
+        pk("g"): float(cp["gs_cgs"]) / 100.0,
+        pk("rstar"): float(cp["rstar_rsun"]),
+        pk("a"): float(cp["orbit_au"]),
+        pk("tp"): tp_mode,
+    }
+    if str(cp.get("sflux", "")) in planets.SFLUX_CHOICES:
+        state[pk("sflux")] = str(cp["sflux"])
+    else:
+        notes.append("the configuration names no stellar UV spectrum; the "
+                     "menu keeps its current selection")
+    if tp_mode == "guillot":
+        state.update({
+            pk("tirr"): float(cp["Tirr"]), pk("tirr_auto"): None,
+            pk("tint"): float(cp["Tint"]), pk("lk"): float(cp["log_kappa"]),
+            pk("lg"): float(cp["log_gamma"]),
+        })
+    elif tp_mode == "picaso_climate":
+        state.update({
+            pk("tintcl"): float(cp["tint_cl"]),
+            pk("rfacv"): float(cp["rfacv"]),
+            pk("tiovo"): bool(cp["tio_vo"]),
+            pk("rcb"): int(cp["climate_rcb"]),
+        })
+    elif tp_mode == "file":
+        state[pk("tpsrc")] = str(cp.get("tp_file", forward.TP_FILE_SHIPPED))
+        if restored_tp:
+            state["restored_tp_path"] = restored_tp
+    metallicity = float(cp["met_x_solar"])
+    co_ratio = float(cp["co_ratio"])
+    if tp_mode == "picaso_climate":
+        from jwst_tool import picaso_chem as pchem
+        feh = round(math.log10(metallicity), 1)
+        if feh in [x for x in pchem.FEH_NODES if -1.0 <= x <= 2.0]:
+            state[key("metnode")] = feh
+            if co_ratio in pchem.CO_NODES:
+                state[key(f"conode_{feh:.1f}")] = co_ratio
+        else:
+            notes.append(f"climate metallicity {metallicity:g}x solar is not "
+                         "a selectable node and was not restored")
+    elif provider == "picaso":
+        state[key("met_pic")] = metallicity
+        state[key("co_pic")] = co_ratio
+    else:
+        state[key("met")] = metallicity
+        state[key("co")] = co_ratio
+    return state
+
+
+def _reject_removed_physics(cp: dict) -> None:
+    removed = []
+    for active, label in (
+            (bool(cp.get("use_condense", False)), "condensation (use_condense)"),
+            (bool(cp.get("use_settling", False)),
+             "gravitational settling (use_settling)"),
+            (bool(cp.get("diff_esc") or []), "diffusion-limited escape (diff_esc)"),
+            (bool(cp.get("top_flux") or []), "top-boundary fluxes (top_flux)"),
+            (bool(cp.get("bot_flux") or []), "bottom-boundary fluxes (bot_flux)")):
+        if active:
+            removed.append(label)
+    if removed:
+        raise ValueError(
+            "this configuration enables atmospheric physics the interface no "
+            "longer offers -- " + ", ".join(removed) + ". These settings "
+            "remain available through the programmatic interface "
+            "(jwst_tool.forward.canonical_params); loading them in the GUI "
+            "would change the atmosphere.")
+
+
+def _restore_vulcan_physics(state: dict, cp: dict, key, pk) -> None:
+    mode = str(cp.get("kzz_mode", "const"))
+    state[pk("kzzmode")] = mode
+    if mode == "const":
+        state[pk("kzz")] = _log10(cp["kzz_const"], "kzz_const")
+    elif mode == "Pfunc":
+        state[pk("kzkmax")] = _log10(cp["kzz_kmax"], "kzz_kmax")
+        state[pk("kzplev")] = _log10(cp["kzz_plev"], "kzz_plev")
+    elif mode == "JM16":
+        state[pk("kzkdeep")] = _log10(cp["kzz_kdeep"], "kzz_kdeep")
+    if mode != "const":
+        state[pk("kzzx")] = _log10(cp.get("kzz_x", 1.0), "kzz_x")
+    state.update({
+        key("photo"): bool(cp["use_photo"]),
+        key("sza"): float(cp["sl_angle_deg"]),
+        key("fdiur"): float(cp["f_diurnal"]),
+        key("moldiff"): bool(cp["use_moldiff"]),
+        key("vmmol"): bool(cp["use_vm_mol"]),
+        key("yconv"): float(cp["yconv_cri"]),
+    })
+    _reject_removed_physics(cp)
+
+
+def _restore_rt_state(state: dict, cp: dict, key, provider: str) -> None:
+    state[key("rayl")] = bool(cp["use_rayleigh"])
+    state[key("cloud")] = bool(cp["cloud_on"])
+    if cp["cloud_on"]:
+        state[key("ck")] = float(cp["log_kappa_cloud"])
+        state[key("ca")] = float(cp["alpha_cloud"])
+    mie = str(cp.get("mie_condensate", "") or "")
+    state[key("miec")] = mie if mie in forward.MIE_CONDENSATES else ""
+    if state[key("miec")]:
+        state[key("mierg")] = float(cp["mie_log_rg"])
+        state[key("miesg")] = float(cp["mie_sigmag"])
+        state[key("miemmr")] = float(cp["mie_log_mmr"])
+    if provider == "picaso":
+        from jwst_tool import picaso_chem as pchem
+        extras_all = list(pchem.PICASO_EXTRA_MOLECULES)
+    else:
+        extras_all = list(forward.EXTRA_MOLECULES)
+    state[key(f"xmols_{provider}")] = [
+        molecule for molecule in (cp.get("extra_mols") or [])
+        if molecule in extras_all]
+    state.update({
+        key("broad"): str(cp.get("broadening", "air")),
+        key("nupts"): int(cp["nu_pts"]),
+        key("nz_pic" if provider == "picaso" else "nz"): int(cp["nz"]),
+        key("rtptop"): float(cp["rt_ptop_bar"]),
+        key("rtint"): str(cp["rt_integration"]),
+        key("rtdit"): float(cp["rt_dit_res"]),
+    })
+
+
+def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
+                  notes: list[str]) -> tuple[dict, list[str]]:
+    planet = str(cp["planet"])
+    provider = str(cp.get("chem_provider", "vulcan"))
+    tp_mode = str(cp.get("tp_mode", "guillot"))
+
+    def pk(name: str) -> str:            # per-planet widget keys
+        return key(f"{planet}_{name}")
+
+    restored_tp = _resolve_embedded_tp(cp, cfg, tp_mode)
+
+    state = _restore_system_profile(
+        cp, key, pk, planet, provider, tp_mode, restored_tp, notes)
+
+    if provider == "vulcan":
+        _restore_vulcan_physics(state, cp, key, pk)
+
+    _restore_rt_state(state, cp, key, provider)
+    _restore_goal(state, cp, goal, key, provider, tp_mode, notes)
+    _restore_observation(state, obs, cfg, key, pk, notes)
 
     return state, notes

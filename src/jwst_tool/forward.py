@@ -68,6 +68,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -235,6 +236,14 @@ def default_tirr(planet: str, system: dict | None = None) -> float:
 # (picaso_chem.FD_KINK_TOL): the defaults sit ON grid nodes with no unique
 # local derivative, and a row whose left/right secants disagree hard-errors.
 CHEM_PROVIDERS = ("vulcan", "picaso")
+PICASO_EXPERIMENTAL_ENV = "JWST_TOOL_ENABLE_UNCERTIFIED_PICASO"
+
+
+def picaso_experimental_enabled() -> bool:
+    """Whether the explicitly uncertified PICASO research path is enabled."""
+    return os.environ.get(PICASO_EXPERIMENTAL_ENV) == "1"
+
+
 PICASO_MET_RANGE = (0.1, 100.0)       # = [M/H] in [-1, 2], inside the grid
 PICASO_CO_RANGE = (0.14, 1.10)        # the Visscher grid span (hard cap)
 # ln-space steps chosen so 2h stays inside the cells adjacent to the defaults
@@ -420,6 +429,15 @@ def _read_tp_table(path: Path) -> dict:
     ValueError with the offending detail on any malformed content -- a bad
     table must fail at the API, never inside the engine's pre-loop."""
     try:
+        # genfromtxt emits a warning, rather than an exception, for an empty
+        # file. Reject it before NumPy so corrupt share uploads fail cleanly.
+        text = path.read_text()
+        lines = [line for line in text.splitlines() if line.strip()]
+        if path.stat().st_size == 0 or not text.strip():
+            raise ValueError("file is empty")
+        if len(lines) < 6:
+            raise ValueError(
+                "file is too short for a units line, column header, and four rows")
         tab = np.genfromtxt(path, names=True, dtype=None, skip_header=1)
     except Exception as e:                                    # noqa: BLE001
         raise ValueError(
@@ -669,6 +687,15 @@ def canonical_params(params: dict) -> dict:
             "engine, the default; 'picaso' = PICASO equilibrium chemistry, "
             "FD-only, no photochemistry/SO2, C/O <= 1.10).")
     needs_picaso = provider == "picaso" or tp_mode == "picaso_climate"
+    if needs_picaso and not picaso_experimental_enabled():
+        raise RuntimeError(
+            "PICASO chemistry/climate is uncertified in this release and is "
+            "disabled by default: PICASO 4.0.1 requires NumPy >=2 while the "
+            "validated ExoJAX 2.2.3 stack requires NumPy <2, and the native-RT "
+            "cross-model artifact does not pass. Use the VULCAN path for "
+            "collaborator results. Maintainers may set "
+            f"{PICASO_EXPERIMENTAL_ENV}=1 only for isolated investigation; "
+            "such output is not release-certified.")
     if provider == "picaso" and tp_mode == "file":
         raise ValueError(
             "tp_mode='file' is not implemented under chem_provider='picaso': "
