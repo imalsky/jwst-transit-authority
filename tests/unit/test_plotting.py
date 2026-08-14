@@ -595,3 +595,56 @@ def test_log_depth_axis_refuses_a_non_positive_range():
         summary_figure.compose_summary_figure(
             dict(wl_um=wl, depth_ppm=depth, depth_label="eclipse depth (ppm)",
                  model_label="model", points=[], y_log=True))
+
+
+@pytest.mark.parametrize("n_src", [1, 2, 4, 6])
+def test_posterior_headroom_scales_with_the_legend(n_src):
+    """The posterior panel's legend headroom is DERIVED from its row count,
+    not a constant.
+
+    It was a hardcoded 1.42, which only held by coincidence: the legend sits
+    upper-left while the curves peak centrally. With one curve per selected
+    series the legend grows with the selection, so the headroom has to grow
+    with it -- and CLAUDE.md documents the row-count rule for BOTH panels.
+    """
+    th = np.linspace(0.6, 1.4, 200)
+    palette = ["#1f4e9c", "#8c2d04", "#0f6b4f", "#6a3d9a", "#117733",
+               "#444444"]
+    curves = []
+    for i in range(n_src):
+        sig = 0.02 + 0.006 * i
+        curves.append(dict(label=f"Source {i} with a longish mode name",
+                           theta=th,
+                           pdf=np.exp(-(th - 1.0) ** 2 / (2 * sig ** 2)),
+                           mu=1.0, sigma=sig, color=palette[i],
+                           ls="-", lw=1.8))
+    wl = np.linspace(1.0, 12.0, 200)
+    fig = summary_figure.compose_summary_figure(
+        dict(wl_um=wl, depth_ppm=20000.0 + 300.0 * np.sin(wl),
+             depth_label="transit depth (ppm)", model_label="model",
+             points=[]),
+        posterior_panels=[dict(axis_label="[M/H] [dex]", center=1.0,
+                               curves=curves)])
+    try:
+        with plotting.render_lock:
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+            ax = fig.axes[1]
+            top = ax.get_ylim()[1]
+            # curves are peak-normalized to 1.0, so the top IS the headroom
+            assert top > 1.0 + 0.10 * n_src - 0.02, \
+                f"{n_src} sources got only {top:.2f} of headroom"
+            lb = ax.get_legend().get_window_extent(renderer)
+            covered = 0
+            for ln in ax.get_lines():
+                xd, yd = ln.get_data()
+                if len(xd) < 2:
+                    continue
+                pix = ax.transData.transform(np.column_stack([xd, yd]))
+                covered += int(((pix[:, 0] >= lb.x0) & (pix[:, 0] <= lb.x1)
+                                & (pix[:, 1] >= lb.y0)
+                                & (pix[:, 1] <= lb.y1)).sum())
+            assert covered == 0, \
+                f"legend covers {covered} vertices with {n_src} sources"
+    finally:
+        plt.close(fig)

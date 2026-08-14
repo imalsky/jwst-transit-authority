@@ -446,8 +446,14 @@ def _plot_posterior_panel(axp, pan: dict, color: str) -> None:
     axp.set_yticks([])
     axp.tick_params(labelsize=_TICK)
     axp.set_ylabel("relative forecast density", fontsize=_AX_LBL)
-    # headroom for the in-axes legend (see the spectrum panel's note)
-    axp.set_ylim(0.0, 1.42)
+    # Headroom for the in-axes legend, sized from the legend's ROW COUNT --
+    # the same rule the spectrum panel uses, and what CLAUDE.md documents.
+    # This replaced a hardcoded 1.42: with one curve per selected series the
+    # legend grows with the selection, so a constant only held by coincidence
+    # (the legend sits upper-left while the curves peak centrally). Curves are
+    # peak-normalized to 1.0, so the top is 1.0 + the legend's share.
+    _rows = len(pan["curves"]) + (pan["center"] is not None)
+    axp.set_ylim(0.0, 1.0 + min(0.85, 0.13 * max(1, _rows)))
     axp.grid(alpha=0.15)
     if pan["curves"]:
         leg = axp.legend(loc="upper left", frameon=True, framealpha=0.82,
