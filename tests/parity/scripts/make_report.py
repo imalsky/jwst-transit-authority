@@ -330,19 +330,44 @@ def main(require_pass: bool = False):
             f"ratio ({_sr:.3f}^2 = {_sr**2:.3f}). ")
     else:
         _attrib = ""
+    # Derived from THIS artifact, never hard-coded: the envelope moves every
+    # time the matrix is regenerated, and a stale literal beside fresh tables
+    # reads as a measurement.
+    _nir, _miri, _nir_pol = [], [], []
+    for _b in summary["stars"].values():
+        for _m in _b["modes"]:
+            _mm = (_m.get("sigma_ratio_matched") or {}).get("median")
+            _pp = (_m.get("sigma_ratio_policy") or {}).get("median")
+            if _mm is None:
+                continue
+            (_miri if "miri" in _m["key"] else _nir).append(_mm)
+            if _pp is not None and "miri" not in _m["key"]:
+                _nir_pol.append(_pp)
+
+    def _pct(v):
+        d = (v - 1.0) * 100.0
+        return f"{d:+.1f}%" if abs(d) < 2.0 else f"{d:+.0f}%"
+
+    _below = [v for v in _nir + _miri if v < 1.0]
+    _sense = ("This tool is therefore CONSERVATIVE relative to PandExo on "
+              "every row" if not _below else
+              "This tool is therefore conservative relative to PandExo on "
+              f"every row but {len(_below)}, which sits marginally below unity"
+              if len(_below) == 1 else
+              f"every row but {len(_below)}, which sit marginally below unity")
     w("2. **The remaining sigma difference is the noise model itself, and "
-      "it is one-sided.** This tool propagates pandeia's full extracted "
-      "noise (correlated ramp/read noise, background, dark, IPC, "
+      "it is nearly one-sided.** This tool propagates pandeia's full "
+      "extracted noise (correlated ramp/read noise, background, dark, IPC, "
       "quantum-yield excess); PandExo's default 'fml' calculation is an "
       "analytic ramp formula that sits within a few percent of pure photon "
       "noise in the NIR. The attribution tables above show the variance "
       f"excess over photon counts on both sides; {_attrib}"
-      "This tool is therefore systematically CONSERVATIVE relative to "
-      "PandExo: ~2-24% higher sigma for NIRSpec/NIRISS/NIRCam on matched "
-      "configurations (up to ~31% under the policy configs on the faint "
-      "Ks=13 star), and larger "
-      "for MIRI LRS (~33-56%), where the deep-red background and detector "
-      "terms dominate and the analytic formula under-represents them.")
+      f"{_sense}: {_pct(min(_nir))} to {_pct(max(_nir))} on matched "
+      f"NIRSpec/NIRISS/NIRCam configurations (up to {_pct(max(_nir_pol))} "
+      f"under the policy configs), and larger for MIRI LRS "
+      f"({_pct(min(_miri))} to {_pct(max(_miri))}), where the deep-red "
+      "background and detector terms dominate and the analytic formula "
+      "under-represents them.")
     w("")
     w("3. **Residual policy differences (documented, small):** integration "
       "counts are floored here vs rounded in PandExo (at most one "

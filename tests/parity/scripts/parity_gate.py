@@ -117,7 +117,9 @@ MAX_FLUX_RATIO_DEV = 0.03
 
 # Sigma ratios are deliberately NOT gated to unity: pandeia's full extracted
 # noise and PandExo's analytic `fml` estimator are different noise models on
-# purpose, with a measured envelope of ~2-24% (NIR) and ~33-56% (MIRI LRS).
+# purpose. Measured envelope on the 2026-08-14 eight-mode matrix: -0.3% to
+# +31% (NIR) and +35% to +53% (MIRI LRS). REPORT.md derives these from the
+# artifact -- do not re-hard-code a range here, it goes stale on every re-run.
 # But "different by design" has a ceiling: a median ratio outside this band
 # is an ANOMALY (the 2026-08-09 regression measured 7.08x from an
 # unnecessary 1-group ramp and the ungated sigma let it pass silently).

@@ -374,10 +374,13 @@ Five limits to keep in view:
   permitted ramp (pandeia's per-detector minimum: 1 group in the near infrared,
   2 for MIRI); ramps below the STScI-recommended minimum are flagged with a
   warning. Verify the chosen configuration in APT before proposing.
-- **The noise model omits time-correlated systematics.** In a three-star,
-  fixed-configuration, no-floor parity benchmark (`tests/parity/`) it is
-  conservative against PandExo by roughly 2-24% in the near infrared and 33-56%
-  for MIRI LRS. Those ranges are benchmark results, not a general guarantee.
+- **The noise model omits time-correlated systematics.** In the three-star,
+  eight-mode, fixed-configuration, no-floor parity benchmark (`tests/parity/`,
+  regenerated 2026-08-14) it is conservative against PandExo on every row but
+  one, spanning -0.3% to +31% in the near infrared and +35% to +53% for MIRI
+  LRS; the single sub-unity row is `faint_k/nircam_f444w` at 0.997. Those
+  ranges are benchmark results, not a general guarantee, and "conservative" is
+  not universal.
 - **Stellar contamination is not modeled.** Unocculted spots and faculae can
   dominate transit-depth systematics for active hosts, most strongly below about
   3 um (Rackham et al. 2018; Lim et al. 2023). Treat short-wavelength depths
@@ -1153,6 +1156,14 @@ lives in notes.md, Decision records; scope and conventions live in
   export states this permanently.
 
 ## Data provenance
+
+A downloaded configuration carries a `provenance` block (`provenance.py`, added
+by the 2026-08-14 audit): the commit, branch and dirty flag of every sibling
+repository, package versions, the Pandeia/PandExo identity, PHOENIX and
+line-list checksums, the cache schema versions, and the random seed. It is
+informational on load, so old configurations stay portable, but treat a dirty
+tree, an `unversioned`/`absent` repository, or a missing checksum as a failed
+release input rather than a reproduction.
 
 Inputs for this repo live in `data/` (env `JWST_TOOL_DATA_DIR` overrides; an
 editable checkout infers the root, a site-packages install must set it). The
