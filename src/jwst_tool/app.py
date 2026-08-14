@@ -2496,21 +2496,36 @@ with st.expander("Parameter constraint forecast (Fisher)"):
             _disp.append(_r2)
         _disp_df = pd.DataFrame(_disp)
         _combo_mask = _disp_df.pop("_is_combo")
+        # st.table, NOT st.dataframe (maintainer, 2026-08-13: "if you sort by
+        # something else you can't see which mode does what. I just don't want
+        # to allow that reordering").
+        #
+        # st.dataframe is an INTERACTIVE table -- clicking a column header
+        # re-sorts it -- and this table cannot survive that, because the mode
+        # column is blanked on repeat rows for readability (above). Half the
+        # rows therefore carry no mode name, and they only mean anything in
+        # their emitted order: re-sort by the marginalized column and every
+        # blank row detaches from the mode it belongs to, silently attributing
+        # numbers to the wrong instrument. st.table is static by definition
+        # ("without sorting or scrolling", its own docs), which removes the
+        # interaction rather than trying to make the blanks survive it.
+        #
+        # It renders every row with no scroll region, which is fine here: the
+        # worst case is 8 modes + combined + custom sets at 3 parameters = 33
+        # rows, and the whole table sits inside a collapsed expander.
         if _combo_mask.any():
-            # tint the custom-combination rows so they read as a group
-            # distinct from the per-mode rows above/below them
-            # TEXT color, not a background tint (maintainer, 2026-08-13):
-            # a filled row reads as a highlight/alert. Colored text marks the
-            # group without shouting. #5b3a8e is the combo palette's purple,
-            # dark enough for body text on white.
-            st.dataframe(
+            # tint the custom-set rows so they read as a group distinct from
+            # the per-mode rows. TEXT color, not a background tint (maintainer,
+            # 2026-08-13): a filled row reads as a highlight/alert. Colored
+            # text marks the group without shouting. #5b3a8e is the combo
+            # palette's purple, dark enough for body text on white.
+            st.table(
                 _disp_df.style.apply(
                     lambda row: ["color: #5b3a8e; font-weight: 600"
                                  if _combo_mask.loc[row.name] else ""
-                                 for _ in row], axis=1),
-                width="stretch", hide_index=True)
+                                 for _ in row], axis=1))
         else:
-            st.dataframe(_disp_df, width="stretch", hide_index=True)
+            st.table(_disp_df)
         st.download_button("Constraint forecast (CSV)",
                            _csv_bytes(pd.DataFrame(frows)),
                            f"{_fname_base}_fisher_forecast.csv", "text/csv",

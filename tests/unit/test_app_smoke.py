@@ -310,6 +310,47 @@ def test_figures_render_at_a_fixed_width_not_stretched():
     assert define < use, (define, use)
 
 
+def test_fisher_table_is_static_and_cannot_be_resorted():
+    """The Fisher table renders through st.table, never st.dataframe
+    (maintainer, 2026-08-13: "if you sort by something else you can't see which
+    mode does what. I just don't want to allow that reordering").
+
+    st.dataframe sorts on a header click. This table cannot survive that: the
+    mode column is BLANKED on repeat rows so the mode boundaries read clearly,
+    so half the rows carry no mode name and only mean anything in their emitted
+    order. A re-sort detaches every blank row from its mode and silently
+    attributes numbers to the wrong instrument. st.table is static by
+    definition, which removes the interaction instead of trying to make the
+    blanks survive it.
+
+    The other results tables are deliberately LEFT sortable -- they carry one
+    self-contained row per mode, so re-sorting them loses nothing.
+    """
+    src = APP.read_text()
+    i = src.index('with st.expander("Parameter constraint forecast (Fisher)")')
+    j = src.index('st.download_button("Constraint forecast (CSV)"', i)
+    block = src[i:j]
+    assert "st.table(" in block, \
+        "the Fisher table no longer renders through st.table"
+    assert "st.dataframe(" not in block, \
+        "the Fisher table is interactive again -- a header sort would " \
+        "detach the blanked mode names from their rows"
+    # the blanking that makes a re-sort unsafe is still what it protects
+    assert '_r2["mode"] = ""' in block, \
+        "mode names are no longer blanked; re-check whether st.table is needed"
+
+
+def test_the_fisher_csv_carries_a_mode_on_every_row():
+    """The DISPLAY blanks repeated mode names; the CSV must not.
+
+    A machine-readable file whose key column is empty on half its rows is
+    unusable, so the download is built from the UNBLANKED rows.
+    """
+    src = APP.read_text()
+    assert "_csv_bytes(pd.DataFrame(frows))" in src, \
+        "the Fisher CSV is no longer built from the unblanked rows"
+
+
 def test_removed_tooltips_and_table_guidance_are_gone():
     """Prose the maintainer removed 2026-08-13 must not come back.
 
@@ -671,7 +712,10 @@ def test_combo_builder_and_summary_figure_render_with_jacobians():
     assert "PRISM + G395H" in md
     # its rows are in the Fisher long-format table
     import pandas as pd
-    tables = [pd.DataFrame(d.value) for d in at.get("dataframe")]
+    # at.TABLE, not at.dataframe: the Fisher table renders through st.table so
+    # a header click cannot re-sort it away from its blanked mode names
+    tables = [pd.DataFrame(d.value)
+              for d in list(at.get("table")) + list(at.get("dataframe"))]
     assert any(t.astype(str)
                .apply(lambda c: c.str.contains("PRISM \\+ G395H"))
                .any().any() for t in tables), \
@@ -852,10 +896,15 @@ def test_all_usable_row_is_renamed_and_combos_lead_the_table():
     assert not at.exception, at.exception
     # the CONSTRAINT table specifically -- Mode details also has a "mode"
     # column and renders first, so identify by the parameter column
-    tables = [df.value for df in at.dataframe
-              if "mode" in getattr(df.value, "columns", [])
-              and "parameter" in getattr(df.value, "columns", [])]
+    # at.TABLE: the constraint forecast is a STATIC table (st.table), so a
+    # reader cannot re-sort it and detach the blanked mode names from their rows
+    tables = [t.value for t in at.table
+              if "mode" in getattr(t.value, "columns", [])
+              and "parameter" in getattr(t.value, "columns", [])]
     assert tables, "no constraint-forecast table rendered"
+    assert not [df.value for df in at.dataframe
+                if "parameter" in getattr(df.value, "columns", [])], \
+        "the constraint forecast is an interactive dataframe again"
     modes = [str(v) for v in tables[0]["mode"]]
     assert not any("ALL USABLE" in m for m in modes), modes[:8]
     assert not any(m.startswith("COMBO:") for m in modes), modes[:8]
