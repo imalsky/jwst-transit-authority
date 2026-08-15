@@ -402,6 +402,11 @@ def _restore_rt_state(state: dict, cp: dict, key, provider: str) -> None:
         key("rtptop"): float(cp["rt_ptop_bar"]),
         key("rtint"): str(cp["rt_integration"]),
         key("rtdit"): float(cp["rt_dit_res"]),
+        # p_ref_bar (v26). .get with the default so a configuration downloaded
+        # before v26 still loads: those runs were anchored at the grid bottom,
+        # but restoring them onto the 1 mbar default is the CORRECT physics and
+        # the stale-key banner already tells the user the run must be redone.
+        key("pref"): float(cp.get("p_ref_bar", 1.0e-3)),
     })
 
 

@@ -1580,6 +1580,15 @@ with st.sidebar:
             "RT top pressure (bar)",
             1.0e-9, 1.0e-6, 1.0e-8, 1.0e-9,
             format="%.1e", key=K("rtptop"))
+        p_ref_bar = st.number_input(
+            "Reference pressure for the planet radius (bar)",
+            1.0e-6, 7.0, 1.0e-3, format="%.1e", key=K("pref"),
+            help="The pressure at which the planet radius and surface gravity "
+                 "above are taken to apply. A catalogue radius comes from a "
+                 "white-light transit fit, so it is the transit radius near the "
+                 "terminator photosphere, around a millibar for a hot Jupiter. "
+                 "The default 1e-3 bar reproduces the published JWST WASP-39 b "
+                 "transmission spectrum to 0.6% in median depth.")
         if science_mode == "emission":
             # canonical_params pins simpson in emission (no transit chord);
             # show the pinned state, not a silently ignored choice
@@ -1625,7 +1634,7 @@ params = dict(planet=planet_key, science_mode=science_mode,
               top_flux=top_flux, bot_flux=bot_flux,
               use_rayleigh=use_rayleigh, broadening=broadening,
               rt_ptop_bar=float(rt_ptop_bar), rt_integration=rt_integration,
-              rt_dit_res=float(rt_dit_res),
+              rt_dit_res=float(rt_dit_res), p_ref_bar=float(p_ref_bar),
               cloud_on=cloud_on,
               log_kappa_cloud=log_kappa_cloud, alpha_cloud=alpha_cloud,
               mie_condensate=mie_condensate, mie_log_rg=mie_log_rg,
@@ -1973,6 +1982,19 @@ try:
     if _shown_stale:
         _changed = sorted(k for k in set(_cur_cp) | set(_cpj)
                           if _cur_cp.get(k) != _cpj.get(k))
+    # RUN-META, not just canonical model params. The canonical set deliberately
+    # excludes the detection target and the observing setup, because they do not
+    # change the SPECTRUM -- one run already computes the removed-molecule curve
+    # for every RT molecule. But they do change what is DISPLAYED, and without
+    # this the page silently kept showing the previous target's curve, legend and
+    # CSV column: a reviewer switched SO2 to CO2, never pressed Run, and reported
+    # the result as a caching bug. Same for goal / n_transits / r_bin.
+    _meta_now = dict(goal=goal, target=target_mol, goal_param=goal_param,
+                     n_transits=int(n_transits), r_bin=int(r_bin))
+    _meta_chg = sorted(k for k, v in _meta_now.items() if meta.get(k) != v)
+    if _meta_chg:
+        _shown_stale = True
+        _changed = sorted(set(_changed) | set(_meta_chg))
 except (ValueError, RuntimeError):
     _shown_stale = True   # the current sidebar settings do not even validate
 if _shown_stale:

@@ -296,8 +296,14 @@ def _plot_spectrum(ax, spec: dict) -> None:
     ax.plot(spec["wl_um"], spec["depth_ppm"], color="#444444", lw=1.1,
             alpha=0.9, zorder=4, label=spec["model_label"])
     if spec["depth2_ppm"] is not None:
+        # zorder 3.5: ABOVE the points (3), below the model (4). At zorder 1 this
+        # curve sat under both, and since it is identical to the model everywhere
+        # outside the target molecule's own bands it read as absent -- a reviewer
+        # reported "I didn't see the model without SO2 curve" for exactly this
+        # reason. It must not go above the model: where the two coincide the solid
+        # line is the one to show.
         ax.plot(spec["wl_um"], spec["depth2_ppm"], color="#888888",
-                lw=1.0, ls="--", zorder=1, label=spec["depth2_label"])
+                lw=1.0, ls="--", zorder=3.5, label=spec["depth2_label"])
     for p in spec["points"]:
         # markeredgecolor MUST be set: science.mplstyle leaves it "auto" with
         # markeredgewidth 1.0, and on a 3.6 pt marker a 1 pt black edge

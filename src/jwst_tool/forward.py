@@ -88,7 +88,7 @@ MOLECULES = ["H2O", "CO2", "CO", "CH4", "SO2"]   # always-on WIDE-profile set
 # network already solves these; extra_mols only exposes them to the RT and the
 # detection scores.
 EXTRA_MOLECULES = ["C2H2", "C2H4", "C2H6", "CS2", "H2S", "HCN", "NH3", "OCS"]
-_VERSION = 25  # model_cache buster: bump whenever the physics or the canonical
+_VERSION = 26  # model_cache buster: bump whenever the physics or the canonical
                # key set changes. Per-version history lives in notes.md.
                # DELIBERATE (reviews keep re-finding it): the cache identity
                # is canonical params + this hand-bumped version, NOT content
@@ -834,6 +834,17 @@ def canonical_params(params: dict) -> dict:
         "rt_ptop_bar": float(f"{float(params.get('rt_ptop_bar', 1.0e-8)):.6e}"),
         "rt_integration": str(params.get("rt_integration", "simpson")),
         "rt_dit_res": round(float(params.get("rt_dit_res", 1.0)), 3),
+        # p_ref_bar (v26): the pressure at which rp_rjup and gs_cgs are taken to
+        # apply. A catalogue radius comes from a white-light TRANSIT fit, so it
+        # is the transit radius at roughly the terminator photosphere, NOT the
+        # radius at the bottom of the RT grid where exojax wants it. Before v26
+        # the literature pair was handed straight to exojax as its
+        # radius_btm/gravity_btm at 7 bar, which stacked the whole 7 bar -> mbar
+        # column on top of a radius that already was the photospheric one:
+        # WASP-39 b came out at 26,853 ppm against a measured 21,381, with 1.42x
+        # too much spectral contrast. 1e-3 bar is the validated default
+        # (re-anchored median 21,299 ppm, 0.4% from the JWST ERS spectrum).
+        "p_ref_bar": float(f"{float(params.get('p_ref_bar', 1.0e-3)):.6e}"),
         "cloud_on": bool(params.get("cloud_on", False)),
         "log_kappa_cloud": round(float(params.get("log_kappa_cloud", -1.0)), 3),
         "alpha_cloud": round(float(params.get("alpha_cloud", 0.0)), 2),
@@ -886,6 +897,12 @@ def canonical_params(params: dict) -> dict:
         raise ValueError(
             f"rt_ptop_bar={cp['rt_ptop_bar']:g} outside [1e-9, 1e-6] bar (the "
             "exercised RT-top range; 1e-8 is the validated default)")
+    if not cp["rt_ptop_bar"] <= cp["p_ref_bar"] <= 7.0:
+        raise ValueError(
+            f"p_ref_bar={cp['p_ref_bar']:g} must lie inside the RT grid "
+            f"[{cp['rt_ptop_bar']:g}, 7.0] bar. It is the pressure at which "
+            "rp_rjup and gs_cgs are defined, so the grid has to cover it. "
+            "1e-3 bar is the validated default for a transit-derived radius.")
     if cp["rt_integration"] not in ("simpson", "trapezoid"):
         raise ValueError(
             f"rt_integration={cp['rt_integration']!r}: exojax ArtTransPure "
@@ -1482,6 +1499,7 @@ def _rt_profile_common(cp: dict, config) -> dict:
     profile["art_ptop_bar"] = cp["rt_ptop_bar"]
     profile["rt_integration"] = cp["rt_integration"]
     profile["dit_grid_resolution"] = cp["rt_dit_res"]
+    profile["p_ref_bar"] = cp["p_ref_bar"]
     # Mie condensate deck (v16): the engine builds the OpaMie deck from a
     # pre-generated miegrid under DATA_DIR/exojax_mie and ECHOES mie_condensate
     # on the rt namespace; run_model verifies that echo below (an engine too old
@@ -1897,7 +1915,8 @@ def run_model(params: dict, log=print) -> Path:
     # spectrum under a key describing physics the engine did not apply.
     _echo = {"art_ptop_bar": cp["rt_ptop_bar"],
              "rt_integration": cp["rt_integration"],
-             "dit_grid_resolution": cp["rt_dit_res"]}
+             "dit_grid_resolution": cp["rt_dit_res"],
+             "p_ref_bar": cp["p_ref_bar"]}
     for k, want in _echo.items():
         got = getattr(rt, k, None)
         if got != want:

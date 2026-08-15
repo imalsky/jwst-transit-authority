@@ -60,7 +60,7 @@ def _pc(**kw):
 
 def test_vulcan_defaults_carry_inert_picaso_keys():
     cp = forward.canonical_params(_p())
-    assert cp["version"] == 25
+    assert cp["version"] == 26
     assert cp["chem_provider"] == "vulcan"
     assert cp["picaso_version"] == ""
     assert cp["picaso_chemgrid_sha1"] == ""
@@ -90,6 +90,11 @@ def test_v17_to_v18_key_regression():
         "alpha_cloud", "mie_condensate", "mie_log_rg", "mie_sigmag",
         "mie_log_mmr", "use_condense", "use_settling", "diff_esc",
         "top_flux", "bot_flux", "extra_mols", "fisher_params", "jac_method",
+        # v26: the pressure at which rp_rjup/gs_cgs are defined. Before it, the
+        # catalogue transit radius was handed to exojax as its bottom-of-grid
+        # radius at 7 bar, inflating every transit depth (WASP-39 b 26,754 ppm
+        # vs a measured 21,381).
+        "p_ref_bar",
         "version"}
 
 

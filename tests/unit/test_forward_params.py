@@ -462,14 +462,18 @@ def test_wasp39b_reference_state_is_the_literature_validated_one():
 def test_wasp39b_reference_cache_key_is_stable():
     # The key hashes every canonical parameter: if ANY default feeding the
     # reference run changes, this trips even when the pins above still pass.
-    # The hash is the one the pre-2026-08-09 default run carried, proving the
-    # reference atmosphere is bit-identical to the validated one of old.
+    # RE-PINNED at v26 (was f14f4d10512552ea): p_ref_bar joined the canonical
+    # set, so the reference atmosphere is deliberately NOT the old one. Every
+    # spectrum before v26 anchored the planet radius at the 7 bar grid bottom
+    # instead of the ~mbar transit photosphere, which put WASP-39 b's median
+    # depth at 26,754 ppm against a measured 21,381. At the 1 mbar default it
+    # is 21,259 ppm, 0.6% from the JWST ERS FIREFLy spectrum.
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b", tp_mode="file"))) == "f14f4d10512552ea"
+        dict(planet="wasp39b", tp_mode="file"))) == "de55467c4a459b4e"
     # ... and since 2026-08-11 the bare DEFAULT run is that same atmosphere:
     # a default W39b forecast is the literature-validated configuration.
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "f14f4d10512552ea"
+        dict(planet="wasp39b"))) == "de55467c4a459b4e"
 
 
 def test_wasp39b_shipped_table_bytes_are_unchanged():
