@@ -407,6 +407,12 @@ def _restore_rt_state(state: dict, cp: dict, key, provider: str) -> None:
         # but restoring them onto the 1 mbar default is the CORRECT physics and
         # the stale-key banner already tells the user the run must be redone.
         key("pref"): float(cp.get("p_ref_bar", 1.0e-3)),
+        # p_btm_bar (v27). Same .get treatment: a pre-v27 configuration has no
+        # column bottom, and its geometry is the transmission one.
+        # per-geometry widget key (app.py): the default differs by an order of
+        # magnitude, so each geometry keeps its own box
+        key(f"pbtm_{cp.get('science_mode', 'transmission')}"):
+            float(cp.get("p_btm_bar", 7.6)),
     })
 
 

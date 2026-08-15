@@ -60,7 +60,7 @@ def _pc(**kw):
 
 def test_vulcan_defaults_carry_inert_picaso_keys():
     cp = forward.canonical_params(_p())
-    assert cp["version"] == 26
+    assert cp["version"] == 27
     assert cp["chem_provider"] == "vulcan"
     assert cp["picaso_version"] == ""
     assert cp["picaso_chemgrid_sha1"] == ""
@@ -95,6 +95,11 @@ def test_v17_to_v18_key_regression():
         # radius at 7 bar, inflating every transit depth (WASP-39 b 26,754 ppm
         # vs a measured 21,381).
         "p_ref_bar",
+        # v27: the chemistry + RT column bottom. Emission needs an optically
+        # thick bottom (100 bar) where transmission is validated at 7.6, so it
+        # cannot be one constant; the two geometries would otherwise share a
+        # cache key while running different columns.
+        "p_btm_bar",
         "version"}
 
 
@@ -235,12 +240,28 @@ def test_picaso_keys_never_fragment_vulcan_cache():
 # --- import hygiene ---------------------------------------------------------
 
 def test_fast_path_never_imports_picaso():
-    import jwst_tool.datacheck   # noqa: F401
-    import jwst_tool.picaso_chem   # noqa: F401
-    import jwst_tool.picaso_env   # noqa: F401
-    forward.canonical_params(_p())
-    assert "picaso" not in sys.modules
-    assert "jax" not in sys.modules
+    """The light path (canonical_params, datacheck, the picaso shims) must not
+    drag in picaso or jax.
+
+    Run in a SUBPROCESS. sys.modules is global to the pytest session, so any
+    earlier test that touched the engine made this assertion vacuous in a full
+    run and true in isolation -- exactly the kind of order-dependent test that
+    reports whatever the file ordering happens to give. A fresh interpreter is
+    the only place the claim means anything.
+    """
+    import subprocess
+    src = (
+        "import sys\n"
+        "import jwst_tool.datacheck, jwst_tool.picaso_chem, jwst_tool.picaso_env\n"
+        "from jwst_tool import forward\n"
+        "forward.canonical_params(dict(planet='wasp39b', tp_mode='guillot',\n"
+        "                              kzz_mode='const', kzz_const=1.0e9))\n"
+        "assert 'picaso' not in sys.modules, 'picaso imported on the light path'\n"
+        "assert 'jax' not in sys.modules, 'jax imported on the light path'\n"
+    )
+    r = subprocess.run([sys.executable, "-c", src], capture_output=True,
+                       text=True)
+    assert r.returncode == 0, r.stderr[-2000:]
 
 
 # --- GUI-review behavior fixes ----------------------------------------------
@@ -460,7 +481,7 @@ def test_write_atm_table_bottom_row_and_window(tmp_path):
     P = np.logspace(-6, np.log10(300.0), 91)
     T = 850.0 + 1900.0 * (np.log10(P) + 6.0) / 8.5      # ~2750 K at 300 bar
     path = tmp_path / "atm.txt"
-    pcl._write_atm_table(P, T, path)
+    pcl._write_atm_table(P, T, path, forward.CHEM_P_SPAN_DYN[1])
     tab = forward._read_tp_table(path)                   # the engine's parser
     assert tab["P_dyn"].max() == pytest.approx(forward.CHEM_P_SPAN_DYN[1])
     assert np.all(np.diff(tab["P_dyn"]) < 0)             # descending (bottom first)
@@ -475,7 +496,8 @@ def test_write_atm_table_refuses_out_of_window(tmp_path):
     T = np.full(91, 1500.0)
     T[P > 1.0] = 3400.0                                  # too hot at depth
     with pytest.raises(RuntimeError, match="modelable window"):
-        pcl._write_atm_table(P, T, tmp_path / "atm.txt")
+        pcl._write_atm_table(P, T, tmp_path / "atm.txt",
+                             forward.CHEM_P_SPAN_DYN[1])
 
 
 def test_guillot_guess_is_deterministic():

@@ -43,7 +43,7 @@ import numpy as np
 from jwst_tool import instruments as _ins
 from jwst_tool import picaso_env as pe
 from jwst_tool import planets
-from jwst_tool.forward import (CHEM_P_SPAN_DYN, CLIMATE_N_LEVELS,
+from jwst_tool.forward import (chem_p_span_dyn, CLIMATE_N_LEVELS,
                                CLIMATE_P_SPAN_BAR, T_WINDOW)
 
 _CLIMATE_VERSION = 2   # bump to invalidate cached solves (history: notes.md)
@@ -168,18 +168,20 @@ def _certify(out: dict, key: str) -> dict:
     return cert
 
 
-def _write_atm_table(P_bar: np.ndarray, T: np.ndarray, path: Path) -> None:
+def _write_atm_table(P_bar: np.ndarray, T: np.ndarray, path: Path,
+                     bottom_dyn: float) -> None:
     """VULCAN atm table (descending P, bottom row EXACTLY the chemistry-grid
     bottom) for the vulcan-provider structural path.
 
-    The bottom row is interpolated to CHEM_P_SPAN_DYN[1]: a raw climate level
+    The bottom row is interpolated to ``bottom_dyn`` (the RUN's chemistry
+    bottom, forward.chem_p_span_dyn): a raw climate level
     just below it can sit above the RT temperature window while T at the
     chemistry bottom is in-window, so writing raw levels would trip the
     T-window refusal. Above the table top the engine holds the topmost T
     constant (standard file-mode convention)."""
     P_dyn = np.asarray(P_bar, float) * 1.0e6
     T = np.asarray(T, float)
-    bottom = CHEM_P_SPAN_DYN[1]
+    bottom = float(bottom_dyn)
     if P_dyn.max() < bottom:
         raise RuntimeError(
             f"climate grid bottom {P_dyn.max():.3g} dyn/cm^2 does not cover "
@@ -397,7 +399,7 @@ def get_or_run(cp: dict, log, tint_override: float | None = None):
         cert = _certify(out, key)
         P = np.asarray(out["pressure"], float)
         T = np.asarray(out["temperature"], float)
-        _write_atm_table(P, T, atm_path)
+        _write_atm_table(P, T, atm_path, chem_p_span_dyn(cp)[1])
         prov = {"climate_subset": climate_subset(cp) | {
                     "tint_cl": round(tint, 2)},
                 "wall_s": round(float(out["_wall_s"]), 1),

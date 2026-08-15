@@ -25,8 +25,10 @@ def _p(**kw):
 
 
 def _table(tmp_path, kzz=True, name="prof.txt", tmin=800.0, tmax=1400.0,
-           rows=8, scramble=False):
-    P = np.logspace(6.9, -1.0, rows)          # dyne/cm^2, descending (deep first)
+           rows=8, scramble=False, p_lo_log10=6.9):
+    # p_lo_log10: bottom pressure exponent. 6.9 (7.9e6 dyn/cm^2) clears the
+    # 7.6 bar transmission column; an EMISSION run needs 100 bar, so pass 8.1.
+    P = np.logspace(p_lo_log10, -1.0, rows)   # dyne/cm^2, descending (deep first)
     if scramble:
         P = P.copy()
         P[2], P[3] = P[3], P[2]               # break monotonicity
@@ -256,8 +258,11 @@ def test_resolution_ceiling_accepted():
 
 
 def test_resolution_out_of_range_raises():
+    # nu_pts cap raised 8000 -> 32000 at v27: the old cap sat BELOW the model
+    # resolving power that NIRSpec G395H's line-spread function needs, so
+    # opacity convergence could not be demonstrated inside the allowed range
     for bad in (dict(nz=40), dict(nz=200), dict(nu_pts=1000),
-                dict(nu_pts=20000), dict(yconv_cri=1.0), dict(yconv_cri=1.0e-6)):
+                dict(nu_pts=40000), dict(yconv_cri=1.0), dict(yconv_cri=1.0e-6)):
         with pytest.raises(ValueError):
             forward.canonical_params(_p(**bad))
 
@@ -425,7 +430,9 @@ def test_rt_knobs_fragment_the_cache_key():
 # --- WASP-39 b reference state: DO NOT let this drift ------------------------
 # The REFERENCE W39b configuration (tp_mode="file", the shipped evening-
 # terminator table) is the one measured against the published JWST detection
-# (G395H SO2 4.16 sigma vs 4.5-4.8 published). Since 2026-08-11 it is the
+# (G395H SO2 sigma_detect 2.89 at v27, vs 4.5-4.8 published; the 4.16 this
+# line used to carry predates the v26 radius anchoring -- see the cache-key
+# test below for the re-measurement). Since 2026-08-11 it is the
 # DEFAULT again (it was demoted to selectable 2026-08-09/-11 under the
 # Guillot-everywhere flip). The guard stays anchored to the EXPLICIT
 # file-mode config so it keeps protecting the reference atmosphere even if
@@ -462,18 +469,28 @@ def test_wasp39b_reference_state_is_the_literature_validated_one():
 def test_wasp39b_reference_cache_key_is_stable():
     # The key hashes every canonical parameter: if ANY default feeding the
     # reference run changes, this trips even when the pins above still pass.
-    # RE-PINNED at v26 (was f14f4d10512552ea): p_ref_bar joined the canonical
-    # set, so the reference atmosphere is deliberately NOT the old one. Every
-    # spectrum before v26 anchored the planet radius at the 7 bar grid bottom
-    # instead of the ~mbar transit photosphere, which put WASP-39 b's median
-    # depth at 26,754 ppm against a measured 21,381. At the 1 mbar default it
-    # is 21,259 ppm, 0.6% from the JWST ERS FIREFLy spectrum.
+    # RE-PINNED at v27 (was de55467c4a459b4e at v26, f14f4d10512552ea before
+    # that). Two changes: p_btm_bar joined the canonical set, and the radius
+    # anchor moved to the bottom layer's lower BOUNDARY, where exojax actually
+    # defines radius_btm, instead of its centre. Measured on this profile the
+    # boundary fix is dR/R = -0.176%, i.e. -0.35% in depth, and it also makes
+    # the depth independent of art_nlayer (it was +0.20% at 100 layers and
+    # +1.02% at 20).
+    #
+    # RE-MEASURED as this test's comment requires, on the run this key names:
+    # median 3.0-5.5 um depth 21,126 ppm against the JWST ERS FIREFLy
+    # spectrum's 21,381 (-1.2%), and G395H SO2 sigma_detect 2.89 at R=100 with
+    # no noise floor. That significance is NOT the 4.16 the docs carried: 4.16
+    # belongs to the pre-v26 geometry, whose 1.42x excess spectral contrast
+    # inflated every feature, and 4.16/1.42 = 2.93 recovers what is measured
+    # here. The tool therefore forecasts BELOW the published 4.5-4.8 sigma
+    # detection, and that gap is real and open, not a regression from v26.
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b", tp_mode="file"))) == "de55467c4a459b4e"
+        dict(planet="wasp39b", tp_mode="file"))) == "ba52447cad5b40c5"
     # ... and since 2026-08-11 the bare DEFAULT run is that same atmosphere:
     # a default W39b forecast is the literature-validated configuration.
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "de55467c4a459b4e"
+        dict(planet="wasp39b"))) == "ba52447cad5b40c5"
 
 
 def test_wasp39b_shipped_table_bytes_are_unchanged():
@@ -760,6 +777,22 @@ def test_emission_star_params_and_hygiene(tmp_path):
     cp_f = forward.canonical_params(_pf(_table(tmp_path),
                                         science_mode="emission"))
     assert cp_f["science_mode"] == "emission"
+    # BOTH geometries default to the shipped column bottom (v27). The emission
+    # default was briefly 100 bar, on the theory that its refusals meant the
+    # column was too shallow. Measured, that was wrong: at 7.6 bar the bottom
+    # optical depth is 30 to 370 across every instrument window, and the only
+    # thin part is a 60 nm notch at the blue edge where no continuum opacity is
+    # modeled. The gate is flux-weighted now; the depth did not need to move.
+    assert cp_f["p_btm_bar"] == forward.P_BTM_TRANSMISSION_BAR
+    assert cp_t["p_btm_bar"] == forward.P_BTM_TRANSMISSION_BAR
+    # a deeper column is still reachable, and still gated on the table covering
+    with pytest.raises(ValueError, match="chemistry-grid bottom"):
+        forward.canonical_params(_pf(_table(tmp_path),
+                                     science_mode="emission", p_btm_bar=100.0))
+    cp_d = forward.canonical_params(
+        _pf(_table(tmp_path, name="deep.txt", p_lo_log10=8.1),
+            science_mode="emission", p_btm_bar=100.0))
+    assert cp_d["p_btm_bar"] == 100.0
     # the two geometries can never share a cache entry
     assert (forward.params_key(_p(science_mode="emission", tp_mode="guillot",
                                   Tirr=1560.0))
@@ -803,3 +836,27 @@ def test_composition_fd_stencil_envelope():
     forward.canonical_params(_p(met_x_solar=100.0, fisher_params=["lnZ"],
                                 jac_method="ad"))
     forward.canonical_params(_p(met_x_solar=100.0))
+
+
+def test_emission_defaults_to_the_dayside_temperature():
+    """An eclipse sees the DAYSIDE; a published equilibrium temperature assumes
+    full redistribution, which is a planet-average profile.
+
+    This was the single largest error in the emission path. Measured on
+    HD 189733 b against the published MIRI/LRS eclipse spectrum (Inglis et al.
+    2024), switching only this default moved the eclipse depth from 1.35x LOW
+    to within 3% of the data, and chi2 per point from 934 to 31.
+    """
+    for key in planets.PLANETS:
+        t = forward.canonical_params(
+            dict(planet=key, tp_mode="guillot"))["Tirr"]
+        e = forward.canonical_params(
+            dict(planet=key, tp_mode="guillot", science_mode="emission"))["Tirr"]
+        # 2**0.25 in temperature, on the 10 K rounding grid the widget uses
+        assert e > t, key
+        assert e == pytest.approx(t * 2 ** 0.25, abs=10.0), (key, t, e)
+    # an explicit T_irr still wins in both geometries
+    for mode in ("transmission", "emission"):
+        cp = forward.canonical_params(dict(planet="wasp39b", tp_mode="guillot",
+                                           science_mode=mode, Tirr=1234.0))
+        assert cp["Tirr"] == 1234.0

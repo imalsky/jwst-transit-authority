@@ -46,39 +46,42 @@ def _panel_sized(mu=1.0, sigma=0.1):
     return pan
 
 
-def test_forecast_panel_width_follows_xlim_sigma():
-    """The panel x window is +/-xlim_sigma about the curve, and nothing else.
+def test_forecast_panel_xlim_is_used_verbatim():
+    """An explicit panel window is applied exactly as typed, and only to the
+    panel it belongs to.
 
     The curve is NOT resampled: posteriors.gaussian_curve's grid is MC-pinned
-    elsewhere, so this must stay a pure window. Width scaling exactly with the
-    setting is what proves that.
+    elsewhere, so this must stay a pure window -- the same curve, a different
+    frame. (2026-08-14: this replaces a sigma-multiple slider. The axis
+    controls are typed min/max numbers now, so the panel window is an absolute
+    pair in the parameter's own units, not a width.)
     """
     import matplotlib.pyplot as plt
     mu, sigma = 1.0, 0.1
-    widths = {}
-    for s in (2.0, 5.0):
-        fig = summary_figure.compose_summary_figure(
-            _spectrum(with_points=False),
-            posterior_panels=[_panel_sized(mu, sigma)], xlim_sigma=s)
-        try:
-            lo, hi = fig.axes[1].get_xlim()
-            # centered on the curve, half-width = s * sigma
-            assert lo == pytest.approx(mu - s * sigma, rel=1e-12)
-            assert hi == pytest.approx(mu + s * sigma, rel=1e-12)
-            widths[s] = hi - lo
-        finally:
-            plt.close(fig)
-    assert widths[5.0] == pytest.approx(2.5 * widths[2.0], rel=1e-12)
+    fig = summary_figure.compose_summary_figure(
+        _spectrum(with_points=False),
+        posterior_panels=[_panel_sized(mu, sigma), _panel_sized(mu, sigma)],
+        panel_xlims=[(0.42, 1.77), None])
+    try:
+        assert fig.axes[1].get_xlim() == pytest.approx((0.42, 1.77), rel=1e-12)
+        # the second panel got None and keeps the automatic +/-3.5 sigma
+        auto = fig.axes[2].get_xlim()
+        assert auto == pytest.approx(
+            (mu - summary_figure._XLIM_SIGMA * sigma,
+             mu + summary_figure._XLIM_SIGMA * sigma), rel=1e-12)
+    finally:
+        plt.close(fig)
 
 
-def test_default_xlim_sigma_is_unchanged_by_the_new_parameter():
-    """None must reproduce the 3.5-sigma default exactly, byte for byte."""
+def test_absent_panel_xlims_keep_the_automatic_window():
+    """None, [] and a short list must all leave the panel automatic."""
     import matplotlib.pyplot as plt
     figs = [summary_figure.compose_summary_figure(
         _spectrum(with_points=False), posterior_panels=[_panel_sized()],
-        xlim_sigma=x) for x in (None, 3.5)]
+        panel_xlims=x) for x in (None, [], [None])]
     try:
         assert figs[0].axes[1].get_xlim() == figs[1].axes[1].get_xlim()
+        assert figs[0].axes[1].get_xlim() == figs[2].axes[1].get_xlim()
     finally:
         for f in figs:
             plt.close(f)
@@ -185,7 +188,8 @@ def test_validation_is_loud():
         spec["depth_range"] = bad_range
         with pytest.raises(ValueError, match="depth_range"):
             summary_figure.compose_summary_figure(spec)
-    for bad_sigma in (0.0, -1.0, np.nan):
-        with pytest.raises(ValueError, match="xlim_sigma"):
+    for bad_pair in ((1.0, 0.0), (np.nan, 1.0), (1.0,), 3.5):
+        with pytest.raises(ValueError, match="panel_xlims"):
             summary_figure.compose_summary_figure(
-                _spectrum(with_points=False), xlim_sigma=bad_sigma)
+                _spectrum(with_points=False),
+                posterior_panels=[_panel_sized()], panel_xlims=[bad_pair])

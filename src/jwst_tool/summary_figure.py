@@ -473,7 +473,7 @@ _PARAM_COLORS = ("#0072b2", "#d55e00")
 
 
 def _plot_posterior_panel(axp, pan: dict, color: str,
-                          xlim_sigma: float = _XLIM_SIGMA) -> None:
+                          xlim: tuple | None = None) -> None:
     """One marginalized forecast posterior: curve, shaded 1-sigma band, and
     the width QUOTED in the panel title.
 
@@ -530,21 +530,25 @@ def _plot_posterior_panel(axp, pan: dict, color: str,
     # NARROWER x bounds (maintainer, 2026-08-13: "hard to read right now").
     # posteriors.gaussian_curve builds its grid as center +/- 5 sigma, and at
     # +/-5 sigma the curve is visually zero across most of the axis, which
-    # squeezes the informative part into the middle fifth. Clip to the widest
-    # drawn curve at +/-xlim_sigma (default _XLIM_SIGMA), which still contains
-    # >99.7% of every curve's mass. The grid itself is untouched (it is
-    # MC-pinned elsewhere), so this is a WINDOW, never a resampling: widening
-    # it back out to 5 shows the same curve, not a recomputed one.
-    _spans = [(c["mu"], c["sigma"]) for c in pan["curves"]
-              if c["mu"] is not None and c["sigma"] is not None]
-    if _spans:
-        _lo = min(m - xlim_sigma * sg for m, sg in _spans)
-        _hi = max(m + xlim_sigma * sg for m, sg in _spans)
-        if pan["center"] is not None:
-            # never crop the input-value line out of frame
-            _lo, _hi = min(_lo, pan["center"]), max(_hi, pan["center"])
-        if _hi > _lo:
-            axp.set_xlim(_lo, _hi)
+    # squeezes the informative part into the middle fifth. The automatic
+    # window clips to the widest drawn curve at +/-_XLIM_SIGMA, which still
+    # contains >99.7% of every curve's mass. The grid itself is untouched (it
+    # is MC-pinned elsewhere), so this is a WINDOW, never a resampling: an
+    # explicit ``xlim`` from the caller shows the same curve, not a recomputed
+    # one, and is used verbatim.
+    if xlim is not None:
+        axp.set_xlim(float(xlim[0]), float(xlim[1]))
+    else:
+        _spans = [(c["mu"], c["sigma"]) for c in pan["curves"]
+                  if c["mu"] is not None and c["sigma"] is not None]
+        if _spans:
+            _lo = min(m - _XLIM_SIGMA * sg for m, sg in _spans)
+            _hi = max(m + _XLIM_SIGMA * sg for m, sg in _spans)
+            if pan["center"] is not None:
+                # never crop the input-value line out of frame
+                _lo, _hi = min(_lo, pan["center"]), max(_hi, pan["center"])
+            if _hi > _lo:
+                axp.set_xlim(_lo, _hi)
     # a narrow window needs a tick count that fits the panel's width
     axp.xaxis.set_major_locator(MaxNLocator(nbins=5, steps=[1, 2, 2.5, 5, 10]))
     axp.set_xlabel(pan["axis_label"], fontsize=_AX_LBL)
@@ -583,7 +587,7 @@ def _plot_posterior_panel(axp, pan: dict, color: str,
 def compose_summary_figure(spectrum: dict, posterior_panels=None,
                            title: str | None = None,
                            footnote: str | None = None,
-                           xlim_sigma: float | None = None):
+                           panel_xlims=None):
     """Compose the three-panel proposal summary figure; returns the Figure.
 
     ``spectrum``: dict(wl_um, depth_ppm, depth_label, model_label,
@@ -602,9 +606,10 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
     ``footnote``: honesty caption under the figure (pass
     posteriors.FORECAST_LABEL-based wording from the caller).
 
-    ``xlim_sigma``: half-width of every forecast panel's x axis, in sigma of
-    the widest curve drawn there. None keeps the _XLIM_SIGMA default. This is
-    a WINDOW on the existing curves, never a resampling.
+    ``panel_xlims``: one entry per forecast panel, each ``(lo, hi)`` in that
+    panel's own parameter units or None for the automatic +/-_XLIM_SIGMA
+    window. A WINDOW on the existing curves, never a resampling. Shorter than
+    the panel list is allowed (the rest stay automatic).
 
     The spectrum's own axis windows are ``spectrum['wl_range']`` and
     ``spectrum['depth_range']``; both default to None, meaning auto-fit.
@@ -614,13 +619,19 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
     """
     spec = _validate_spectrum(spectrum)
     panels = _validate_panels(posterior_panels)
-    if xlim_sigma is None:
-        xlim_sigma = _XLIM_SIGMA
-    else:
-        xlim_sigma = float(xlim_sigma)
-        if not (np.isfinite(xlim_sigma) and xlim_sigma > 0.0):
-            raise ValueError("compose_summary_figure: xlim_sigma must be "
-                             f"finite and > 0, got {xlim_sigma!r}")
+    xlims = list(panel_xlims or [])
+    for i, v in enumerate(xlims):
+        if v is None:
+            continue
+        try:
+            lo, hi = float(v[0]), float(v[1])
+        except (TypeError, ValueError, IndexError, KeyError):
+            raise ValueError(f"compose_summary_figure: panel_xlims[{i}] must "
+                             f"be a (lo, hi) pair or None, got {v!r}")
+        if not (np.isfinite(lo) and np.isfinite(hi) and lo < hi):
+            raise ValueError(f"compose_summary_figure: panel_xlims[{i}] needs "
+                             f"finite lo < hi, got {(lo, hi)}")
+        xlims[i] = (lo, hi)
 
     # plotting.render_lock covers BOTH hazards here: the style context mutates
     # global rcParams, and the layout/legend placement below measures mathtext
@@ -682,7 +693,7 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
                 continue
             _plot_posterior_panel(axp, panels[i],
                                   _PARAM_COLORS[i % len(_PARAM_COLORS)],
-                                  xlim_sigma=xlim_sigma)
+                                  xlim=(xlims[i] if i < len(xlims) else None))
 
         if title:
             fig.suptitle(str(title), fontsize=11)

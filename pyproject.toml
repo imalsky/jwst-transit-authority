@@ -42,11 +42,14 @@ dependencies = [
     # forward v24 labels, the emission tau_bottom diagnostic, the Mie
     # condensate deck, and the profile-overridable RT knobs -- all
     # echo-verified by run_model.
-    "vulcan-forward>=0.2.2",   # 0.2.0 added the named ChemParams primitive this
-                               # module builds its vector with; 0.2.1 added
-                               # paths.ensure_layout(), which `jwst-tool fetch`
-                               # needs; 0.2.2 adds CS2/C2H4/C2H6 to the
-                               # molecule table (the v25 extras resolve there)
+    "vulcan-forward>=0.5.0",
+    # 0.2.0 added the named ChemParams primitive this module builds its vector
+    # with; 0.2.1 added paths.ensure_layout(), which `jwst-tool fetch` needs;
+    # 0.2.2 adds CS2/C2H4/C2H6 to the molecule table (the v25 extras resolve
+    # there); 0.4.0 anchors the planet radius at p_ref_bar instead of the RT
+    # grid bottom; 0.5.0 adds emission_radius() and the interior source term.
+    # An older engine ignores the new profile keys SILENTLY, so the floor is
+    # what makes deploy/pins.env mean anything (test_engine_api_contract.py).
     "vulcan-jax>=0.3.1",  # direct imports: load_config (CO_BASELINE check) +
                           # steady_state_grad (adjoint_diag). 0.3.1 carries the
                           # sflux-epseri normalization fix the forward v22

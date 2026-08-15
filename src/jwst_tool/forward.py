@@ -88,7 +88,7 @@ MOLECULES = ["H2O", "CO2", "CO", "CH4", "SO2"]   # always-on WIDE-profile set
 # network already solves these; extra_mols only exposes them to the RT and the
 # detection scores.
 EXTRA_MOLECULES = ["C2H2", "C2H4", "C2H6", "CS2", "H2S", "HCN", "NH3", "OCS"]
-_VERSION = 26  # model_cache buster: bump whenever the physics or the canonical
+_VERSION = 27  # model_cache buster: bump whenever the physics or the canonical
                # key set changes. Per-version history lives in notes.md.
                # DELIBERATE (reviews keep re-finding it): the cache identity
                # is canonical params + this hand-bumped version, NOT content
@@ -191,15 +191,131 @@ TP_FILE_UPLOAD = "upload"         # user-supplied table; content-addressed copy
 # cross-checks these constants against the LIVE cfg, CO_BASELINE-style.
 CHEM_P_SPAN_DYN = (0.1, 7.6e6)
 
+# The column bottom is a per-run parameter (v27), but BOTH geometries default
+# to the shipped 7.6 bar, and the reason is worth writing down because the first
+# attempt got it wrong.
+#
+# Emission used to refuse on every planet with "min bottom tau = 0.44 < 3", and
+# the obvious reading was that the column was too shallow: deepen it until it is
+# opaque. Measured, that reading is wrong. On HD 189733 b at 7.6 bar the bottom
+# optical depth is 96.7 at 2-3 um, 30.5 across NIRSpec, 140 across MIRI LRS and
+# 370 beyond 12 um. Exactly 1.6% of the band is below 3, and all of it lies in a
+# 60 nm notch at 1.02-1.08 um -- the extreme blue edge, where the modeled
+# opacity set (molecular lines plus H2 CIA) runs out and the continuum that
+# fills that window in a real hot atmosphere (H- bound-free and free-free, the
+# Na and K wings, TiO/VO) is not modeled at all.
+#
+# So the column was never too shallow. A min() over the whole band let a sliver
+# carrying almost no planetary flux veto the entire run, and deepening the grid
+# would have bought opacity from pressure that the real planet does not get,
+# at 4x the chemistry cost and in the temperature range where the opacity tables
+# are least trustworthy. The gate is flux-weighted instead (see run_model).
+#
+# The RANGE stays open to 300 bar for a genuinely deep case. The ceiling is a
+# DATA limit, not a preference: every opacity here is built for T_WINDOW and the
+# shipped H2-H2 CIA table physically ends at 3000 K, so a column hotter than
+# that deeper down is refused rather than extrapolated.
+P_BTM_TRANSMISSION_BAR = CHEM_P_SPAN_DYN[1] / 1.0e6      # 7.6 bar
+P_BTM_EMISSION_BAR = P_BTM_TRANSMISSION_BAR
+P_BTM_RANGE = (P_BTM_TRANSMISSION_BAR, 300.0)
+# The RT column bottom sits just inside the chemistry bottom: interp_map refuses
+# an ART grid reaching below the chemistry (deep clamping would fabricate
+# chemistry). The shipped pair was 7.0 / 7.6 bar; keep that ratio at any depth.
+ART_PBTM_FRACTION = 7.0 / 7.6
+
+
+def default_p_btm_bar(params: dict) -> float:
+    """Chemistry-grid bottom in bar for this run. Both geometries default to
+    the shipped 7.6 bar; see the P_BTM_* block above for the measurement that
+    says emission does not need more."""
+    return (P_BTM_EMISSION_BAR
+            if str(params.get("science_mode", "transmission")) == "emission"
+            else P_BTM_TRANSMISSION_BAR)
+
+
+# Instrument windows the emission tau-bottom report is broken down by, so a
+# refusal says WHERE the column sees through rather than only that it does.
+# The 1-2 um entry is first on purpose: it is where the modeled opacity set
+# runs out, and a min-only report cannot distinguish that from a shallow column.
+_TAU_WINDOWS = (("1.0-2.0 um (no modeled continuum)", 1.0, 2.0),
+                ("2.0-3.0 um", 2.0, 3.0),
+                ("3.0-5.2 um (NIRSpec)", 3.0, 5.2),
+                ("5.0-12 um (MIRI LRS)", 5.0, 12.0),
+                ("12-15 um", 12.0, 15.0))
+
+
+# Share of the planet's EMITTED FLUX that may come from wavelengths where the
+# column sees through its own bottom. This is the emission gate, and it is
+# flux-weighted on purpose: a min() over the whole band let a 60 nm notch at the
+# extreme blue edge, carrying under a thousandth of the planet's emission, veto
+# an otherwise thoroughly opaque column (measured min tau 30 to 370 across every
+# instrument window). 1% is the tolerance -- below it the interior-source
+# assumption cannot move a reported number; above it the run is refused.
+EMIS_TAU_THIN = 3.0            # per-wavelength "sees through the bottom"
+EMIS_THIN_FLUX_FRAC = 0.01     # tolerated share of emitted flux from those
+
+
+def _tau_bottom_breakdown(wl_um, tau, flux=None) -> str:
+    """Per-window minimum bottom optical depth, how much of the band is below
+    the gate, and (given ``flux``) how much of the planet's emission comes from
+    there. A single min() cannot tell a shallow column from a band edge with no
+    modeled opacity; this can."""
+    wl, tau = np.asarray(wl_um, float), np.asarray(tau, float)
+    thin = tau < EMIS_TAU_THIN
+    lines = [f"Where the column sees through ({100.0 * thin.mean():.1f}% of "
+             f"the model band is below tau = {EMIS_TAU_THIN:g}"]
+    if thin.any():
+        lines[0] += f", spanning {wl[thin].min():.2f}-{wl[thin].max():.2f} um)"
+    else:
+        lines[0] += ")"
+    if flux is not None:
+        lines.append(f"  carrying {100.0 * thin_flux_fraction(tau, flux):.3f}% "
+                     "of the planet's emitted flux")
+    for label, lo, hi in _TAU_WINDOWS:
+        m = (wl >= lo) & (wl <= hi)
+        if not m.any():
+            continue
+        lines.append(f"  {label:34s} min tau {tau[m].min():10.3g}"
+                     f"   {100.0 * (tau[m] < EMIS_TAU_THIN).mean():5.1f}% thin")
+    return "\n".join(lines)
+
+
+def thin_flux_fraction(tau, flux) -> float:
+    """Share of the emitted flux coming from wavelengths whose bottom optical
+    depth is below the gate. The emission certificate."""
+    tau, flux = np.asarray(tau, float), np.abs(np.asarray(flux, float))
+    tot = float(flux.sum())
+    if not np.isfinite(tot) or tot <= 0.0:
+        raise RuntimeError(
+            "emission flux is zero or non-finite across the whole band; the "
+            "thin-bottom certificate cannot be evaluated")
+    return float(flux[tau < EMIS_TAU_THIN].sum() / tot)
+
+
+def chem_p_span_dyn(cp: dict) -> tuple:
+    """The RUN's chemistry span (P_t, P_b) in dyn/cm^2.
+
+    CHEM_P_SPAN_DYN is the shipped cfg's OWN span and stays the constant the
+    live-cfg cross-check compares against; the bottom is overridden per run
+    through cfg_overrides["P_b"], so every gate that asks "does this profile
+    cover the chemistry grid" must ask THIS, not the module constant.
+    """
+    return (CHEM_P_SPAN_DYN[0],
+            float(cp.get("p_btm_bar") or default_p_btm_bar(cp)) * 1.0e6)
+
 # Structure default (2026-08-11 maintainer decision, reversing the structure
 # half of the 2026-08-09 speed-first flip): where vulcan_jax bundles a
 # MEASURED T-P/Kzz table VERIFIED end-to-end for a planet, that table (and
 # its Kzz column) is the default structure; the analytic Guillot profile is
 # the default everywhere else and under the picaso provider. Rationale: the
-# default W39b run must reproduce the literature-validated SO2 state (G395H
-# SO2 4.16 sigma vs Alderson+2023 4.8 / Tsai+2023 4.5); on the Guillot +
-# constant-Kzz stand-in it read ~2 sigma (measured 2026-07-21: ~100 K hot
-# through the SO2 formation zone, Kzz 4-33x low). The table also converges
+# default W39b run must be the literature-comparable SO2 state; on the Guillot
+# + constant-Kzz stand-in it read ~2 sigma (measured 2026-07-21: ~100 K hot
+# through the SO2 formation zone, Kzz 4-33x low). The table run measured 4.16
+# sigma against Alderson+2023 4.8 / Tsai+2023 4.5 -- but that was BEFORE the
+# v26 radius anchoring, whose 1.42x excess contrast inflated it. Re-measured
+# at v27: G395H SO2 sigma_detect 2.89, i.e. the tool now forecasts BELOW the
+# published detection. The table is still the right default (it beats Guillot
+# by the same margin); the absolute agreement is an OPEN gap, see README. The table also converges
 # FASTER (28 s vs ~8 min), so this costs no speed; the stated trade-off is
 # that file mode has no T-P Fisher row (Fisher forecasts are conditional on
 # the profile -- switch to Guillot when a temperature row is needed). The
@@ -209,7 +325,18 @@ CHEM_P_SPAN_DYN = (0.1, 7.6e6)
 def _default_tp_mode(params: dict) -> str:
     """tp_mode default: the planet's measured table where a default run on it
     is VERIFIED, else the analytic Guillot profile. Having a table is not
-    enough -- see shipped_tp_table_is_default."""
+    enough -- see shipped_tp_table_is_default.
+
+    EMISSION always defaults to Guillot (v27), whatever the planet ships. The
+    bundled tables are TERMINATOR profiles -- WASP-39 b's is an exo-FMS GCM
+    average over +/-10 deg about the eastern terminator -- and a terminator
+    profile is the wrong structure for a dayside eclipse. It is also 5 to 7
+    decades too short for the emission column (7.6 bar against the ~100 bar
+    an optically thick bottom needs). Selecting a table for emission stays
+    possible and is then the user's explicit choice.
+    """
+    if str(params.get("science_mode", "transmission")) == "emission":
+        return "guillot"
     planet = str(params.get("planet", "wasp39b"))
     if (shipped_tp_table_is_default(planet)
             and str(params.get("chem_provider", "vulcan")) == "vulcan"):
@@ -217,14 +344,16 @@ def _default_tp_mode(params: dict) -> str:
     return "guillot"
 
 
-def default_tirr(planet: str, system: dict | None = None) -> float:
+def default_tirr(planet: str, system: dict | None = None,
+                 science_mode: str = "transmission") -> float:
     """Guillot T_irr default for ``planet`` -- sqrt(2) * T_eq, GUI-identical
     (planets.default_tirr is the single definition both sides call). For the
     custom planet pass ``system`` (star_teff, rstar_rsun, orbit_au) so T_eq
     derives from the entered star and orbit instead of the WASP-39 b seed."""
     return planets.default_tirr(
         planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS),
-        system=(system if planet not in planets.PLANETS else None))
+        system=(system if planet not in planets.PLANETS else None),
+        science_mode=science_mode)
 
 # PICASO equilibrium provider + climate T-P mode. chem_provider selects the
 # atmospheric-state engine; everything downstream of the chemistry (RT,
@@ -302,11 +431,26 @@ def active_molecules(cp: dict) -> list[str]:
 # Measured tier sensitivity (notes.md): near-IR modes move <= 6% low vs high
 # tier, but weak mid-IR SO2 bands nearly double, and the entire movement is
 # native sampling (nu_pts), not nz/yconv. Raise nu_pts for final mid-IR
-# numbers and treat MIRI-LRS weak-band sigmas as sampling-limited lower
-# bounds until a nu_pts ceiling above 8000 is validated.
+# numbers and treat MIRI-LRS weak-band sigmas as sampling-limited lower bounds.
+#
+# The grid is ESLOG over 667-10000 cm^-1, so the resolving power is constant:
+# R = (nu_pts - 1) / ln(10000/667) = nu_pts / 2.708. The cap was 8000 (R 2954),
+# which was BELOW what the highest-R shipped mode needs -- NIRSpec G395H's
+# line-spread function is unresolvable by the model grid there, so the LSF
+# operator silently no-ops on it (detect.py now says so out loud). Resolving a
+# Gaussian kernel needs R_model >= 2.3548 * R_native, i.e. nu_pts >= ~12,300
+# for G395H. The cap is 32,000 so that convergence can at least be DEMONSTRATED
+# in range; it is not a claim that 32,000 converges. It does not: PreMODIT
+# renders any line narrower than a grid cell as a ~2-cell feature, and these
+# line cores are Doppler-limited at R = 3.4e5 to 6.7e5, which would need
+# nu_pts ~ 1e6 and ~127 GB of broadening arrays. This model cannot be
+# line-core converged as built; correlated-k (exojax.opacity.ckd) is the
+# durable answer. Cost measured on the way up: broadening arrays 0.267 GB at
+# 4000, 1.07 GB at 16,000, 2.14 GB at 32,000, with cross-section evaluation
+# ~8x slower at 16,000 than at 4000.
 NZ_DEFAULT, NU_PTS_DEFAULT, YCONV_DEFAULT = 100, 4000, 1.0e-2
 NZ_RANGE = (60, 150)            # chemistry (= RT) layers
-NU_PTS_RANGE = (4000, 8000)     # native wavenumber points (native R ~ nu_pts/2.7)
+NU_PTS_RANGE = (4000, 32000)    # native wavenumber points (R = nu_pts / 2.708)
 YCONV_RANGE = (1.0e-4, 1.0e-2)  # steady-state convergence tolerance (1e-3 is the
                                 # validated "high" tier; below it costs runtime
                                 # but is safe -- the longdy gate rejects loudly)
@@ -419,8 +563,13 @@ def _uploads_dir() -> Path:
     return MODEL_CACHE.parent / "uploads"
 
 
-def _read_tp_table(path: Path) -> dict:
+def _read_tp_table(path: Path, span: tuple | None = None) -> dict:
     """Parse + validate a VULCAN atm table on the LIGHT path.
+
+    ``span``: the RUN's chemistry span (P_t, P_b) in dyn/cm^2, which the
+    coverage and T-window checks are made against. Defaults to the shipped
+    cfg's own span, which is the transmission depth; an emission run passes
+    its deeper one (see chem_p_span_dyn).
 
     Mirrors the engine's read exactly (np.genfromtxt, names=True,
     skip_header=1: line 1 is a units comment, line 2 the column names):
@@ -428,6 +577,7 @@ def _read_tp_table(path: Path) -> dict:
     (cm^2/s) is optional. Returns {"P_dyn", "T", "Kzz" or None}. Raises
     ValueError with the offending detail on any malformed content -- a bad
     table must fail at the API, never inside the engine's pre-loop."""
+    span = CHEM_P_SPAN_DYN if span is None else (float(span[0]), float(span[1]))
     try:
         # genfromtxt emits a warning, rather than an exception, for an empty
         # file. Reject it before NumPy so corrupt share uploads fail cleanly.
@@ -464,22 +614,22 @@ def _read_tp_table(path: Path) -> dict:
     # the table, so a short table would silently run the deep quench region
     # isothermal. A clamped TOP is the standard upstream convention (logged,
     # not refused).
-    if P.max() < CHEM_P_SPAN_DYN[1]:
+    if P.max() < span[1]:
         raise ValueError(
             f"T-P table {path}: bottom pressure {P.max():.3g} dyn/cm^2 does "
-            f"not reach the chemistry-grid bottom {CHEM_P_SPAN_DYN[1]:.3g} "
-            f"dyn/cm^2 ({CHEM_P_SPAN_DYN[1]/1e6:.1f} bar). The engine would "
+            f"not reach the chemistry-grid bottom {span[1]:.3g} "
+            f"dyn/cm^2 ({span[1]/1e6:.1f} bar). The engine would "
             "clamp-extend the last tabulated temperature isothermally over "
             "the deep quench region (CO/CH4/NH3 quenching lives there), "
             "silently biasing quenched abundances. Extend the table to at "
-            "least the grid bottom.")
+            "least the grid bottom, lower p_btm_bar, or (in emission) use the "
+            "Guillot profile, which is defined at every depth.")
     # The T window applies to what the engine actually evaluates: T re-gridded
     # onto the chemistry span (log-P interp, edge clamp -- mirror it exactly),
     # NOT every raw row. Checking raw rows wrongly rejects tables that merely
     # extend past the span (e.g. a thermosphere above it).
     _o = np.argsort(P)
-    _grid = np.logspace(np.log10(CHEM_P_SPAN_DYN[0]),
-                        np.log10(CHEM_P_SPAN_DYN[1]), 200)
+    _grid = np.logspace(np.log10(span[0]), np.log10(span[1]), 200)
     T_grid = np.interp(np.log10(_grid), np.log10(P[_o]), T[_o])
     if T_grid.min() < T_WINDOW[0] or T_grid.max() > T_WINDOW[1]:
         _lo_all, _hi_all = float(T.min()), float(T.max())
@@ -488,7 +638,7 @@ def _read_tp_table(path: Path) -> dict:
                   "only the part covering the chemistry grid is checked)")
         raise ValueError(
             f"T-P table {path}: on the chemistry grid "
-            f"({CHEM_P_SPAN_DYN[0]:g}-{CHEM_P_SPAN_DYN[1]:g} dyn/cm^2) the "
+            f"({span[0]:g}-{span[1]:g} dyn/cm^2) the "
             f"profile spans [{T_grid.min():.0f}, {T_grid.max():.0f}] K, which "
             f"leaves the modelable window [{T_WINDOW[0]:.0f}, "
             f"{T_WINDOW[1]:.0f}] K{_extra}. Opacity tables end there; "
@@ -709,12 +859,24 @@ def canonical_params(params: dict) -> dict:
     # hash, no engine imports) so a bad upload fails at the API and the cache
     # key is content-addressed, never path-addressed. tp_table is reused by
     # the kzz_mode="file" gate below.
+    science_mode = str(params.get("science_mode", "transmission"))
+    # Chemistry-grid bottom: emission needs an optically thick column, so it is
+    # resolved BEFORE the table is validated -- the coverage gate is against
+    # THIS run's span, not the shipped cfg's.
+    p_btm_bar = float(params.get("p_btm_bar", default_p_btm_bar(params)))
+    if not P_BTM_RANGE[0] <= p_btm_bar <= P_BTM_RANGE[1]:
+        raise ValueError(
+            f"p_btm_bar={p_btm_bar:g} outside {P_BTM_RANGE} bar. It is the "
+            "chemistry and RT column bottom; below the low end the deep "
+            "quench region is cut off, and above the high end no shipped "
+            "profile stays inside the modelable temperature window "
+            f"{T_WINDOW} K, where the opacity tables end.")
+    _span = (CHEM_P_SPAN_DYN[0], p_btm_bar * 1.0e6)
     tp_file, tp_file_sha1, tp_table = "", "", None
     if tp_mode == "file":
         tp_path, tp_file_sha1 = _resolve_tp_file(params)
-        tp_table = _read_tp_table(tp_path)
+        tp_table = _read_tp_table(tp_path, span=_span)
         tp_file = str(params.get("tp_file", TP_FILE_SHIPPED))
-    science_mode = str(params.get("science_mode", "transmission"))
     if science_mode not in ("transmission", "emission"):
         raise ValueError(
             f"unknown science_mode {science_mode!r}: choose 'transmission' "
@@ -790,12 +952,14 @@ def canonical_params(params: dict) -> dict:
         # cache so two tables can never share an entry ("" outside file mode)
         "tp_file": tp_file,
         "tp_file_sha1": tp_file_sha1,
-        # Guillot T_irr default = sqrt(2) * T_eq of the SELECTED planet
-        # (planets.default_tirr is the single definition the GUI calls too --
-        # a constant here would make API and GUI defaults diverge per planet)
+        # Guillot T_irr default = sqrt(2) * T_eq of the SELECTED planet, and
+        # the DAYSIDE T_eq in emission (planets.default_tirr is the single
+        # definition the GUI calls too -- a constant here would make API and
+        # GUI defaults diverge per planet)
         "Tirr": round(float(params.get("Tirr", default_tirr(
             planet, system=dict(star_teff=_teff, rstar_rsun=_rstar,
-                                orbit_au=_orbit)))), 2),
+                                orbit_au=_orbit),
+            science_mode=science_mode))), 2),
         "Tint": round(float(params.get("Tint", 100.0)), 2),
         "log_kappa": round(float(params.get("log_kappa", -2.3)), 3),
         "log_gamma": round(float(params.get("log_gamma", -1.0)), 3),
@@ -845,6 +1009,9 @@ def canonical_params(params: dict) -> dict:
         # too much spectral contrast. 1e-3 bar is the validated default
         # (re-anchored median 21,299 ppm, 0.4% from the JWST ERS spectrum).
         "p_ref_bar": float(f"{float(params.get('p_ref_bar', 1.0e-3)):.6e}"),
+        # chemistry + RT column bottom (v27); see the P_BTM_* block at module
+        # top for why transmission and emission take different defaults
+        "p_btm_bar": round(p_btm_bar, 4),
         "cloud_on": bool(params.get("cloud_on", False)),
         "log_kappa_cloud": round(float(params.get("log_kappa_cloud", -1.0)), 3),
         "alpha_cloud": round(float(params.get("alpha_cloud", 0.0)), 2),
@@ -897,12 +1064,14 @@ def canonical_params(params: dict) -> dict:
         raise ValueError(
             f"rt_ptop_bar={cp['rt_ptop_bar']:g} outside [1e-9, 1e-6] bar (the "
             "exercised RT-top range; 1e-8 is the validated default)")
-    if not cp["rt_ptop_bar"] <= cp["p_ref_bar"] <= 7.0:
+    _art_pbtm = cp["p_btm_bar"] * ART_PBTM_FRACTION
+    if not cp["rt_ptop_bar"] <= cp["p_ref_bar"] <= _art_pbtm:
         raise ValueError(
             f"p_ref_bar={cp['p_ref_bar']:g} must lie inside the RT grid "
-            f"[{cp['rt_ptop_bar']:g}, 7.0] bar. It is the pressure at which "
-            "rp_rjup and gs_cgs are defined, so the grid has to cover it. "
-            "1e-3 bar is the validated default for a transit-derived radius.")
+            f"[{cp['rt_ptop_bar']:g}, {_art_pbtm:g}] bar. It is the pressure "
+            "at which rp_rjup and gs_cgs are defined, so the grid has to "
+            "cover it. 1e-3 bar is the validated default for a "
+            "transit-derived radius.")
     if cp["rt_integration"] not in ("simpson", "trapezoid"):
         raise ValueError(
             f"rt_integration={cp['rt_integration']!r}: exojax ArtTransPure "
@@ -1497,6 +1666,9 @@ def _rt_profile_common(cp: dict, config) -> dict:
     # engine that ignores unknown profile keys can never return a spectrum
     # that differs from what the cache key claims.
     profile["art_ptop_bar"] = cp["rt_ptop_bar"]
+    # RT bottom, just inside the chemistry bottom (interp_map refuses an ART
+    # grid reaching below the chemistry). Emission is why this moves at all.
+    profile["art_pbtm_bar"] = cp["p_btm_bar"] * ART_PBTM_FRACTION
     profile["rt_integration"] = cp["rt_integration"]
     profile["dit_grid_resolution"] = cp["rt_dit_res"]
     profile["p_ref_bar"] = cp["p_ref_bar"]
@@ -1655,6 +1827,17 @@ def _assemble_chem(cp: dict, log, clim=None):
         ovr.update({"use_botflux": True, "bot_BC_flux_file": str(p_bot)})
         log(f"[fwd] BC: bottom flux rows {[e[0] for e in cp['bot_flux']]} "
             f"-> {p_bot.name}")
+    # Chemistry-grid bottom. The cfg ships the shipped-planet span; a run that
+    # needs a deeper column (emission -- see the P_BTM_* block at module top)
+    # overrides P_b here rather than editing the YAML, so VULCAN-JAX and
+    # vulcan-retrieval keep the span they were validated on.
+    if abs(cp["p_btm_bar"] - P_BTM_TRANSMISSION_BAR) > 1e-9:
+        ovr["P_b"] = cp["p_btm_bar"] * 1.0e6
+        log(f"[fwd] chemistry grid bottom {cp['p_btm_bar']:g} bar "
+            f"(cfg default {P_BTM_TRANSMISSION_BAR:g} bar), RT bottom "
+            f"{cp['p_btm_bar'] * ART_PBTM_FRACTION:g} bar; "
+            f"{cp['nz'] / np.log10(cp['p_btm_bar'] * 1e6 / CHEM_P_SPAN_DYN[0]):.0f} "
+            "layers per decade")
     profile["cfg_overrides"] = ovr
 
     # CO_BASELINE must equal the loaded cfg's C_H/O_H -- refuse on drift (a
@@ -1681,7 +1864,7 @@ def _assemble_chem(cp: dict, log, clim=None):
     if cp["tp_mode"] in ("file", "picaso_climate"):
         # Log the conventional TOP clamp loudly (the bottom was hard-gated
         # at the API).
-        _P_tab = _read_tp_table(tp_path)["P_dyn"]
+        _P_tab = _read_tp_table(tp_path, span=chem_p_span_dyn(cp))["P_dyn"]
         _dec = float(np.log10(_P_tab.min() / CHEM_P_SPAN_DYN[0]))
         if _dec > 0.0:
             log(f"[fwd] NOTE: T-P table top ({_P_tab.min():.3g} dyn/cm^2) "
@@ -1761,7 +1944,7 @@ def _assemble_chem_picaso(cp: dict, log, clim=None):
 
     # provider chemistry grid: table top (1e-6 bar) .. chemistry bottom
     p_bar = np.logspace(pc.TABLE_P_LOGBAR[0],
-                        np.log10(CHEM_P_SPAN_DYN[1] / 1.0e6), cp["nz"])
+                        np.log10(chem_p_span_dyn(cp)[1] / 1.0e6), cp["nz"])
     if clim is not None:
         from jwst_tool import picaso_climate as _pcl
         T_base = _pcl.interp_T(clim, p_bar)
@@ -1914,6 +2097,7 @@ def run_model(params: dict, log=print) -> Path:
     # profile keys ignores them silently -- refuse rather than cache a
     # spectrum under a key describing physics the engine did not apply.
     _echo = {"art_ptop_bar": cp["rt_ptop_bar"],
+             "art_pbtm_bar": profile["art_pbtm_bar"],
              "rt_integration": cp["rt_integration"],
              "dit_grid_resolution": cp["rt_dit_res"],
              "p_ref_bar": cp["p_ref_bar"]}
@@ -1937,8 +2121,12 @@ def run_model(params: dict, log=print) -> Path:
 
     # --- emission mode (v16): day-side model + stellar SED ------------------
     emis, fs_j = None, None
-    _depth_norm_em = (cp["rp_rjup"] * planets.R_JUP_CM
-                      / (cp["rstar_rsun"] * planets.R_SUN_CM)) ** 2
+    # 1 / R_star^2 only. The PLANET radius for the eclipse prefactor comes from
+    # emis.emission_radius(T, mmw) -- the radius at the emission anchor
+    # (~0.1 bar), NOT the catalogue transit radius (~1 mbar). Pairing the
+    # transit radius with the emission column's gravity implied a GM 8.9% off
+    # on WASP-39 b and inflated every eclipse depth by the same factor.
+    _rstar_cm_sq = (cp["rstar_rsun"] * planets.R_SUN_CM) ** 2
     if cp["science_mode"] == "emission":
         advance()
         log("[fwd] building emission model + stellar SED ...")
@@ -2055,7 +2243,8 @@ def run_model(params: dict, log=print) -> Path:
             if emis is not None:
                 fp = emis.emission_flux(vmr, vmr_h2, T_art, mmw_art,
                                         vmr_he=vmr_he, cloud=cl, mie=mi)
-                return (fp / fs_j) * _depth_norm_em * jnp.exp(
+                rp_em = emis.emission_radius(T_art, mmw_art)
+                return (fp / fs_j) * (rp_em ** 2 / _rstar_cm_sq) * jnp.exp(
                     2.0 * jnp.asarray(lnR0))
             return rt.transmission_depth_r(
                 vmr, vmr_h2, T_art, mmw_art,
@@ -2131,33 +2320,75 @@ def run_model(params: dict, log=print) -> Path:
                 "parameter set outside the modelable range")
         log(f"[fwd] chemistry solved in {time.time()-t0:.0f} s total")
 
-    # Emission bottom-boundary certification. ArtEmisPure has no surface/
-    # interior source term, so any wavelength that sees through the grid
-    # bottom is silently underestimated: refuse the thin case, warn on the
-    # margin.
+    # Emission bottom-boundary certification. Since engine v0.5.0 the solver
+    # DOES carry an interior source term (exojax ibased_linsap), so a
+    # see-through window is no longer silently zero -- but the term is a
+    # blackbody at the extrapolated bottom-boundary temperature, i.e. an
+    # ISOTHERMAL-INTERIOR ASSUMPTION standing in for everything below the grid.
+    # A column that leans on it is reporting an assumption, not a model. Keep
+    # refusing the thin case: the fix is a deeper column (p_btm_bar), which is
+    # cheap, not a wider tolerance.
     emis_tau_min = float("nan")
+    _depth_norm_em0 = float("nan")
     if emis is not None:
         _prof0 = depth_from_y._art_profiles(y_sol, th0, None)
+        # the SAME (R_p/R_star)^2 the baseline depth was built with, so the
+        # stored Fp inverts the stored depth exactly. Recomputing it from the
+        # catalogue radius would reintroduce the transit-vs-emission radius
+        # mismatch in the exported flux only.
+        _depth_norm_em0 = float(
+            np.asarray(emis.emission_radius(_prof0[2], _prof0[3])) ** 2
+            / _rstar_cm_sq)
+        log(f"[fwd] emission anchor: R_p = "
+            f"{_depth_norm_em0 ** 0.5 * cp['rstar_rsun'] * planets.R_SUN_CM / planets.R_JUP_CM:.4f} "
+            f"R_Jup at {getattr(emis, 'p_ref_emission_bar', float('nan')):g} "
+            f"bar (catalogue transit radius {cp['rp_rjup']:.4f} R_Jup at "
+            f"{cp['p_ref_bar']:g} bar)")
         _tau_b = np.asarray(emis.tau_bottom(*_prof0, cloud=cloud_vec,
                                             mie=mie_vec))
         emis_tau_min = float(_tau_b.min())
         _wl_thin = float(rt.wl_um[int(np.argmin(_tau_b))])
-        if emis_tau_min < 3.0:
+        # FLUX-WEIGHTED, not min() over the band. The column being transparent
+        # somewhere only matters to the extent the planet emits there. Measured
+        # on HD 189733 b at the shipped 7.6 bar bottom: min tau 96.7 at 2-3 um,
+        # 30.5 across NIRSpec, 140 across MIRI LRS, 370 beyond 12 um, and one
+        # 60 nm notch at 1.02-1.08 um below 3 -- the extreme blue edge, where
+        # the modeled opacity set runs out (no H- continuum, no Na/K wings, no
+        # TiO/VO). A min() let that notch veto the whole run, and the "obvious"
+        # fix of deepening the column would have bought opacity from pressure
+        # that the real planet does not get, while hiding the actual limitation.
+        _fp = np.asarray(emis.emission_flux(*_prof0, cloud=cloud_vec,
+                                            mie=mie_vec))
+        emis_thin_frac = thin_flux_fraction(_tau_b, _fp)
+        _report = _tau_bottom_breakdown(rt.wl_um, _tau_b, flux=_fp)
+        if emis_thin_frac > EMIS_THIN_FLUX_FRAC:
             raise RuntimeError(
-                f"emission unreliable: the RT column bottom "
-                f"({emis.art_pbtm_bar:g} bar) is optically THIN at "
-                f"{_wl_thin:.2f} um (min bottom tau = {emis_tau_min:.2f} "
-                "< 3). ArtEmisPure has no surface/interior source term, so "
-                "flux in see-through windows is silently underestimated. "
-                "This atmosphere is too transparent for the shipped grid "
-                "bottom; the corner is unsupported rather than wrong.")
-        if emis_tau_min < 10.0:
-            log(f"[fwd] WARNING: min bottom optical depth {emis_tau_min:.1f} "
-                f"at {_wl_thin:.2f} um (< 10): the day-side flux there leans "
-                "on the deepest layers -- treat those windows with care.")
-        else:
-            log(f"[fwd] emission bottom optically thick (min tau "
-                f"{emis_tau_min:.0f} across the band)")
+                f"emission unreliable: {100.0 * emis_thin_frac:.1f}% of this "
+                f"planet's emitted flux comes from wavelengths where the RT "
+                f"column bottom ({emis.art_pbtm_bar:g} bar) is optically thin "
+                f"(tau < {EMIS_TAU_THIN:g}), above the "
+                f"{100.0 * EMIS_THIN_FLUX_FRAC:g}% tolerance. The flux there is "
+                "set by the interior source term, a blackbody at the "
+                "extrapolated bottom-layer temperature -- an assumption about "
+                "everything below the column, not a model of it.\n\n"
+                + _report +
+                "\n\nIf the thin part is at the SHORT-wavelength edge, the "
+                "cause is missing opacity rather than a shallow column: below "
+                "~2 um the modeled sources (molecular lines plus H2 "
+                "collision-induced absorption) thin out, and the continuum "
+                "that fills that window in a real hot atmosphere (H- "
+                "bound-free and free-free, the Na and K wings, TiO/VO) is not "
+                "modeled here. Deepening p_btm_bar would hide that, not fix "
+                "it. If the thin part is spread across the band, the column "
+                f"really is too shallow and p_btm_bar (now "
+                f"{cp['p_btm_bar']:g} bar) is the setting to raise.")
+        log("[fwd] " + _report.replace("\n", "\n[fwd] "))
+        if emis_thin_frac > 0.0:
+            log(f"[fwd] NOTE: {100.0 * emis_thin_frac:.3f}% of the emitted "
+                f"flux comes from below tau = {EMIS_TAU_THIN:g} (min "
+                f"{emis_tau_min:.2f} at {_wl_thin:.2f} um). Under the "
+                f"{100.0 * EMIS_THIN_FLUX_FRAC:g}% tolerance, so the run "
+                "proceeds; treat those wavelengths as unmodeled.")
 
     # --- RT: full spectrum + one spectrum per removed molecule ---------------
     t0 = time.time()
@@ -2168,6 +2399,7 @@ def run_model(params: dict, log=print) -> Path:
 
     depth_wo = np.zeros((len(mols_active), depth.shape[0]))
     emis_tau_min_wo = np.full(len(mols_active), np.nan)
+    emis_thin_wo = np.full(len(mols_active), np.nan)
     for i, mol in enumerate(mols_active):
         t1 = time.time()
         advance()
@@ -2182,16 +2414,22 @@ def run_model(params: dict, log=print) -> Path:
                                                 mie=mie_vec))
             emis_tau_min_wo[i] = float(_tau_i.min())
             _wl_i = float(rt.wl_um[int(np.argmin(_tau_i))])
-            if emis_tau_min_wo[i] < 3.0:
+            # flux-weighted, same reasoning as the baseline gate above: the
+            # blue-edge notch must not refuse every molecule in turn
+            emis_thin_wo[i] = thin_flux_fraction(
+                _tau_i, emis.emission_flux(*_prof_i, cloud=cloud_vec,
+                                           mie=mie_vec))
+            if emis_thin_wo[i] > EMIS_THIN_FLUX_FRAC:
                 # Per-molecule, never whole-run: a thin bottom with THIS
                 # molecule removed makes only THIS molecule's detection
                 # unreliable (detect refuses that target at scoring time);
                 # the baseline spectrum and other molecules stay usable.
                 log(f"[fwd] NOTE: emission detection of {mol} is UNRELIABLE -- "
-                    f"with it removed the RT bottom ({emis.art_pbtm_bar:g} bar) "
-                    f"is optically thin at {_wl_i:.2f} um (min tau "
-                    f"{emis_tau_min_wo[i]:.2f} < 3); detect refuses this target. "
-                    "The spectrum and the other molecules are unaffected.")
+                    f"with it removed, {100.0 * emis_thin_wo[i]:.1f}% of the "
+                    f"emitted flux comes from below tau = {EMIS_TAU_THIN:g} "
+                    f"(min {emis_tau_min_wo[i]:.2f} at {_wl_i:.2f} um); detect "
+                    "refuses this target. The spectrum and the other molecules "
+                    "are unaffected.")
             elif emis_tau_min_wo[i] < 10.0:
                 log(f"[fwd] WARNING: min bottom optical depth "
                     f"{emis_tau_min_wo[i]:.1f} at {_wl_i:.2f} um (< 10) "
@@ -2575,6 +2813,15 @@ def run_model(params: dict, log=print) -> Path:
         depth=depth, depth_wo=depth_wo,
         mols=np.array(mols_active, dtype="U8"),
         ymix=ymix_np, p_bar=np.asarray(chem.p_bar),
+        # THE COLUMN NAMES OF ymix. ymix is the FULL network state (89 species
+        # for SNCHO), while `mols` is the much shorter RT molecule list, and
+        # nothing recorded which was which. Every reader that zipped `mols`
+        # against ymix's columns positionally was therefore reading the wrong
+        # species: the GUI's mixing-ratio panel labelled H2 as CO2, and its CSV
+        # export carried the same wrong headers. Never infer these from `mols`.
+        ymix_species=np.array(
+            [s for s, _ in sorted(chem.sidx.items(), key=lambda kv: kv[1])],
+            dtype="U16"),
         T=np.asarray(T_check), theta=theta,
         theta_names=np.array(theta_names, dtype="U16"),
         # auto-sized U dtype: a fixed width silently truncated long JSON
@@ -2596,10 +2843,16 @@ def run_model(params: dict, log=print) -> Path:
     if emis is not None:
         arrays["fs_flux"] = np.asarray(fs_j, dtype=np.float64)
         # Fp derived exactly from the stored eclipse depth (lnR0 = 0 baseline)
-        arrays["fp_flux"] = depth * np.asarray(fs_j) / _depth_norm_em
+        arrays["fp_flux"] = depth * np.asarray(fs_j) / _depth_norm_em0
         arrays["emis_tau_bottom_min"] = np.array([emis_tau_min])
         # per-removed-molecule bottom-tau certificate (aligned with mols)
         arrays["emis_tau_bottom_min_wo"] = emis_tau_min_wo
+        # v27: the FLUX-WEIGHTED certificate, which is what the gates use.
+        # The min-tau arrays above are kept for provenance and for readers of
+        # older files; a min() over the band cannot tell a shallow column from
+        # a band edge with no modeled opacity (see the P_BTM_* block).
+        arrays["emis_thin_flux_frac"] = np.array([emis_thin_frac])
+        arrays["emis_thin_flux_frac_wo"] = emis_thin_wo
     if jac is not None:
         arrays["jac"] = jac
         arrays["jac_names"] = np.array(jac_names, dtype="U16")

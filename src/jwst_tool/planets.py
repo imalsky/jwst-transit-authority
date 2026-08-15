@@ -200,7 +200,15 @@ def system_teq(star_teff: float, rstar_rsun: float, orbit_au: float) -> float:
         float(rstar_rsun) * R_SUN_CM / (2.0 * float(orbit_au) * AU_CM))
 
 
-def default_tirr(planet: dict, system: dict | None = None) -> float:
+# Dayside-average versus planet-average redistribution, in temperature:
+# T_eq(dayside) = T_eq(global) * 2**0.25. A published equilibrium temperature is
+# the GLOBAL one (f = 1/4), which is the right structure for a terminator and
+# the wrong one for an eclipse.
+DAYSIDE_TEQ_FACTOR = 2.0 ** 0.25
+
+
+def default_tirr(planet: dict, system: dict | None = None,
+                 science_mode: str = "transmission") -> float:
     """Guillot T_irr default: sqrt(2) * T_eq, on the GUI's 20 K step grid and
     clipped to the widget range.
 
@@ -209,9 +217,19 @@ def default_tirr(planet: dict, system: dict | None = None) -> float:
     is DERIVED from it -- otherwise an untouched custom T_irr silently keeps
     WASP-39 b's temperature.
 
+    EMISSION takes the DAYSIDE value, T_eq * 2**0.25 (2026-08-14). A published
+    equilibrium temperature assumes full redistribution, which is a
+    planet-average profile: correct for a terminator, too cool for the dayside
+    an eclipse actually sees. Measured on HD 189733 b against the published
+    MIRI/LRS eclipse spectrum (Inglis et al. 2024), switching only this default
+    moved the eclipse depth from 1.35x LOW to within 3%, and chi2 per point from
+    934 to 31. It is the single largest error in the emission path.
+
     ONE definition, used by BOTH canonical_params and the sidebar widget; a
     split default built different profiles per planet (history: notes.md)."""
     teq = (system_teq(system["star_teff"], system["rstar_rsun"],
                       system["orbit_au"])
            if system is not None else planet["teq_k"])
+    if str(science_mode) == "emission":
+        teq *= DAYSIDE_TEQ_FACTOR
     return min(max(round(teq * math.sqrt(2.0) / 10.0) * 10.0, 800.0), 2500.0)

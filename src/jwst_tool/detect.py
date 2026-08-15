@@ -40,6 +40,7 @@ import numpy as np
 
 from . import binning
 from . import instruments as ins
+from . import forward
 from . import noise as noise_mod
 
 # transits-to-target scan cap: beyond this, effectively unreachable anyway
@@ -243,16 +244,34 @@ def _removed_spectrum(model: dict, mols: list[str], target_mol,
             f"set {mols} -- re-run the forward model with it enabled "
             "(extra_mols)")
     index = mols.index(target_mol)
-    if (str(model.get("science_mode", "transmission")) == "emission"
-            and "emis_tau_bottom_min_wo" in model):
-        tau_bottom = float(np.asarray(model["emis_tau_bottom_min_wo"])[index])
-        if tau_bottom < 3.0:
-            raise ValueError(
-                f"{target_mol} emission detection is not supported for this "
-                f"atmosphere: with {target_mol} removed, the emission RT "
-                f"column bottom is optically thin (min tau {tau_bottom:.2f} "
-                "< 3), so its eclipse detection contrast would be overstated. "
-                "Detect a molecule with deeper opacity, or use transmission.")
+    if str(model.get("science_mode", "transmission")) == "emission":
+        # v27: FLUX-WEIGHTED. The min-tau form this replaces refused a target
+        # whenever the column saw through ANYWHERE, and on every planet tried
+        # that was a 60 nm notch at the extreme blue edge carrying under a
+        # thousandth of the planet's emission -- so it refused everything.
+        # Older cached runs carry only the min, and are read the old way.
+        if "emis_thin_flux_frac_wo" in model:
+            frac = float(np.asarray(model["emis_thin_flux_frac_wo"])[index])
+            if np.isfinite(frac) and frac > forward.EMIS_THIN_FLUX_FRAC:
+                raise ValueError(
+                    f"{target_mol} emission detection is not supported for "
+                    f"this atmosphere: with {target_mol} removed, "
+                    f"{100.0 * frac:.1f}% of the emitted flux comes from "
+                    "wavelengths where the RT column bottom is optically thin, "
+                    "so its eclipse detection contrast would be overstated. "
+                    "Detect a molecule with deeper opacity, or use "
+                    "transmission.")
+        elif "emis_tau_bottom_min_wo" in model:
+            tau_bottom = float(np.asarray(model["emis_tau_bottom_min_wo"])[index])
+            if tau_bottom < 3.0:
+                raise ValueError(
+                    f"{target_mol} emission detection is not supported for this "
+                    f"atmosphere: with {target_mol} removed, the emission RT "
+                    f"column bottom is optically thin (min tau {tau_bottom:.2f} "
+                    "< 3), so its eclipse detection contrast would be "
+                    "overstated. Detect a molecule with deeper opacity, or use "
+                    "transmission. (This model predates the flux-weighted "
+                    "certificate; re-run it to get the less conservative test.)")
     return np.asarray(model["depth_wo"])[index][order]
 
 
@@ -361,6 +380,23 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         # feature is not (gating left Jacobians unsmoothed by ~59 ppm)
         lsf_applied = bool(np.any(depth_sm != depth))
         depth = depth_sm
+        if not lsf_applied:
+            # The operator auto-no-ops when the model grid cannot resolve the
+            # kernel, and that case used to be the SILENT one: the path that
+            # applied the blur printed a note, the path that did nothing said
+            # nothing. It is the more dangerous half. The model's own opacity
+            # smearing then stands in for the instrument line-spread function,
+            # which is a different width set by a numerical knob.
+            # R_model = nu_pts/ln(nu_max/nu_min) on the ESLOG grid; a Gaussian
+            # kernel needs R_model >= 2.3548 * R_native to be resolved at all.
+            _rn = float(np.nanmax(r_nat)) if np.isfinite(r_nat).any() else 0.0
+            _lsf_skip_note = (
+                f"native-R LSF is a NO-OP here: the model grid cannot resolve "
+                f"this mode's line-spread function (native R up to {_rn:.0f}, "
+                "which needs about 2.35x that in model resolving power). The "
+                "model's own opacity sampling sets the effective width "
+                "instead -- raise nu_pts to make the instrument's LSF the "
+                "thing that blurs the spectrum.")
         if depth_wo is not None:
             depth_wo = binning.smooth_to_native_r(wl_model, depth_wo, wl_r,
                                                   r_curve, b_lo, b_hi,

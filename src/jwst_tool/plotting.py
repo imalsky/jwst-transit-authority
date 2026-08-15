@@ -130,26 +130,57 @@ def _new_panel():
     return fig, ax
 
 
-def build_tp_figure(p_bar, T_K):
+TP_XLIM_DEFAULT = (1.0, 3000.0)
+VMR_XLIM_DEFAULT = (1e-12, 1.0)
+
+
+def _axis_window(name, v, positive):
+    """Validate an optional ``(lo, hi)`` axis window. None means the default."""
+    if v is None:
+        return None
+    try:
+        lo, hi = float(v[0]), float(v[1])
+    except (TypeError, ValueError, IndexError, KeyError):
+        raise ValueError(f"{name} must be a (lo, hi) pair or None, got {v!r}")
+    if not (np.isfinite(lo) and np.isfinite(hi) and lo < hi):
+        raise ValueError(f"{name} needs finite lo < hi, got {(lo, hi)}")
+    if positive and lo <= 0.0:
+        raise ValueError(f"{name} is plotted on a log axis, so lo must be > 0, "
+                         f"got {lo}")
+    return (lo, hi)
+
+
+def build_tp_figure(p_bar, T_K, xlim=None, ylim=None):
     """T-P profile: pressure (log, inverted) vs temperature. Square.
 
-    Returns ``(fig, ylim)``; ``ylim`` is the pressure axis range so the
-    mixing-ratio panel beside it can share the vertical scale.
+    ``xlim``: temperature window in K, None for TP_XLIM_DEFAULT. ``ylim``:
+    pressure window in bar, None to fit the profile. Both are drawn INVERTED
+    on the pressure axis, so the caller passes (p_min, p_max) in the natural
+    order and this function orients it.
+
+    Returns ``(fig, ylim)``; the returned ``ylim`` is the pressure axis range
+    in matplotlib's (inverted) order so the mixing-ratio panel beside it can
+    share the vertical scale verbatim.
     """
     p = np.asarray(p_bar, dtype=float)
     T = np.asarray(T_K, dtype=float)
     if p.ndim != 1 or p.shape != T.shape or p.size == 0:
         raise ValueError(f"build_tp_figure: p_bar {p.shape} and T_K {T.shape} "
                          "must be matching non-empty 1-D arrays")
+    xlim = _axis_window("build_tp_figure: xlim", xlim, positive=False)
+    ylim = _axis_window("build_tp_figure: ylim", ylim, positive=True)
     with render_lock:
         fig, ax = _new_panel()
         ax.plot(T, p, color="#2a78d6", lw=1.6)
         # the chemistry grid's validated temperature span
         for tlim in (320.0, 2980.0):
             ax.axvline(tlim, color="#cccccc", lw=0.8, ls=":")
-        ax.set_xlim(1.0, 3000.0)
+        ax.set_xlim(*(xlim or TP_XLIM_DEFAULT))
         ax.set_yscale("log")
-        ax.invert_yaxis()
+        if ylim is not None:
+            ax.set_ylim(ylim[1], ylim[0])      # deep at the bottom
+        else:
+            ax.invert_yaxis()
         _thin_log_axis(ax, "y")
         # 4-digit temperature labels collide on a ~3 in box at the default
         # locator; cap the count instead of rotating them
@@ -161,12 +192,14 @@ def build_tp_figure(p_bar, T_K):
         return fig, ax.get_ylim()
 
 
-def build_vmr_figure(p_bar, columns, ylim=None):
+def build_vmr_figure(p_bar, columns, ylim=None, xlim=None):
     """Mixing-ratio profiles: VMR (log) vs pressure (log, inverted). Square.
 
     ``columns``: ordered ``[(molecule, vmr_array), ...]`` (the caller sorts;
     peak-abundance order makes the legend read top-down). ``ylim``: pressure
-    range to share with the T-P panel.
+    range to share with the T-P panel, in MATPLOTLIB order (i.e. exactly what
+    ``build_tp_figure`` returned). ``xlim``: mixing-ratio window, None for
+    VMR_XLIM_DEFAULT.
 
     The legend sits OUTSIDE the axes, in the strip to the RIGHT, so it can
     never cover a profile and needs no y-limit padding.
@@ -175,6 +208,7 @@ def build_vmr_figure(p_bar, columns, ylim=None):
     cols = list(columns)
     if not cols:
         raise ValueError("build_vmr_figure: columns is empty")
+    xlim = _axis_window("build_vmr_figure: xlim", xlim, positive=True)
     with render_lock:
         fig, ax = _new_panel()
         for m, y in cols:
@@ -185,7 +219,7 @@ def build_vmr_figure(p_bar, columns, ylim=None):
                     f"the pressure grid {p.shape}")
             ax.plot(np.clip(ya, 1e-14, None), p, lw=1.4, label=str(m))
         ax.set_xscale("log")
-        ax.set_xlim(1e-12, 1.0)
+        ax.set_xlim(*(xlim or VMR_XLIM_DEFAULT))
         ax.set_yscale("log")
         if ylim is not None:
             ax.set_ylim(ylim)

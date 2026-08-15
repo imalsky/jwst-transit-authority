@@ -566,6 +566,49 @@ def K(name: str) -> str:
     return f"n{_NONCE}_{name}"
 
 
+def _axis_range(container, label: str, key: str, warn, *, unit: str = "",
+                positive: bool = False, fmt: str = "%.6g",
+                step: float | None = None, help: str | None = None):
+    """A plain min/max pair of number boxes for one plot axis.
+
+    Every axis control in this app is this widget (2026-08-14, maintainer):
+    two typed numbers, no slider. Both boxes start BLANK, meaning "fit the
+    data", rather than prefilled with the current automatic values -- the
+    automatic fit tracks the run and the mode selection, so a prefilled number
+    would silently pin a stale window the moment either changed.
+
+    Returns ``(lo, hi)`` or None. Both boxes or neither: a one-sided window has
+    no second edge to fall back on, and the automatic fit lives inside the
+    figure builders, not here, so a half-specified range is refused VISIBLY
+    through ``warn`` rather than half-applied.
+
+    ``positive``: the axis is drawn on a LOG scale, so a bound at or below zero
+    is refused here. The figure builders raise on it -- correctly, they are the
+    API backstop -- but that exception reaches Streamlit uncaught and kills the
+    whole results page. A typed number is a user choice, not a defect: warn and
+    fall back to the automatic fit, the same way a one-sided window does.
+    """
+    _u = f" ({unit})" if unit else ""
+    c_lo, c_hi = container.columns(2)
+    lo = c_lo.number_input(f"{label} min{_u}", value=None, step=step,
+                           format=fmt, key=f"{key}_min", help=help)
+    hi = c_hi.number_input(f"{label} max{_u}", value=None, step=step,
+                           format=fmt, key=f"{key}_max")
+    if (lo is None) != (hi is None):
+        warn(f"{label} range needs both boxes filled. Fitting to the data.")
+        return None
+    if lo is None:
+        return None
+    if float(lo) >= float(hi):
+        warn(f"{label} range needs min below max. Fitting to the data.")
+        return None
+    if positive and float(lo) <= 0.0:
+        warn(f"{label} is drawn on a log axis, so min must be above 0. "
+             "Fitting to the data.")
+        return None
+    return (float(lo), float(hi))
+
+
 def _apply_pending_config() -> None:
     """Apply a loaded configuration file to the widget state.
 
@@ -868,7 +911,8 @@ with st.sidebar:
             tirr0 = planets.default_tirr(
                 pdef, system=(dict(star_teff=teff, rstar_rsun=rstar,
                                    orbit_au=orbit_au)
-                              if planet_key == "custom" else None))
+                              if planet_key == "custom" else None),
+                science_mode=science_mode)
             if planet_key == "custom":
                 # follow-until-overridden: while T_irr still equals the last
                 # derived default, keep it tracking the star/orbit fields;
@@ -1589,6 +1633,25 @@ with st.sidebar:
                  "terminator photosphere, around a millibar for a hot Jupiter. "
                  "The default 1e-3 bar reproduces the published JWST WASP-39 b "
                  "transmission spectrum to 0.6% in median depth.")
+        # keyed PER GEOMETRY: the default differs by an order of magnitude
+        # between transmission and emission, and a widget key only takes its
+        # default on first render -- one shared key would have kept 7.6 bar
+        # after a switch to emission and refused the run for being transparent.
+        # Each geometry now remembers its own value, which is also what a user
+        # flipping back and forth expects.
+        p_btm_bar = st.number_input(
+            "Column bottom pressure (bar)",
+            *forward.P_BTM_RANGE,
+            value=forward.default_p_btm_bar(dict(science_mode=science_mode)),
+            step=1.0, format="%.4g", key=K(f"pbtm_{science_mode}"),
+            help="How deep the chemistry and radiative-transfer column runs. "
+                 "The transit chord never probes it, so transmission stays at "
+                 "the validated 7.6 bar. An eclipse does probe it: where the "
+                 "column is not opaque at its bottom, the flux comes from an "
+                 "assumed interior blackbody rather than from the model, and "
+                 "the run stops. 100 bar is the emission default. Going "
+                 "deeper can push the profile past the modelable temperature "
+                 "range, which also stops the run.")
         if science_mode == "emission":
             # canonical_params pins simpson in emission (no transit chord);
             # show the pinned state, not a silently ignored choice
@@ -1635,6 +1698,7 @@ params = dict(planet=planet_key, science_mode=science_mode,
               use_rayleigh=use_rayleigh, broadening=broadening,
               rt_ptop_bar=float(rt_ptop_bar), rt_integration=rt_integration,
               rt_dit_res=float(rt_dit_res), p_ref_bar=float(p_ref_bar),
+              p_btm_bar=float(p_btm_bar),
               cloud_on=cloud_on,
               log_kappa_cloud=log_kappa_cloud, alpha_cloud=alpha_cloud,
               mie_condensate=mie_condensate, mie_log_rg=mie_log_rg,
@@ -1717,6 +1781,49 @@ with _run_slot:
                                  disabled=(bool(params_error) or not mode_keys
                                            or not floor_choice_made))
 
+# ONE description of everything a run consumes OUTSIDE the canonical model
+# parameters: the science goal and the observation setup. Built once and used
+# three times -- the shareable config, the stored run meta, and the staleness
+# guard -- so a new setting joins all three at once.
+#
+# The staleness guard used to compare a HAND-PICKED subset, and the fields it
+# missed reached the page silently: a reviewer switched the detection molecule
+# from SO2 to CO2, never pressed Run, and the curve, the legend and the CSV
+# column all kept the previous target. He reported it as a caching bug. It was
+# not one -- the canonical set deliberately excludes the target, because one
+# run already computes the removed-molecule curve for every RT molecule -- but
+# the display had no way to know it was showing something else. Comparing this
+# whole block closes the class, not just that one field.
+_goal_meta = dict(goal=goal, target_mol=target_mol,
+                  target_sig=float(target_sig),
+                  goal_param=goal_param,
+                  target_prec=(None if target_prec is None
+                               else float(target_prec)),
+                  marginalize=bool(marginalize),
+                  do_fisher=bool(do_fisher),
+                  fisher_params=list(fisher_params),
+                  jac_method=jac_method)
+_obs_meta = dict(
+    ks_mag=float(ks_mag), t14=float(t14), t_base=float(t_base),
+    sat_limit=float(sat_limit), modes=list(mode_keys),
+    n_transits=int(n_transits), r_bin=int(r_bin),
+    floor_mode=floor_mode,
+    floors={k: (None if floors[k] is None
+                else (float(floors[k]) if np.isscalar(floors[k])
+                      else "wavelength table"))
+            for k in mode_keys},
+    # the PER-MODE widget values, not the composed product: the global scale is
+    # recorded separately below, and share_config restores noise_infl into the
+    # per-mode widgets -- writing the product here would re-multiply by the
+    # global scale on every restore.
+    noise_infl={k: float(_infl_mode[k]) for k in mode_keys},
+    noise_scale=float(noise_scale),
+    show_noise=bool(show_noise),
+    seed=int(seed),
+    combos=[dict(name=str(c["name"]), modes=[str(m) for m in c["modes"]])
+            for c in (st.session_state.get(K("combos")) or [])])
+_run_sig = dict(goal=_goal_meta, observation=_obs_meta)
+
 with st.expander("Run summary & configuration"):
     _goal_txt = (f"detect {target_mol} at {target_sig:g}σ" if goal == "detect"
                  else f"constrain {forward.PARAM_LABELS[goal_param]} to "
@@ -1737,36 +1844,8 @@ with st.expander("Run summary & configuration"):
     if _canon is not None:
         _share = share_config.build_share(
             canon=_canon,
-            goal=dict(goal=goal, target_mol=target_mol,
-                      target_sig=float(target_sig),
-                      goal_param=goal_param,
-                      target_prec=(None if target_prec is None
-                                   else float(target_prec)),
-                      marginalize=bool(marginalize),
-                      do_fisher=bool(do_fisher),
-                      fisher_params=list(fisher_params),
-                      jac_method=jac_method),
-            observation=dict(
-                ks_mag=float(ks_mag), t14=float(t14), t_base=float(t_base),
-                sat_limit=float(sat_limit), modes=list(mode_keys),
-                n_transits=int(n_transits), r_bin=int(r_bin),
-                floor_mode=floor_mode,
-                floors={k: (None if floors[k] is None
-                            else (float(floors[k]) if np.isscalar(floors[k])
-                                  else "wavelength table"))
-                        for k in mode_keys},
-                # the PER-MODE widget values, not the composed product: the
-                # global scale is recorded separately below, and
-                # share_config restores noise_infl into the per-mode widgets
-                # -- writing the product here would re-multiply by the global
-                # scale on every restore.
-                noise_infl={k: float(_infl_mode[k]) for k in mode_keys},
-                noise_scale=float(noise_scale),
-                show_noise=bool(show_noise),
-                seed=int(seed),
-                combos=[dict(name=str(c["name"]),
-                             modes=[str(m) for m in c["modes"]])
-                        for c in (st.session_state.get(K("combos")) or [])]),
+            goal=_goal_meta,
+            observation=_obs_meta,
             tp_table_text=(Path(tp_file_path).read_text()
                            if tp_file_path else None),
             floor_table=(np.asarray(floor_table).tolist()
@@ -1942,11 +2021,9 @@ if run_clicked:
             floor_mode=floor_mode,
             # the SELECTED floor, not the registry suggestion: a result must
             # carry the number that produced it
-            floor_selected={
-                k: (None if floors[k] is None
-                    else (float(floors[k]) if np.isscalar(floors[k])
-                          else "wavelength table"))
-                for k in mode_keys})
+            floor_selected=_obs_meta["floors"],
+            # the COMPLETE non-canonical input set, for the staleness guard
+            run_sig=_run_sig)
 
 # ---------------------------------------------------------------------------
 # Render order: staleness/failure notices, the VERDICT, then spectrum /
@@ -1982,16 +2059,24 @@ try:
     if _shown_stale:
         _changed = sorted(k for k in set(_cur_cp) | set(_cpj)
                           if _cur_cp.get(k) != _cpj.get(k))
-    # RUN-META, not just canonical model params. The canonical set deliberately
-    # excludes the detection target and the observing setup, because they do not
-    # change the SPECTRUM -- one run already computes the removed-molecule curve
-    # for every RT molecule. But they do change what is DISPLAYED, and without
-    # this the page silently kept showing the previous target's curve, legend and
-    # CSV column: a reviewer switched SO2 to CO2, never pressed Run, and reported
-    # the result as a caching bug. Same for goal / n_transits / r_bin.
-    _meta_now = dict(goal=goal, target=target_mol, goal_param=goal_param,
-                     n_transits=int(n_transits), r_bin=int(r_bin))
-    _meta_chg = sorted(k for k, v in _meta_now.items() if meta.get(k) != v)
+    # RUN-META, not just canonical model params -- the WHOLE non-canonical
+    # input set (see _run_sig, built next to the shareable config). The
+    # canonical set deliberately excludes the detection target and the
+    # observing setup because they do not change the SPECTRUM, but they do
+    # change what is DISPLAYED and what the scores are computed from. Compared
+    # through json so nested floors/combos/mode lists compare by value.
+    # A stored result with no run_sig predates this guard (it is written by the
+    # same block that reads it, so that is the only way to get here). Compare
+    # nothing rather than report every field as changed; the canonical-params
+    # half of the guard above still applies.
+    _sig_was = meta.get("run_sig")
+    _meta_chg = []
+    for _sec, _now_d in (_run_sig if _sig_was else {}).items():
+        _was_d = _sig_was.get(_sec) or {}
+        _meta_chg += [
+            _k for _k in sorted(set(_now_d) | set(_was_d))
+            if json.dumps(_now_d.get(_k), sort_keys=True, default=str)
+            != json.dumps(_was_d.get(_k), sort_keys=True, default=str)]
     if _meta_chg:
         _shown_stale = True
         _changed = sorted(set(_changed) | set(_meta_chg))
@@ -2230,13 +2315,29 @@ if d_wo_s is not None:
     _native[f"depth_without_{meta['target']}_ppm"] = d_wo_s
 
 with st.expander("Physical structure (T-P profile, mixing ratios)"):
+    # Same axis widget as the results figure: typed min and max, blank for
+    # automatic. The pressure axis is SHARED by both panels, so it is one
+    # control, which is also what keeps the two canvases the same height.
+    _st_box = st.container()
+    with st.expander("Axis ranges"):
+        _tp_xr = _axis_range(st, "Temperature", K("struct_T"), _st_box.warning,
+                             unit="K", step=10.0)
+        _pr_r = _axis_range(st, "Pressure", K("struct_p"), _st_box.warning,
+                            unit="bar", positive=True, step=0.001,
+                            fmt="%.3g",
+                            help="Applies to both panels, which share this "
+                                 "axis.")
+        _vmr_xr = _axis_range(st, "Mixing ratio", K("struct_vmr"),
+                              _st_box.warning, positive=True, step=1e-6,
+                              fmt="%.1e")
     _tp_col, _vmr_col, _ = st.columns([1.4, 1.4, 1.2])
 
     with _tp_col:
         # built by plotting.build_tp_figure (pure, importable without
         # streamlit) so the threaded regression test exercises this exact
         # code; the whole lifecycle stays under plotting.render_lock
-        fig3, ax3_ylim = plotting.build_tp_figure(model["p_bar"], model["T"])
+        fig3, ax3_ylim = plotting.build_tp_figure(model["p_bar"], model["T"],
+                                                  xlim=_tp_xr, ylim=_pr_r)
         # tight=False: identical canvas -> identical on-page size as the
         # mixing-ratio panel beside it (see _fig_png)
         _tp_png = _fig_png(fig3, tight=False)
@@ -2275,22 +2376,39 @@ with st.expander("Physical structure (T-P profile, mixing ratios)"):
 
     with _vmr_col:
         _ymix = model.get("ymix")
-        if _ymix is None:
-            st.info("This run predates the stored mixing-ratio profiles "
+        _ysp = model.get("ymix_species")
+        if _ymix is None or _ysp is None:
+            st.info("This run predates the labelled mixing-ratio profiles "
                     "(re-run to populate them).")
         else:
             _ymix = np.asarray(_ymix, dtype=float)
-            _mols_all = [str(m) for m in model["mols"]]
+            _ysp = [str(s) for s in np.asarray(_ysp)]
             if _ymix.ndim != 2 or _ymix.shape[0] != _p_arr.size:
                 raise ValueError(
                     f"ymix shape {_ymix.shape} does not match the pressure grid "
                     f"({_p_arr.size} layers): the stored model is inconsistent")
-            # plot the molecules the spectrum actually uses, ordered by peak
-            # abundance so the legend reads top-down
-            _cols = [(_m, _ymix[:, _i]) for _i, _m in enumerate(_mols_all)
-                     if _i < _ymix.shape[1]]
+            if len(_ysp) != _ymix.shape[1]:
+                raise ValueError(
+                    f"ymix has {_ymix.shape[1]} columns but "
+                    f"{len(_ysp)} species names: the stored model is "
+                    "inconsistent")
+            # Select the RT molecules BY NAME. ymix is the full network state
+            # (89 species for SNCHO) while model["mols"] is the RT subset, so
+            # zipping them positionally read the wrong species entirely -- this
+            # panel used to label H2 as CO2, and the CSV below exported the same
+            # wrong headers. Ordered by peak abundance so the legend reads
+            # top-down.
+            # engine_config.MOLECULES maps the RT token to the VULCAN species
+            # name; they differ (the tool's OCS is VULCAN's COS)
+            from jwst_tool import engine_config as _ec
+            _want = {_ec.MOLECULES[str(m)]["vulcan"]: str(m)
+                     for m in np.asarray(model["mols"]).tolist()
+                     if str(m) in _ec.MOLECULES}
+            _cols = [(_want[s], _ymix[:, _i]) for _i, s in enumerate(_ysp)
+                     if s in _want]
             _cols.sort(key=lambda kv: -float(np.nanmax(kv[1])))
-            fig4 = plotting.build_vmr_figure(_p_arr, _cols, ylim=ax3_ylim)
+            fig4 = plotting.build_vmr_figure(_p_arr, _cols, ylim=ax3_ylim,
+                                             xlim=_vmr_xr)
             _vmr_png = _fig_png(fig4, tight=False)
             _show_fig(fig4, tight=False)
             _vmr_df = pd.DataFrame({"p_bar": _p_arr}
@@ -2803,6 +2921,10 @@ if _have_fisher:
             _fitted = any(c.get("kind") == posteriors.MOCK_RECOVERY_KIND
                           for c in _curves)
             _post_panels.append(dict(
+                # the parameter NAME, so the axis-range widget keys below stay
+                # stable when the selection reorders (compose_summary_figure
+                # rebuilds each panel and drops keys it does not use)
+                param=str(_p),
                 axis_label=forward.param_axis(_p),
                 axis_unit=forward.PARAM_UNITS.get(_p, ""),
                 density_label=("relative density, fit to one noise draw"
@@ -2909,55 +3031,37 @@ with _fc2:
                 min(_grid_hi, max(c[1] for c in _cov) * 1.03))
     else:
         _fit = (_grid_lo, _grid_hi)
-    # ALWAYS fit to the selected modes (maintainer, 2026-08-13): the
-    # "Full model" option and the Custom slider before it are both gone. The
-    # window is derived from the selection, so choosing modes is the only
-    # wavelength control -- selecting every mode gives the full span anyway.
     _ax1, _ax2 = st.columns(2)
     # x defaults to log (the wavelength convention here); y to linear, since
     # transit depth spans a narrow range where log adds nothing.
     _x_log = _ax1.checkbox("Log x", value=True, key=K("sum_xlog"))
     _y_log = _ax2.checkbox("Log y", value=False, key=K("sum_ylog"))
-_wl_range = _fit          # always the selected modes' coverage
 
 # Axis ranges (2026-08-14). These move the WINDOW the figure is drawn in and
 # never the data, so nothing downstream reads them -- the scores, the CSVs and
-# the forecast are unchanged by anything in here.
-#
-# Both depth bounds start BLANK, meaning auto-fit, rather than prefilled with
-# the current auto values: the auto fit tracks the mode selection, so a
-# prefilled number would silently pin a stale range the moment the selection
-# changed. The wavelength window stays derived from the selection (see above);
-# it is deliberately not a control.
+# the forecast are unchanged by anything in here. Every axis is the same
+# widget: typed min and max, blank for automatic (see _axis_range).
 with _fig_ctx.expander("Axis ranges"):
-    _r1, _r2, _r3 = st.columns([1.0, 1.0, 1.6])
-    _dmin = _r1.number_input(
-        "Depth min (ppm)", value=None, step=1.0, format="%.6g",
-        key=K("sum_ymin"),
-        help="Leave both bounds blank to fit the visible data. Setting them "
-             "also turns off the automatic legend headroom, so the legend can "
-             "overlap the curve.")
-    _dmax = _r2.number_input(
-        "Depth max (ppm)", value=None, step=1.0, format="%.6g",
-        key=K("sum_ymax"))
-    _post_sigma = _r3.slider(
-        "Forecast panel width (sigma)", min_value=1.0, max_value=5.0,
-        value=3.5, step=0.5, key=K("sum_xlim_sigma"),
-        help="Half-width of each forecast panel's x axis, in sigma of the "
-             "widest curve it draws. The curves themselves are unchanged.")
-
-# Both bounds or neither: a one-sided window has no second edge to fall back
-# on, and the auto fit lives in summary_figure, not here. Refuse it visibly
-# rather than picking a bound on the user's behalf.
-_depth_range = None
-if (_dmin is None) != (_dmax is None):
-    _fig_box.warning("Depth range needs both bounds. Fitting to the data.")
-elif _dmin is not None:
-    if float(_dmin) < float(_dmax):
-        _depth_range = (float(_dmin), float(_dmax))
-    else:
-        _fig_box.warning("Depth range needs min below max. Fitting to the "
-                         "data.")
+    _wl_range = _axis_range(
+        st, "Wavelength", K("sum_x"), _fig_box.warning, unit="um", step=0.1,
+        positive=True,
+        help="Blank fits the wavelength span the selected modes cover. Set "
+             "both to zoom, for example 3.0 to 5.5 for G395H.")
+    _depth_range = _axis_range(
+        st, "Depth", K("sum_y"), _fig_box.warning, unit="ppm", step=1.0,
+        help="Blank fits the visible data. Setting both also turns off the "
+             "automatic legend headroom, so the legend can overlap the curve.")
+    # no unit= here: forward.param_axis already carries it inside the label
+    # ("[M/H] [dex]"), so passing one again reads "[M/H] [dex] min (dex)"
+    _post_xlims = [
+        _axis_range(st, p["axis_label"], K("sum_post_" + p["param"]),
+                    _fig_box.warning,
+                    help="Blank fits the drawn posterior.")
+        for p in _post_panels]
+# Blank wavelength boxes fall back to the span the SELECTED modes cover, so
+# choosing modes remains a wavelength control on its own.
+if _wl_range is None:
+    _wl_range = _fit
 
 _sum_points = []
 for r in results:
@@ -3043,7 +3147,7 @@ def _compose(spec):
     # PNG/PDF carry the planet name in their FILENAME.
     return summary_figure.compose_summary_figure(
         spec, posterior_panels=_post_panels or None,
-        footnote=_sum_foot, xlim_sigma=_post_sigma)
+        footnote=_sum_foot, panel_xlims=_post_xlims)
 
 
 try:

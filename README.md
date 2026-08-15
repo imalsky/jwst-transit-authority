@@ -378,8 +378,20 @@ Five limits to keep in view:
   3 um (Rackham et al. 2018; Lim et al. 2023). Treat short-wavelength depths
   around active stars with care.
 - **Emission is pure-absorption thermal emission.** There is no scattering in the
-  emergent flux and no reflected light. The run refuses atmospheres whose column
-  is not optically thick at its bottom, because there is no interior flux term.
+  emergent flux and no reflected light. The solver does carry an interior source
+  term (a blackbody at the extrapolated bottom-boundary temperature, attenuated
+  by the column), but that term is an isothermal-interior assumption standing in
+  for everything below the grid, so the run still refuses a column that is not
+  optically thick at its bottom rather than reporting the assumption as a model.
+  The emission column runs to 100 bar by default for this reason; the
+  transmission column stays at the validated 7.6 bar, which the slant chord
+  never probes. Both are the `p_btm_bar` setting.
+- **Emission uses one radius for the whole spectrum.** It is the radius at the
+  emission anchor (0.1 bar), consistent with the gravity the same column uses.
+  The correct treatment is a wavelength-dependent radius at vertical optical
+  depth 2/3 (Fortney et al. 2019, ApJL 880 L16), which biases planet-to-star
+  flux ratios by about 5 percent typically and 10 to 25 percent for low-gravity
+  hot Jupiters, and mutes or enhances features rather than offsetting them.
 - **The PICASO engine has no photochemistry**, and therefore no SO2 and no CS2.
   It is capped at C/O of 1.10 by its tables and is finite-difference only.
 
@@ -576,9 +588,16 @@ p < 1 mbar, the constant 1e9 cm²/s stand-in runs 3.8-48x low for WASP-39 b
 pressure-cut dependent — deeper than ~10 mbar the table falls *below* 1e9 for
 WASP-39 b — so quote it with the cut. On WASP-39 b the Guillot profile also ran
 about 100 K hot through the SO2 formation zone when this was measured
-(2026-07-21); the published-detection agreement (G395H SO2 4.16 sigma) belongs
-to the **shipped table**, which is why the table is the W39b default again.
-Never quote Guillot-mode W39b SO2 numbers against Alderson/Tsai 2023.
+(2026-07-21); the better SO2 forecast belongs to the **shipped table**, which
+is why the table is the W39b default again. Never quote Guillot-mode W39b SO2
+numbers against Alderson/Tsai 2023.
+
+The absolute agreement is weaker than this section used to claim. The 4.16
+sigma once quoted here was measured before the v26 radius anchoring, whose
+1.42x excess spectral contrast inflated every feature. Re-measured at v27 on
+the same configuration: **G395H SO2 sigma_detect 2.89** at R = 100 with no
+noise floor, against a published 4.5-4.8. The tool forecasts BELOW the
+published detection. That gap is open and is listed under "Open gaps".
 
 ### Boundary conditions and condensation (programmatic interface only)
 
@@ -849,9 +868,13 @@ findings behind its design decisions, and the features deliberately deferred
 - **Pressure policy**: the equilibrium tables and the climate grid start at
   1e-6 bar; above it the topmost layer is held constant (the sibling
   interp_map's documented edge clamp -- it logs the clamped layer count on
-  every run). The provider chemistry grid spans exactly 1e-6 bar to the
-  chemistry bottom (7.6 bar); the VULCAN+climate path goes through the
-  file-mode top-clamp logging. Nothing extrapolates silently.
+  every run). The provider chemistry grid spans exactly 1e-6 bar to the RUN's
+  chemistry bottom (`p_btm_bar`, 7.6 bar in transmission); the VULCAN+climate
+  path goes through the file-mode top-clamp logging. Nothing extrapolates
+  silently. NOTE that the emission default of 100 bar is outside what any
+  cached climate profile covers inside the modelable temperature window: every
+  one of the 13 cached profiles crosses 2980 K between about 10 and 90 bar, so
+  a deep climate-mode emission run is refused, loudly, by the T-window gate.
 - **Certified domain**: v1 climate mode is certified around the WASP-39b
   configuration. Other planets / nodes / rfacv values are dynamically
   convergence-gated (the certification refuses anything unconverged,
@@ -1040,6 +1063,49 @@ notes.md, Decision records; scope and conventions live in
 * `science.mplstyle` is a vendored copy of an older matplotlib defaults file
   rather than a minimal set of intentional overrides, so it will keep
   surfacing upstream deprecations one at a time.
+
+### Opened by the 2026-08-14 validation against published spectra
+
+Measured by running the tool against eight published transmission and emission
+spectra (the data, the tool's own model for each, and the scoring are in the
+maintainer's `vulcan_validation` bundle).
+
+- **The forecast SO2 significance on WASP-39 b sits below the published
+  detection.** Re-measured at v27: G395H `sigma_detect` 2.89 at R = 100 with no
+  noise floor, against Alderson+2023 4.8 and Tsai+2023 4.5. The 4.16 this
+  README used to quote was measured before the v26 radius anchoring, whose
+  1.42x excess spectral contrast inflated every feature; 4.16/1.42 recovers the
+  number measured now. Whether the gap is the SO2 abundance, the limb
+  temperature, or the noise model is not established.
+- **A residual spectral-contrast excess of about 1.5x against the JWST ERS
+  WASP-39 b spectrum, and it is an H2O excess.** Measured per-molecule
+  contributions over 1.0-5.3 um: H2O 4234 ppm peak / 2147 ppm rms, CO 2515/335,
+  CO2 2628/304, SO2 432/35. The shipped T-P table was investigated and CLEARED
+  (its 2246 K bottom row is a real GCM convective adiabat 5-7 decades below the
+  transmission photosphere, and the quench pathway to the spectrum measures
+  negligible here: CH4 contributes at most 1.8 ppm). A grey cloud deck removes
+  under 10% of the excess, so aerosols are not the explanation either.
+- **The opacity grid cannot be line-core converged as built.** PreMODIT renders
+  any line narrower than a grid cell as a roughly two-cell feature, and these
+  line cores are Doppler-limited at R = 3.4e5 to 6.7e5, needing `nu_pts` around
+  1e6 and roughly 127 GB of broadening arrays. Doubling `nu_pts` from 4000 to
+  8000 still moves binned R = 100 depths by 90-262 ppm plus an 83-221 ppm rms
+  shape residual. The cap was raised to 32,000 at v27 so convergence can at
+  least be measured in range; correlated-k (`exojax.opacity.ckd`) is the
+  durable answer.
+- **The line-spread-function operator is a no-op on NIRSpec G395H.** The model
+  grid at `nu_pts` 4000-8000 is coarser than that mode's LSF, so the model's own
+  opacity sampling sets the effective width instead of the instrument. v27 says
+  so in the mode's warning channel rather than staying silent; resolving it
+  needs `nu_pts` >= about 12,300.
+- **Emission is validated only as far as "it runs".** v27 deepens the emission
+  column to 100 bar and switches the solver to one that carries an interior
+  source term, which is what made emission produce a spectrum at all. The
+  eclipse depths have not been scored against the three published emission
+  spectra to the standard the transmission ones have.
+- **HD 189733 b transmission is under-contrasted (0.70x).** Pont+2013 is
+  dominated by a steep Rayleigh haze slope and the model has no haze. A
+  different failure from the excess above, and expected.
 
 ### Opened by the 2026-08-14 audit
 

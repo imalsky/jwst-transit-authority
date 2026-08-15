@@ -8,6 +8,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import numpy as np
+
 import pytest
 
 st = pytest.importorskip("streamlit")
@@ -45,6 +47,15 @@ def _synthetic_out(science_mode="transmission", saturated=False,
         "depth_wo": np.tile(np.full(n, 0.0208), (5, 1)),
         "T": np.full(30, 1100.0),
         "p_bar": np.logspace(-7, 0.8, 30),
+        # the mixing-ratio panel only renders when this is present, and it is
+        # the one figure with its own log x axis -- without it a whole panel
+        # (and the axis controls that drive it) was untested
+        # the FULL network state, wider than the RT molecule list and in a
+        # different order -- which is the shape that exposed the mislabelling
+        "ymix": np.tile(np.array([0.85, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 0.14]),
+                        (30, 1)),
+        "ymix_species": np.array(["H2", "CO", "H2O", "CH4", "CO2", "SO2", "He"],
+                                 dtype="U16"),
         "science_mode": science_mode,
         "params_json": json.dumps({"co_ratio": 0.549348,
                                    "tp_mode": "guillot",
@@ -862,13 +873,15 @@ def test_intro_prose_is_short_and_carries_no_methodology():
         "the live Pandeia version is no longer interpolated"
 
 
-def test_summary_has_no_wavelength_range_control():
-    """The WAVELENGTH window ALWAYS fits the selected modes (maintainer,
-    2026-08-13): the "Fit to selected modes / Full model" radio is gone, as is
-    the Custom slider before it. Selecting modes is the only wavelength
-    control -- and selecting every mode gives the full span anyway. Reaffirmed
-    2026-08-14 when the depth-range controls were added: those are a separate
-    axis and did not reopen this one.
+def test_every_axis_control_is_a_typed_min_max_pair():
+    """No slider anywhere near an axis (maintainer, 2026-08-14). Every axis on
+    every figure is two number boxes, min and max, blank for automatic.
+
+    The wavelength window came BACK as a control in that pass, after being
+    removed on 2026-08-13. The thing that was wrong with it then was the
+    RADIO + range-slider pair, not the idea: a reviewer specifically asked to
+    zoom into the PRISM and G395H regions. Blank boxes still fit the selected
+    modes, so selecting modes remains a wavelength control on its own.
     """
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
     at = AppTest.from_file(str(APP), default_timeout=60)
@@ -878,29 +891,106 @@ def test_summary_has_no_wavelength_range_control():
     assert not at.exception, at.exception
     assert not [r for r in at.radio if r.key == "n0_sum_wlmode"], \
         "the wavelength-range radio should be gone"
-    assert not [s for s in at.slider if s.key == "n0_sum_wlrange"], \
-        "the Custom wavelength slider should be gone"
+    # every axis pair: the results figure, the two structure panels. Each must
+    # exist and START BLANK -- prefilled bounds would go stale the moment the
+    # run or the mode selection changed, which is why blank is the default.
+    for _k in ("sum_x", "sum_y", "struct_T", "struct_p", "struct_vmr",
+               "sum_post_lnZ"):
+        for _end in ("min", "max"):
+            _w = at.number_input(key=f"n0_{_k}_{_end}")
+            assert _w.value is None, f"{_k}_{_end} should start blank"
+    # NO slider drives any axis. The only slider left on the page is the noise
+    # scale, which is a model input.
+    assert {s.key for s in at.slider} <= {"n0_noisescale"}, \
+        [s.key for s in at.slider]
     _x = at.checkbox(key="n0_sum_xlog")
     _y = at.checkbox(key="n0_sum_ylog")
     assert _x.value is True and _x.label == "Log x", _x.label
     assert _y.value is False and _y.label == "Log y", _y.label
 
 
-def test_summary_axis_range_controls_default_to_auto():
-    """The depth bounds start BLANK (= auto-fit) and the forecast panels start
-    at the 3.5-sigma default, so an untouched page draws exactly what it drew
-    before these controls existed. Prefilled depth bounds would go stale the
-    moment the mode selection changed, which is why blank is the default.
+@pytest.mark.parametrize(
+    "widget,value,field",
+    # the molecule selectbox keys on the extra-molecule selection, so the key
+    # carries the default extra set (jwst_tool.app: K("mol_<provider>_<mols>"))
+    [("n0_mol_vulcan_C2H2_C2H4_C2H6_CS2_H2S_HCN_NH3_OCS", "CO2",
+      "target_mol"),                                # the reported bug
+     ("n0_ntr", 4, "n_transits"),
+     ("n0_rbin", 60, "r_bin"),
+     ("n0_noisescale", 2.0, "noise_scale")])
+def test_changing_any_run_input_marks_the_result_stale(widget, value, field,
+                                                       monkeypatch):
+    """The staleness guard compares the WHOLE non-canonical input set, not a
+    hand-picked subset.
+
+    The bug this pins: the detection target is deliberately absent from the
+    canonical model params (one run computes the removed-molecule curve for
+    every RT molecule), so switching SO2 to CO2 without pressing Run left the
+    curve, the legend and the CSV column on the previous target with no notice.
+    It was reported as a caching bug. The noise scale and R are here because a
+    subset guard is exactly how the next one of these gets missed.
     """
+    from jwst_tool import share_config as _sc
+    seen = {}
+    _real = _sc.build_share
+
+    def _spy(*, canon, goal, observation, **kw):
+        # the app builds ONE description of the run and hands the same two
+        # blocks to the shareable config and to the staleness guard
+        seen["run_sig"] = dict(goal=goal, observation=observation)
+        seen["canon"] = canon
+        return _real(canon=canon, goal=goal, observation=observation, **kw)
+
+    monkeypatch.setattr(_sc, "build_share", _spy)
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
     at = AppTest.from_file(str(APP), default_timeout=60)
     at.session_state["out"] = out
     at.session_state["out_meta"] = out_meta
     at.run()
     assert not at.exception, at.exception
-    assert at.number_input(key="n0_sum_ymin").value is None
-    assert at.number_input(key="n0_sum_ymax").value is None
-    assert at.slider(key="n0_sum_xlim_sigma").value == 3.5
+    # Adopt the page's OWN canonical params and run signature as the cached
+    # run's, so an untouched sidebar reads as fresh and the ONLY difference
+    # below is the widget under test.
+    import json as _json
+    at.session_state["out"] = dict(
+        out, model=dict(out["model"],
+                        params_json=_json.dumps(seen["canon"], default=str)))
+    at.session_state["out_meta"] = dict(out_meta, run_sig=seen["run_sig"])
+    at.run()
+
+    def _named():
+        return [w.value for w in at.warning if "previous run" in w.value]
+
+    assert not _named(), \
+        f"an unchanged sidebar must not read as stale: {_named()}"
+    at.session_state[widget] = value
+    at.run()
+    assert not at.exception, at.exception
+    assert _named() and field in _named()[0], _named()
+
+
+@pytest.mark.parametrize("key,label", [("n0_sum_x", "Wavelength"),
+                                       ("n0_struct_p", "Pressure"),
+                                       ("n0_struct_vmr", "Mixing ratio")])
+def test_a_nonpositive_bound_on_a_log_axis_warns_instead_of_killing_the_page(
+        key, label):
+    """Three of the axes are LOG, and a min at or below zero has no logarithm.
+
+    The figure builders raise on it, which is right for an API backstop, but
+    that exception reaches Streamlit uncaught and takes the ENTIRE results page
+    down -- spectrum, tables, downloads. A typed number is a user choice, not a
+    defect. Warn, fall back to the automatic fit, keep the page alive.
+    """
+    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["out"] = out
+    at.session_state["out_meta"] = out_meta
+    at.session_state[f"{key}_min"] = 0.0
+    at.session_state[f"{key}_max"] = 5.0
+    at.run()
+    assert not at.exception, at.exception
+    assert any("log axis" in w.value and label in w.value for w in at.warning), \
+        [w.value for w in at.warning]
 
 
 def test_summary_refuses_a_one_sided_depth_range():
@@ -911,18 +1001,53 @@ def test_summary_refuses_a_one_sided_depth_range():
     at = AppTest.from_file(str(APP), default_timeout=60)
     at.session_state["out"] = out
     at.session_state["out_meta"] = out_meta
-    at.session_state["n0_sum_ymin"] = 20500.0      # max left blank
+    at.session_state["n0_sum_y_min"] = 20500.0      # max left blank
     at.run()
     assert not at.exception, at.exception
-    assert any("both bounds" in w.value for w in at.warning), \
+    assert any("both boxes" in w.value for w in at.warning), \
         [w.value for w in at.warning]
     # and the COMPLETE pair is accepted silently, so the warning above is a
     # real refusal and not something the page says either way
-    at.session_state["n0_sum_ymax"] = 21500.0
+    at.session_state["n0_sum_y_max"] = 21500.0
     at.run()
     assert not at.exception, at.exception
     assert not [w for w in at.warning if "Depth range" in w.value], \
         [w.value for w in at.warning]
+
+
+def test_typed_axis_windows_reach_the_figure(monkeypatch):
+    """The zoom the reviewer asked for: typing 3.0 to 5.5 um must reach the
+    figure, not merely be accepted by the widget. A control that validates and
+    is then dropped looks identical from the widget side, so this intercepts
+    the call the page actually makes. The app closes every Figure it builds,
+    which is why this records the ARGUMENTS rather than inspecting axes.
+    """
+    from jwst_tool import summary_figure as _sf
+    seen = {}
+    _real = _sf.compose_summary_figure
+
+    def _spy(spectrum, **kw):
+        seen["wl_range"] = spectrum.get("wl_range")
+        seen["depth_range"] = spectrum.get("depth_range")
+        seen["panel_xlims"] = kw.get("panel_xlims")
+        return _real(spectrum, **kw)
+
+    monkeypatch.setattr(_sf, "compose_summary_figure", _spy)
+    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["out"] = out
+    at.session_state["out_meta"] = out_meta
+    at.session_state["n0_sum_x_min"] = 3.0
+    at.session_state["n0_sum_x_max"] = 5.5
+    at.session_state["n0_sum_y_min"] = 20500.0
+    at.session_state["n0_sum_y_max"] = 21500.0
+    at.session_state["n0_sum_post_lnZ_min"] = -0.4
+    at.session_state["n0_sum_post_lnZ_max"] = 0.4
+    at.run()
+    assert not at.exception, at.exception
+    assert seen["wl_range"] == pytest.approx((3.0, 5.5))
+    assert seen["depth_range"] == pytest.approx((20500.0, 21500.0))
+    assert seen["panel_xlims"][0] == pytest.approx((-0.4, 0.4))
 
 
 def test_all_usable_row_is_renamed_and_combos_lead_the_table():
@@ -956,3 +1081,60 @@ def test_all_usable_row_is_renamed_and_combos_lead_the_table():
     # combos lead: the first non-blank mode label is the combination
     first = next(m for m in modes if m.strip())
     assert "My set" in first, f"combos should lead the table, got {first!r}"
+
+
+def test_column_bottom_follows_the_geometry():
+    """The emission column has to be an order of magnitude deeper than the
+    transmission one, and a Streamlit widget takes its default only on FIRST
+    render. One shared key would therefore have kept 7.6 bar after a switch to
+    emission and refused the run for being transparent -- the exact failure
+    this release exists to remove. Each geometry keeps its own box."""
+    from jwst_tool import forward
+
+    at = _run_app()
+    assert not at.exception, at.exception
+    t = at.number_input(key="n0_pbtm_transmission")
+    assert t.value == forward.P_BTM_TRANSMISSION_BAR
+    at.radio(key="n0_scimode").set_value("emission").run()
+    assert not at.exception, at.exception
+    e = at.number_input(key="n0_pbtm_emission")
+    assert e.value == forward.P_BTM_EMISSION_BAR
+    # and the transmission box is untouched when we go back
+    at.radio(key="n0_scimode").set_value("transmission").run()
+    assert at.number_input(key="n0_pbtm_transmission").value == \
+        forward.P_BTM_TRANSMISSION_BAR
+
+
+def test_mixing_ratio_panel_selects_species_by_name(monkeypatch):
+    """ymix is the FULL network state (89 species for SNCHO); model["mols"] is
+    the short RT list. Zipping them positionally read the wrong species.
+
+    Found 2026-08-14 by comparing this tool's WASP-39 b chemistry against Tsai
+    et al. 2023's published VULCAN run for the same planet: the curve the panel
+    labelled CO2 sat at 0.847 at 1 bar, which is H2. The panel and its CSV were
+    mislabelled for every species.
+    """
+    from jwst_tool import plotting
+    seen = {}
+    _real = plotting.build_vmr_figure
+
+    def _spy(p_bar, columns, **kw):
+        seen["columns"] = list(columns)
+        return _real(p_bar, columns, **kw)
+
+    monkeypatch.setattr(plotting, "build_vmr_figure", _spy)
+    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["out"] = out
+    at.session_state["out_meta"] = out_meta
+    at.run()
+    assert not at.exception, at.exception
+    got = {name: float(np.asarray(y)[0]) for name, y in seen["columns"]}
+    # the fixture puts H2 first at 0.85; it is NOT an RT molecule and must not
+    # appear, and no RT molecule may take its column
+    assert "H2" not in got
+    assert set(got) == {"H2O", "CO2", "CO", "CH4", "SO2"}, got
+    assert got["CO"] == pytest.approx(1e-3)     # by NAME, not by position
+    assert got["H2O"] == pytest.approx(1e-4)
+    assert got["CO2"] == pytest.approx(1e-6)
+    assert 0.85 not in got.values()
