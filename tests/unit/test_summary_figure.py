@@ -39,6 +39,66 @@ def _panel():
                 notes=[], center=1.0)
 
 
+def _panel_sized(mu=1.0, sigma=0.1):
+    """A panel whose curve carries mu/sigma, which is what sets the x window."""
+    pan = _panel()
+    pan["curves"][0].update(mu=mu, sigma=sigma)
+    return pan
+
+
+def test_forecast_panel_width_follows_xlim_sigma():
+    """The panel x window is +/-xlim_sigma about the curve, and nothing else.
+
+    The curve is NOT resampled: posteriors.gaussian_curve's grid is MC-pinned
+    elsewhere, so this must stay a pure window. Width scaling exactly with the
+    setting is what proves that.
+    """
+    import matplotlib.pyplot as plt
+    mu, sigma = 1.0, 0.1
+    widths = {}
+    for s in (2.0, 5.0):
+        fig = summary_figure.compose_summary_figure(
+            _spectrum(with_points=False),
+            posterior_panels=[_panel_sized(mu, sigma)], xlim_sigma=s)
+        try:
+            lo, hi = fig.axes[1].get_xlim()
+            # centered on the curve, half-width = s * sigma
+            assert lo == pytest.approx(mu - s * sigma, rel=1e-12)
+            assert hi == pytest.approx(mu + s * sigma, rel=1e-12)
+            widths[s] = hi - lo
+        finally:
+            plt.close(fig)
+    assert widths[5.0] == pytest.approx(2.5 * widths[2.0], rel=1e-12)
+
+
+def test_default_xlim_sigma_is_unchanged_by_the_new_parameter():
+    """None must reproduce the 3.5-sigma default exactly, byte for byte."""
+    import matplotlib.pyplot as plt
+    figs = [summary_figure.compose_summary_figure(
+        _spectrum(with_points=False), posterior_panels=[_panel_sized()],
+        xlim_sigma=x) for x in (None, 3.5)]
+    try:
+        assert figs[0].axes[1].get_xlim() == figs[1].axes[1].get_xlim()
+    finally:
+        for f in figs:
+            plt.close(f)
+
+
+def test_explicit_depth_range_is_used_verbatim():
+    """An explicit depth window is never overridden -- not even for legend
+    headroom, which the auto-fit path adds and this path deliberately does
+    not (summary_figure._plot_spectrum). The GUI exposes this, so a silent
+    inflation would mean the user's typed bounds did not appear."""
+    import matplotlib.pyplot as plt
+    spec = _spectrum()                      # WITH points, so a legend is drawn
+    spec["depth_range"] = (20500.0, 21500.0)
+    fig = summary_figure.compose_summary_figure(spec)
+    try:
+        assert fig.axes[0].get_ylim() == pytest.approx((20500.0, 21500.0))
+    finally:
+        plt.close(fig)
+
+
 def test_full_figure_composes_and_exports_png_and_pdf():
     fig = summary_figure.compose_summary_figure(
         _spectrum(), posterior_panels=[_panel(), _panel()],
@@ -117,3 +177,15 @@ def test_validation_is_loud():
         summary_figure.compose_summary_figure(
             _spectrum(with_points=False),
             posterior_panels=[_panel() for _ in range(4)])
+    # axis windows: a reversed or non-finite pair is refused, never silently
+    # swapped or ignored. The GUI validates before calling, so these are the
+    # backstop for API callers.
+    for bad_range in ((21500.0, 20500.0), (np.nan, 1.0)):
+        spec = _spectrum(with_points=False)
+        spec["depth_range"] = bad_range
+        with pytest.raises(ValueError, match="depth_range"):
+            summary_figure.compose_summary_figure(spec)
+    for bad_sigma in (0.0, -1.0, np.nan):
+        with pytest.raises(ValueError, match="xlim_sigma"):
+            summary_figure.compose_summary_figure(
+                _spectrum(with_points=False), xlim_sigma=bad_sigma)

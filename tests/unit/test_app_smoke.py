@@ -862,12 +862,13 @@ def test_intro_prose_is_short_and_carries_no_methodology():
         "the live Pandeia version is no longer interpolated"
 
 
-def test_summary_has_no_wavelength_range_control_only_axis_scales():
-    """The window ALWAYS fits the selected modes (maintainer, 2026-08-13): the
-    "Fit to selected modes / Full model" radio is gone, as is the Custom
-    slider before it. Selecting modes is the only wavelength control -- and
-    selecting every mode gives the full span anyway. What remains is the pair
-    of log/linear checkboxes, labelled "Log x" / "Log y".
+def test_summary_has_no_wavelength_range_control():
+    """The WAVELENGTH window ALWAYS fits the selected modes (maintainer,
+    2026-08-13): the "Fit to selected modes / Full model" radio is gone, as is
+    the Custom slider before it. Selecting modes is the only wavelength
+    control -- and selecting every mode gives the full span anyway. Reaffirmed
+    2026-08-14 when the depth-range controls were added: those are a separate
+    axis and did not reopen this one.
     """
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
     at = AppTest.from_file(str(APP), default_timeout=60)
@@ -883,6 +884,45 @@ def test_summary_has_no_wavelength_range_control_only_axis_scales():
     _y = at.checkbox(key="n0_sum_ylog")
     assert _x.value is True and _x.label == "Log x", _x.label
     assert _y.value is False and _y.label == "Log y", _y.label
+
+
+def test_summary_axis_range_controls_default_to_auto():
+    """The depth bounds start BLANK (= auto-fit) and the forecast panels start
+    at the 3.5-sigma default, so an untouched page draws exactly what it drew
+    before these controls existed. Prefilled depth bounds would go stale the
+    moment the mode selection changed, which is why blank is the default.
+    """
+    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["out"] = out
+    at.session_state["out_meta"] = out_meta
+    at.run()
+    assert not at.exception, at.exception
+    assert at.number_input(key="n0_sum_ymin").value is None
+    assert at.number_input(key="n0_sum_ymax").value is None
+    assert at.slider(key="n0_sum_xlim_sigma").value == 3.5
+
+
+def test_summary_refuses_a_one_sided_depth_range():
+    """One bound alone has no second edge, and the auto fit lives in
+    summary_figure. The page must SAY it fell back rather than invent the
+    other bound -- and it must still render the figure."""
+    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["out"] = out
+    at.session_state["out_meta"] = out_meta
+    at.session_state["n0_sum_ymin"] = 20500.0      # max left blank
+    at.run()
+    assert not at.exception, at.exception
+    assert any("both bounds" in w.value for w in at.warning), \
+        [w.value for w in at.warning]
+    # and the COMPLETE pair is accepted silently, so the warning above is a
+    # real refusal and not something the page says either way
+    at.session_state["n0_sum_ymax"] = 21500.0
+    at.run()
+    assert not at.exception, at.exception
+    assert not [w for w in at.warning if "Depth range" in w.value], \
+        [w.value for w in at.warning]
 
 
 def test_all_usable_row_is_renamed_and_combos_lead_the_table():

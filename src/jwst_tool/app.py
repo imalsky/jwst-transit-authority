@@ -2898,6 +2898,45 @@ with _fc2:
     _y_log = _ax2.checkbox("Log y", value=False, key=K("sum_ylog"))
 _wl_range = _fit          # always the selected modes' coverage
 
+# Axis ranges (2026-08-14). These move the WINDOW the figure is drawn in and
+# never the data, so nothing downstream reads them -- the scores, the CSVs and
+# the forecast are unchanged by anything in here.
+#
+# Both depth bounds start BLANK, meaning auto-fit, rather than prefilled with
+# the current auto values: the auto fit tracks the mode selection, so a
+# prefilled number would silently pin a stale range the moment the selection
+# changed. The wavelength window stays derived from the selection (see above);
+# it is deliberately not a control.
+with _fig_ctx.expander("Axis ranges"):
+    _r1, _r2, _r3 = st.columns([1.0, 1.0, 1.6])
+    _dmin = _r1.number_input(
+        "Depth min (ppm)", value=None, step=1.0, format="%.6g",
+        key=K("sum_ymin"),
+        help="Leave both bounds blank to fit the visible data. Setting them "
+             "also turns off the automatic legend headroom, so the legend can "
+             "overlap the curve.")
+    _dmax = _r2.number_input(
+        "Depth max (ppm)", value=None, step=1.0, format="%.6g",
+        key=K("sum_ymax"))
+    _post_sigma = _r3.slider(
+        "Forecast panel width (sigma)", min_value=1.0, max_value=5.0,
+        value=3.5, step=0.5, key=K("sum_xlim_sigma"),
+        help="Half-width of each forecast panel's x axis, in sigma of the "
+             "widest curve it draws. The curves themselves are unchanged.")
+
+# Both bounds or neither: a one-sided window has no second edge to fall back
+# on, and the auto fit lives in summary_figure, not here. Refuse it visibly
+# rather than picking a bound on the user's behalf.
+_depth_range = None
+if (_dmin is None) != (_dmax is None):
+    _fig_box.warning("Depth range needs both bounds. Fitting to the data.")
+elif _dmin is not None:
+    if float(_dmin) < float(_dmax):
+        _depth_range = (float(_dmin), float(_dmax))
+    else:
+        _fig_box.warning("Depth range needs min below max. Fitting to the "
+                         "data.")
+
 _sum_points = []
 for r in results:
     # saturated modes are excluded from every ranking, combination and
@@ -2964,6 +3003,7 @@ _sum_spectrum = dict(wl_um=wl_s, depth_ppm=d_plot,
                      model_label="model",
                      legend_title=_leg_note,
                      wl_range=_wl_range,
+                     depth_range=_depth_range,
                      x_log=_x_log, y_log=_y_log,
                      points=_sum_points)
 if d_wo_s is not None:
@@ -2981,7 +3021,7 @@ def _compose(spec):
     # PNG/PDF carry the planet name in their FILENAME.
     return summary_figure.compose_summary_figure(
         spec, posterior_panels=_post_panels or None,
-        footnote=_sum_foot)
+        footnote=_sum_foot, xlim_sigma=_post_sigma)
 
 
 try:

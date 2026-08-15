@@ -291,6 +291,15 @@ footnote carries the same linearized-forecast wording as the posterior
 section. The T-P profile remains its own small figure, and the Fisher
 table carries the full per-mode and per-combination numbers.
 
+**Axis controls.** Log/linear switches sit under the figure, and an "Axis
+ranges" expander sets the depth window and the forecast panels' half-width in
+sigma. All of these move the drawn window only: the scores, the CSVs and the
+forecast are unchanged by them. The depth bounds start blank, meaning fit to
+the visible data, and both are needed before either applies. Setting them also
+drops the automatic legend headroom, so the legend can overlap the curve. The
+wavelength window is not a control: it always fits the selected modes, and
+selecting every mode gives the full span.
+
 **Figure conventions (2026-08-13).** Every figure is square (equal panel box
 aspect), every legend sits OUTSIDE its axes, and log axes label at most seven
 decades with no minor ticks. The legends moved out of the axes because keeping
