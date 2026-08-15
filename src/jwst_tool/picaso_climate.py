@@ -42,6 +42,7 @@ import numpy as np
 
 from jwst_tool import instruments as _ins
 from jwst_tool import picaso_env as pe
+from jwst_tool import planets
 from jwst_tool.forward import (CHEM_P_SPAN_DYN, CLIMATE_N_LEVELS,
                                CLIMATE_P_SPAN_BAR, T_WINDOW)
 
@@ -63,8 +64,12 @@ _GUESS_KAPPA_IR = 1.0e-2    # cm^2/g
 _GUESS_GAMMA = 0.4
 _GUESS_F = 0.25
 
-_RSUN_CM = 6.957e10
-_AU_CM = 1.496e13
+# One copy per package: these are `planets`' values, re-exported under the
+# local names this module already uses. Two modules in one package disagreeing
+# about a unit conversion is exactly the drift test_shared_constants_pin.py
+# guards against.
+_RSUN_CM = planets.R_SUN_CM
+_AU_CM = planets.AU_CM
 
 
 def climate_subset(cp: dict) -> dict:
