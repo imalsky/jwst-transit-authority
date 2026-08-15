@@ -1064,6 +1064,27 @@ notes.md, Decision records; scope and conventions live in
   rather than a minimal set of intentional overrides, so it will keep
   surfacing upstream deprecations one at a time.
 
+### The chemistry is validated against published VULCAN runs
+
+Measured 2026-08-14, three benchmarks, two of them the VULCAN authors' own
+released model output and the third upstream VULCAN run locally on
+byte-identical inputs:
+
+| benchmark | scope | agreement |
+|---|---|---|
+| WASP-39 b, Tsai et al. 2023 (Nature 617, 483) | 11 species, 7.9 decades | 0.068 dex median in the transmission photosphere |
+| HD 189733 b, Tsai et al. 2021 (ApJ 923, 264) | 69 species, 11 decades | 0.0046 dex median for species peaking above 1e-6 |
+| WASP-39 b, upstream VULCAN 3 at the pinned commit | 87 species, 7.9 decades | 0.0048 dex median for species peaking above 1e-6 |
+
+Against the upstream run, every molecule with modeled opacity agrees to 0.035
+dex or better (CO 0.00000, H2O 0.00002, CO2 0.00022, SO2 0.00957, HCN 0.03448),
+and only 7 of 87 species exceed 0.1 dex, none of them peaking above 1e-6 and
+none with modeled opacity. On WASP-39 b, SO2 -- the subject of the Tsai 2023
+paper -- agrees to 0.006 dex at its peak.
+
+So the gaps listed below are in the radiative transfer, the opacities, or the
+aerosol treatment. They are not kinetics.
+
 ### Opened by the 2026-08-14 validation against published spectra
 
 Measured by running the tool against eight published transmission and emission
