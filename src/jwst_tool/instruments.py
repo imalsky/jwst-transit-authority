@@ -104,7 +104,9 @@ if JWST_TOOL_BACKEND not in _BACKENDS:
 _BE = _BACKENDS[JWST_TOOL_BACKEND]
 BACKEND_STATUS = _BE["status"]
 BACKEND_RELEASE = _BE["release"]
-BACKEND_IS_SUPPORTED = _BE["supported"]
+# (no BACKEND_IS_SUPPORTED export: with one selectable backend it was always
+# True and nothing read it. The "supported" flag stays in _BACKENDS so a
+# future entry can declare itself unsupported.)
 
 # The PANDEIA backend interpreter (machine-specific, no portable default;
 # require_pandeia_python() turns a missing setting into one actionable

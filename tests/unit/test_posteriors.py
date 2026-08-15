@@ -425,18 +425,22 @@ def test_scoring_modules_never_reference_the_mock_layer():
                 "fitted only by mock_recovery, consumed in app.py)")
 
 
-def test_compare_combos_orders_and_rejects_duplicates():
+def test_adding_a_mode_cannot_loosen_the_marginalized_bound():
+    """Fisher information is additive over independent modes, so a superset
+    combination can only tighten a marginalized sigma.
+
+    Pinned on ``combo_forecast`` directly since ``compare_combos`` (a thin
+    ordering/duplicate-checking wrapper with no production consumer) was
+    removed on 2026-08-14; this invariant is pinned nowhere else.
+    """
     k1, k2 = _registry_keys(2)
     results = {k1: _result(seed=9), k2: _result(seed=10)}
-    recs = posteriors.compare_combos(
-        {"A": [k1], "A + B": [k1, k2]}, results, FREE, co_eval=CO)
-    assert [r["name"] for r in recs] == ["A", "A + B"]
-    # more modes cannot loosen the marginalized bound
-    assert (recs[1]["sigma_marginalized_display"]["lnZ"]
-            <= recs[0]["sigma_marginalized_display"]["lnZ"] * (1 + 1e-12))
-    with pytest.raises(ValueError, match="duplicate combo names"):
-        posteriors.compare_combos([("A", [k1]), ("A", [k2])], results, FREE,
-                                  co_eval=CO)
+    one = posteriors.combo_forecast("A", [k1], results, FREE, co_eval=CO)
+    both = posteriors.combo_forecast("A + B", [k1, k2], results, FREE,
+                                     co_eval=CO)
+    assert one["name"] == "A" and both["name"] == "A + B"
+    assert (both["sigma_marginalized_display"]["lnZ"]
+            <= one["sigma_marginalized_display"]["lnZ"] * (1 + 1e-12))
 
 
 def test_mock_realization_records_seed_scheme_provenance():

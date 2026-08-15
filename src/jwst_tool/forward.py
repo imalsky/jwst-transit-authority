@@ -939,7 +939,6 @@ def canonical_params(params: dict) -> dict:
         _fp = _picaso_fingerprint()
         cp["picaso_version"] = str(_fp["picaso_version"])
     if provider == "picaso":
-        from jwst_tool import picaso_chem as _pc
         cp["picaso_chemgrid_sha1"] = str(_picaso_fingerprint()["chemgrid_sha1"])
         if cp["jac_method"] == "ad":
             raise ValueError(
@@ -995,15 +994,9 @@ def canonical_params(params: dict) -> dict:
                 "provider is HARD-CAPPED at C/O 1.10 by its tables (VULCAN "
                 "handles up to 2.0 structurally -- use "
                 "chem_provider='vulcan' for C-rich atmospheres).")
-        _bad_extra = set(cp["extra_mols"]) - set(_pc.PICASO_EXTRA_MOLECULES)
-        if _bad_extra:
-            raise ValueError(
-                f"extra_mols {sorted(_bad_extra)} are not available under "
-                "the PICASO provider: it supplies "
-                f"{_pc.PICASO_MOLECULES} + optional "
-                f"{_pc.PICASO_EXTRA_MOLECULES}. There is NO SO2/S2/S8/CS2 "
-                "-- equilibrium sulfur sits in H2S/OCS; photochemical "
-                "sulfur science needs chem_provider='vulcan'.")
+        # (extra_mols is NOT re-checked here: the generic gate above already
+        # differenced it against PICASO_EXTRA_MOLECULES under this provider
+        # and raised, and nothing writes cp["extra_mols"] in between.)
     # --- climate T-P mode matrix (v18; both providers) ----------------------
     if tp_mode == "picaso_climate":
         from jwst_tool import picaso_chem as _pc

@@ -114,12 +114,12 @@ USER 1000
 #      DELETE the staging dir first, it skips staging when one already exists)
 #   3. rebuild the Space with this pin at `current`
 #
-# The previous 2026.2 deployment stays selectable as JWST_TOOL_BACKEND=
-# archival_2026_2 for reproducibility, as long as its two trees remain in the
-# dataset. The committed PandExo parity artifact
-# (tests/parity/outputs/REPORT.md) is a gate-evaluated PASS on 2026.7
-# (2026-08-04); the old 2026.2 artifact predates the gate and was never
-# gate-evaluated.
+# There is no archival backend to fall back to: instruments.py ships exactly
+# one, "current" = 2026.7, and raises for any other JWST_TOOL_BACKEND. An
+# older release is reachable only by checking out a commit that still carried
+# it. The committed PandExo parity artifact (tests/parity/outputs/REPORT.md)
+# is a gate-evaluated PASS on 2026.7 (2026-08-04); the old 2026.2 artifact
+# predates the gate and was never gate-evaluated.
 ENV VULCAN_PROJECT_ROOT=/srv/vulcan \
     VULCAN_FORWARD_DATA=/data/retrieval-data \
     JWST_TOOL_DATA_DIR=/data/jwst-data \

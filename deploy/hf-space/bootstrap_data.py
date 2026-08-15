@@ -14,17 +14,18 @@ os.environ.setdefault("HF_HOME", "/tmp/hf-cache")
 DATA = Path("/data")
 DATASET_REPO = os.environ.get("DATASET_REPO", "imalsky/vulcan-jwst-tool-data")
 
-# One marker per dataset the tool refuses to run without (same trees
-# make_data_bundles.sh packs for the VM deployment). The Pandeia markers are
-# the load-bearing VERSION FILES, not directories: an empty or truncated tree
-# must not count as seeded. The "current" backend needs the 2026.7 pair; the
-# 2026.2 pair keeps the archival_2026_2 backend selectable.
+# One marker per dataset the tool refuses to run without. The Pandeia markers
+# are the load-bearing VERSION FILES, not directories: an empty or truncated
+# tree must not count as seeded. Only the 2026.7 pair is listed, because
+# instruments.py defines exactly one backend ("current" = 2026.7) and raises
+# for anything else. The 2026.2 trees were required here until 2026-08-14,
+# from before the archival backend was removed; boot then failed closed on
+# 4.33 GB nothing could reach. They may still sit in the dataset repo, which
+# is harmless -- an unlisted tree is simply downloaded and ignored.
 MARKERS = [
     DATA / "jwst-data" / "cdbs" / "grid" / "phoenix" / "catalog.fits",
     DATA / "jwst-data" / "pandeia_data-2026.7-jwst" / "VERSION_DATA",
     DATA / "jwst-data" / "pandeia_psfs-2026.7-jwst" / "VERSION_PSF",
-    DATA / "jwst-data" / "pandeia_data-2026.2-jwst" / "VERSION_DATA",
-    DATA / "jwst-data" / "pandeia_psfs-2026.2-jwst" / "VERSION_PSF",
     DATA / "retrieval-data" / "cm24_wasp39b",
     DATA / "retrieval-data" / "exojax_linelists",
     DATA / "retrieval-data" / "opacity_cache",

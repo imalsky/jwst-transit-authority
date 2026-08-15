@@ -43,23 +43,29 @@ sys.path.insert(0, str(HERE))
 
 import parity_gate as pg                       # noqa: E402
 
+from jwst_tool import instruments as _ins       # noqa: E402
+
 # --- validated categorical palette (light mode) ------------------------------
 TOOL = "#2a78d6"       # this tool (blue, slot 1)
 PANDEXO = "#eb6834"    # PandExo (orange, slot 8) -- CVD-safe against blue
-MODE_HUES = ["#2a78d6", "#1baf7a", "#eda100", "#008300",
-             "#4a3aa7", "#e34948", "#e87ba4"]
 SURFACE = "#ffffff"
 INK = "#0b0b0b"
 INK2 = "#52514e"
 GRID = "#e6e5e2"
 
-MODES = ["nirspec_prism", "nirspec_g395h", "nirspec_g235h", "niriss_soss",
-         "nircam_f322w2", "nircam_f444w", "miri_lrs"]
-LABEL = {"nirspec_prism": "PRISM", "nirspec_g395h": "G395H",
-         "nirspec_g235h": "G235H", "niriss_soss": "SOSS",
-         "nircam_f322w2": "F322W2", "nircam_f444w": "F444W",
-         "miri_lrs": "MIRI LRS"}
-MCOL = dict(zip(MODES, MODE_HUES))
+# The plotted mode set is the GATE's declared experiment, never a local copy.
+# A hand-maintained list here silently dropped nirspec_g395m from the
+# committed config-parity figure while REPORT.md advertised the full matrix
+# (found 2026-08-14); test_instruments_registry pins MODE_KEYS against the
+# registry, so deriving from it inherits that guard. Colours and short labels
+# likewise come from the one validated registry palette.
+MODES = list(pg.MODE_KEYS)
+MCOL = {k: _ins.MODE_COLOR[k] for k in MODES}
+LABEL = {k: (_ins.MODES[k]["label"]
+             .replace("NIRSpec ", "").replace("NIRCam ", "")
+             .replace("NIRISS ", "").replace(" (ord 1)", "")
+             .replace(" (slitless)", ""))
+         for k in MODES}
 STAR_MARK = {"w39_like": "o", "bright_hot": "s", "faint_k": "^"}
 STAR_LABEL = {"w39_like": "W39-like (Ks 10.7)", "bright_hot": "bright (Ks 8.5)",
               "faint_k": "faint (Ks 13)"}
@@ -183,6 +189,49 @@ def fig_config_parity(summary, release):
 # =============================================================================
 # Extracted stellar flux parity (the engine product agreeing 1:1)
 # =============================================================================
+def _require_raw_matches_summary(summary, star, o_all, p_all, of, pf):
+    """Refuse to plot raw per-wavelength data from a DIFFERENT run.
+
+    The raw JSON is git-ignored, so a checkout carries the committed figures
+    beside whatever raw files happen to be on that machine -- possibly from an
+    older experiment. Plotting those silently re-labels stale numbers with the
+    committed artifact's release banner.
+
+    This is not hypothetical. On 2026-08-14 the outputs directory held a
+    worker-v10, 7-mode run while the committed summary was worker v11 with 8
+    modes; regenerating drew a 0.9973 binned-median flux ratio over an
+    artifact that records exactly 1.0 (max_abs_dev 2.2e-16). House rule: a
+    check that cannot run must say so, and a mismatch is a hard error.
+    """
+    s_star = summary["stars"][star]
+    s_modes = {r["key"] for r in s_star["modes"]}
+    problems = []
+    for label, raw, path in (("ours", o_all, of), ("pandexo", p_all, pf)):
+        r_modes = {k for k in raw if not k.startswith("__")}
+        if missing := sorted(s_modes - r_modes):
+            problems.append(
+                f"{path.name}: missing mode(s) {missing} that the summary "
+                f"declares -- this raw file predates the current experiment")
+        s_prov = s_star.get(f"provenance_{label}", {})
+        r_prov = raw.get("__provenance__", {})
+        for key in ("worker_version", "engine_version", "refdata_version",
+                    "psf_version"):
+            if key in s_prov and key in r_prov and s_prov[key] != r_prov[key]:
+                problems.append(
+                    f"{path.name}: {key}={r_prov[key]!r} but the summary "
+                    f"records {s_prov[key]!r}")
+    if problems:
+        raise SystemExit(
+            "make_parity_plots: the raw run outputs do not belong to the "
+            "committed parity_summary.json, so the extracted-flux figure "
+            "would misrepresent the gated run:\n  "
+            + "\n  ".join(problems)
+            + "\n\nEither re-run tests/parity/scripts/run_parity.py to "
+              "regenerate the raw outputs for THIS experiment, or move the "
+              "stale *_ours.json / *_pandexo.json aside and keep the "
+              "committed figure.")
+
+
 def fig_extracted_flux(summary, out_root, mode="nirspec_g395h",
                        star="w39_like", release="unknown"):
     of = out_root / f"{star}_ours.json"
@@ -191,8 +240,11 @@ def fig_extracted_flux(summary, out_root, mode="nirspec_g395h",
         print(f"  [flux fig] raw run outputs not in {out_root} -- skipping "
               "(re-run run_parity.py to regenerate them)")
         return None
-    o = json.loads(of.read_text())[mode]
-    p = json.loads(pf.read_text())[mode]
+    o_all = json.loads(of.read_text())
+    p_all = json.loads(pf.read_text())
+    _require_raw_matches_summary(summary, star, o_all, p_all, of, pf)
+    o = o_all[mode]
+    p = p_all[mode]
     wl_o = np.asarray(o["wl"])
     flux_o = np.asarray(o["flux"])
     order = np.argsort(wl_o)
@@ -256,12 +308,22 @@ def fig_extracted_flux(summary, out_root, mode="nirspec_g395h",
 def main():
     summary = load_summary()
     release = require_passing_summary(summary)
-    # raw per-run JSON lives in this dir (written by run_parity.py, git-ignored)
-    made = [fig_config_parity(summary, release),
-            fig_extracted_flux(summary, OUTPUTS, release=release)]
+    made = [fig_config_parity(summary, release)]
+    # The flux figure ALSO needs the raw per-wavelength JSON (written by
+    # run_parity.py, git-ignored). A stale raw set is refused rather than
+    # plotted, but that must not discard the config figure, which is built
+    # from the committed summary alone: report both, then exit non-zero.
+    stale = None
+    try:
+        made.append(fig_extracted_flux(summary, OUTPUTS, release=release))
+    except SystemExit as exc:
+        stale = str(exc)
     for pth in made:
         if pth is not None:
             print(f"wrote {pth}")
+    if stale:
+        print(f"\n{stale}", file=sys.stderr)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

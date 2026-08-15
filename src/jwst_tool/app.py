@@ -349,11 +349,11 @@ with st.expander("Data status: what this machine has installed"
               help="The status above is cached for an hour. Refresh after "
                    "installing data.")
 
-# Measured FD/AD Fisher-row wall times (WASP-39b defaults; see forward.py's
-# FD_STEPS). Threaded through every GUI mention below so a re-measurement
-# updates one place (the slow-run estimator uses the midpoints, 7 and 4).
-_FD_COMP_MIN, _FD_COMP_MAX = 6, 8      # minutes per FD composition row
-_FD_THETA_MIN, _FD_THETA_MAX = 3, 5    # minutes per FD Kzz/T row
+# Measured AD Fisher-row wall time (WASP-39b defaults), threaded through the
+# GUI mention below so a re-measurement updates one place. The FD companions
+# were deleted 2026-08-14: the run-time estimator builds its own FD cost model
+# from `_solve_min` (see "Jacobian-row cost model" below), so the old
+# _FD_COMP_*/_FD_THETA_* literals had no reader and no longer tracked it.
 _AD_ROW_MIN, _AD_ROW_MAX = 1, 2        # minutes per AD row
 
 _PROG_RE = re.compile(r"\[fwd\] PROG ([0-9.]+) (.*)")
@@ -1078,9 +1078,12 @@ with st.sidebar:
         # fallback "ad" mirrors the method widget's default (index=1), so
         # the photo-lock is right on the FIRST constrain render, before the
         # selectbox has seeded session state (picaso forces "fd" above).
+        # (No condensation term: the GUI has offered no condensation widget
+        # since 2026-08-13 and share_config REFUSES a condensing config
+        # rather than restoring one, so the old K("conden") guard could
+        # never be True.)
         _jac_hint = (st.session_state.get(K("jacm"), "ad")
                      if (_goal_ss == "constrain" or _dofish_ss)
-                     and not bool(st.session_state.get(K("conden"), False))
                      else "fd")
 
         with st.expander("Vertical mixing (Kzz)"):
@@ -2364,7 +2367,7 @@ with st.expander("Mode details"):
 with st.expander("Add a custom mode set"):
     # --- mode combinations (builder) --------------------------------------------
     # Named combinations of the modes that were run, evaluated through
-    # posteriors.combo_forecast / compare_combos (the same combination math as
+    # posteriors.combo_forecast (the same combination math as
     # the all-usable-modes row). They add rows to the Fisher table below
     # and bars to the comparison chart above.
     if fisher_names and "jac" in model:
@@ -2667,13 +2670,6 @@ if _have_fisher:
             _recs_by_src[_lbl] = posteriors.marginalized_posteriors(
                 _rl, fisher_names, _centers,
                 params=_curve_params, co_eval=co_eval)
-
-        def _src_score(lbl: str) -> float:
-            if not _post_sel:
-                return np.inf
-            v = _recs_by_src[lbl]["sigma_marginalized"].get(_post_sel[0],
-                                                            np.inf)
-            return float(v) if np.isfinite(v) else np.inf
 
         # ONE curve per parameter (maintainer, 2026-08-13). This box used to
         # SOURCES FOLLOW THE SPECTRUM SERIES (maintainer, 2026-08-13: "I want

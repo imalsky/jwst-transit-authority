@@ -432,8 +432,17 @@ def warm_default() -> None:
     Idempotent (a cache hit returns in milliseconds). Takes a run slot so
     warming never starves visitors; skips (and says so) when busy. Also
     compiles picaso's numba kernels, persisted via NUMBA_CACHE_DIR.
+
+    No-ops with a printed reason when the PICASO path is gated off. That is
+    the shipped state: canonical_params refuses tp_mode="picaso_climate"
+    unless JWST_TOOL_ENABLE_UNCERTIFIED_PICASO=1, so before this check every
+    boot launched a background solve that died on its first statement.
     """
     from jwst_tool import forward, runlimit
+    if not forward.picaso_experimental_enabled():
+        print(f"[warm] PICASO is disabled ({forward.PICASO_EXPERIMENTAL_ENV} "
+              "is not 1); no climate pre-solve to do", flush=True)
+        return
     cp = forward.canonical_params({"tp_mode": "picaso_climate"})
     slot = runlimit.acquire("climate-warm")
     if slot is None:

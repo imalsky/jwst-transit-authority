@@ -77,7 +77,13 @@ else
     # loudly without it and everything else is unaffected)
     if [ -d /data/picaso-reference/chemistry/visscher_grid_2121 ]; then
         export JWST_TOOL_PICASO_REFDATA=/data/picaso-reference
-        echo "[entrypoint] PICASO reference tree seeded (provider enabled)"
+        # Refdata present is NOT the same as provider enabled: the PICASO
+        # path is additionally gated on JWST_TOOL_ENABLE_UNCERTIFIED_PICASO,
+        # which no deploy file sets. Do not restore the old "provider
+        # enabled" wording -- it was false on every boot.
+        echo "[entrypoint] PICASO reference tree seeded (refdata available;" \
+             "the provider stays OFF until" \
+             "JWST_TOOL_ENABLE_UNCERTIFIED_PICASO=1)"
     else
         echo "[entrypoint] NOTE: no picaso-reference in the seeded dataset;" \
              "the PICASO provider/climate mode will refuse until uploaded"
@@ -99,7 +105,11 @@ cd "$STATE/cwd"
 # first visitor gets a cache hit instead of a multi-minute solve (also
 # compiles + persists the numba kernels). Idempotent: instant no-op when
 # the /data volume already holds it. Log kept for diagnosis, never /dev/null.
-if [ -n "${JWST_TOOL_PICASO_REFDATA:-}" ]; then
+# BOTH conditions are required: refdata on disk AND the experimental gate
+# open. With only the refdata test (the shipped state until 2026-08-14) this
+# launched a solve that canonical_params killed on its first statement.
+if [ -n "${JWST_TOOL_PICASO_REFDATA:-}" ] \
+   && [ "${JWST_TOOL_ENABLE_UNCERTIFIED_PICASO:-}" = "1" ]; then
     (python -c "from jwst_tool import picaso_climate; picaso_climate.warm_default()"         >"$STATE/output/climate_warm.log" 2>&1 &)
 fi
 

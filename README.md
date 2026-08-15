@@ -1037,6 +1037,13 @@ notes.md, Decision records; scope and conventions live in
 - PICASO is disabled and uncertified (NumPy conflict, stale native-RT gate).
   Re-certifying needs a compatible live run and a passing cross-model gate.
 - The eight-mode parity matrix passes but exists from one machine only.
+- The raw per-wavelength parity JSON is git-ignored, and the copy on the
+  maintainer workstation is a worker-v10, seven-mode run while the committed
+  summary is worker v11 with eight modes. The extracted-flux figure is the
+  only artifact built from that raw data; `make_parity_plots.py` now refuses
+  to redraw it from a mismatched run instead of silently relabelling stale
+  numbers. Closing this means re-running `run_parity.py` on a machine with
+  the 2026.7 refdata.
 - Sharing PandExo's stellar spectrum (`star_spectrum`, worker v11) makes the
   sigma comparison a clean estimator-vs-estimator test, but removes the only
   independent check on the PRODUCTION source setup (PHOENIX + 2MASS Ks), which
@@ -1179,14 +1186,17 @@ vulcan_jax package data) -- see the [Install](#install) section and
 
 ## Deployment
 
-The tool runs anywhere `pip install vulcan-jwst-tool` works. The two production
-deployments (always-on AWS VM behind Caddy, and the Hugging Face Space) have
-step-by-step runbooks in `notes.md`, "Deployment runbooks" section.
+The tool runs anywhere `pip install vulcan-jwst-tool` works. One hosted
+deployment is maintained: the Hugging Face Space, whose Docker build, data
+bootstrap and pin manifest live in `deploy/hf-space/` and `deploy/pins.env`.
+The step-by-step runbook is in `notes.md`, "Deployment runbooks" section.
+Caches self-invalidate by version keys.
 
-Two deployment runbooks (merged here from `deploy/DEPLOY.md` and
-`deploy/hf-space/SETUP.md` in the 2026-08 doc consolidation). The scripts and
-configs they reference live in `deploy/` and `deploy/hf-space/`. Caches
-self-invalidate by version keys in both deployments.
+A second target, an always-on AWS VM behind Caddy, was removed on 2026-08-14.
+Its image had not built since the 2026-07-29 engine split: it installed the
+three repos with `--no-deps` and never installed `vulcan-forward`, which
+`engine_config.py` imports at module scope. The runbook is kept in `notes.md`
+for anyone reviving it.
 
 ## Release gate
 

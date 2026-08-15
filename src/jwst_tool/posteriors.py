@@ -24,7 +24,7 @@ comes back from ``fisher._marg_sigmas`` as inf; here it is an explicit
 ``constrained=False`` record with NO curve (theta/pdf None) -- never a fake
 finite Gaussian. Non-finite inputs raise (house style: fail fast and loud).
 
-Named combinations (``combo_forecast`` / ``compare_combos``): a combo is a
+Named combinations (``combo_forecast``): a combo is a
 user-facing name plus a list of registry mode keys, evaluated against the
 per-mode result dicts of a run through the EXISTING ``combined_forecast``
 (single-mode combos equal ``mode_forecast`` -- that identity is pinned
@@ -380,37 +380,6 @@ def combo_forecast(name: str, mode_keys: list[str], results_by_mode: dict,
         posteriors_note=(None if centers is not None else
                          "no centers supplied: sigmas only, no curves"),
     )
-
-
-def compare_combos(combos, results_by_mode: dict, free_names: list[str],
-                   centers: dict | None = None,
-                   params: list[str] | None = None,
-                   co_eval: float | None = None,
-                   grids: dict | None = None, n_sigma: float = 5.0,
-                   n_points: int = 201) -> list[dict]:
-    """Evaluate several named combinations against one run's results.
-
-    ``combos``: {name: [mode_keys]} (insertion-ordered) or an iterable of
-    (name, [mode_keys]) pairs; duplicate names raise. Returns one
-    ``combo_forecast`` record per combo, in input order -- e.g.
-    compare_combos({"SOSS + G395H": [...], "SOSS + G395H + MIRI": [...]}, ...)
-    is the one-call comparison. Any failing combo raises with its name (a
-    partial comparison silently missing a combo would misrank the rest).
-    """
-    if isinstance(combos, dict):
-        items = list(combos.items())
-    else:
-        items = [(n, ks) for n, ks in combos]
-    if not items:
-        raise ValueError("compare_combos: no combos given")
-    names = [n for n, _ in items]
-    if len(set(names)) != len(names):
-        dupes = sorted({n for n in names if names.count(n) > 1})
-        raise ValueError(f"compare_combos: duplicate combo names {dupes}")
-    return [combo_forecast(n, ks, results_by_mode, free_names,
-                           centers=centers, params=params, co_eval=co_eval,
-                           grids=grids, n_sigma=n_sigma, n_points=n_points)
-            for n, ks in items]
 
 
 # ---------------------------------------------------------------------------

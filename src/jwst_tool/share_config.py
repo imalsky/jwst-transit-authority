@@ -29,23 +29,6 @@ from jwst_tool import forward, planets, provenance
 SHARE_FORMAT = 1
 
 
-def _software_versions() -> dict:
-    """Installed versions of the science-relevant packages, information only.
-
-    Never consumed by `widget_state` (a configuration must load on any tool
-    version); "not installed" is acceptable here because the field is a
-    provenance note, not an input.
-    """
-    import importlib.metadata as md
-    out = {}
-    for dist in ("vulcan-jwst-tool", "vulcan-forward", "vulcan-jax", "exojax"):
-        try:
-            out[dist] = md.version(dist)
-        except md.PackageNotFoundError:
-            out[dist] = "not installed"
-    return out
-
-
 def build_share(canon: dict, goal: dict, observation: dict,
                 tp_table_text: str | None = None,
                 floor_table: list | None = None) -> dict:
@@ -55,10 +38,11 @@ def build_share(canon: dict, goal: dict, observation: dict,
         "canonical_params": dict(canon),
         "goal": dict(goal),
         "observation": dict(observation),
-        # informational provenance: which software wrote this file. NOT a
-        # pin -- results depend on these versions, but the file loads on any
-        # tool version and widget_state never reads this key.
-        "software": _software_versions(),
+        # Which software wrote this file is recorded ONCE, inside the
+        # provenance block ("software"): provenance._versions() is a superset
+        # of the top-level copy this key used to carry (it adds jax, numpy and
+        # picaso). Informational only -- a configuration must load on any tool
+        # version, and widget_state never reads it.
         "provenance": provenance.snapshot(observation.get("seed")),
     }
     if tp_table_text:
