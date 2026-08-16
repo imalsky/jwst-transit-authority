@@ -148,20 +148,21 @@ def test_shipped_tables_gate_defaults_and_are_never_substituted():
 
 def test_guillot_default_tirr_follows_planet_and_custom_system():
     """T_irr default = sqrt(2) * T_eq of the SELECTED planet on the GUI's
-    10 K grid; a bare constant makes API and GUI defaults diverge. The
-    custom planet derives T_eq from the entered star and orbit
-    (T_eq = Teff sqrt(Rstar/2a)), never WASP-39 b's literature value."""
+    20 K step grid (the widget step); a bare constant makes API and GUI
+    defaults diverge. The custom planet derives T_eq from the entered star
+    and orbit (T_eq = Teff sqrt(Rstar/2a)), never WASP-39 b's literature
+    value."""
     for key, p in planets.PLANETS.items():
-        expect = min(max(round(p["teq_k"] * math.sqrt(2.0) / 10.0) * 10.0,
+        expect = min(max(round(p["teq_k"] * math.sqrt(2.0) / 20.0) * 20.0,
                          800.0), 2500.0)
         cp = forward.canonical_params(dict(planet=key, tp_mode="guillot"))
         assert cp["Tirr"] == expect, key
     # the values that used to disagree, pinned explicitly
     assert forward.default_tirr("wasp39b") == 1580.0
-    assert forward.default_tirr("hd209458b") == 2050.0   # was 1580 via the API
+    assert forward.default_tirr("hd209458b") == 2060.0   # was 1580 via the API
     sys_cool = dict(star_teff=3300.0, rstar_rsun=0.30, orbit_au=0.05)
     teq = planets.system_teq(**sys_cool)                    # ~350 K
-    expect = min(max(round(teq * math.sqrt(2.0) / 10.0) * 10.0, 800.0), 2500.0)
+    expect = min(max(round(teq * math.sqrt(2.0) / 20.0) * 20.0, 800.0), 2500.0)
     cp = forward.canonical_params(dict(planet="custom", tp_mode="guillot",
                                        **sys_cool))
     assert cp["Tirr"] == expect
@@ -217,9 +218,14 @@ def test_resolution_knobs_defaults_ranges_and_refusals():
     assert cp["yconv_cri"] == forward.YCONV_DEFAULT == 1.0e-2
     assert "quality" not in cp        # retired
     assert "art_nlayer" not in cp     # locked to nz in run_model, not cache-keyed
-    # explicit in-range values accepted; the yconv ladder reaches its 1e-4 floor
+    # explicit in-range values accepted; the yconv ladder reaches its 1e-4
+    # floor. nu_pts is INERT under the default correlated-k mode (the model
+    # grid comes from the published k-tables) and is normalized to its default
+    # there (v32, Kzz precedent); it stays live in lbl mode.
     cp = forward.canonical_params(_p(nz=150, nu_pts=8000, yconv_cri=1.0e-4))
-    assert (cp["nz"], cp["nu_pts"], cp["yconv_cri"]) == (150, 8000, 1.0e-4)
+    assert (cp["nz"], cp["nu_pts"], cp["yconv_cri"]) == (150, 4000, 1.0e-4)
+    cp = forward.canonical_params(_p(opacity_mode="lbl", nu_pts=8000))
+    assert cp["nu_pts"] == 8000
     assert forward.YCONV_RANGE == (1.0e-4, 1.0e-2)
     # nu_pts cap raised 8000 -> 32000 at v27: the old cap sat BELOW the model
     # resolving power that NIRSpec G395H's line-spread function needs, so
@@ -273,8 +279,10 @@ def test_composition_structural_path_baseline_and_ranges():
     # v13: composition is ONE structural path -- co_ratio (absolute N_C/N_O)
     # and met_x_solar go straight into the cfg elemental abundances; the
     # legacy differential knobs are gone from the canonical params entirely
+    # v32: the DEFAULT co_ratio is CO_DEFAULT (the baseline rounded onto the
+    # widgets' 0.05 grid); CO_BASELINE stays the display baseline + cross-check
     cp = forward.canonical_params(_p())
-    assert abs(cp["co_ratio"] - forward.CO_BASELINE) < 1e-5
+    assert cp["co_ratio"] == forward.CO_DEFAULT == 0.55
     assert "dco" not in cp and "co_baseline" not in cp
     # C-rich is the same path, with NO detection-only restriction: FD Fisher
     # rows are certified re-solves, valid at any baseline
@@ -325,11 +333,17 @@ def test_rt_knobs_defaults_validation_and_cache_key():
     assert cp["rt_ptop_bar"] == 1.0e-8
     assert cp["rt_integration"] == "simpson"
     assert cp["rt_dit_res"] == 1.0
+    # v32: rt_dit_res is INERT under the default correlated-k mode (PreMODIT
+    # never runs) and normalized to its default there, like nu_pts; it stays
+    # live -- and key-live -- in lbl mode. Out-of-range values still refuse
+    # in both modes (validation precedes normalization).
     cp = forward.canonical_params(_p(rt_ptop_bar=1.0e-6,
                                      rt_integration="trapezoid",
                                      rt_dit_res=0.2))
     assert (cp["rt_ptop_bar"], cp["rt_integration"], cp["rt_dit_res"]) == \
-        (1.0e-6, "trapezoid", 0.2)
+        (1.0e-6, "trapezoid", 1.0)
+    cp = forward.canonical_params(_p(opacity_mode="lbl", rt_dit_res=0.2))
+    assert cp["rt_dit_res"] == 0.2
     for bad, match in ((dict(rt_ptop_bar=1.0e-5), "rt_ptop_bar"),
                        (dict(rt_ptop_bar=1.0e-10), "rt_ptop_bar"),
                        (dict(rt_integration="euler"), "rt_integration"),
@@ -337,11 +351,16 @@ def test_rt_knobs_defaults_validation_and_cache_key():
                        (dict(rt_dit_res=2.0), "rt_dit_res")):
         with pytest.raises(ValueError, match=match):
             forward.canonical_params(_p(**bad))
-    # changing any RT knob must change the cache key (different physics)
+    # a LIVE RT knob must change the cache key (different physics); an inert
+    # one must NOT (editing it would force a bit-identical recompute)
     k0 = forward.params_key(_p())
     assert forward.params_key(_p(rt_ptop_bar=1.0e-7)) != k0
     assert forward.params_key(_p(rt_integration="trapezoid")) != k0
-    assert forward.params_key(_p(rt_dit_res=0.5)) != k0
+    assert forward.params_key(_p(rt_dit_res=0.5)) == k0
+    assert forward.params_key(_p(nu_pts=8000)) == k0
+    kl = forward.params_key(_p(opacity_mode="lbl"))
+    assert forward.params_key(_p(opacity_mode="lbl", rt_dit_res=0.5)) != kl
+    assert forward.params_key(_p(opacity_mode="lbl", nu_pts=8000)) != kl
 
 
 # --- WASP-39 b reference state: DO NOT let this drift ------------------------
@@ -357,7 +376,11 @@ W39B_REFERENCE = {
     "kzz_mode": "file",                     # mixing from the table, not a stand-in
     "kzz_const": 0.0,                       # inert once tabulated
     "met_x_solar": 10.0,                    # Tsai+2023 10x solar
-    "co_ratio": 0.549348,                   # cfg C_H/O_H
+    "co_ratio": 0.55,                       # CO_DEFAULT (v32, maintainer):
+                                            # the cfg C_H/O_H 0.549348 rounded
+                                            # onto the 0.05 widget grid; the
+                                            # 0.12% composition shift awaits
+                                            # the SO2 re-measure noted below
     "use_photo": True,                      # SO2 is photochemical; non-negotiable
     "sl_angle_deg": 83.0,                   # Tsai+2023 terminator slant
     "use_vm_mol": False,                    # validated pre-flip baseline
@@ -377,12 +400,81 @@ def test_wasp39b_reference_state_is_the_literature_validated_one():
             "before updating W39B_REFERENCE.")
 
 
+def test_wo_mols_end_to_end_semantics():
+    """The v32 leave-one-out contract, end to end at the numpy level.
+
+    (a) canonical form: default = every RT molecule in fold order; a subset
+        canonicalizes to fold order deduped; unknown molecules refuse; [] is
+        the constrain goal's valid empty set.
+    (b) cache honesty: [] / subset / default are three different keys -- a
+        constrain run must never serve a detect run's cache slot.
+    (c) the progress contract mirrors the real solve sequence: no removed-
+        molecule stage for [], exactly one batch stage otherwise.
+    (d) consumers index depth_wo by the model's wo_mols, never by mols, and
+        refuse loudly when the target has no removed spectrum.
+    """
+    # (a) canonicalization
+    cp = forward.canonical_params(_p())
+    assert cp["wo_mols"] == forward.MOLECULES
+    cp = forward.canonical_params(_p(extra_mols=["HCN", "C2H2"]))
+    assert cp["wo_mols"] == forward.MOLECULES + ["C2H2", "HCN"]
+    cp = forward.canonical_params(_p(wo_mols=["SO2", "H2O", "SO2"]))
+    assert cp["wo_mols"] == ["H2O", "SO2"]          # fold order, deduped
+    assert forward.canonical_params(_p(wo_mols=[]))["wo_mols"] == []
+    with pytest.raises(ValueError, match="wo_mols"):
+        forward.canonical_params(_p(wo_mols=["HCN"]))   # not in the RT set
+    # a saved canonical payload round-trips unchanged (share_config path)
+    assert forward.canonical_params(cp)["wo_mols"] == cp["wo_mols"]
+    # (b) cache keys
+    k_all = forward.params_key(_p())
+    k_none = forward.params_key(_p(wo_mols=[]))
+    k_sub = forward.params_key(_p(wo_mols=["H2O"]))
+    assert len({k_all, k_none, k_sub}) == 3
+    assert forward.params_key(_p(wo_mols=forward.MOLECULES)) == k_all
+    # (c) progress stages mirror the solve sequence
+    for kw, n_wo_stages in ((dict(), 1), (dict(wo_mols=[]), 0),
+                            (dict(science_mode="emission",
+                                  tp_mode="guillot", Tirr=1560.0), 1),
+                            (dict(science_mode="emission", wo_mols=[],
+                                  tp_mode="guillot", Tirr=1560.0), 0)):
+        lines = []
+        advance, _fin = forward._make_progress(
+            forward.canonical_params(_p(**kw)), lambda s, _l=lines: _l.append(s))
+        while True:
+            try:
+                advance()
+            except IndexError:
+                break
+        assert sum("removed-molecule" in s for s in lines) == n_wo_stages, kw
+    # (d) consumers follow wo_mols alignment
+    from jwst_tool import detect
+    n = 8
+    order = np.arange(n)
+    model = {"wo_mols": np.array(["CO2"], dtype="U8"),
+             "depth_wo": np.arange(n, dtype=float)[None, :] * 1e-3}
+    mols = ["H2O", "CO2", "CO"]
+    got = detect._removed_spectrum(model, mols, "CO2", order)
+    assert np.array_equal(got, model["depth_wo"][0])     # NOT mols.index -> 1
+    assert detect._removed_spectrum(model, mols, None, order) is None
+    with pytest.raises(ValueError, match="wo_mols"):
+        detect._removed_spectrum(model, mols, "CO", order)   # constrain cache
+    with pytest.raises(ValueError, match="extra_mols"):
+        detect._removed_spectrum(model, mols, "HCN", order)  # not in RT set
+    with pytest.raises(KeyError):
+        detect._removed_spectrum({"depth_wo": model["depth_wo"]},
+                                 mols, "CO2", order)     # malformed payload
+
+
 def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # The key hashes every canonical parameter: if ANY default feeding the
     # reference run changes, this trips even when the pins above still pass.
-    # RE-PINNED at v31 (history: acba771e80c772a1 v30, 9b30d6d526e2a78a v29,
-    # ead8394cf913ff67 v28, ba52447cad5b40c5 v27, de55467c4a459b4e v26,
-    # f14f4d10512552ea first). v31 removed the interim "ckd" opacity mode
+    # RE-PINNED at v32 (history: c20582509e215eb0 v31, acba771e80c772a1 v30,
+    # 9b30d6d526e2a78a v29, ead8394cf913ff67 v28, ba52447cad5b40c5 v27,
+    # de55467c4a459b4e v26, f14f4d10512552ea first). v32 added the wo_mols
+    # leave-one-out set to the canonical params, rounded the default co_ratio
+    # to CO_DEFAULT (0.55), made the p_btm_bar default structure-aware, and
+    # normalized the inert nu_pts/rt_dit_res out of the exomolop-mode key.
+    # v31 removed the interim "ckd" opacity mode
     # (forward 0.8.0); the spectrum is bit-identical to v30's. v30 switched
     # the default opacity DATA to "exomolop" (published ExoMol/HITEMP
     # k-tables, H2/He broadening) from HITRAN 296 K air-broadened lines,
@@ -397,10 +489,10 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # published 4.5-4.8 -- that gap is real and open). Both need a full
     # run; SO2 also needs the pandeia backend. Full history: notes.md.
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b", tp_mode="file"))) == "c20582509e215eb0"
+        dict(planet="wasp39b", tp_mode="file"))) == "57c662c1be8b0776"
     # ... and since 2026-08-11 the bare DEFAULT run is that same atmosphere
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "c20582509e215eb0"
+        dict(planet="wasp39b"))) == "57c662c1be8b0776"
     # the sha1 pin is only meaningful re-derived from the file the run
     # actually reads -- this catches the table itself being swapped
     path = forward._shipped_tp_file("wasp39b")
@@ -614,11 +706,13 @@ def test_emission_mode_gating_star_params_and_hygiene(tmp_path):
     cp_f = forward.canonical_params(_pf(_table(tmp_path),
                                         science_mode="emission"))
     assert cp_f["science_mode"] == "emission"
-    # BOTH geometries default to the shipped column bottom (v27): measured,
-    # 7.6 bar is optically thick (tau 30-370) in every instrument window,
-    # so emission did not need its briefly-default 100 bar column
-    assert cp_f["p_btm_bar"] == forward.P_BTM_TRANSMISSION_BAR
-    assert cp_t["p_btm_bar"] == forward.P_BTM_TRANSMISSION_BAR
+    # v32: the default follows the STRUCTURE, not the geometry -- a measured
+    # table caps the column at its own bottom (7.6 bar for the shipped
+    # tables), parametric profiles get the round 10 bar. Emission needs no
+    # deeper default: measured, 7.6 bar is optically thick (tau 30-370) in
+    # every instrument window (the brief 100 bar default was retracted).
+    assert cp_f["p_btm_bar"] == forward.P_BTM_FILE_BAR
+    assert cp_t["p_btm_bar"] == forward.P_BTM_PARAMETRIC_BAR
     # a deeper column is still reachable, and still gated on the table covering
     with pytest.raises(ValueError, match="chemistry-grid bottom"):
         forward.canonical_params(_pf(_table(tmp_path),

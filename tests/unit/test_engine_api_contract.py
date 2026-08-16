@@ -47,8 +47,8 @@ EXPECTED = {
 # tool would call it and fail at run time on a user's machine instead of here.
 RT_NAMESPACE = ["transmission_depth", "transmission_depth_r", "wl_um",
                 "art_ptop_bar", "art_pbtm_bar", "p_ref_bar", "molecules"]
-EMIS_NAMESPACE = ["emission_flux", "emission_radius", "tau_bottom",
-                  "art_pbtm_bar", "p_ref_emission_bar"]
+EMIS_NAMESPACE = ["emission_flux", "emission_flux_tau", "emission_radius",
+                  "tau_bottom", "art_pbtm_bar", "p_ref_emission_bar"]
 
 
 def _skip_without_engine():

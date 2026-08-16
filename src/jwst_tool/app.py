@@ -356,9 +356,7 @@ with st.expander("Data status: what this machine has installed"
         "on demand. Console equivalent: `jwst-tool data` (add `--deep` to "
         "probe the Pandeia env's engine version).")
     st.button("Refresh data status", on_click=_bump_data_nonce,
-              key="data_refresh_btn",
-              help="The status above is cached for an hour. Refresh after "
-                   "installing data.")
+              key="data_refresh_btn")
 
 # Measured AD Fisher-row wall time (WASP-39b defaults), threaded through the
 # GUI mention below so a re-measurement updates one place. The FD companions
@@ -523,16 +521,15 @@ def _render_deferred_downloads(busy: bool = False) -> None:
         if busy:
             slot.button(
                 label, disabled=True, key=f"{key}_busy",
-                help="Available again as soon as the run finishes. "
-                     "Downloading is a page interaction, and a page "
-                     "interaction during a run cancels the run.")
+                help="Available when the run finishes; downloading during "
+                     "a run cancels it.")
         else:
             slot.download_button(label, data, file_name, mime, key=key,
                                  help=help_)
 
 
 # default target precision per parameter (DISPLAY units: dex / K / absolute C/O)
-_TARGET_DEFAULT = {"lnZ": 0.10, "dlnCO": 0.05, "lnKzz": 0.30,
+_TARGET_DEFAULT = {"lnZ": 0.10, "dlnCO": 0.10, "lnKzz": 0.30,
                    "Tirr": 50.0, "Tint": 50.0,
                    "Tint_cl": 50.0,
                    "log_kappa": 0.30, "log_gamma": 0.30,
@@ -908,9 +905,22 @@ with st.sidebar:
             _tp_opts = ["guillot", "file"]
             if _picaso_enabled:
                 _tp_opts.append("picaso_climate")
-        # Mirror canonical_params' default so GUI and API defaults agree.
+        # Mirror canonical_params' default so GUI and API defaults agree --
+        # INCLUDING the science mode (emission defaults to Guillot on every
+        # planet; the bundled tables are terminator profiles). On a science-
+        # mode switch, a widget still holding the other mode's default moves
+        # to this mode's default; an explicit user choice survives.
         _tp_default = forward._default_tp_mode(
-            {"planet": planet_key, "chem_provider": chem_provider})
+            {"planet": planet_key, "chem_provider": chem_provider,
+             "science_mode": science_mode})
+        _tp_other = forward._default_tp_mode(
+            {"planet": planet_key, "chem_provider": chem_provider,
+             "science_mode": ("transmission" if science_mode == "emission"
+                              else "emission")})
+        if st.session_state.get(K("tp_scimode_seen")) != science_mode:
+            st.session_state[K("tp_scimode_seen")] = science_mode
+            if st.session_state.get(_k("tp")) == _tp_other != _tp_default:
+                st.session_state[_k("tp")] = _tp_default
         if st.session_state.get(_k("tp")) not in _tp_opts:
             st.session_state[_k("tp")] = _tp_default
         tp_mode = st.selectbox(
@@ -945,8 +955,9 @@ with st.sidebar:
                 "T_irr (K)", 800.0, 2500.0, tirr0, 20.0, key=_k("tirr"))
             tp_kwargs["Tint"] = st.number_input(
                 "T_int (K)", 50.0, 500.0, 100.0, 25.0, key=_k("tint"))
+            # default 0.01 cm^2/g, Guillot (2010)'s canonical thermal opacity
             tp_kwargs["log_kappa"] = st.number_input(
-                "log10 kappa_IR (cm^2/g)", -4.0, 0.0, -2.3, 0.1, key=_k("lk"))
+                "log10 kappa_IR (cm^2/g)", -4.0, 0.0, -2.0, 0.1, key=_k("lk"))
             tp_kwargs["log_gamma"] = st.number_input(
                 "log10 gamma (kappa_vis/kappa_IR)", -2.0, 0.3, -1.0, 0.05,
                 key=_k("lg"))
@@ -1074,10 +1085,8 @@ with st.sidebar:
                     st.warning("Upload a table to run in file mode.")
                     tp_file_ok = False
             st.caption(
-                "Note: file mode has no temperature constraint row (a "
-                "fixed table has no temperature parameter). Constraint "
-                "forecasts assume this profile is exactly right, so the "
-                "bounds are optimistic.")
+                "File mode has no temperature parameter, so constraint "
+                "forecasts assume this profile is exact (optimistic bounds).")
 
     with st.expander("Composition"):
         if tp_mode == "picaso_climate":
@@ -1119,7 +1128,7 @@ with st.sidebar:
                 format="%.2f", key=K("met"))
             co_ratio = st.number_input(
                 "C/O (carbon/oxygen number ratio)",
-                0.10, 2.00, float(forward.CO_BASELINE), 0.05,
+                0.10, 2.00, float(forward.CO_DEFAULT), 0.05,
                 format="%.3f", key=K("co"))
 
     # Kzz and photochemistry render BEFORE the science-goal step, so the AD
@@ -1203,6 +1212,7 @@ with st.sidebar:
             use_photo = st.checkbox(
                 "Photochemistry (UV photolysis)", value=True, key=K("photo"),
                 disabled=(_jac_hint == "ad"))
+            # default 83 deg = upstream VULCAN's dayside-average zenith angle
             sl_angle_deg = st.number_input(
                 "Photolysis zenith angle (degrees)", 0.0, 89.0, 83.0, 1.0,
                 key=K("sza"), disabled=not use_photo)
@@ -1215,30 +1225,39 @@ with st.sidebar:
                 "Upwind molecular-diffusion advection (vm_mol)", value=False,
                 key=K("vmmol"), disabled=not use_moldiff)
 
-    # Opacity & line lists live in the Atmosphere step so extra_mols is a
+    # Opacity settings live in the Atmosphere step so extra_mols is a
     # live variable by step 3; all extras default ON.
-    with st.expander("Opacity & line lists (ExoJAX)"):
+    with st.expander("Opacity (ExoJAX)"):
         _base_set, _extra_set = ((forward.MOLECULES, forward.EXTRA_MOLECULES)
                                  if not _pic else
                                  (picaso_chem.PICASO_MOLECULES,
                                   picaso_chem.PICASO_EXTRA_MOLECULES))
         st.caption(
-            "The opacity always includes the base set "
-            f"**{' · '.join(_base_set)}**. The extras are "
-            f"**{' · '.join(_extra_set)}**, on by default except the two "
-            "without a published ExoMolOP table (CS2, C2H6 -- selectable, "
-            "but they need a Mie/line-by-line run). Deselect any to save "
-            "about 7 s each on a new run."
+            f"The base set **{' · '.join(_base_set)}** is always on; CS2 and "
+            "C2H6 have no published ExoMolOP k-table and need a "
+            "Mie/line-by-line run."
             + (" No SO2 here: in equilibrium, sulfur sits in H2S and "
                "OCS. Making SO2 needs the VULCAN engine." if _pic else ""))
-        # live line-list availability for the CURRENT broadening choice
-        # (widget below; via session_state, default "air")
-        _mol_status = datacheck.molecule_linelist_status(
-            list(_extra_set),
-            broadening=st.session_state.get(K("broad"), "air"))
-        _MOL_NOTE = {datacheck.OK: "opacity cached",
-                     datacheck.AUTO: "downloads on first use",
-                     datacheck.MISSING: "engine data missing"}
+        # Which data the annotations must describe depends on the opacity
+        # path this run will take, and that is DERIVED (a Mie deck forces
+        # line-by-line -- forward.default_opacity_mode). Under the default
+        # correlated-k mode the engine reads ExoMolOP k-tables and never
+        # touches a HITRAN line list, so reporting line-list status there
+        # annotated every molecule with a file the run does not open.
+        _opac_lbl = bool(st.session_state.get(K("miec"), ""))
+        if _opac_lbl:
+            _mol_status = datacheck.molecule_linelist_status(
+                list(_extra_set),
+                broadening=st.session_state.get(K("broad"), "air"))
+            _MOL_NOTE = {datacheck.OK: "line list cached",
+                         datacheck.AUTO: "downloads on first use",
+                         datacheck.MISSING: "engine data missing"}
+        else:
+            _mol_status = datacheck.exomolop_table_status(
+                [m for m in _extra_set if m not in forward._NO_EXOMOLOP_TABLE])
+            _MOL_NOTE = {datacheck.OK: "k-table ready",
+                         datacheck.AUTO: "downloads on first use",
+                         datacheck.MISSING: "k-table missing"}
         # Extras default ON (a complete detection report is worth more than a
         # faster first run) EXCEPT the species with no published ExoMolOP
         # k-table: under the default opacity_mode canonical_params refuses
@@ -1260,23 +1279,22 @@ with st.sidebar:
             1 for v in datacheck.molecule_linelist_status(
                 _h2he_mols, broadening="h2he").values() if v == datacheck.OK)
         broadening = st.selectbox(
-            "Pressure-broadening gas", ["air", "h2he"], index=0,
-            key=K("broad"),
+            "Pressure-broadening gas (line-by-line mode only)",
+            ["air", "h2he"], index=0, key=K("broad"),
             format_func=lambda b: (
                 "air (HITRAN terrestrial widths, default)"
                 if b == "air" else
                 f"H2/He blend (planetary, {_h2he_cached}/{len(_h2he_mols)} "
-                "line-list caches present)"))
+                "line-list caches present)"),
+            help="Line-width perturber, line-by-line mode only; the default "
+                 "correlated-k tables already carry H2/He broadening.")
         nu_pts = st.number_input(
             "Native spectral grid points (line-by-line mode only)",
             *forward.NU_PTS_RANGE,
             forward.NU_PTS_DEFAULT, 500, key=K("nupts"),
-            help="Wavelength sampling of the model spectrum across 1-15 µm, "
-                 "used ONLY when the opacity mode is line-by-line (that is, "
-                 "with a Mie condensate deck). There it sets model R to about "
-                 "nu_pts/2.7. Under the default correlated-k mode the "
-                 "wavelength grid comes from the published k-tables at R=1000 "
-                 "and this setting does not change the spectrum.")
+            help="Model wavelength sampling (R about nu_pts/2.7), line-by-line "
+                 "mode only; the default correlated-k grid comes from the "
+                 "published k-tables at R=1000.")
 
     with st.expander("Clouds & scattering (ExoJAX)"):
         if science_mode == "emission":
@@ -1375,8 +1393,7 @@ with st.sidebar:
             if not marginalize:
                 st.warning(
                     "Marginalization is off: every other parameter is held "
-                    "fixed. Read the bound as a best-case sensitivity, not a "
-                    "joint-fit forecast.")
+                    "fixed, so the bound is a best-case sensitivity.")
             unit = forward.PARAM_UNITS[goal_param]
             # label uses the unit when there is one (dex / K), else the bare
             # symbol -- C/O is a dimensionless number ratio
@@ -1417,9 +1434,8 @@ with st.sidebar:
                 fisher_params = sorted(set(fisher_extra) | {goal_param})
             elif goal == "constrain":
                 st.caption(
-                    "Marginalization is off (above): only the goal "
-                    "parameter is free. This is the optimistic "
-                    "conditional bound.")
+                    "Marginalization is off (above): only the goal parameter "
+                    "is free (the optimistic conditional bound).")
                 fisher_params = [goal_param]
             else:
                 fisher_params = st.multiselect(
@@ -1466,11 +1482,9 @@ with st.sidebar:
             "Instrument modes",
             options=list(ins.MODES),
             default=ins.DEFAULT_MODES, key=K("modes"),
-            help="The noise engine computes every mode once per star, so "
-                 "adding modes later is instant. Each mode is one fixed "
-                 "detector configuration (subarray and readout pattern, "
-                 "listed in the mode details table); the tool does not "
-                 "search alternative subarrays.",
+            help="One fixed detector configuration per mode (see the mode "
+                 "details table); noise is computed once per star, so adding "
+                 "modes later is instant.",
             format_func=lambda k: (f"{ins.MODES[k]['label']}  "
                                    f"({ins.MODES[k]['wl_min']:g}-"
                                    f"{ins.MODES[k]['wl_max']:g} µm)"))
@@ -1486,14 +1500,11 @@ with st.sidebar:
     with st.expander("Jitter & noise multiplier"):
         show_noise = st.checkbox(
             "Jitter", value=True, key=K("shownoise"),
-            help="Add Gaussian noise on top of the spectrum from the forward "
-                 "model: one draw per point at that point's own error bar. "
-                 "The posterior panels overlay the parameters recovered from "
-                 "this draw; the forecast numbers do not depend on it.")
+            help="One Gaussian draw per point at its own error bar, fitted "
+                 "in the posterior panels; the forecast numbers do not "
+                 "depend on the draw.")
         seed = st.number_input(
-            "Seed", 0, 9999, 0, key=K("seed"), disabled=not show_noise,
-            help="The same seed reproduces the identical draw and the "
-                 "identical recovered parameters.")
+            "Seed", 0, 9999, 0, key=K("seed"), disabled=not show_noise)
         # ONE knob for "more jitter" (maintainer, 2026-08-13). It scales the
         # NOISE MODEL, not the draw: posteriors.mock_realization deliberately
         # refuses a draw-only scale factor, because a 2x draw beside 1x error
@@ -1506,16 +1517,15 @@ with st.sidebar:
         # which stay for mode-specific tuning.
         noise_scale = st.number_input(
             "Noise multiplier", 0.5, 3.0, 1.0, 0.05, key=K("noisescale"),
-            help="Scales every mode's random noise. 1.0 is the Pandeia "
-                 "prediction as-is. Moves the error bars, the S/N, the "
-                 "forecast widths and the jitter draw together.")
+            help="Scales every mode's noise (1.0 = the Pandeia prediction): "
+                 "error bars, S/N, forecast widths and jitter draw together.")
 
     with st.expander("Timing, saturation & binning (Pandeia)"):
         t_base = st.number_input(
             f"Out-of-{_evw} baseline (hours)", 0.5, 10.0,
             float(t14), 0.1, key=_k("tbase"),
-            help="Sets how well the stellar flux is anchored. The PandExo "
-                 "convention is a baseline equal to T14.")
+            help="Out-of-event time anchoring the stellar flux; the PandExo "
+                 "convention is baseline = T14.")
         sat_limit = st.number_input(
             "Saturation limit (full-well fraction)",
             0.5, 0.95, 0.80, 0.05, key=K("sat"),
@@ -1551,9 +1561,8 @@ with st.sidebar:
             up = st.file_uploader(
                 "Two columns: wavelength (µm), floor (ppm)",
                 type=["txt", "csv", "dat"], key=K("floorfile"),
-                help="Whitespace- or comma-separated. Linearly "
-                     "interpolated to the final bin wavelengths. Endpoint "
-                     "values extend beyond the supplied range. Applied to "
+                help="Whitespace- or comma-separated; interpolated to the "
+                     "final bins with constant edge extension; applied to "
                      "every selected mode.")
             if up is not None:
                 try:
@@ -1659,31 +1668,29 @@ with st.sidebar:
         p_ref_bar = st.number_input(
             "Reference pressure for the planet radius (bar)",
             1.0e-6, 7.0, 1.0e-3, format="%.1e", key=K("pref"),
-            help="The pressure at which the planet radius and surface gravity "
-                 "above are taken to apply. A catalogue radius comes from a "
-                 "white-light transit fit, so it is the transit radius near the "
-                 "terminator photosphere, around a millibar for a hot Jupiter. "
-                 "The default 1e-3 bar reproduces the published JWST WASP-39 b "
-                 "transmission spectrum to 0.6% in median depth.")
-        # keyed PER GEOMETRY: the default differs by an order of magnitude
-        # between transmission and emission, and a widget key only takes its
-        # default on first render -- one shared key would have kept 7.6 bar
-        # after a switch to emission and refused the run for being transparent.
-        # Each geometry now remembers its own value, which is also what a user
-        # flipping back and forth expects.
+            help="Where the catalogue radius and gravity apply; the 1e-3 bar "
+                 "default is the transit photosphere and reproduces the "
+                 "published WASP-39 b depth to 0.6%.")
+        # keyed PER GEOMETRY (shipped key contract). The DEFAULT follows the
+        # structure mode -- a measured T-P table caps the honest column at its
+        # own bottom (7.6 bar for the shipped tables), parametric profiles get
+        # a round 10 bar -- and tracks that mode until the user edits the box
+        # (same seed pattern as the Kzz mode above; an untouched default must
+        # never survive a structure switch and refuse the run).
+        _pbtm_key = K(f"pbtm_{science_mode}")
+        _pbtm_default = forward.default_p_btm_bar(dict(tp_mode=tp_mode))
+        _pbtm_now = st.session_state.get(_pbtm_key)
+        if (_pbtm_now in (forward.P_BTM_FILE_BAR, forward.P_BTM_PARAMETRIC_BAR)
+                and _pbtm_now != _pbtm_default):
+            st.session_state[_pbtm_key] = _pbtm_default
         p_btm_bar = st.number_input(
             "Column bottom pressure (bar)",
             *forward.P_BTM_RANGE,
-            value=forward.default_p_btm_bar(dict(science_mode=science_mode)),
-            step=1.0, format="%.4g", key=K(f"pbtm_{science_mode}"),
-            help="How deep the chemistry and radiative-transfer column runs. "
-                 "The transit chord never probes it, so transmission stays at "
-                 "the validated 7.6 bar. An eclipse does probe it: where the "
-                 "column is not opaque at its bottom, the flux comes from an "
-                 "assumed interior blackbody rather than from the model, and "
-                 "the run stops. 100 bar is the emission default. Going "
-                 "deeper can push the profile past the modelable temperature "
-                 "range, which also stops the run.")
+            value=_pbtm_default,
+            step=1.0, format="%.4g", key=_pbtm_key,
+            help="How deep the chemistry and radiative-transfer column runs; "
+                 "an eclipse needs the bottom optically thick, and a measured "
+                 "T-P table caps it at the table's own bottom.")
         if science_mode == "emission":
             # canonical_params pins simpson in emission (no transit chord);
             # show the pinned state, not a silently ignored choice
@@ -1693,8 +1700,12 @@ with st.sidebar:
             key=K("rtint"), disabled=(science_mode == "emission"),
             format_func={"simpson": "Simpson (ExoJAX default)",
                          "trapezoid": "Trapezoid"}.get)
+        # No help= here: the Advanced RT widgets are pinned tooltip-free
+        # (test_removed_gui_prose_sections_and_tooltips_stay_gone). The
+        # label carries the one thing a user needs -- the setting is inert
+        # under the default correlated-k mode, which reads the k-tables.
         rt_dit_res = st.number_input(
-            "Line-wing (broadening) grid resolution",
+            "Line-wing (broadening) grid resolution (line-by-line mode only)",
             0.1, 1.0, 1.0, 0.1, format="%.1f", key=K("rtdit"))
 
     # Reset sits behind a confirmation step: one click must not clear a long
@@ -1735,6 +1746,10 @@ params = dict(planet=planet_key, science_mode=science_mode,
               log_kappa_cloud=log_kappa_cloud, alpha_cloud=alpha_cloud,
               mie_condensate=mie_condensate, mie_log_rg=mie_log_rg,
               mie_sigmag=mie_sigmag, mie_log_mmr=mie_log_mmr,
+              # v32: detect computes the removed-molecule spectrum for every
+              # RT molecule (None = all, so switching targets stays a cache
+              # hit); constrain reads none of them and skips the whole block
+              wo_mols=(None if goal == "detect" else []),
               extra_mols=extra_mols, **tp_kwargs)
 star = dict(teff=teff, log_g=logg, metallicity=feh, ks_mag=ks_mag)
 planet_label = (planets.PLANETS[planet_key]["label"]
@@ -1767,7 +1782,7 @@ else:
         base_min += 0.00005 * (nu_pts - forward.NU_PTS_DEFAULT)
     if yconv_cri <= 1.5e-3:          # strict convergence costs extra iterations
         base_min += 0.5
-    base_min += 0.25 * len(extra_mols)   # opa build + removed spectrum per extra
+    base_min += 0.25 * len(extra_mols)   # k-table load + one more overlap fold
 # A finer broadening grid slows the premodit opacity builds -- but ONLY in
 # line-by-line mode. Under correlated-k the k-tables carry the line opacity
 # and _build_opa is skipped entirely, so charging for it here overstated the
@@ -1802,6 +1817,19 @@ else:
     fd_min = (n_fd_comp * 4 * (_solve_min + (0.0 if _pic else 0.8))
               + n_fd_theta * 4 * _solve_min + 0.2 * n_cloud_rows)
 fd_min += _tint_min
+
+# The removed-molecule block (v32: one engine batch reusing the shared
+# correlated-k fold prefix, DETECT GOAL ONLY -- constrain reads none of these
+# spectra and skips the block). Scaling is QUADRATIC-ish in the molecule
+# count: wo spectrum i still folds molecules i..n, so the block costs about
+# n(n+3)/2 overlap folds at ~3 s each (measured 2026-08-16: 42 s at n=5,
+# both geometries, nz=100). This term sits OUTSIDE base_min on purpose: a
+# Jacobian row computes ONE spectrum, not the whole block, so _solve_min
+# must not inherit it.
+_n_wo_est = (len(_base_set) + len(extra_mols)) if goal == "detect" else 0
+_wo_min = (0.05 * _n_wo_est * (_n_wo_est + 3) / 2.0
+           * (nz / forward.NZ_DEFAULT))
+
 # Report the resolving power the run will ACTUALLY use. Under correlated-k
 # (the default) that is the k-tables' own band grid, R=1000, and nu_pts is
 # inert; the nu_pts-derived number described the line-by-line path only and
@@ -1812,7 +1840,7 @@ if _lbl_mode:
 else:
     grid_lbl = f"{nz}-layer, correlated-k R=1000"
 est = "instant (cached)" if cached else (
-    f"~{base_min + fd_min:.0f} min (local {grid_lbl} run"
+    f"~{base_min + _wo_min + fd_min:.0f} min (local {grid_lbl} run"
     + (f" + {len(fisher_params)} Jacobian rows" if fisher_params else "")
     + ")")
 
@@ -1909,12 +1937,9 @@ with st.expander("Run summary & configuration"):
             json.dumps(_share, indent=2, default=str).encode(),
             f"jwst_tool_{_slug(planet_label)}_config.json",
             "application/json", key=K("dl_config"),
-            help="The full setup of this run: the canonical model "
-                 "parameters (the same dictionary the result stores as "
-                 "provenance) plus the science goal and observation "
-                 "settings, with any uploaded tables embedded. Load it "
-                 "below -- here or on another machine -- to reproduce "
-                 "the run.")
+            help="The full setup of this run, uploaded tables included; "
+                 "load it in step 0, here or on another machine, to "
+                 "reproduce the run.")
     else:
         st.caption("Configuration download is unavailable while the "
                    "settings do not validate (see the message above).")
@@ -1963,7 +1988,7 @@ def _compute_locked():
                        expanded=True) as status:
             # prior = the same rough pre-run estimate shown next to the Run
             # button; the bar's remaining time converges to the measured pace
-            bar = _TimedBar(prior_total_s=(base_min + fd_min) * 60.0,
+            bar = _TimedBar(prior_total_s=(base_min + _wo_min + fd_min) * 60.0,
                             text="starting …")
             pfile = forward.MODEL_CACHE / f"{forward.params_key(params)}.params.json"
             forward.MODEL_CACHE.mkdir(parents=True, exist_ok=True)
@@ -2318,11 +2343,14 @@ order = np.argsort(wl)
 wl_s, d_s = wl[order], model["depth"][order] * 1e6
 _fname_base = f"jwst_tool_{_slug(meta.get('planet', 'planet'))}"
 
-# DISPLAY smoothing: at native R ~ 1500 the unresolved line forest renders
-# as one-sample spikes, so the PLOT is convolved to a constant display R
-# (>= 3x the analysis R, floor 300) with the SAME tested LSF operator the
-# science path uses (flat weight). No score touches this curve; the native
-# model stays in the "Native model (CSV)" download.
+# DISPLAY smoothing: at the model's own resolving power (R = 1000 on the
+# correlated-k band grid, ~nu_pts/2.7 line-by-line) the unresolved line
+# forest renders as one-sample spikes, so the PLOT is convolved to a
+# constant display R (>= 3x the analysis R, floor 300) with the SAME tested
+# LSF operator the science path uses (flat weight). That operator no-ops
+# when the model grid cannot resolve the kernel, so past an analysis R of
+# about 140 this is already the native curve. No score touches it; the
+# native model stays in the "Native model (CSV)" download.
 _disp_R = float(max(300, 3 * int(meta["r_bin"])))
 _disp_wl_r = np.array([float(wl_s[0]), float(wl_s[-1])])
 _disp_curve = np.array([_disp_R, _disp_R])
@@ -2336,8 +2364,9 @@ def _display_smooth(y_ppm):
 d_plot = _display_smooth(d_s)
 d_wo_s = None
 if goal_r == "detect":
-    mols = [str(x) for x in model["mols"]]
-    d_wo_s = model["depth_wo"][mols.index(meta["target"])][order] * 1e6
+    # depth_wo rows align with the model's wo_mols set, not mols (v32)
+    wo_mols_r = [str(x) for x in model["wo_mols"]]
+    d_wo_s = model["depth_wo"][wo_mols_r.index(meta["target"])][order] * 1e6
 # Mock-observation layer: one seeded N(0, sigma_i) draw per
 # bin ON TOP of the binned noiseless model, generated AFTER the forward
 # model and the noise model (posteriors.mock_realization). The LIVE widget
@@ -2597,10 +2626,7 @@ with st.expander("Add a custom mode set"):
 
         if len(_usable_keys) >= 2:
             st.button("Add preset: all usable modes", key=K("cb_add_all"),
-                      on_click=_combo_add_all_usable,
-                      help="One combination holding every usable (unsaturated) "
-                           "mode of this run -- the same mode set as the ALL "
-                           "USABLE row.")
+                      on_click=_combo_add_all_usable)
         for _i, _c in enumerate(st.session_state.get(K("combos")) or []):
             _cc1, _cc2 = st.columns([4.0, 1.0])
             _cc1.markdown(
@@ -3097,14 +3123,14 @@ with _fig_ctx.expander("Figure settings"):
     _wl_range = _axis_range(
         _wx, "Wavelength", K("sum_x"), _fig_box.warning, unit="um", step=0.1,
         positive=True,
-        help="Blank fits the wavelength span the selected modes cover. Set "
-             "both to zoom, for example 3.0 to 5.5 for G395H.")
+        help="Blank fits the selected modes' span; set both to zoom "
+             "(for example 3.0 to 5.5 for G395H).")
     _x_log = _wlg.checkbox("Log x", value=True, key=K("sum_xlog"))
     _dx, _dlg = st.columns([2.6, 0.9], vertical_alignment="bottom")
     _depth_range = _axis_range(
         _dx, "Depth", K("sum_y"), _fig_box.warning, unit="ppm", step=1.0,
-        help="Blank fits the visible data. Setting both also turns off the "
-             "automatic legend headroom, so the legend can overlap the curve.")
+        help="Blank fits the data; setting both also turns off the automatic "
+             "legend headroom.")
     _y_log = _dlg.checkbox("Log y", value=False, key=K("sum_ylog"))
     # no unit= here: forward.param_axis already carries it inside the label
     # ("[M/H] [dex]"), so passing one again reads "[M/H] [dex] min (dex)"

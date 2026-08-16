@@ -127,9 +127,12 @@ def smooth_to_native_r(wl_model: np.ndarray, y: np.ndarray,
     """Blur a native transit-depth model to the instrument's Gaussian LSF of
     resolving power R(lambda) over [band_lo, band_hi]; returns a full-length copy.
 
-    Only bites where final bins approach native R (MIRI LRS, PRISM, blue
-    SOSS); on high-R modes the kernel is unresolved by the model grid and the
-    input is returned unchanged.
+    Only bites where the MODEL grid resolves the kernel, i.e. model R >=
+    2.3548 x the smallest native R in the band (MIRI LRS and PRISM under the
+    correlated-k default's R = 1000 grid); on higher-R modes the kernel is
+    unresolved and the input is returned unchanged. SOSS and G395M were
+    resolved by the old line-by-line default at R ~ 2954 and are not now --
+    the caller discloses the skip (detect._lsf_skip_note).
 
     ``wl_r``/``r_curve`` are the native resolving-power table. ``wl_r`` MUST
     be strictly ascending and is validated: the kernel width comes from

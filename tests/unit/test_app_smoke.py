@@ -47,6 +47,8 @@ def _synthetic_out(science_mode="transmission", saturated=False,
         "wl_um": wl,
         "depth": np.full(n, 0.021) + 1e-4 * np.sin(wl),
         "mols": np.array(["H2O", "CO2", "CO", "CH4", "SO2"], dtype="U8"),
+        # depth_wo rows align with wo_mols, not mols (v32)
+        "wo_mols": np.array(["H2O", "CO2", "CO", "CH4", "SO2"], dtype="U8"),
         "depth_wo": np.tile(np.full(n, 0.0208), (5, 1)),
         "T": np.full(30, 1100.0),
         "p_bar": np.logspace(-7, 0.8, 30),
@@ -203,10 +205,10 @@ def test_deferred_downloads_are_live_outside_a_run():
 def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
     """One fresh boot, three gating behaviors.
 
-    1. Each geometry keeps its OWN column-bottom box: a Streamlit widget takes
-       its default only on first render, so one shared key would have kept
-       7.6 bar after a switch to emission and refused the run for being
-       transparent -- the exact failure the v27 release removed.
+    1. Each geometry keeps its OWN column-bottom box (shipped key contract),
+       and the DEFAULT is structure-aware (v32): W39b transmission defaults
+       to its measured table's own bottom, emission (Guillot everywhere)
+       to the round parametric default.
     2. AD under a constrain goal forces the photochemistry checkbox ON and
        disabled; switching back to detect releases it (the photo widget
        renders before the method menu, so the lock reads session state).
@@ -219,16 +221,16 @@ def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
 
     at = _run_app()
     assert not at.exception, at.exception
-    # 1. per-geometry column bottoms
+    # 1. per-geometry column bottoms, structure-aware defaults
     assert at.number_input(key="n0_pbtm_transmission").value == \
-        forward.P_BTM_TRANSMISSION_BAR
+        forward.P_BTM_FILE_BAR
     at.radio(key="n0_scimode").set_value("emission").run()
     assert not at.exception, at.exception
     assert at.number_input(key="n0_pbtm_emission").value == \
-        forward.P_BTM_EMISSION_BAR
+        forward.P_BTM_PARAMETRIC_BAR
     at.radio(key="n0_scimode").set_value("transmission").run()
     assert at.number_input(key="n0_pbtm_transmission").value == \
-        forward.P_BTM_TRANSMISSION_BAR
+        forward.P_BTM_FILE_BAR
 
     # 2. AD photo-lock
     at.radio(key="n0_goal").set_value("constrain").run()
@@ -314,7 +316,10 @@ def test_removed_gui_prose_sections_and_tooltips_stay_gone():
         w.key for w in at.get("multiselect")}
     assert "n0_conden" not in keys and "n0_settle" not in keys
     assert "n0_descape" not in keys
-    for key in ("n0_nz", "n0_yconv", "n0_rtptop", "n0_rtint", "n0_rtdit"):
+    # n0_seed joined the list in the 2026-08-16 trim (label says it all);
+    # tooltips that stay are one line of simplified technical English
+    for key in ("n0_nz", "n0_yconv", "n0_rtptop", "n0_rtint", "n0_rtdit",
+                "n0_seed"):
         found = [w for w in at.get("number_input") + at.get("selectbox")
                  if w.key == key]
         if not found:            # nz_pic under the picaso provider

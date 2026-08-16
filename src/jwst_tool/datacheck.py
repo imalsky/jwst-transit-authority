@@ -227,18 +227,25 @@ def check_engine_data(base_mols: list[str], extra_mols: list[str]) -> list[Item]
                "it): download https://hitran.org/data/CIA/main/H2-He_2011.cia "
                f"to {h2he} (the /main/ path segment is required)."))
 
+    # HITRAN line lists feed the LINE-BY-LINE opacity mode only, which since
+    # v31 runs solely under a Mie condensate deck. The default correlated-k
+    # mode reads the ExoMolOP k-tables below and never opens these files, so
+    # they are not required for a default run (they used to be listed as
+    # required, which described the pre-v30 default).
     for mol in base_mols + extra_mols:
         spec = cfg.MOLECULES.get(mol)
         if spec is None or spec["source"] != "hitran":
             continue                             # CO handled above
         p = linelist_path(mol)
-        required = mol in base_mols
         items.append(Item(
-            key=f"linelist:{mol}", label=f"{mol} HITRAN line list",
-            status=OK if p.exists() else AUTO, required=required,
+            key=f"linelist:{mol}",
+            label=f"{mol} HITRAN line list (line-by-line mode only)",
+            status=OK if p.exists() else AUTO, required=False,
             detail=_found(p) if p.exists() else f"absent: {p}",
             remedy="Downloaded automatically from hitran.org on the first "
-                   "run that uses it (~10-15 s; network required)."))
+                   "line-by-line run that uses it (~10-15 s; network "
+                   "required). The default correlated-k mode does not need "
+                   "it."))
 
     # ExoMolOP k-tables: what the DEFAULT opacity_mode ("exomolop") actually
     # reads, ~389 MB per species. Before v31 this check did not exist, so

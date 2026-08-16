@@ -243,7 +243,18 @@ def _removed_spectrum(model: dict, mols: list[str], target_mol,
             f"target molecule {target_mol!r} is not in the cached model's RT "
             f"set {mols} -- re-run the forward model with it enabled "
             "(extra_mols)")
-    index = mols.index(target_mol)
+    # v32: depth_wo rows (and the emis_*_wo certificates) align with the
+    # model's wo_mols set, not with mols. REQUIRED key: every v32 cache
+    # stores it, and pre-v32 caches are unreachable (the version is in the
+    # cache key), so a missing key means a malformed payload, not an old one.
+    wo = [str(m) for m in np.asarray(model["wo_mols"])]
+    if target_mol not in wo:
+        raise ValueError(
+            f"this cached model computed removed-molecule spectra only for "
+            f"{wo or 'no molecules'} (wo_mols), not for {target_mol!r} -- it "
+            "was a constrain-goal run. Re-run the forward model with the "
+            "detect goal (or wo_mols including the target).")
+    index = wo.index(target_mol)
     if str(model.get("science_mode", "transmission")) == "emission":
         # v27: FLUX-WEIGHTED. The min-tau form this replaces refused a target
         # whenever the column saw through ANYWHERE, and on every planet tried
@@ -387,16 +398,27 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
             # nothing. It is the more dangerous half. The model's own opacity
             # smearing then stands in for the instrument line-spread function,
             # which is a different width set by a numerical knob.
-            # R_model = nu_pts/ln(nu_max/nu_min) on the ESLOG grid; a Gaussian
-            # kernel needs R_model >= 2.3548 * R_native to be resolved at all.
-            _rn = float(np.nanmax(r_nat)) if np.isfinite(r_nat).any() else 0.0
+            # A Gaussian kernel needs R_model >= 2.3548 * R_native to be
+            # resolved at all, and the binding R_native is the SMALLEST in
+            # band (the widest kernel), matching smooth_to_native_r's test.
+            # Measure R_model from the model grid itself rather than naming a
+            # setting: the two opacity modes set it differently (correlated-k
+            # is fixed at the published k-tables' R = 1000, line-by-line
+            # scales with nu_pts), so "raise nu_pts" was advice that does
+            # nothing under the default mode (2026-08-16).
+            _rn = float(np.nanmin(r_nat)) if np.isfinite(r_nat).any() else 0.0
+            _lnw = np.log(wl_model)
+            _r_model = (1.0 / float(np.median(np.diff(_lnw)))
+                        if _lnw.size > 2 else float("nan"))
             _lsf_skip_note = (
-                f"native-R LSF is a NO-OP here: the model grid cannot resolve "
-                f"this mode's line-spread function (native R up to {_rn:.0f}, "
+                f"native-R LSF is a NO-OP here: the model spectrum's own "
+                f"resolving power (R = {_r_model:.0f}) cannot resolve this "
+                f"mode's line-spread function (native R down to {_rn:.0f}, "
                 "which needs about 2.35x that in model resolving power). The "
                 "model's own opacity sampling sets the effective width "
-                "instead -- raise nu_pts to make the instrument's LSF the "
-                "thing that blurs the spectrum.")
+                "instead. Under the default correlated-k opacity mode the "
+                "model grid is the published k-tables' band grid and cannot "
+                "be raised; the line-by-line mode's nu_pts can.")
         if depth_wo is not None:
             depth_wo = binning.smooth_to_native_r(wl_model, depth_wo, wl_r,
                                                   r_curve, b_lo, b_hi,

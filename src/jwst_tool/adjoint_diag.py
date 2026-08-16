@@ -67,6 +67,7 @@ def adjoint_key(params: dict, species: str) -> str:
                if k not in ("fisher_params", "jac_method", "nu_pts",
                             "use_rayleigh", "broadening", "cloud_on",
                             "log_kappa_cloud", "alpha_cloud", "extra_mols",
+                            "wo_mols",
                             "rt_ptop_bar", "rt_integration", "rt_dit_res",
                             "opacity_mode",
                             "mie_condensate", "mie_log_rg", "mie_sigmag",

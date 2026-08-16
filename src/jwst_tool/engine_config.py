@@ -36,7 +36,8 @@ WIDE = {
     "molecules": ["H2O", "CO2", "CO", "CH4", "SO2"],
     "nu_min": _fwd.WIDE_BAND_NU_MIN,    # 667 cm^-1 = 15 um
     "nu_max": _fwd.WIDE_BAND_NU_MAX,    # 10000 cm^-1 = 1 um (H2-H2 CIA edge)
-    "nu_pts": 8000,                     # native R ~ 2950; binned to display_R
+    "nu_pts": 8000,                     # native R ~ 2950 -- LINE-BY-LINE mode
+                                        # only; correlated-k uses the k-tables' R=1000 grid
     "art_nlayer": 60,
     "display_R": 100,
 }

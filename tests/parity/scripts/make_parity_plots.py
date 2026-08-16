@@ -8,7 +8,8 @@ These figures show the quantities that are in PARITY between this tool and
 current PandExo on the same Pandeia 2026.7 engine -- the things that match
 1:1: the selected groups, integration time, integration counts, and the
 extracted stellar flux. The depth-uncertainty difference (a noise-model
-difference, not a configuration one) is quantified in REPORT.md, not plotted.
+difference, not a configuration one) is quantified in REPORT.md and
+parity_summary.json, and explained in README.md, not plotted.
 
 The summary is RE-VALIDATED through the shared gate (parity_gate.py) before
 any figure gets current-release labels; the persisted `gate.passed` boolean

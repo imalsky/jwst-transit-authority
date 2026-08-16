@@ -158,6 +158,14 @@ derivatives and reports local Cramer-Rao lower bounds. Those are not posterior
 widths: they are local, likelihood-based approximations, and informative priors
 or external data can make a real posterior narrower.
 
+The goals cache differently (v32, the `wo_mols` canonical parameter): a detect
+run computes one removed-molecule spectrum per RT molecule in a single engine
+batch that reuses the shared correlated-k fold prefix, so switching detection
+targets is a cache hit; a constrain run reads none of those spectra and skips
+the whole block, which makes it the faster goal and gives it its own cache
+entry. Scoring a detection against a constrain-cached model stops with an
+error naming the fix.
+
 ### How the Fisher bounds are computed
 
 (This detail sat in the GUI's "How to read this table" expander until the
@@ -397,9 +405,10 @@ Five limits to keep in view:
   by the column), but that term is an isothermal-interior assumption standing in
   for everything below the grid, so the run still refuses a column that is not
   optically thick at its bottom rather than reporting the assumption as a model.
-  The emission column runs to 100 bar by default for this reason; the
-  transmission column stays at the validated 7.6 bar, which the slant chord
-  never probes. Both are the `p_btm_bar` setting.
+  The default column bottom (`p_btm_bar`) follows the structure, both
+  geometries: a measured T-P table caps the column at its own bottom (7.6 bar
+  for the shipped tables), and the parametric profiles run to 10 bar. The
+  slant chord never probes it in transmission.
 - **Emission uses one radius for the whole spectrum.** It is the radius at the
   emission anchor (0.1 bar), consistent with the gravity the same column uses.
   The correct treatment is a wavelength-dependent radius at vertical optical
@@ -409,11 +418,12 @@ Five limits to keep in view:
 - **The PICASO engine has no photochemistry**, and therefore no SO2 and no CS2.
   It is capped at C/O of 1.10 by its tables and is finite-difference only.
 
-Line-spread treatment: for modes whose analysis bins approach the native
-resolving power (PRISM, MIRI LRS, blue SOSS), the model is blurred with a
-flux-weighted Gaussian built from the tabulated R(λ), not with Pandeia's full
-wavelength-response matrix. This approximation has not yet been validated
-against mode-specific Pandeia impulse responses.
+Line-spread treatment: for modes whose native resolving power the model grid
+can resolve (PRISM and MIRI LRS under the correlated-k default), the model is
+blurred with a flux-weighted Gaussian built from the tabulated R(λ), not with
+Pandeia's full wavelength-response matrix. This approximation has not yet been
+validated against mode-specific Pandeia impulse responses. On the higher-R
+modes the blur is skipped and disclosed; see Open gaps.
 
 ExoJAX capabilities that exist upstream but are not wired here: reflected-light
 spectra, scattering emission, H-minus continuum, atomic and FeH line lists,
@@ -796,8 +806,9 @@ findings behind its design decisions, and the features deliberately deferred
   tool's RT moved to an inverse-square profile in the 2026-07-28 audit, so BOTH
   sides now integrate altitude on g(r) ~ 1/r^2 and gravity is not a difference
   between them. The archived numbers predate that change and are STALE pending a
-  rerun. Reported in tests/parity_picaso/outputs/REPORT.md; the size of the
-  envelope is exactly why the production path never mixes the two RTs.
+  rerun; the archived values are in notes.md (2026-08-16). A rerun writes
+  tests/parity_picaso/outputs/REPORT.json. The size of the envelope is
+  exactly why the production path never mixes the two RTs.
 
 ### Stated science limits (intrinsic, not bugs)
 
@@ -821,8 +832,8 @@ findings behind its design decisions, and the features deliberately deferred
   in the mean molecular weight, none in the opacity. Na/K are doubly out
   of scope (the RT native grid starts at 1 um, above both resonance
   doublets, and exojax atomic lines + Allard wing profiles are a
-  project); PH3 has no line list on disk (HITRAN room-T entry would be
-  the unblock) and would need a provider-split extras menu; TiO/VO/FeH
+  project); PH3 now HAS an ExoMolOP k-table on disk, so wiring it needs a
+  provider-split extras menu rather than new data; TiO/VO/FeH
   and H- matter only above ~1600-2000 K photospheres, which the
   ultra-hot warning already covers. N2 is spectrally inactive and
   correctly mmw-only.
@@ -885,12 +896,12 @@ findings behind its design decisions, and the features deliberately deferred
   1e-6 bar; above it the topmost layer is held constant (the sibling
   interp_map's documented edge clamp -- it logs the clamped layer count on
   every run). The provider chemistry grid spans exactly 1e-6 bar to the RUN's
-  chemistry bottom (`p_btm_bar`, 7.6 bar in transmission); the VULCAN+climate
+  chemistry bottom (`p_btm_bar`); the VULCAN+climate
   path goes through the file-mode top-clamp logging. Nothing extrapolates
-  silently. NOTE that the emission default of 100 bar is outside what any
-  cached climate profile covers inside the modelable temperature window: every
-  one of the 13 cached profiles crosses 2980 K between about 10 and 90 bar, so
-  a deep climate-mode emission run is refused, loudly, by the T-window gate.
+  silently. NOTE that a deep column is outside what any cached climate
+  profile covers inside the modelable temperature window: every one of the 13
+  cached profiles crosses 2980 K between about 10 and 90 bar, so a deep
+  (tens of bar) climate-mode run is refused, loudly, by the T-window gate.
 - **Certified domain**: v1 climate mode is certified around the WASP-39b
   configuration. Other planets / nodes / rfacv values are dynamically
   convergence-gated (the certification refuses anything unconverged,
@@ -990,7 +1001,8 @@ measured-2026-07-20 battery: within-node native parity, leave-one-node-out
 blend accuracy, lnZ FD closure, picaso-vs-vulcan spectrum sanity, and the
 climate smoke matrix (W39b x rfacv {0, 0.5, 1}, solar node, HD 189733 b,
 WASP-107 b). The native-RT CROSS-MODEL report (outside target, not a parity
-result) lives in `tests/parity_picaso/outputs/REPORT.md`.
+result) is written to `tests/parity_picaso/outputs/REPORT.json` by
+`tests/parity_picaso/scripts/run_native_rt_parity.py`.
 
 ## Chemistry config vs upstream VULCAN
 
@@ -1016,7 +1028,7 @@ flipped on 2026-07-14), condensation/settling off in both.
 | Field | Master (W39b) | Tool effective | Status |
 |---|---|---|---|
 | `atm_type` | `file` (GCM evening-terminator T-P) | `isothermal` structural + live `tp_eval` (iso/Guillot) | DELIBERATE, documented: GCM baseline removed 2026-07-13; every planet gets an explicit T-P. Tool answers differ from Tsai-2023-style runs by construction. |
-| `Kzz_prof` | `file` (GCM Kzz(z)) | `const`, GUI default 1e9 | DELIBERATE (same removal). Master's `const_Kzz=1e10` is inert there. Note the GUI default 1e9 is a choice, not Tsai's profile; slider spans 1e6-1e12. |
+| `Kzz_prof` | `file` (GCM Kzz(z)) | `const`, GUI default 1e9 | DELIBERATE (same removal). Master's `const_Kzz=1e10` is inert there. Note the GUI default 1e9 is a choice, not Tsai's profile; the input spans 1e6-1e12. |
 | `dt_max` | 1e17 (`runtime*1e-5`) | 1e11 | DELIBERATE, documented (validated state-preserving; prevents the adaptive-dt balloon; master's own uncapped value implicated in the photo-off blow-up, see VULCAN-JAX/notes.md (2026-07-15 photo-off entry)). |
 | `nz` | 150 | 100 (GUI default; 150 available) | DELIBERATE fast-tier default; use 150 + yconv 1e-3 for final numbers (documented deltas: MIRI LRS halves at 100/1e-2). |
 | `conver_ignore` | 13 heavy hydrocarbons (C2H2, C6H6, ...) | `['HC3N']` only | SETTLED 2026-07-30 (was FLAGGED "provenance unclear, review"): the 13-species list exists in NO upstream repository (the local VULCAN-master copy was contaminated with it); fetched exoclime master ships `[]`, shami vm_branch ships `['HC3N']`, and `[]` vs `['HC3N']` measured behaviorally IDENTICAL on HD189/HD209/W39b. The stricter JAX-side gate stands; nothing to adopt. |
@@ -1125,10 +1137,12 @@ notes.md, Decision records; scope and conventions live in
   has deliberately not been re-tuned: fitting a nuisance parameter to the
   answer would hide the remaining opacity error rather than fix it.
 
-* **The G395H SO2 significance has not been re-measured under 0.35.0.** It was
-  2.89 at 0.32.0. Re-running it needs the pandeia backend
-  (`JWST_TOOL_PANDEIA_PYTHON`), which was not configured where the correlated-k
-  and ExoMolOP changes were validated.
+* **The G395H SO2 significance has not been re-measured under 0.35.0-0.37.0.**
+  It was 2.89 at 0.32.0. Two later changes await the re-measure: the
+  correlated-k/ExoMolOP opacity switch (0.35.0) and the default C/O rounding
+  0.549 -> 0.55 (0.37.0, a 0.12% composition shift). Re-running it needs the
+  pandeia backend (`JWST_TOOL_PANDEIA_PYTHON`), which was not configured where
+  those changes were validated.
 
 * `app.py`'s post-run section is still one long top-level block sharing
   implicit variables; extracting pure result builders (mode performance,
@@ -1181,22 +1195,32 @@ maintainer's `vulcan_validation` bundle).
   transmission photosphere, and the quench pathway to the spectrum measures
   negligible here: CH4 contributes at most 1.8 ppm). A grey cloud deck removes
   under 10% of the excess, so aerosols are not the explanation either.
-- **The opacity grid cannot be line-core converged as built.** PreMODIT renders
-  any line narrower than a grid cell as a roughly two-cell feature, and these
-  line cores are Doppler-limited at R = 3.4e5 to 6.7e5, needing `nu_pts` around
+- **The line-by-line opacity grid cannot be line-core converged as built,
+  and that is why it is no longer the default.** PreMODIT renders any line
+  narrower than a grid cell as a roughly two-cell feature, and these line
+  cores are Doppler-limited at R = 3.4e5 to 6.7e5, needing `nu_pts` around
   1e6 and roughly 127 GB of broadening arrays. Doubling `nu_pts` from 4000 to
   8000 still moves binned R = 100 depths by 90-262 ppm plus an 83-221 ppm rms
-  shape residual. The cap was raised to 32,000 at v27 so convergence can at
-  least be measured in range; correlated-k (`exojax.opacity.ckd`) is the
-  durable answer.
-- **The line-spread-function operator is a no-op on NIRSpec G395H.** The model
-  grid at `nu_pts` 4000-8000 is coarser than that mode's LSF, so the model's own
-  opacity sampling sets the effective width instead of the instrument. v27 says
-  so in the mode's warning channel rather than staying silent; resolving it
-  needs `nu_pts` >= about 12,300.
-- **Emission is validated only as far as "it runs".** v27 deepens the emission
-  column to 100 bar and switches the solver to one that carries an interior
-  source term, which is what made emission produce a spectrum at all. The
+  shape residual. Correlated-k was the durable answer and it SHIPPED in
+  0.35.0, so this now describes only the `lbl` mode, which runs solely under
+  a Mie condensate deck. The `nu_pts` cap of 32,000 stays so convergence can
+  be measured in range there.
+- **The line-spread-function operator is a no-op on the four modes whose
+  native R the model grid cannot resolve.** A Gaussian kernel needs the model
+  to resolve it: model R >= 2.35 x the SMALLEST native R in the band. The
+  correlated-k default puts the model on the k-tables' R = 1000 band grid, so
+  the operator runs on PRISM (needs 126) and MIRI LRS (needs 99) and no-ops on
+  NIRISS SOSS (needs 1277), NIRSpec G395M (1708), G395H (4546) and G235H
+  (4417); the model's own opacity resolution sets the effective width there
+  instead of the instrument. Measured from the cached ETC dispersion curves,
+  2026-08-16. **SOSS and G395M lost the blur in the 0.35.0 switch**: the old
+  line-by-line default sat at R ~ 2954 (`nu_pts` 8000) and resolved both.
+  Every affected mode says so in its warning channel rather than staying
+  silent. Closing it needs higher-resolution k-tables, not a setting: the
+  correlated-k band grid is fixed by the published files.
+- **Emission is validated only as far as "it runs".** v27 switched the solver
+  to one that carries an interior source term, which is what made emission
+  produce a spectrum at all. The
   eclipse depths have not been scored against the three published emission
   spectra to the standard the transmission ones have.
 - **HD 189733 b transmission is under-contrasted (0.70x).** Pont+2013 is
@@ -1260,10 +1284,12 @@ maintainer's `vulcan_validation` bundle).
 - Per-pixel saturation-mask parity is compared and gated
   (`min_sat_mask_matched_pixel_frac` 0.99, `min_sat_mask_equal_frac` 1.0),
   but on one machine only, like the rest of the matrix.
-- The PICASO-native RT cross-model report
-  (tests/parity_picaso/outputs/REPORT.md) is a FAIL and its numbers are
-  STALE (they predate the inverse-square-gravity change). Rerun pending;
-  never cite it as validation.
+- The PICASO-native RT cross-model comparison is a FAIL and its numbers are
+  STALE (they predate the inverse-square-gravity change). The 2026-07-20
+  values are archived in notes.md; a rerun
+  (`tests/parity_picaso/scripts/run_native_rt_parity.py`) writes
+  `tests/parity_picaso/outputs/REPORT.json`. Rerun pending; never cite it
+  as validation.
 - The PICASO climate mode is certified around WASP-39 b only; other
   planets/nodes/rfacv values are gate-checked dynamically but have no run
   history (`tests/live/test_picaso_live.py` smoke matrix).
@@ -1278,12 +1304,16 @@ maintainer's `vulcan_validation` bundle).
   (S2-10).
 - Emission is absorption-only; Mie clouds in emission are refused, not
   approximated (S2-02). No scattering-aware emission solver is planned.
-- Room-temperature HITRAN lists and the hot-band caveat above ~2000 K;
-  swap line lists for publication-grade absolute work (S2-06).
+- Room-temperature HITRAN lists and the hot-band caveat above ~2000 K
+  apply to the LINE-BY-LINE mode only, which since 0.35.0 runs solely
+  under a Mie condensate deck. The default correlated-k mode reads the
+  published ExoMolOP tables, which are built from high-temperature line
+  lists (ExoMol / HITEMP) over 100-3400 K, so S2-06 is closed for
+  default runs.
 - Stellar contamination (spots/faculae) is not modeled (README limit).
 - ExoJAX capabilities not wired: reflected light, scattering emission,
-  correlated-k, H-minus, atomic/FeH lists, rotational broadening, GP
-  noise kernels (README).
+  H-minus, atomic/FeH lists, rotational broadening, GP noise kernels
+  (README). Correlated-k IS wired and is the default since 0.35.0.
 - UV data inherited from upstream VULCAN as-is: eps Eri 115-283 nm
   coverage, GJ 1214 zero-flux FUV runs (S2-01 addendum).
 - σ_detect is a conditional matched-template S/N and the Fisher numbers
@@ -1350,9 +1380,9 @@ sibling-repo data the forward model needs), with per-item download remedies.
   redistributed in the collaborator bundle: the manifest records source
   identifiers and checksums and recipients acquire the data from the providers.
 
-The forward model's own data (HITRAN line lists, CIA tables, CO ExoMol cache,
-stellar UV spectra) lives in the SIBLING repos (vulcan-retrieval `data/`,
-vulcan_jax package data) -- see the [Install](#install) section and
+The forward model's own data (ExoMolOP k-tables, CIA tables, HITRAN line
+lists for the line-by-line mode, CO ExoMol cache, stellar UV spectra) lives
+in the SIBLING repos (vulcan-retrieval `data/`, vulcan_jax package data) -- see the [Install](#install) section and
 `jwst-tool data`.
 
 ## Deployment
@@ -1425,6 +1455,51 @@ Known, intended differences:
 * Group-count caps: the registry's `ngroup_max` can bind before PandExo's
   optimizer does; where it binds the tool uses a shorter ramp (slightly
   higher sigma, never lower).
+
+What the comparison does and does not claim:
+
+* The two sides are independently IMPLEMENTED estimators calling the same
+  Pandeia engine on an identically pinned configuration. Only what is read
+  straight from the shared engine agrees exactly. Anything each side computes
+  on its own agrees closely but not exactly. That is a property of a
+  cross-tool test, not a defect. Forcing bit-equality would mean one tool
+  copying the other's numbers, which is not a validation.
+* The submitted configuration (subarray, readout, filter, disperser) is
+  identical by construction, and the gate fails on any drift in those four
+  recorded fields. The extraction strategy (apertures and annuli) and the
+  ecliptic/medium background are configured to match PandExo's TSO
+  conventions, but those fields are NOT captured in the artifact, so no
+  measured claim is made for them.
+* The remaining per-pixel scatter in extracted flux comes from the two tools
+  independently extracting the same 2D calculation. It is disclosed in the
+  artifact but not gated, and has not been assigned a physical cause, so
+  this gate makes NO per-pixel flux-parity claim.
+* Rows above the saturation limit are diagnostic rows, not numerical
+  estimator-validation rows.
+* **PandExo operational warnings are recorded, not adjudicated.** Under the
+  pinned RAPID readout PandExo attaches data-volume-excess warnings to the
+  NIRCam rows, because its optimizer would prefer a slower pattern. A numerical
+  parity row says the two estimators agree on that configuration. It does not
+  say the configuration is schedulable or operationally recommended.
+
+Why the sigmas still differ. This tool propagates pandeia's full extracted
+noise: correlated ramp and read noise, background, dark, IPC, and
+quantum-yield excess. PandExo's default `fml` calculation is an analytic ramp
+formula that sits within a few percent of pure photon noise in the NIR. The
+generated report quantifies both sides as a variance excess over pure photon
+counts, and that ratio accounts for the bulk of the measured squared sigma
+ratio. The gap is larger for MIRI LRS, where the deep-red background and
+detector terms dominate and the analytic formula under-represents them.
+
+What may be claimed on a passing artifact: on the fixed configurations this
+tool's registry submits, with PandExo explicitly overridden to the same
+hardware, the timing, group optimization, configuration-level saturation
+handling, and extraction of this tool match the PandExo revision named in the
+artifact's provenance table, on the supported Pandeia engine. This is not a
+test of PandExo's configuration-selection policy. Absolute sigmas are NOT
+PandExo-identical and must never be labeled as such. They are
+pandeia-extracted-noise forecasts, conservative relative to PandExo's analytic
+noise by the mode-dependent margins the report quantifies.
 
 Running it requires a conda env with `pandeia.engine==2026.7` and PandExo at
 the commit pinned by `run_parity.py`, the extracted

@@ -162,6 +162,6 @@ def test_archive_fill_feeds_canonical_params():
     assert cp["gs_cgs"] == pytest.approx(values["g"] * 100.0, rel=1e-4)
     assert cp["sflux"] == "sflux-HD189_Moses11.txt"
     teq = planets.system_teq(values["teff"], values["rstar"], values["a"])
-    expect_tirr = min(max(round(teq * 2.0 ** 0.5 / 10.0) * 10.0, 800.0),
+    expect_tirr = min(max(round(teq * 2.0 ** 0.5 / 20.0) * 20.0, 800.0),
                       2500.0)
     assert cp["Tirr"] == expect_tirr

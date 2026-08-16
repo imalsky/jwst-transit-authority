@@ -16,7 +16,9 @@ A GCM profile is never silently substituted.
 
 Resolution knobs: nz (chemistry layers; the RT grid is locked equal in
 run_model), nu_pts (native wavenumber points over 1-15 um, native
-R ~ nu_pts/2.7), yconv_cri (steady-state convergence tolerance). Defaults are
+R ~ nu_pts/2.7 -- LINE-BY-LINE mode only; the default correlated-k mode
+takes its grid from the published k-tables at R = 1000 and ignores it),
+yconv_cri (steady-state convergence tolerance). Defaults are
 the old "fast" tier; the validated ceiling is the old "high" tier
 (nz=150, nu_pts=8000, yconv 1e-3).
 
@@ -32,7 +34,7 @@ f_diurnal, use_moldiff, use_rayleigh; the power-law and Mie cloud decks
 (use_settling, diff_esc, top_flux, bot_flux); extra_mols; and the
 echo-checked RT knobs rt_ptop_bar / rt_integration / rt_dit_res.
 
-Any T-P outside the modelable premodit window [320, 2980] K is REJECTED with
+Any T-P outside the modelable opacity window [320, 2980] K is REJECTED with
 a clear error, never clipped -- same rule as the retrieval.
 
 Condensation is DETECTION-ONLY (certified S8 recipe, CONDEN_CFG). The
@@ -93,7 +95,7 @@ EXTRA_MOLECULES = ["C2H2", "C2H4", "C2H6", "CS2", "H2S", "HCN", "NH3", "OCS"]
 # exomolop.load_tables. Cross-checked against exomolop.available() by a
 # data-gated test so this set cannot rot when ExoMolOP adds a species.
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
-_VERSION = 31  # model_cache buster: bump whenever the physics or the canonical
+_VERSION = 32  # model_cache buster: bump whenever the physics or the canonical
                # key set changes. Per-version history lives in notes.md.
                # DELIBERATE (reviews keep re-finding it): the cache identity
                # is canonical params + this hand-bumped version, NOT content
@@ -112,6 +114,10 @@ _VERSION = 31  # model_cache buster: bump whenever the physics or the canonical
 # the GUI default co_ratio and display baseline; run_model cross-checks it
 # against the loaded cfg's C_H/O_H and refuses on drift.
 CO_BASELINE = 0.00295 / 0.00537   # = 0.54935, cfg C_H/O_H (Tsai 2023 10x-solar)
+# The GUI/API default co_ratio (v32): the baseline rounded onto the widgets'
+# 0.05 grid. Default runs SOLVE at this value; CO_BASELINE stays the display
+# baseline and the live-cfg cross-check constant.
+CO_DEFAULT = 0.55
 
 # FD Fisher Jacobians: every composition/structure row is a CENTRAL difference
 # of fully re-initialized, longdy-certified cold solves (the upstream-VULCAN
@@ -196,33 +202,28 @@ TP_FILE_UPLOAD = "upload"         # user-supplied table; content-addressed copy
 # cross-checks these constants against the LIVE cfg, CO_BASELINE-style.
 CHEM_P_SPAN_DYN = (0.1, 7.6e6)
 
-# The column bottom is a per-run parameter (v27), but BOTH geometries default
-# to the shipped 7.6 bar, and the reason is worth writing down because the first
-# attempt got it wrong.
+# The column bottom is a per-run parameter (v27) with STRUCTURE-AWARE defaults
+# (v32): a measured T-P table caps honest chemistry at its own bottom -- the
+# shipped tables end at 7.6 bar, and chemistry below a table's end is refused
+# (the quench-region clamp, v17) -- while the parametric profiles (Guillot /
+# isothermal) default to a round 10 bar, both geometries.
 #
-# Emission used to refuse on every planet with "min bottom tau = 0.44 < 3", and
-# the obvious reading was that the column was too shallow: deepen it until it is
-# opaque. Measured, that reading is wrong. On HD 189733 b at 7.6 bar the bottom
-# optical depth is 96.7 at 2-3 um, 30.5 across NIRSpec, 140 across MIRI LRS and
-# 370 beyond 12 um. Exactly 1.6% of the band is below 3, and all of it lies in a
-# 60 nm notch at 1.02-1.08 um -- the extreme blue edge, where the modeled
-# opacity set (molecular lines plus H2 CIA) runs out and the continuum that
-# fills that window in a real hot atmosphere (H- bound-free and free-free, the
-# Na and K wings, TiO/VO) is not modeled at all.
-#
-# So the column was never too shallow. A min() over the whole band let a sliver
-# carrying almost no planetary flux veto the entire run, and deepening the grid
-# would have bought opacity from pressure that the real planet does not get,
-# at 4x the chemistry cost and in the temperature range where the opacity tables
-# are least trustworthy. The gate is flux-weighted instead (see run_model).
+# Emission does NOT need a deeper default. It briefly defaulted to 100 bar,
+# retracted on measurement: on HD 189733 b at 7.6 bar the bottom optical depth
+# is 30-370 across the real instrument windows; the only tau < 3 sliver is a
+# 60 nm notch at 1.02-1.08 um where the modeled opacity set (lines + H2 CIA)
+# runs out and the real continuum there (H- bound-free/free-free, Na/K wings,
+# TiO/VO) is unmodeled. Deepening buys opacity the real planet does not get,
+# at 4x the chemistry cost, in the least-trusted opacity temperatures -- so
+# the tau-bottom gate is flux-weighted, not min() (see run_model).
 #
 # The RANGE stays open to 300 bar for a genuinely deep case. The ceiling is a
-# DATA limit, not a preference: every opacity here is built for T_WINDOW and the
-# shipped H2-H2 CIA table physically ends at 3000 K, so a column hotter than
-# that deeper down is refused rather than extrapolated.
-P_BTM_TRANSMISSION_BAR = CHEM_P_SPAN_DYN[1] / 1.0e6      # 7.6 bar
-P_BTM_EMISSION_BAR = P_BTM_TRANSMISSION_BAR
-P_BTM_RANGE = (P_BTM_TRANSMISSION_BAR, 300.0)
+# DATA limit, not a preference: every opacity here is built for T_WINDOW and
+# the shipped H2-H2 CIA table physically ends at 3000 K, so a column hotter
+# than that deeper down is refused rather than extrapolated.
+P_BTM_FILE_BAR = CHEM_P_SPAN_DYN[1] / 1.0e6    # 7.6 bar, the shipped tables' bottom
+P_BTM_PARAMETRIC_BAR = 10.0
+P_BTM_RANGE = (1.0, 300.0)
 # The RT column bottom sits just inside the chemistry bottom: interp_map refuses
 # an ART grid reaching below the chemistry (deep clamping would fabricate
 # chemistry). The shipped pair was 7.0 / 7.6 bar; keep that ratio at any depth.
@@ -253,12 +254,12 @@ def default_opacity_mode(params: dict) -> str:
 
 
 def default_p_btm_bar(params: dict) -> float:
-    """Chemistry-grid bottom in bar for this run. Both geometries default to
-    the shipped 7.6 bar; see the P_BTM_* block above for the measurement that
-    says emission does not need more."""
-    return (P_BTM_EMISSION_BAR
-            if str(params.get("science_mode", "transmission")) == "emission"
-            else P_BTM_TRANSMISSION_BAR)
+    """Chemistry-grid bottom (bar) for this run, both geometries: a measured
+    T-P table's own bottom in file mode (the shipped tables end at 7.6 bar,
+    and chemistry below a table's end is refused), a round 10 bar for the
+    parametric profiles. See the P_BTM_* block above."""
+    mode = str(params.get("tp_mode", _default_tp_mode(params)))
+    return P_BTM_FILE_BAR if mode == "file" else P_BTM_PARAMETRIC_BAR
 
 
 # Instrument windows the emission tau-bottom report is broken down by, so a
@@ -358,10 +359,8 @@ def _default_tp_mode(params: dict) -> str:
     EMISSION always defaults to Guillot (v27), whatever the planet ships. The
     bundled tables are TERMINATOR profiles -- WASP-39 b's is an exo-FMS GCM
     average over +/-10 deg about the eastern terminator -- and a terminator
-    profile is the wrong structure for a dayside eclipse. It is also 5 to 7
-    decades too short for the emission column (7.6 bar against the ~100 bar
-    an optically thick bottom needs). Selecting a table for emission stays
-    possible and is then the user's explicit choice.
+    profile is the wrong structure for a dayside eclipse. Selecting a table
+    for emission stays possible and is then the user's explicit choice.
     """
     if str(params.get("science_mode", "transmission")) == "emission":
         return "guillot"
@@ -483,7 +482,13 @@ YCONV_RANGE = (1.0e-4, 1.0e-2)  # steady-state convergence tolerance (1e-3 is th
                                 # validated "high" tier; below it costs runtime
                                 # but is safe -- the longdy gate rejects loudly)
 
-# Modelable temperature window (premodit table range, 20 K inset) -- reject, never clip.
+# Modelable temperature window -- reject, never clip. The numbers are the
+# PreMODIT table range with a 20 K inset, which set the limit when
+# line-by-line was the only opacity mode. Under the default correlated-k
+# mode the published ExoMolOP tables span 100-3400 K, so this window is
+# CONSERVATIVE there; it is kept as-is because nothing above 2980 K has been
+# validated (the H2-H2 CIA table also ends near 3000 K). Widening it is a
+# physics decision backed by a run, not a constant edit.
 T_WINDOW = (320.0, 2980.0)
 
 # Parameters that can be freed in the Fisher forecast, per tp_mode. "file" is
@@ -864,7 +869,7 @@ _PARAM_KEYS_READ = frozenset({
     "science_mode", "sflux", "sl_angle_deg", "star_feh", "star_logg",
     "star_teff", "tint_cl", "tio_vo", "top_flux", "tp_file", "tp_file_path",
     "tp_file_sha1", "tp_mode", "use_condense", "use_moldiff", "use_photo",
-    "use_rayleigh", "use_settling", "use_vm_mol", "yconv_cri",
+    "use_rayleigh", "use_settling", "use_vm_mol", "wo_mols", "yconv_cri",
 })
 # Output-only keys of the canonical dict itself: a SAVED canonical payload
 # round-trips through canonical_params for validation (share_config), so its
@@ -1004,8 +1009,8 @@ def canonical_params(params: dict) -> dict:
         # inside one table cell.
         "co_ratio": round(float(params.get(
             "co_ratio",
-            0.55 if tp_mode == "picaso_climate"
-            else (0.50 if provider == "picaso" else CO_BASELINE))), 6),
+            0.50 if (provider == "picaso" and tp_mode != "picaso_climate")
+            else CO_DEFAULT)), 6),
         # Kzz default follows the structure: a tabulated T-P that carries a
         # Kzz column supplies the mixing profile too; no column -> constant.
         "kzz_mode": str(params.get(
@@ -1089,8 +1094,8 @@ def canonical_params(params: dict) -> dict:
         # too much spectral contrast. 1e-3 bar is the validated default
         # (re-anchored median 21,299 ppm, 0.4% from the JWST ERS spectrum).
         "p_ref_bar": float(f"{float(params.get('p_ref_bar', 1.0e-3)):.6e}"),
-        # chemistry + RT column bottom (v27); see the P_BTM_* block at module
-        # top for why transmission and emission take different defaults
+        # chemistry + RT column bottom (v27; v32: structure-aware default --
+        # see the P_BTM_* block at module top)
         "p_btm_bar": round(p_btm_bar, 4),
         "cloud_on": bool(params.get("cloud_on", False)),
         "log_kappa_cloud": round(float(params.get("log_kappa_cloud", -1.0)), 3),
@@ -1111,6 +1116,12 @@ def canonical_params(params: dict) -> dict:
         "top_flux": _canon_bc_entries(params.get("top_flux"), kind="top"),
         "bot_flux": _canon_bc_entries(params.get("bot_flux"), kind="bot"),
         "extra_mols": sorted(str(m) for m in (params.get("extra_mols") or [])),
+        # Leave-one-out spectrum set (v32): which molecules get a removed-
+        # molecule spectrum. None = every RT molecule (the detect default);
+        # [] skips the whole block (the constrain goal reads none of them).
+        # Canonicalized to fold order below, once the RT set is validated.
+        "wo_mols": (None if params.get("wo_mols") is None
+                    else [str(m) for m in params.get("wo_mols")]),
         "fisher_params": sorted(str(p) for p in (params.get("fisher_params") or [])),
         # Jacobian method: "fd" (certified central FD, default, valid
         # everywhere) or "ad" (one warm-started jvp per row, photo-on only;
@@ -1175,6 +1186,14 @@ def canonical_params(params: dict) -> dict:
             f"rt_dit_res={cp['rt_dit_res']:g} outside [0.1, 1.0] (PreMODIT "
             "broadening-grid spacing; 1.0 = this tool's validated default, "
             "0.2 = exojax's own default)")
+    if cp["opacity_mode"] == "exomolop":
+        # Inert-knob normalization (cache hygiene, Kzz precedent): under
+        # correlated-k the wavelength grid comes from the published k-tables
+        # and PreMODIT never runs, so nu_pts and rt_dit_res cannot reach the
+        # physics -- pin them to the defaults so editing either does not force
+        # a recompute of a bit-identical spectrum. Both stay live in lbl mode.
+        cp["nu_pts"] = NU_PTS_DEFAULT
+        cp["rt_dit_res"] = 1.0
     if provider == "picaso":
         # provider-specific menu (NO SO2 anywhere in the picaso sets): the
         # detailed refusal with the sulfur explanation lives in the provider
@@ -1219,6 +1238,23 @@ def canonical_params(params: dict) -> dict:
                 "default). Drop them, or set opacity_mode='lbl' knowingly "
                 "(sampled line-by-line, measurably biased -- vulcan-forward "
                 "README, Opacity sections).")
+    # --- leave-one-out spectrum set (v32) -----------------------------------
+    # After the molecule-universe checks, so the RT set is final. Canonical
+    # form: a subset of active_molecules(cp) in fold order (deduped), which
+    # keeps the cache key and the stored depth_wo rows in one order.
+    _active = active_molecules(cp)
+    if cp["wo_mols"] is None:
+        cp["wo_mols"] = list(_active)
+    else:
+        _bad_wo = sorted(set(cp["wo_mols"]) - set(_active))
+        if _bad_wo:
+            raise ValueError(
+                f"wo_mols {_bad_wo} are not in this run's RT molecule set "
+                f"{_active}. A removed-molecule spectrum exists only for "
+                "molecules the RT actually includes; fix wo_mols or add the "
+                "molecule via extra_mols.")
+        _req = set(cp["wo_mols"])
+        cp["wo_mols"] = [m for m in _active if m in _req]
     if not 0.1 <= cp["co_ratio"] <= 2.0:
         raise ValueError(
             f"co_ratio={cp['co_ratio']} outside [0.1, 2.0] (the network was "
@@ -1644,7 +1680,9 @@ def cache_path(params: dict) -> Path:
 def load_result(params: dict):
     """Cached spectrum dict or None.
 
-    Always present: wl_um, depth, depth_wo (nmol, n_nu), mols, ymix, p_bar,
+    Always present: wl_um, depth, depth_wo (n_wo, n_nu), wo_mols (the
+    leave-one-out set depth_wo rows align with -- a subset of mols in fold
+    order, empty for a wo_mols=[] run), mols, ymix, p_bar,
     T, theta, theta_names, params_json, chem_provider, and (vulcan provider)
     the convergence certificate (conv_stages, conv_accept, conv_longdy,
     conv_gate -- EMPTY arrays under the picaso provider, which emits
@@ -1702,7 +1740,6 @@ def _make_progress(cp: dict, log):
     conditionals); weights are rough wall-clock seconds so the GUI bar moves
     honestly. advance() is called at the START of each stage.
     """
-    mols = active_molecules(cp)
     _emis = cp.get("science_mode") == "emission"
     _pic = cp.get("chem_provider") == "picaso"
     stages = []
@@ -1720,8 +1757,21 @@ def _make_progress(cp: dict, log):
         stages += [("emission model + stellar SED", 6.0)]
     stages += [("equilibrium state ready", 1.0) if _pic
                else ("solving photochemistry", 35.0)]
-    stages += [(f"full {'eclipse' if _emis else 'transmission'} spectrum", 8.0)]
-    stages += [(f"spectrum without {m}", 4.0) for m in mols]
+    # wo_mols (v32): the leave-one-out block is one engine batch, not one
+    # stage per molecule -- transmission folds it into the full-spectrum
+    # call. Cost ~ n(n+3)/2 overlap folds at ~3 s (measured: 42 s at n=5).
+    _n_wo = len(cp["wo_mols"])
+    _wo_w = 1.5 * _n_wo * (_n_wo + 3)
+    if _emis:
+        stages += [("full eclipse spectrum", 8.0)]
+        if _n_wo:
+            stages += [(f"removed-molecule spectra ({_n_wo} molecules)",
+                        _wo_w)]
+    elif _n_wo:
+        stages += [(f"full + removed-molecule spectra ({_n_wo} molecules)",
+                    8.0 + _wo_w)]
+    else:
+        stages += [("full transmission spectrum", 8.0)]
     # Jacobian rows: fd = 4 re-init build+solve cycles per composition row /
     # 4 cold solves per lnKzz/T-P row (picaso: 4 table re-evaluations, the RT
     # call dominates); Tint_cl = 4 full climate re-solves (+ chemistry);
@@ -1853,7 +1903,7 @@ def _assemble_chem(cp: dict, log, clim=None):
     profile["co_mode"] = "fixed_O"
     profile["reanchor_atom_ini"] = True   # finite-Z steps must re-anchor atom totals
     # step-size cap, validated state-preserving (retrieval case.py): prevents the
-    # adaptive-dt ballooning non-convergence at high Kzz the GUI sliders can reach
+    # adaptive-dt ballooning non-convergence at high Kzz the GUI inputs can reach
     profile["dt_max"] = 1.0e11
     rp_cm = profile["rp_cm"]
     ovr = {                              # chemistry side (applied pre-pre-loop)
@@ -1942,10 +1992,10 @@ def _assemble_chem(cp: dict, log, clim=None):
     # needs a deeper column (emission -- see the P_BTM_* block at module top)
     # overrides P_b here rather than editing the YAML, so VULCAN-JAX and
     # vulcan-retrieval keep the span they were validated on.
-    if abs(cp["p_btm_bar"] - P_BTM_TRANSMISSION_BAR) > 1e-9:
+    if abs(cp["p_btm_bar"] - P_BTM_FILE_BAR) > 1e-9:
         ovr["P_b"] = cp["p_btm_bar"] * 1.0e6
         log(f"[fwd] chemistry grid bottom {cp['p_btm_bar']:g} bar "
-            f"(cfg default {P_BTM_TRANSMISSION_BAR:g} bar), RT bottom "
+            f"(cfg default {P_BTM_FILE_BAR:g} bar), RT bottom "
             f"{cp['p_btm_bar'] * ART_PBTM_FRACTION:g} bar; "
             f"{cp['nz'] / np.log10(cp['p_btm_bar'] * 1e6 / CHEM_P_SPAN_DYN[0]):.0f} "
             "layers per decade")
@@ -2333,26 +2383,34 @@ def run_model(params: dict, log=print) -> Path:
                 _gas[int(_i)] = 0.0
         gas_mask = jnp.asarray(_gas)
 
-        def _art_profiles(y, th, drop_mol):
+        def _art_profiles(y, th):
             y_gas = y * gas_mask[None, :]
             ymix = y_gas / jnp.sum(y_gas, axis=1, keepdims=True)
             T_art = art_T(th) if T_art_override is None else T_art_override
             mmw_art = to_art_b(ymix @ chem_b.species_masses)
             vmr = {k: to_art_b(ymix[:, c]) for k, c in mol_cols.items()}
-            if drop_mol is not None:
-                vmr[drop_mol] = jnp.zeros_like(vmr[drop_mol])
             return (vmr, to_art_b(ymix[:, h2_b]), T_art, mmw_art,
                     to_art_b(ymix[:, he_b]))
 
-        def depth_fn(y, th, lnR0=0.0, drop_mol=None, cloud=None, mie=None):
+        def depth_fn(y, th, lnR0=0.0, cloud=None, mie=None, wo_mols=None):
             # cloud=/mie=None -> the baseline decks (cloud_vec/mie_vec; None
             # when that deck is off). An explicit vector overrides it -- the
             # v16 cloud and Mie Fisher rows differentiate the depth through
             # these two arguments (one deck at a time).
-            vmr, vmr_h2, T_art, mmw_art, vmr_he = _art_profiles(y, th, drop_mol)
+            # wo_mols (v32, transmission only): a list of molecules returns
+            # (depth, depth_wo) from the engine's leave-one-out batch instead
+            # of one solve per removed molecule; emission gets its batch via
+            # emis.emission_flux_tau in run_model (the tau-bottom gate needs
+            # the same optical depth, so the batch lives there).
+            vmr, vmr_h2, T_art, mmw_art, vmr_he = _art_profiles(y, th)
             cl = cloud_vec if cloud is None else cloud
             mi = mie_vec if mie is None else mie
             if emis is not None:
+                if wo_mols is not None:
+                    raise ValueError(
+                        "depth_fn(wo_mols=...) is transmission-only; emission "
+                        "removed-molecule spectra come from "
+                        "emis.emission_flux_tau (run_model owns that call).")
                 fp = emis.emission_flux(vmr, vmr_h2, T_art, mmw_art,
                                         vmr_he=vmr_he, cloud=cl, mie=mi)
                 rp_em = emis.emission_radius(T_art, mmw_art)
@@ -2360,7 +2418,8 @@ def run_model(params: dict, log=print) -> Path:
                     2.0 * jnp.asarray(lnR0))
             return rt.transmission_depth_r(
                 vmr, vmr_h2, T_art, mmw_art,
-                jnp.asarray(lnR0), vmr_he=vmr_he, cloud=cl, mie=mi)
+                jnp.asarray(lnR0), vmr_he=vmr_he, cloud=cl, mie=mi,
+                wo_mols=wo_mols)
         depth_fn._art_profiles = _art_profiles   # reused by the tau-bottom gate
         return depth_fn
 
@@ -2442,8 +2501,14 @@ def run_model(params: dict, log=print) -> Path:
     # cheap, not a wider tolerance.
     emis_tau_min = float("nan")
     _depth_norm_em0 = float("nan")
+    wo_list = list(cp["wo_mols"])
+    depth_wo = None
+    emis_tau_min_wo = np.full(len(wo_list), np.nan)
+    emis_thin_wo = np.full(len(wo_list), np.nan)
     if emis is not None:
-        _prof0 = depth_from_y._art_profiles(y_sol, th0, None)
+        t0 = time.time()
+        advance()                    # full eclipse spectrum
+        _prof0 = depth_from_y._art_profiles(y_sol, th0)
         # the SAME (R_p/R_star)^2 the baseline depth was built with, so the
         # stored Fp inverts the stored depth exactly. Recomputing it from the
         # catalogue radius would reintroduce the transit-vs-emission radius
@@ -2456,8 +2521,12 @@ def run_model(params: dict, log=print) -> Path:
             f"R_Jup at {getattr(emis, 'p_ref_emission_bar', float('nan')):g} "
             f"bar (catalogue transit radius {cp['rp_rjup']:.4f} R_Jup at "
             f"{cp['p_ref_bar']:g} bar)")
-        _tau_b = np.asarray(emis.tau_bottom(*_prof0, cloud=cloud_vec,
-                                            mie=mie_vec))
+        # ONE optical-depth build feeds the flux, the tau-bottom gate, and the
+        # stored depth (emission_flux_tau is bitwise the separate calls; the
+        # old path built the same dtau three times)
+        _fp_j, _tau_j = emis.emission_flux_tau(*_prof0, cloud=cloud_vec,
+                                               mie=mie_vec)
+        _tau_b = np.asarray(_tau_j)
         emis_tau_min = float(_tau_b.min())
         _wl_thin = float(rt.wl_um[int(np.argmin(_tau_b))])
         # FLUX-WEIGHTED, not min() over the band. The column being transparent
@@ -2469,8 +2538,7 @@ def run_model(params: dict, log=print) -> Path:
         # TiO/VO). A min() let that notch veto the whole run, and the "obvious"
         # fix of deepening the column would have bought opacity from pressure
         # that the real planet does not get, while hiding the actual limitation.
-        _fp = np.asarray(emis.emission_flux(*_prof0, cloud=cloud_vec,
-                                            mie=mie_vec))
+        _fp = np.asarray(_fp_j)
         emis_thin_frac = thin_flux_fraction(_tau_b, _fp)
         _report = _tau_bottom_breakdown(rt.wl_um, _tau_b, flux=_fp)
         if emis_thin_frac > EMIS_THIN_FLUX_FRAC:
@@ -2502,52 +2570,70 @@ def run_model(params: dict, log=print) -> Path:
                 f"{100.0 * EMIS_THIN_FLUX_FRAC:g}% tolerance, so the run "
                 "proceeds; treat those wavelengths as unmodeled.")
 
-    # --- RT: full spectrum + one spectrum per removed molecule ---------------
-    t0 = time.time()
-    advance()
-    log("[fwd] radiative transfer: full spectrum (jit compile on first call) ...")
-    depth = np.asarray(depth_from_y(y_sol, th0))
-    log(f"[fwd] full spectrum in {time.time()-t0:.0f} s")
+        # the stored depth via the exact expression depth_fn uses (bitwise);
+        # the flux is already in hand, so no separate depth solve remains
+        _rp_em = emis.emission_radius(_prof0[2], _prof0[3])
+        depth = np.asarray((_fp_j / fs_j) * (_rp_em ** 2 / _rstar_cm_sq)
+                           * jnp.exp(2.0 * jnp.asarray(0.0)))
+        log(f"[fwd] full spectrum in {time.time()-t0:.0f} s")
 
-    depth_wo = np.zeros((len(mols_active), depth.shape[0]))
-    emis_tau_min_wo = np.full(len(mols_active), np.nan)
-    emis_thin_wo = np.full(len(mols_active), np.nan)
-    for i, mol in enumerate(mols_active):
-        t1 = time.time()
+        depth_wo = np.zeros((len(wo_list), depth.shape[0]))
+        if wo_list:
+            t0 = time.time()
+            advance()
+            # ONE engine batch: each removed-molecule optical depth is built
+            # once and feeds the spectrum AND the tau-bottom certification,
+            # which must cover EVERY emission spectrum the results consume --
+            # zeroing a dominant absorber can open see-through windows that
+            # inflate the full-minus-removed contrast.
+            _, _, _fp_wo, _tau_wo = emis.emission_flux_tau(
+                *_prof0, cloud=cloud_vec, mie=mie_vec, wo_mols=wo_list)
+            for i, mol in enumerate(wo_list):
+                depth_wo[i] = np.asarray(
+                    (_fp_wo[i] / fs_j) * (_rp_em ** 2 / _rstar_cm_sq)
+                    * jnp.exp(2.0 * jnp.asarray(0.0)))
+                _tau_i = np.asarray(_tau_wo[i])
+                emis_tau_min_wo[i] = float(_tau_i.min())
+                _wl_i = float(rt.wl_um[int(np.argmin(_tau_i))])
+                # flux-weighted, same reasoning as the baseline gate above:
+                # the blue-edge notch must not refuse every molecule in turn
+                emis_thin_wo[i] = thin_flux_fraction(_tau_i,
+                                                     np.asarray(_fp_wo[i]))
+                if emis_thin_wo[i] > EMIS_THIN_FLUX_FRAC:
+                    # Per-molecule, never whole-run: a thin bottom with THIS
+                    # molecule removed makes only THIS molecule's detection
+                    # unreliable (detect refuses that target at scoring time);
+                    # the baseline spectrum and other molecules stay usable.
+                    log(f"[fwd] NOTE: emission detection of {mol} is "
+                        f"UNRELIABLE -- with it removed, "
+                        f"{100.0 * emis_thin_wo[i]:.1f}% of the emitted flux "
+                        f"comes from below tau = {EMIS_TAU_THIN:g} (min "
+                        f"{emis_tau_min_wo[i]:.2f} at {_wl_i:.2f} um); detect "
+                        "refuses this target. The spectrum and the other "
+                        "molecules are unaffected.")
+                elif emis_tau_min_wo[i] < 10.0:
+                    log(f"[fwd] WARNING: min bottom optical depth "
+                        f"{emis_tau_min_wo[i]:.1f} at {_wl_i:.2f} um (< 10) "
+                        f"with {mol} removed: its detection contrast leans on "
+                        "the deepest layers -- treat with care.")
+            log(f"[fwd] {len(wo_list)} removed-molecule spectra in "
+                f"{time.time()-t0:.0f} s")
+    else:
+        # --- RT: transmission full spectrum (+ leave-one-out batch) ----------
+        t0 = time.time()
         advance()
-        depth_wo[i] = np.asarray(depth_from_y(y_sol, th0, drop_mol=mol))
-        if emis is not None:
-            # The tau-bottom certification must cover EVERY emission spectrum
-            # the results consume, not just the baseline: zeroing a dominant
-            # absorber can open see-through windows that inflate the
-            # full-minus-removed contrast. Same thresholds as the baseline.
-            _prof_i = depth_from_y._art_profiles(y_sol, th0, mol)
-            _tau_i = np.asarray(emis.tau_bottom(*_prof_i, cloud=cloud_vec,
-                                                mie=mie_vec))
-            emis_tau_min_wo[i] = float(_tau_i.min())
-            _wl_i = float(rt.wl_um[int(np.argmin(_tau_i))])
-            # flux-weighted, same reasoning as the baseline gate above: the
-            # blue-edge notch must not refuse every molecule in turn
-            emis_thin_wo[i] = thin_flux_fraction(
-                _tau_i, emis.emission_flux(*_prof_i, cloud=cloud_vec,
-                                           mie=mie_vec))
-            if emis_thin_wo[i] > EMIS_THIN_FLUX_FRAC:
-                # Per-molecule, never whole-run: a thin bottom with THIS
-                # molecule removed makes only THIS molecule's detection
-                # unreliable (detect refuses that target at scoring time);
-                # the baseline spectrum and other molecules stay usable.
-                log(f"[fwd] NOTE: emission detection of {mol} is UNRELIABLE -- "
-                    f"with it removed, {100.0 * emis_thin_wo[i]:.1f}% of the "
-                    f"emitted flux comes from below tau = {EMIS_TAU_THIN:g} "
-                    f"(min {emis_tau_min_wo[i]:.2f} at {_wl_i:.2f} um); detect "
-                    "refuses this target. The spectrum and the other molecules "
-                    "are unaffected.")
-            elif emis_tau_min_wo[i] < 10.0:
-                log(f"[fwd] WARNING: min bottom optical depth "
-                    f"{emis_tau_min_wo[i]:.1f} at {_wl_i:.2f} um (< 10) "
-                    f"with {mol} removed: its detection contrast leans on "
-                    "the deepest layers -- treat with care.")
-        log(f"[fwd] spectrum without {mol} in {time.time()-t1:.0f} s")
+        if wo_list:
+            log("[fwd] radiative transfer: full + removed-molecule spectra ...")
+            _d_j, _d_wo_j = depth_from_y(y_sol, th0, wo_mols=wo_list)
+            depth = np.asarray(_d_j)
+            depth_wo = np.asarray(_d_wo_j)
+            log(f"[fwd] full + {len(wo_list)} removed-molecule spectra in "
+                f"{time.time()-t0:.0f} s")
+        else:
+            log("[fwd] radiative transfer: full spectrum ...")
+            depth = np.asarray(depth_from_y(y_sol, th0))
+            depth_wo = np.zeros((0, depth.shape[0]))
+            log(f"[fwd] full spectrum in {time.time()-t0:.0f} s")
 
     # Fisher Jacobian: certified FD (default) / warm-jvp AD (opt-in) -- see
     # the FD_STEPS block at module top; per-row method in jac_row_method.
@@ -2924,6 +3010,10 @@ def run_model(params: dict, log=print) -> Path:
         wl_um=np.asarray(rt.wl_um, dtype=np.float64),
         depth=depth, depth_wo=depth_wo,
         mols=np.array(mols_active, dtype="U8"),
+        # the leave-one-out set depth_wo (and the emis_*_wo certificates) are
+        # aligned with -- a subset of mols in fold order; readers must index
+        # by THIS array, never by mols (v32)
+        wo_mols=np.array(wo_list, dtype="U8"),
         ymix=ymix_np, p_bar=np.asarray(chem.p_bar),
         # THE COLUMN NAMES OF ymix. ymix is the FULL network state (89 species
         # for SNCHO), while `mols` is the much shorter RT molecule list, and
@@ -2957,7 +3047,7 @@ def run_model(params: dict, log=print) -> Path:
         # Fp derived exactly from the stored eclipse depth (lnR0 = 0 baseline)
         arrays["fp_flux"] = depth * np.asarray(fs_j) / _depth_norm_em0
         arrays["emis_tau_bottom_min"] = np.array([emis_tau_min])
-        # per-removed-molecule bottom-tau certificate (aligned with mols)
+        # per-removed-molecule bottom-tau certificate (aligned with wo_mols)
         arrays["emis_tau_bottom_min_wo"] = emis_tau_min_wo
         # v27: the FLUX-WEIGHTED certificate, which is what the gates use.
         # The min-tau arrays above are kept for provenance and for readers of

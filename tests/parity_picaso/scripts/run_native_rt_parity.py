@@ -3,7 +3,8 @@
 Offline CROSS-MODEL COMPARISON ONLY (the production path is always provider
 chemistry + ExoJax; decision 2026-07-20). Requires the native opacity DB
 (opacities/opacities/opacities_0.3_15_R15000.db) in the reference tree and
-the full tool stack. Writes tests/parity_picaso/outputs/REPORT.md and a PNG.
+the full tool stack. Writes tests/parity_picaso/outputs/REPORT.json and a
+PNG (a machine-readable artifact, not a doc -- see the writer's comment).
 
 WHAT THIS IS NOT: it is not a parity check unless every declared target below
 passes, and it does not validate absolute spectral agreement. The two codes use
@@ -161,8 +162,8 @@ def main(diagnostic: bool = False):
     # canonical_params runs under guillot here. The native/tool RT below is
     # still compared on the SAME manually-built isothermal T_ISO column
     # (p_bar + T arrays constructed directly), so the parity state is unchanged;
-    # only the canonical_params tp_mode label differs. (REPORT.md still describes
-    # the isothermal comparison state.)
+    # only the canonical_params tp_mode label differs. (REPORT.json still
+    # records the isothermal comparison state.)
     cp = forward.canonical_params(dict(
         chem_provider="picaso", tp_mode="guillot",
         met_x_solar=MET, co_ratio=CO))
@@ -273,70 +274,69 @@ def main(diagnostic: bool = False):
         ("p95 |resid| < 400 ppm", stats["p95_abs_ppm"] < 400)]
     all_pass = all(ok for _label, ok in verdicts)
 
-    # The HEADING and the claim follow the measurement, not the other way
+    # The VERDICT and the claim follow the measurement, not the other way
     # round. An artifact outside target is a cross-model discrepancy, and
     # saying "parity" on top of failing numbers is exactly what change 7 of the
     # 2026-08 handoff was written to stop.
+    #
+    # This writes REPORT.json, not a markdown doc (2026-08-16, 3-doc policy):
+    # the repo carries README.md + notes.md + CLAUDE.md and nothing else, and
+    # everything a reader needs about this comparison -- verdict, the measured
+    # envelope, and the never-cite-it-as-validation rule -- is a README.md
+    # section ("PICASO engine" + "Open gaps and accepted limitations"). Do not
+    # reintroduce a .md artifact here; put new prose in the README instead.
     if all_pass:
-        title = "# Native-PICASO RT vs tool ExoJax RT: one-state parity"
-        headline = (
-            "**VERDICT: PASS.** Every declared target below is met on this one "
-            "state, so this artifact supports a one-state numerical parity "
-            "claim between the native PICASO RT and the tool's ExoJax RT.")
+        claim = (
+            "PASS. Every declared target is met on this one state, so this "
+            "artifact supports a one-state numerical parity claim between "
+            "the native PICASO RT and the tool's ExoJax RT.")
     else:
-        title = ("# Native-PICASO RT vs tool ExoJax RT: one-state CROSS-MODEL "
-                 "DISCREPANCY")
-        headline = (
-            "**VERDICT: FAIL (outside target).** At least one declared target "
-            "below is not met. This artifact is a cross-model discrepancy "
-            "record: it does NOT validate absolute spectral agreement and must "
-            "not be described as parity, or cited as evidence that the "
-            "consumers' physics is validated against real spectra. The two "
-            "codes use different opacity sources, broadening, and "
-            "reference-radius conventions, so the disagreement does not by "
-            "itself identify a bug in either.")
+        claim = (
+            "FAIL (outside target). At least one declared target is not met. "
+            "This artifact is a cross-model discrepancy record: it does NOT "
+            "validate absolute spectral agreement and must not be described "
+            "as parity, or cited as evidence that the consumers' physics is "
+            "validated against real spectra. The two codes use different "
+            "opacity sources, broadening, and reference-radius conventions, "
+            "so the disagreement does not by itself identify a bug in "
+            "either.")
 
-    prov_rows = "\n".join(f"| {k} | {v} |" for k, v in sorted(prov.items()))
-    lines = [
-        title,
-        "",
-        headline,
-        "",
-        f"Generated {time.strftime('%Y-%m-%d %H:%M')} by "
-        "scripts/run_native_rt_parity.py. OFFLINE comparison only; the "
-        "production path is always provider chemistry + ExoJax. See the "
-        "script docstring for the method and why exact agreement is not "
-        "expected (different opacity sources + reference-radius "
-        "conventions). Gravity is NOT one of the differences: both sides "
-        "integrate altitude on an inverse-square profile.",
-        "",
-        f"State: W39b geometry, isothermal {T_ISO:.0f} K, blended "
-        f"equilibrium at {MET:g}x solar / C/O {CO:g}, absorbers "
-        f"{MOLS} on H2/He. Native DB: {db.name}.",
-        "",
-        "| metric | value |",
-        "|---|---|",
-        f"| broadband offset (removed) | {stats['offset_ppm']:+.0f} ppm |",
-        f"| median abs residual | {stats['median_abs_ppm']:.0f} ppm |",
-        f"| p95 abs residual | {stats['p95_abs_ppm']:.0f} ppm |",
-        f"| max abs residual | {stats['max_abs_ppm']:.0f} ppm |",
-        f"| bins (R={R_BIN:.0f}, {WL_MIN}-{WL_MAX} um) | {stats['n_bins']} |",
-        "",
-        "Declared targets:",
-        ""]
-    lines += [f"- {'PASS' if ok else 'OUTSIDE TARGET'}: {label}"
-              for label, ok in verdicts]
-    lines += [
-        "",
-        "## Provenance",
-        "",
-        "| key | value |",
-        "|---|---|",
-        prov_rows,
-        "",
-        "Figure: ../figs/parity_native_rt.png"]
-    (OUT_DIR / "REPORT.md").write_text("\n".join(lines) + "\n")
-    print("wrote", OUT_DIR / "REPORT.md")
+    report = {
+        "verdict": "PASS" if all_pass else "FAIL",
+        "claim": claim,
+        "generated": time.strftime("%Y-%m-%d %H:%M"),
+        "generated_by": "tests/parity_picaso/scripts/run_native_rt_parity.py",
+        "note": (
+            "OFFLINE comparison only; the production path is always provider "
+            "chemistry + ExoJax. Method and why exact agreement is not "
+            "expected: this script's docstring. Gravity is NOT one of the "
+            "differences: both sides integrate altitude on an inverse-square "
+            "profile. Scope and the standing rule: README.md."),
+        "state": {
+            "geometry": "W39b",
+            "T_iso_K": T_ISO,
+            "metallicity_x_solar": MET,
+            "co_ratio": CO,
+            "absorbers": list(MOLS),
+            "background": "H2/He",
+            "native_db": db.name,
+        },
+        "metrics_ppm": {
+            "broadband_offset_removed": round(stats["offset_ppm"], 1),
+            "median_abs_residual": round(stats["median_abs_ppm"], 1),
+            "p95_abs_residual": round(stats["p95_abs_ppm"], 1),
+            "max_abs_residual": round(stats["max_abs_ppm"], 1),
+        },
+        "binning": {"R": R_BIN, "wl_min_um": WL_MIN, "wl_max_um": WL_MAX,
+                    "n_bins": stats["n_bins"]},
+        "targets": [{"target": label, "met": bool(ok)}
+                    for label, ok in verdicts],
+        "provenance": {k: str(v) for k, v in sorted(prov.items())},
+        "figure": "../figs/parity_native_rt.png",
+    }
+    (OUT_DIR / "REPORT.json").write_text(
+        json.dumps(report, indent=2, sort_keys=False) + "\n")
+    print("wrote", OUT_DIR / "REPORT.json")
 
     if not all_pass:
         failed = [label for label, ok in verdicts if not ok]

@@ -232,4 +232,4 @@ def default_tirr(planet: dict, system: dict | None = None,
            if system is not None else planet["teq_k"])
     if str(science_mode) == "emission":
         teq *= DAYSIDE_TEQ_FACTOR
-    return min(max(round(teq * math.sqrt(2.0) / 10.0) * 10.0, 800.0), 2500.0)
+    return min(max(round(teq * math.sqrt(2.0) / 20.0) * 20.0, 800.0), 2500.0)

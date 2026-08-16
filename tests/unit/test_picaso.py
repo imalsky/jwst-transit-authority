@@ -101,7 +101,8 @@ def test_v17_to_v18_key_regression():
         "mie_log_mmr", "use_condense", "use_settling", "diff_esc",
         "top_flux", "bot_flux", "extra_mols", "fisher_params", "jac_method",
         "p_ref_bar",      # v26: the pressure where rp_rjup/gs_cgs are defined
-        "p_btm_bar",      # v27: chemistry + RT column bottom, per geometry
+        "p_btm_bar",      # v27: chemistry + RT column bottom
+        "wo_mols",        # v32: the leave-one-out spectrum set
         "version"}
 
 
@@ -262,7 +263,7 @@ def test_gui_review_fixes_orbit_co_default_and_dlnco():
                                         tp_mode="guillot"))
     assert cp2["co_ratio"] == 0.50             # mid-cell
     assert forward.canonical_params(
-        _p())["co_ratio"] == round(forward.CO_BASELINE, 6)
+        _p())["co_ratio"] == forward.CO_DEFAULT   # 0.55 (v32 default)
     # exact-node climate composition means the picaso C/O stencil always
     # straddles a table kink: dlnCO refuses at the API, never mid-run
     with pytest.raises(ValueError, match="unavailable under the PICASO"):
