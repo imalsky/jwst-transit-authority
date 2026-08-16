@@ -278,34 +278,16 @@ Each run computes a spectrum for the atmosphere you configure.
 
         """)
 
-# Static links to the committed validation tests (maintainer, 2026-08-15):
-# a beta visitor can see what has been checked without anything running here.
-with st.expander("Validation & testing"):
+# One link to the committed benchmark figures (maintainer, 2026-08-16):
+# short on purpose. A beta visitor should see that the physics was checked
+# without reading an essay; nothing here runs.
+with st.expander("Validation"):
     st.markdown(
-        """
-The physics is pinned by automated tests in the public repositories. Nothing
-runs from this page; the links show the committed tests and their measured
-results.
-
-- **Radiative transfer vs petitRADTRANS.** Transmission and eclipse emission
-  are cross-checked against petitRADTRANS 3.4.0 reading the same opacity
-  files; agreement is better than 0.1% rms and is pinned as test fixtures
-  with tolerances:
-  [test_e2e_rt_reference.py](https://github.com/imalsky/vulcan-forward/blob/main/tests/test_e2e_rt_reference.py)
-- **Absolute emission check.** An isothermal atmosphere must radiate the
-  blackbody flux π B(T) independent of its opacity; the full emission path
-  reproduces it to about 1e-15 (same test file).
-- **Chemistry vs the reference VULCAN.** The JAX solver is validated
-  species-by-species against the original VULCAN code:
-  [VULCAN-JAX validation](https://github.com/imalsky/jax-vulcan#validation)
-- **Noise vs PandExo.** Instrument configuration, ramp selection, timing and
-  extracted flux match PandExo on the same Pandeia release; the remaining
-  noise-model difference is measured and documented:
-  [parity report](https://github.com/imalsky/vulcan-jwst-tool/blob/main/tests/parity/outputs/REPORT.md)
-- **Full-chain regression.** The default WASP-39 b case re-solves against a
-  committed reference spectrum, both observation types:
-  [test_e2e_run_model.py](https://github.com/imalsky/vulcan-jwst-tool/blob/main/tests/live/test_e2e_run_model.py)
-""")
+        "The radiative transfer is checked against petitRADTRANS and a "
+        "closed-form limit, and the chemistry against the original VULCAN "
+        "code. Benchmark figures: "
+        "[vulcan-forward/validation/figures]"
+        "(https://github.com/imalsky/vulcan-forward/tree/main/validation/figures).")
 
 # ---------------------------------------------------------------------------
 # Data availability -- detected live; the display adapts to what is installed
