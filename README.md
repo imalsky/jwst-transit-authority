@@ -69,10 +69,10 @@ export JWST_TOOL_PANDEIA_PYTHON="$(conda run -n pandeia_2026_7 which python)"
 export VULCAN_FORWARD_DATA="$HOME/vulcan/forward_data"
 ```
 
-`VULCAN_FORWARD_DATA` is where the forward engine keeps its line lists and
-opacity caches (`exojax_linelists/` and `opacity_cache/` beneath it). They are
-tens of gigabytes, so they are never bundled; `jwst-tool fetch` downloads what
-it can and `jwst-tool data` reports the rest.
+`VULCAN_FORWARD_DATA` is where the forward engine keeps its line lists, opacity
+caches and k-tables (`exojax_linelists/`, `opacity_cache/` and `exomolop/`
+beneath it). They are tens of gigabytes, so they are never bundled;
+`jwst-tool fetch` downloads what it can and `jwst-tool data` reports the rest.
 
 4. Fetch the reference data:
 
@@ -83,6 +83,20 @@ jwst-tool fetch
 This downloads every dataset with a public URL, then prints the two STScI Box
 downloads it cannot script, with the exact paths to extract them to. Everything
 else fetches itself on first use.
+
+5. Fetch the ExoMolOP k-tables. They are the default opacity source for both
+   observables and are the one dataset `jwst-tool fetch` does not cover: they
+   belong to the engine, and at ~371 MiB per species the download is
+   deliberately explicit rather than automatic.
+
+```bash
+python -m vulcan_forward.fetch_exomolop --molecules H2O,CO2,CO,CH4,SO2,C2H2,C2H4,H2S,HCN,NH3,OCS
+```
+
+The first five are required; the rest are the selectable extras. Without them
+every model step stops with an error naming the missing species. CS2 and C2H6
+have no published table, so they cannot be selected under the default opacity
+mode.
 
 Run `jwst-tool data` at any time for a live status report with a remedy per item.
 

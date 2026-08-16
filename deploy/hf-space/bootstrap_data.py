@@ -29,6 +29,11 @@ MARKERS = [
     DATA / "retrieval-data" / "cm24_wasp39b",
     DATA / "retrieval-data" / "exojax_linelists",
     DATA / "retrieval-data" / "opacity_cache",
+    # The default opacity_mode ("exomolop", since _VERSION 31) reads these,
+    # so a seed without them leaves every model step failing. One real table
+    # stands for the tree, for the same reason the Pandeia markers are
+    # VERSION files: an empty directory must not count as seeded.
+    DATA / "retrieval-data" / "exomolop" / "H2O.ktable.h5",
 ]
 
 

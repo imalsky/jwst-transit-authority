@@ -37,12 +37,15 @@ fi
 # Known limit: this adds MISSING entries, it does not refresh changed files
 # inside an entry already present. Delete the entry (or the stage) to re-copy.
 # -RL: follow symlinks so the staged copy is self-contained.
-stage_tree() {                  # stage_tree <src-dir> <dst-dir> <label>
-    local src="$1" dst="$2" label="$3" entry base added=0
+stage_tree() {                  # stage_tree <src-dir> <dst-dir> <label> [skip]
+    local src="$1" dst="$2" label="$3" skip="${4:-}" entry base added=0
     mkdir -p "$dst"
     for entry in "$src"/*; do
         [ -e "$entry" ] || continue          # unmatched glob
         base="$(basename "$entry")"
+        if [ -n "$skip" ] && [ "$base" = "$skip" ]; then
+            continue                         # staged separately below
+        fi
         if [ ! -e "$dst/$base" ]; then
             echo "Staging $label/$base ..."
             cp -RL "$entry" "$dst/"
@@ -61,7 +64,41 @@ stage_tree "$ROOT/vulcan-jwst-tool/data" "$STAGE/jwst-data" jwst-data
 # checkout on the maintainer's machine; the dataset folder keeps the
 # name "retrieval-data" deliberately, because renaming it would mean
 # re-uploading gigabytes. $VULCAN_FORWARD_DATA points at it at boot.
-stage_tree "$ROOT/vulcan-retrieval/data" "$STAGE/retrieval-data" retrieval-data
+stage_tree "$ROOT/vulcan-retrieval/data" "$STAGE/retrieval-data" retrieval-data \
+    exomolop
+
+# ExoMolOP k-tables are staged SELECTIVELY (~371 MiB each): only the species
+# the planner can actually select, so the dataset repo does not carry
+# gigabytes the Space never opens. The engine's local tree holds more of them
+# than this tool has a molecule table for. The list is read from the INSTALLED
+# tool -- never copy it in here, it would rot the moment a molecule is added.
+KTABLE_SRC="$ROOT/vulcan-retrieval/data/exomolop"
+if [ -d "$KTABLE_SRC" ]; then
+    KTABLE_MOLS="$(python3 - <<'PYEOF'
+from jwst_tool import forward
+print(" ".join(m for m in forward.MOLECULES + forward.EXTRA_MOLECULES
+                if m not in forward._NO_EXOMOLOP_TABLE))
+PYEOF
+)"
+    [ -n "$KTABLE_MOLS" ] || { echo "ERROR: empty k-table molecule list" >&2; exit 1; }
+    mkdir -p "$STAGE/retrieval-data/exomolop"
+    for mol in $KTABLE_MOLS; do
+        src="$KTABLE_SRC/$mol.ktable.h5"
+        dst="$STAGE/retrieval-data/exomolop/$mol.ktable.h5"
+        if [ ! -e "$src" ]; then
+            echo "ERROR: no k-table for $mol at $src -- fetch it first:" >&2
+            echo "  python -m vulcan_forward.fetch_exomolop --molecules $mol" >&2
+            exit 1
+        fi
+        # Hardlink (instant, no extra disk); the tables are immutable products.
+        [ -e "$dst" ] || ln "$src" "$dst" 2>/dev/null || cp -c "$src" "$dst"
+    done
+    cp -f "$KTABLE_SRC/provenance.json" "$STAGE/retrieval-data/exomolop/"
+    echo "exomolop: staged $(echo "$KTABLE_MOLS" | wc -w | tr -d ' ') tables."
+else
+    echo "NOTE: no exomolop/ tree at $KTABLE_SRC -- skipping the k-tables."
+    echo "      The Space's default opacity_mode will stop with an error."
+fi
 
 # PICASO reference tree (v18.1): OPTIONAL science data for the PICASO
 # provider + climate mode -- staged from JWST_TOOL_PICASO_REFDATA when set

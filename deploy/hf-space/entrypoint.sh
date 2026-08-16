@@ -25,6 +25,14 @@ export HOME="$STATE/home"
 mkdir -p "$STATE/numba_cache"
 export NUMBA_CACHE_DIR="$STATE/numba_cache"
 
+# The ExoMolOP k-tables are read straight off the read-only dataset mount
+# (see the exomolop block below). HDF5 >= 1.10 takes an advisory lock even on
+# a read-only open, and a mount that does not implement locking answers with
+# "unable to lock file", which would fail every model build. Nothing in this
+# container ever WRITES an HDF5 file, so turning the lock off is safe here and
+# is the documented override for exactly this case.
+export HDF5_USE_FILE_LOCKING=FALSE
+
 if [ -d /srv/hub-data/jwst-data ]; then
     echo "[entrypoint] dataset volume found at /srv/hub-data (no download)"
     # jwst-data is a pure READ consumer (cdbs/refdata/PSFs/mie): serve it
@@ -38,10 +46,31 @@ if [ -d /srv/hub-data/jwst-data ]; then
     # live-updates as commits land).
     echo "[entrypoint] syncing retrieval-data to writable storage ..."
     mkdir -p "$STATE/retrieval-data"
-    cp -au /srv/hub-data/retrieval-data/. "$STATE/retrieval-data/"
-    # cp -a preserves the mount's read-only modes -- restore owner-write
-    # (radis mkdirs its tempdir inside exojax_linelists at import).
-    chmod -R u+wX "$STATE/retrieval-data"
+    for entry in /srv/hub-data/retrieval-data/*; do
+        [ -e "$entry" ] || continue          # unmatched glob
+        name="$(basename "$entry")"
+        if [ "$name" = "exomolop" ]; then continue; fi
+        cp -au "$entry" "$STATE/retrieval-data/"
+        # cp -a preserves the mount's read-only modes -- restore owner-write
+        # (radis mkdirs its tempdir inside exojax_linelists at import).
+        chmod -R u+wX "$STATE/retrieval-data/$name"
+    done
+    # The ExoMolOP k-tables are the one tree that is NOT copied: 4.3 GB of
+    # pure-read HDF5 (h5py opens them "r"; nothing in the engine writes
+    # there), so they are symlinked straight off the read-only mount.
+    # Copying them would pay for the same bytes twice -- once in the dataset
+    # repo, once in the bucket -- and add minutes to every cold boot.
+    if [ -d /srv/hub-data/retrieval-data/exomolop ]; then
+        rm -rf "$STATE/retrieval-data/exomolop"   # drop an older boot's copy
+        ln -s /srv/hub-data/retrieval-data/exomolop \
+              "$STATE/retrieval-data/exomolop"
+        echo "[entrypoint] exomolop k-tables served from the read-only mount"
+    else
+        echo "[entrypoint] WARNING: no exomolop/ in the dataset volume --" \
+             "the default opacity_mode has no tables and every model step" \
+             "will stop with an error (upload them: deploy/hf-space/" \
+             "upload_data.sh, or see 'jwst-tool data')"
+    fi
     # The forward engine takes its data root from the environment now, so no
     # symlink into a checkout is needed (the dataset folder keeps its name --
     # renaming it would mean re-uploading gigabytes).
