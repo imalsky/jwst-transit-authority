@@ -11,8 +11,9 @@ import numpy as np
 import pytest
 
 matplotlib.use("Agg", force=True)
+import matplotlib.pyplot as plt      # noqa: E402
 
-from jwst_tool import summary_figure
+from jwst_tool import summary_figure  # noqa: E402
 
 
 def _spectrum(n=60, with_points=True):
@@ -56,7 +57,6 @@ def test_forecast_panel_xlim_is_used_verbatim():
     controls are typed min/max numbers now, so the panel window is an absolute
     pair in the parameter's own units, not a width.)
     """
-    import matplotlib.pyplot as plt
     mu, sigma = 1.0, 0.1
     fig = summary_figure.compose_summary_figure(
         _spectrum(with_points=False),
@@ -75,7 +75,6 @@ def test_forecast_panel_xlim_is_used_verbatim():
 
 def test_absent_panel_xlims_keep_the_automatic_window():
     """None, [] and a short list must all leave the panel automatic."""
-    import matplotlib.pyplot as plt
     figs = [summary_figure.compose_summary_figure(
         _spectrum(with_points=False), posterior_panels=[_panel_sized()],
         panel_xlims=x) for x in (None, [], [None])]
@@ -92,7 +91,6 @@ def test_explicit_depth_range_is_used_verbatim():
     headroom, which the auto-fit path adds and this path deliberately does
     not (summary_figure._plot_spectrum). The GUI exposes this, so a silent
     inflation would mean the user's typed bounds did not appear."""
-    import matplotlib.pyplot as plt
     spec = _spectrum()                      # WITH points, so a legend is drawn
     spec["depth_range"] = (20500.0, 21500.0)
     fig = summary_figure.compose_summary_figure(spec)
@@ -109,14 +107,14 @@ def test_full_figure_composes_and_exports_png_and_pdf():
         footnote="Linearized Fisher (Cramer-Rao) forecast; not a sampled "
                  "posterior.")
     try:
-        for fmt in ("png", "pdf"):
+        for fmt, magic in (("png", b"\x89PNG"), ("pdf", b"%PDF")):
             buf = io.BytesIO()
             fig.savefig(buf, format=fmt)
             assert buf.getbuffer().nbytes > 1000, fmt
+            assert buf.getvalue()[:4] == magic, fmt
         # 1 spectrum + 2 posterior panels
         assert len(fig.axes) == 3
     finally:
-        import matplotlib.pyplot as plt
         plt.close(fig)
 
 
@@ -127,7 +125,6 @@ def test_minimal_figure_spectrum_only():
         fig.savefig(buf, format="png")
         assert buf.getbuffer().nbytes > 1000
     finally:
-        import matplotlib.pyplot as plt
         plt.close(fig)
 
 
@@ -141,7 +138,6 @@ def test_unconstrained_panel_renders_note_without_curve():
         texts = [t.get_text() for ax in fig.axes for t in ax.texts]
         assert any("unconstrained" in t for t in texts)
     finally:
-        import matplotlib.pyplot as plt
         plt.close(fig)
 
 
@@ -150,7 +146,6 @@ def test_inputs_are_never_mutated():
     wl_before = spec["wl_um"].copy()
     d_before = spec["depth_ppm"].copy()
     fig = summary_figure.compose_summary_figure(spec)
-    import matplotlib.pyplot as plt
     plt.close(fig)
     assert np.array_equal(spec["wl_um"], wl_before)
     assert np.array_equal(spec["depth_ppm"], d_before)

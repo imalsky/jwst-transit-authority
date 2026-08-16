@@ -9,7 +9,7 @@ mode_forecast identity, and the saturated-mode exclusion policy (same as the
 import numpy as np
 import pytest
 
-from jwst_tool import fisher, posteriors
+from jwst_tool import fisher, instruments, posteriors
 
 
 def _result(seed=0, n_free=2, n_bins=40, saturated=False):
@@ -157,8 +157,7 @@ def test_list_of_results_uses_combined_forecast():
 # --- named combinations ------------------------------------------------------
 
 def _registry_keys(n):
-    from jwst_tool import instruments as ins
-    return list(ins.MODES)[:n]
+    return list(instruments.MODES)[:n]
 
 
 def test_single_mode_combo_equals_mode_forecast():
@@ -447,8 +446,6 @@ def test_mock_realization_records_seed_scheme_provenance():
     """The mock record carries the seed-scheme version and numpy version
     (archival reproducibility: default_rng bitstreams are not contractually
     version-stable)."""
-    import numpy as np
-    from jwst_tool import posteriors
     r = _result(seed=1)
     r["mode_key"] = "nirspec_g395h"
     r["depth"] = np.full(40, 0.021)
@@ -462,8 +459,6 @@ def test_mode_stream_crc_collision_refused_and_registry_clean():
     """A crc32 collision between mode keys would silently share noise
     draws; the guard refuses it, and today's registry has none."""
     import zlib
-    import pytest
-    from jwst_tool import posteriors, instruments
     # today's registry is collision-free
     posteriors._assert_mode_streams_distinct(instruments.MODES.keys())
     # a genuine crc32 collision is refused loudly (classic colliding pair)
@@ -480,8 +475,6 @@ def test_mock_draw_uses_the_same_sigma_as_the_reported_error_bars():
     the dots without moving the forecast was removed in 0.29.4 -- this pins
     the invariant so it cannot come back silently."""
     import inspect
-    import numpy as np
-    from jwst_tool import posteriors
 
     # the API must not accept a scale/multiplier on the draw
     params = set(inspect.signature(posteriors.mock_realization).parameters)

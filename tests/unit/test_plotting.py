@@ -72,6 +72,20 @@ def _summary_fig(n_points: int = 3, with_sigma: bool = False):
         footnote="one seeded realization")
 
 
+def _vertices_inside(ax, bbox):
+    """Count plotted line vertices whose display coordinates fall in bbox
+    (the legend-covers-no-data invariant both legend tests assert)."""
+    n = 0
+    for ln in ax.get_lines():
+        xd, yd = ln.get_data()
+        if len(xd) < 2:
+            continue
+        pix = ax.transData.transform(np.column_stack([xd, yd]))
+        n += int(((pix[:, 0] >= bbox.x0) & (pix[:, 0] <= bbox.x1)
+                  & (pix[:, 1] >= bbox.y0) & (pix[:, 1] <= bbox.y1)).sum())
+    return n
+
+
 def _visible_major_label_bboxes(ax, renderer):
     out = {}
     for axis in (ax.xaxis, ax.yaxis):
@@ -310,11 +324,9 @@ def test_major_tick_labels_never_overlap(which):
         if which == "tp":
             fig, _ = plotting.build_tp_figure(p, T)
         elif which == "vmr":
-            _, ylim = plotting.build_tp_figure(p, T)
-            plt.close("all")
-            fig, ylim2 = plotting.build_tp_figure(p, T)
-            plt.close(fig)
-            fig = plotting.build_vmr_figure(p, _vmr_cols(p), ylim=ylim2)
+            tp_fig, ylim = plotting.build_tp_figure(p, T)
+            plt.close(tp_fig)
+            fig = plotting.build_vmr_figure(p, _vmr_cols(p), ylim=ylim)
         else:
             fig = _summary_fig()
         fig.canvas.draw()
@@ -330,35 +342,18 @@ def test_major_tick_labels_never_overlap(which):
     assert not bad, f"overlapping tick labels on {sorted(set(bad))}"
 
 
-def test_minor_tick_labels_are_suppressed_on_log_axes():
-    """Minor decade labels would collide with the majors on a small panel."""
-    p, T = _tp()
-    g = plotting.build_vmr_figure(p, _vmr_cols(p))
-    g.canvas.draw()
-    ax = g.axes[0]
-    assert [t.get_text() for t in ax.get_xticklabels(minor=True)
-            if t.get_text()] == []
-    assert [t.get_text() for t in ax.get_yticklabels(minor=True)
-            if t.get_text()] == []
-    plt.close(g)
-
-
 # ---------------------------------------------------------------------------
 # Legends outside the axes
 # ---------------------------------------------------------------------------
 
 def test_summary_legends_sit_inside_their_axes_and_cover_no_data():
-    """Summary figure legends are INSIDE the axes (maintainer, 2026-08-13).
-
-    This SUPERSEDES the earlier outside-the-axes rule for the summary figure
-    only -- the paired T-P/mixing-ratio panels keep their external legends
-    (see test_vmr_legend_clears_the_axes_ticks_and_axis_label).
-
-    "Inside" alone is not the requirement: the reason the legends went
-    outside originally was that they landed on the data. Both panels reserve
-    headroom sized from the legend's row count and pin the legend into it, so
-    the real invariant is that no legend rectangle contains a plotted vertex.
-    Checked across 1, 3 and 6 series, since the spectrum legend grows.
+    """Summary-figure legends sit INSIDE the axes (maintainer, 2026-08-13;
+    the paired T-P/mixing-ratio panels keep external legends). "Inside"
+    alone is not the requirement -- the legends went outside originally
+    because they landed on the data -- so the real invariant is that no
+    legend rectangle contains a plotted vertex. Checked across 1, 3 and 6
+    series, since the spectrum legend grows. Full record: the CLAUDE.md
+    legend-placement bullet.
     """
     for n_pts in (1, 3, 6):
         fig = _summary_fig(n_points=n_pts)
@@ -377,17 +372,7 @@ def test_summary_legends_sit_inside_their_axes_and_cover_no_data():
                     assert (lb.x0 >= ab.x0 - 2 and lb.x1 <= ab.x1 + 2
                             and lb.y0 >= ab.y0 - 2 and lb.y1 <= ab.y1 + 2), \
                         f"legend escaped its axes (n_pts={n_pts})"
-                    covered = 0
-                    for ln in ax.get_lines():
-                        xd, yd = ln.get_data()
-                        if len(xd) < 2:
-                            continue
-                        pix = ax.transData.transform(
-                            np.column_stack([xd, yd]))
-                        covered += int(((pix[:, 0] >= lb.x0)
-                                        & (pix[:, 0] <= lb.x1)
-                                        & (pix[:, 1] >= lb.y0)
-                                        & (pix[:, 1] <= lb.y1)).sum())
+                    covered = _vertices_inside(ax, lb)
                     assert covered == 0, \
                         f"legend covers {covered} vertices (n_pts={n_pts})"
         finally:
@@ -421,7 +406,9 @@ def test_vmr_legend_clears_the_axes_ticks_and_axis_label():
 def test_log_axes_carry_no_minor_ticks(which):
     """Over 10+ decades the 8 subdecade marks per decade merge into a solid
     black band along the spine (the house style ticks all four sides), which
-    reads as a rendering artifact rather than as data."""
+    reads as a rendering artifact rather than as data. Zero minor tick
+    OBJECTS also means zero minor labels, which would collide with the
+    majors on a small panel."""
     p, T = _tp()
     fig = (plotting.build_tp_figure(p, T)[0] if which == "tp"
            else plotting.build_vmr_figure(p, _vmr_cols(p)))
@@ -464,17 +451,6 @@ def test_no_y_limit_inflation_for_legend_headroom():
     src = inspect.getsource(summary_figure)
     assert "set_ylim(_y0, _y0 + (_y1 - _y0)" not in src, \
         "y-limit headroom hack is back"
-
-
-def test_summary_figure_exports_png_and_pdf():
-    fig = _summary_fig()
-    with plotting.render_lock:
-        png, pdf = io.BytesIO(), io.BytesIO()
-        fig.savefig(png, format="png", bbox_inches="tight")
-        fig.savefig(pdf, format="pdf", bbox_inches="tight")
-    assert png.getvalue()[:4] == b"\x89PNG"
-    assert pdf.getvalue()[:4] == b"%PDF"
-    plt.close(fig)
 
 
 def test_builders_validate_their_inputs_loudly():
@@ -705,12 +681,9 @@ def test_log_depth_ticks_are_log_spaced_at_every_span():
 @pytest.mark.parametrize("n_src", [1, 2, 4, 6])
 def test_posterior_headroom_scales_with_the_legend(n_src):
     """The posterior panel's legend headroom is DERIVED from its row count,
-    not a constant.
-
-    It was a hardcoded 1.42, which only held by coincidence: the legend sits
-    upper-left while the curves peak centrally. With one curve per selected
-    series the legend grows with the selection, so the headroom has to grow
-    with it -- and CLAUDE.md documents the row-count rule for BOTH panels.
+    never a constant: a hardcoded 1.42 once held only by coincidence, and
+    the legend grows with the selection. The row-count rule for both panels
+    is documented in the CLAUDE.md legend-placement bullet.
     """
     th = np.linspace(0.6, 1.4, 200)
     palette = ["#1f4e9c", "#8c2d04", "#0f6b4f", "#6a3d9a", "#117733",
@@ -740,15 +713,7 @@ def test_posterior_headroom_scales_with_the_legend(n_src):
             assert top > 1.0 + 0.10 * n_src - 0.02, \
                 f"{n_src} sources got only {top:.2f} of headroom"
             lb = ax.get_legend().get_window_extent(renderer)
-            covered = 0
-            for ln in ax.get_lines():
-                xd, yd = ln.get_data()
-                if len(xd) < 2:
-                    continue
-                pix = ax.transData.transform(np.column_stack([xd, yd]))
-                covered += int(((pix[:, 0] >= lb.x0) & (pix[:, 0] <= lb.x1)
-                                & (pix[:, 1] >= lb.y0)
-                                & (pix[:, 1] <= lb.y1)).sum())
+            covered = _vertices_inside(ax, lb)
             assert covered == 0, \
                 f"legend covers {covered} vertices with {n_src} sources"
     finally:
@@ -821,9 +786,5 @@ def test_three_posterior_panels_render():
             assert abs(bb.width - bb.height) < 1.0, (bb.width, bb.height)
     finally:
         plt.close(fig)
-
-    with pytest.raises(ValueError, match="at most three"):
-        summary_figure.compose_summary_figure(
-            dict(wl_um=wl, depth_ppm=20000.0 + 300.0 * np.sin(wl),
-                 depth_label="d", model_label="model", points=[]),
-            posterior_panels=[dict(panel) for _ in range(4)])
+    # the four-panel refusal is pinned in
+    # test_summary_figure.py::test_validation_is_loud
