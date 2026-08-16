@@ -139,7 +139,7 @@ def test_fresh_boot_pre_run_contract():
     assert ms, "extra-molecule multiselect missing"
     # (the molecule_linelist_status contract itself is pinned in
     # test_datacheck.py; here only the annotated widget's presence matters)
-    sld = at.slider(key="n0_noisescale")
+    sld = at.number_input(key="n0_noisescale")
     assert sld.value == 1.0 and sld.label == "Noise multiplier", \
         (sld.label, sld.value)
     assert at.checkbox(key="n0_shownoise").value is True   # ON by default
@@ -657,9 +657,10 @@ def test_every_axis_control_is_a_typed_min_max_pair():
         for _end in ("min", "max"):
             _w = at.number_input(key=f"n0_{_k}_{_end}")
             assert _w.value is None, f"{_k}_{_end} should start blank"
-    # the only slider left on the page is the noise scale, a model input
-    assert {s.key for s in at.slider} <= {"n0_noisescale"}, \
-        [s.key for s in at.slider]
+    # NO sliders anywhere (maintainer, 2026-08-15): every numeric input is a
+    # typed number box, including the noise multiplier that used to be the
+    # one exception
+    assert not at.slider, [s.key for s in at.slider]
     _x = at.checkbox(key="n0_sum_xlog")
     _y = at.checkbox(key="n0_sum_ylog")
     assert _x.value is True and _x.label == "Log x", _x.label

@@ -278,6 +278,35 @@ Each run computes a spectrum for the atmosphere you configure.
 
         """)
 
+# Static links to the committed validation tests (maintainer, 2026-08-15):
+# a beta visitor can see what has been checked without anything running here.
+with st.expander("Validation & testing"):
+    st.markdown(
+        """
+The physics is pinned by automated tests in the public repositories. Nothing
+runs from this page; the links show the committed tests and their measured
+results.
+
+- **Radiative transfer vs petitRADTRANS.** Transmission and eclipse emission
+  are cross-checked against petitRADTRANS 3.4.0 reading the same opacity
+  files; agreement is better than 0.1% rms and is pinned as test fixtures
+  with tolerances:
+  [test_e2e_rt_reference.py](https://github.com/imalsky/vulcan-forward/blob/main/tests/test_e2e_rt_reference.py)
+- **Absolute emission check.** An isothermal atmosphere must radiate the
+  blackbody flux π B(T) independent of its opacity; the full emission path
+  reproduces it to about 1e-15 (same test file).
+- **Chemistry vs the reference VULCAN.** The JAX solver is validated
+  species-by-species against the original VULCAN code:
+  [VULCAN-JAX validation](https://github.com/imalsky/jax-vulcan#validation)
+- **Noise vs PandExo.** Instrument configuration, ramp selection, timing and
+  extracted flux match PandExo on the same Pandeia release; the remaining
+  noise-model difference is measured and documented:
+  [parity report](https://github.com/imalsky/vulcan-jwst-tool/blob/main/tests/parity/outputs/REPORT.md)
+- **Full-chain regression.** The default WASP-39 b case re-solves against a
+  committed reference spectrum, both observation types:
+  [test_e2e_run_model.py](https://github.com/imalsky/vulcan-jwst-tool/blob/main/tests/live/test_e2e_run_model.py)
+""")
+
 # ---------------------------------------------------------------------------
 # Data availability -- detected live; the display adapts to what is installed
 # (missing data still fails loudly at run time; this is the up-front view)
@@ -738,8 +767,13 @@ with st.sidebar:
     # _apply_pending_config(); this is the widget plus the outcome messages.
     # -----------------------------------------------------------------------
     st.markdown("### 0 · Configuration")
-    _cfg_up = st.file_uploader(
-        "Load a configuration (JSON)", type=["json"], key=K("cfg_upload"))
+    # Every step's controls sit behind an expander (maintainer, 2026-08-15),
+    # so the sidebar reads as a short list of titled sections. The
+    # load-outcome messages stay OUTSIDE the expander: a failed restore must
+    # be loud without opening anything.
+    with st.expander("Load a configuration (JSON)"):
+        _cfg_up = st.file_uploader(
+            "Configuration file", type=["json"], key=K("cfg_upload"))
     if st.session_state.get("_cfg_load_error"):
         st.error("The configuration file could not be applied: "
                  + st.session_state["_cfg_load_error"])
@@ -754,16 +788,17 @@ with st.sidebar:
     # Step 1: Target
     # -----------------------------------------------------------------------
     st.markdown("### 1 · Target")
-    planet_key = st.selectbox(
-        "Planet", list(planets.PLANETS) + ["custom"], key=K("planet"),
-        format_func=lambda k: planets.PLANETS[k]["label"] if k in planets.PLANETS
-        else "Custom planet …")
-    pdef = planets.PLANETS.get(planet_key, planets.CUSTOM_DEFAULTS)
-    science_mode = st.radio(
-        "Observation type", ["transmission", "emission"], horizontal=True,
-        key=K("scimode"),
-        format_func={"transmission": "Transmission",
-                     "emission": "Emission"}.get)
+    with st.expander("Planet & observation type", expanded=True):
+        planet_key = st.selectbox(
+            "Planet", list(planets.PLANETS) + ["custom"], key=K("planet"),
+            format_func=lambda k: planets.PLANETS[k]["label"]
+            if k in planets.PLANETS else "Custom planet …")
+        pdef = planets.PLANETS.get(planet_key, planets.CUSTOM_DEFAULTS)
+        science_mode = st.radio(
+            "Observation type", ["transmission", "emission"], horizontal=True,
+            key=K("scimode"),
+            format_func={"transmission": "Transmission",
+                         "emission": "Emission"}.get)
     # Event word for observation-facing labels: only the vocabulary changes
     # with the observation type, not the calculation.
     _evw = "eclipse" if science_mode == "emission" else "transit"
@@ -868,10 +903,11 @@ with st.sidebar:
     st.markdown("### 2 · Atmosphere")
     _picaso_enabled = forward.picaso_experimental_enabled()
     _providers = (["vulcan", "picaso"] if _picaso_enabled else ["vulcan"])
-    chem_provider = st.selectbox(
-        "Chemistry engine", _providers, index=0, key=K("provider"),
-        format_func={"vulcan": "VULCAN (photochemical kinetics)",
-                     "picaso": "PICASO (UNCERTIFIED experiment)"}.get)
+    with st.expander("Chemistry engine"):
+        chem_provider = st.selectbox(
+            "Chemistry engine", _providers, index=0, key=K("provider"),
+            format_func={"vulcan": "VULCAN (photochemical kinetics)",
+                         "picaso": "PICASO (UNCERTIFIED experiment)"}.get)
     _pic = chem_provider == "picaso"
     if _pic:
         st.session_state[K("jacm")] = "fd"   # tables are not differentiable
@@ -1323,61 +1359,62 @@ with st.sidebar:
     mol_options = forward.active_molecules(
         {"chem_provider": chem_provider, "extra_mols": extra_mols})
 
-    goal = st.radio(
-        "Goal", ["detect", "constrain"], horizontal=True, key=K("goal"),
-        format_func={"detect": "Detect a molecule",
-                     "constrain": "Constrain a parameter"}.get)
     goal_param, target_prec, marginalize = None, None, True
     do_fisher = False
-    if goal == "detect":
-        # SO2 is the flagship W39b science under VULCAN; the equilibrium
-        # provider has no SO2, so its default detection target is H2O
-        _mol_default = "SO2" if "SO2" in mol_options else "H2O"
-        target_mol = st.selectbox(
-            "Molecule to detect", mol_options,
-            index=mol_options.index(_mol_default),
-            key=K(f"mol_{chem_provider}_" + "_".join(sorted(extra_mols))))
-        target_sig = st.number_input(
-            "Target significance (σ)", 1.0, 10.0, 3.0, 0.5, key=K("tsig"))
-    else:
-        target_mol = None
-        goal_param = st.selectbox(
-            "Parameter to constrain", avail_free,
-            key=K(f"gp_{chem_provider}_{tp_mode}_{int(cloud_on)}_"
-                  f"{int(bool(mie_condensate))}"),
-            format_func=lambda n: forward.PARAM_LABELS[n])
-        marginalize = st.checkbox(
-            "Marginalize over the other parameters", value=True,
-            key=K("marg"))
-        if not marginalize:
-            st.warning(
-                "Marginalization is off: every other parameter is held "
-                "fixed. Read the bound as a best-case sensitivity, not a "
-                "joint-fit forecast.")
-        unit = forward.PARAM_UNITS[goal_param]
-        # label uses the unit when there is one (dex / K), else the bare
-        # symbol -- C/O is a dimensionless number ratio
-        _tgt_lbl = (f"Target uncertainty (±{unit})" if unit else
-                    f"Target uncertainty (±{forward.PARAM_SYMBOLS[goal_param]})")
-        if unit == "K":
-            target_prec = st.number_input(_tgt_lbl, 5.0, 500.0,
-                                          _TARGET_DEFAULT[goal_param], 5.0,
-                                          key=K(f"tgt_{goal_param}"))
+    with st.expander("Goal & target"):
+        goal = st.radio(
+            "Goal", ["detect", "constrain"], horizontal=True, key=K("goal"),
+            format_func={"detect": "Detect a molecule",
+                         "constrain": "Constrain a parameter"}.get)
+        if goal == "detect":
+            # SO2 is the flagship W39b science under VULCAN; the equilibrium
+            # provider has no SO2, so its default detection target is H2O
+            _mol_default = "SO2" if "SO2" in mol_options else "H2O"
+            target_mol = st.selectbox(
+                "Molecule to detect", mol_options,
+                index=mol_options.index(_mol_default),
+                key=K(f"mol_{chem_provider}_" + "_".join(sorted(extra_mols))))
+            target_sig = st.number_input(
+                "Target significance (σ)", 1.0, 10.0, 3.0, 0.5, key=K("tsig"))
+            do_fisher = st.checkbox(
+                "Also calculate parameter constraints", value=True,
+                key=K("dofish"))
         else:
-            target_prec = st.number_input(_tgt_lbl, 0.01, 3.0,
-                                          _TARGET_DEFAULT[goal_param], 0.01,
-                                          key=K(f"tgt_{goal_param}"))
-        target_sig = st.number_input(
-            "Report bounds at significance (σ)", 1.0, 10.0, 3.0, 0.5,
-            key=K("tsig"))
+            target_mol = None
+            goal_param = st.selectbox(
+                "Parameter to constrain", avail_free,
+                key=K(f"gp_{chem_provider}_{tp_mode}_{int(cloud_on)}_"
+                      f"{int(bool(mie_condensate))}"),
+                format_func=lambda n: forward.PARAM_LABELS[n])
+            marginalize = st.checkbox(
+                "Marginalize over the other parameters", value=True,
+                key=K("marg"))
+            if not marginalize:
+                st.warning(
+                    "Marginalization is off: every other parameter is held "
+                    "fixed. Read the bound as a best-case sensitivity, not a "
+                    "joint-fit forecast.")
+            unit = forward.PARAM_UNITS[goal_param]
+            # label uses the unit when there is one (dex / K), else the bare
+            # symbol -- C/O is a dimensionless number ratio
+            _tgt_lbl = (f"Target uncertainty (±{unit})" if unit else
+                        f"Target uncertainty "
+                        f"(±{forward.PARAM_SYMBOLS[goal_param]})")
+            if unit == "K":
+                target_prec = st.number_input(_tgt_lbl, 5.0, 500.0,
+                                              _TARGET_DEFAULT[goal_param], 5.0,
+                                              key=K(f"tgt_{goal_param}"))
+            else:
+                target_prec = st.number_input(_tgt_lbl, 0.01, 3.0,
+                                              _TARGET_DEFAULT[goal_param], 0.01,
+                                              key=K(f"tgt_{goal_param}"))
+            target_sig = st.number_input(
+                "Report bounds at significance (σ)", 1.0, 10.0, 3.0, 0.5,
+                key=K("tsig"))
 
     # Constraint settings render only when the run will compute derivatives.
     fisher_params: list = []
     jac_method = "fd"
-    if goal == "detect":
-        do_fisher = st.checkbox(
-            "Also calculate parameter constraints", value=True,
-            key=K("dofish"))
     if goal == "constrain" or do_fisher:
         with st.expander("Constraint settings", expanded=(goal == "constrain")):
             if goal == "constrain" and marginalize:
@@ -1441,20 +1478,21 @@ with st.sidebar:
     # -----------------------------------------------------------------------
     st.divider()
     st.markdown("### 4 · Observation")
-    mode_keys = st.multiselect(
-        "Instrument modes",
-        options=list(ins.MODES),
-        default=ins.DEFAULT_MODES, key=K("modes"),
-        help="The noise engine computes every mode once per star, so adding "
-             "modes later is instant. Each mode is one fixed detector "
-             "configuration (subarray and readout pattern, listed in the "
-             "mode details table); the tool does not search alternative "
-             "subarrays.",
-        format_func=lambda k: (f"{ins.MODES[k]['label']}  "
-                               f"({ins.MODES[k]['wl_min']:g}-"
-                               f"{ins.MODES[k]['wl_max']:g} µm)"))
-    n_transits = st.number_input(f"Number of {_evw}s", 1, 10, 1, 1,
-                                 key=K("ntr"))
+    with st.expander(f"Instrument modes & {_evw}s", expanded=True):
+        mode_keys = st.multiselect(
+            "Instrument modes",
+            options=list(ins.MODES),
+            default=ins.DEFAULT_MODES, key=K("modes"),
+            help="The noise engine computes every mode once per star, so "
+                 "adding modes later is instant. Each mode is one fixed "
+                 "detector configuration (subarray and readout pattern, "
+                 "listed in the mode details table); the tool does not "
+                 "search alternative subarrays.",
+            format_func=lambda k: (f"{ins.MODES[k]['label']}  "
+                                   f"({ins.MODES[k]['wl_min']:g}-"
+                                   f"{ins.MODES[k]['wl_max']:g} µm)"))
+        n_transits = st.number_input(f"Number of {_evw}s", 1, 10, 1, 1,
+                                     key=K("ntr"))
 
     # Mock-observation layer: generated AFTER the forward model and the
     # noise model (posteriors.mock_realization), never inside them. The
@@ -1462,30 +1500,32 @@ with st.sidebar:
     # from it -- so this is not a cosmetic layer. What it may never touch:
     # the FORECAST (detection/Fisher scores, caches, result CSVs), which
     # stays realization-independent by construction.
-    show_noise = st.checkbox(
-        "Jitter", value=True, key=K("shownoise"),
-        help="Add Gaussian noise on top of the spectrum from the forward "
-             "model: one draw per point at that point's own error bar. The "
-             "posterior panels overlay the parameters recovered from this "
-             "draw; the forecast numbers do not depend on it.")
-    seed = st.number_input(
-        "Seed", 0, 9999, 0, key=K("seed"), disabled=not show_noise,
-        help="The same seed reproduces the identical draw and the identical "
-             "recovered parameters.")
-    # ONE knob for "more jitter" (maintainer, 2026-08-13). It scales the NOISE
-    # MODEL, not the draw: posteriors.mock_realization deliberately refuses a
-    # draw-only scale factor, because a 2x draw beside 1x error bars is not a
-    # realization of the plotted model, and the S/N and Fisher numbers would
-    # still assume the unscaled sigma. Scaling the noise model instead moves
-    # the error bars, the scores, the forecast widths and the draw together,
-    # so the figure stays internally consistent and the value is recorded with
-    # the run. Composes with (multiplies) the per-mode multipliers in the
-    # Noise model expander, which stay for mode-specific tuning.
-    noise_scale = st.slider(
-        "Noise multiplier", 0.5, 3.0, 1.0, 0.05, key=K("noisescale"),
-        help="Scales every mode's random noise. 1.0 is the Pandeia "
-             "prediction as-is. Moves the error bars, the S/N, the forecast "
-             "widths and the jitter draw together.")
+    with st.expander("Jitter & noise multiplier"):
+        show_noise = st.checkbox(
+            "Jitter", value=True, key=K("shownoise"),
+            help="Add Gaussian noise on top of the spectrum from the forward "
+                 "model: one draw per point at that point's own error bar. "
+                 "The posterior panels overlay the parameters recovered from "
+                 "this draw; the forecast numbers do not depend on it.")
+        seed = st.number_input(
+            "Seed", 0, 9999, 0, key=K("seed"), disabled=not show_noise,
+            help="The same seed reproduces the identical draw and the "
+                 "identical recovered parameters.")
+        # ONE knob for "more jitter" (maintainer, 2026-08-13). It scales the
+        # NOISE MODEL, not the draw: posteriors.mock_realization deliberately
+        # refuses a draw-only scale factor, because a 2x draw beside 1x error
+        # bars is not a realization of the plotted model, and the S/N and
+        # Fisher numbers would still assume the unscaled sigma. Scaling the
+        # noise model instead moves the error bars, the scores, the forecast
+        # widths and the draw together, so the figure stays internally
+        # consistent and the value is recorded with the run. Composes with
+        # (multiplies) the per-mode multipliers in the Noise model expander,
+        # which stay for mode-specific tuning.
+        noise_scale = st.number_input(
+            "Noise multiplier", 0.5, 3.0, 1.0, 0.05, key=K("noisescale"),
+            help="Scales every mode's random noise. 1.0 is the Pandeia "
+                 "prediction as-is. Moves the error bars, the S/N, the "
+                 "forecast widths and the jitter draw together.")
 
     with st.expander("Timing, saturation & binning (Pandeia)"):
         t_base = st.number_input(
@@ -2328,7 +2368,7 @@ with st.expander("Physical structure (T-P profile, mixing ratios)"):
     # automatic. The pressure axis is SHARED by both panels, so it is one
     # control, which is also what keeps the two canvases the same height.
     _st_box = st.container()
-    with st.expander("Axis ranges"):
+    with st.expander("Figure settings"):
         _tp_xr = _axis_range(st, "Temperature", K("struct_T"), _st_box.warning,
                              unit="K", step=10.0)
         _pr_r = _axis_range(st, "Pressure", K("struct_p"), _st_box.warning,
@@ -3011,55 +3051,58 @@ _series_ids = [f"{kind}:{key}" for kind, key, _ in _series_opts]
 _series_lbl = {f"{kind}:{key}": lbl for kind, key, lbl in _series_opts}
 
 _fig_ctx = _fig_box.container()
-_fc1, _fc2 = _fig_ctx.columns([2.0, 1.6])
-with _fc1:
+with _fig_ctx:
     _sel_series = st.multiselect(
         "Modes", _series_ids,
         default=[i for i in _series_ids if i.startswith("mode:")],
         format_func=lambda i: _series_lbl[i], key=K("sum_series"))
-with _fc2:
-    # Default window = the span the SELECTED modes actually cover, so the
-    # figure is not mostly empty spectrum. Recomputed from the selection.
-    def _series_modes(i: str) -> list:
-        """Mode keys a series id covers. The all-usable entry spans every
-        usable mode; without this it fell through to an empty combo lookup and
-        contributed nothing to the window."""
-        _kind, _key = i.split(":", 1)
-        if _kind == "mode":
-            return [_key]
-        if _kind == "allusable":
-            return [r["mode_key"] for r in _usable]
-        return _combo_members.get(_key, [])
 
-    _cov = [(ins.MODES[k]["wl_min"], ins.MODES[k]["wl_max"])
-            for i in _sel_series for k in _series_modes(i)
-            if k in ins.MODES]
-    _grid_lo, _grid_hi = float(wl_s[0]), float(wl_s[-1])
-    if _cov:
-        _fit = (max(_grid_lo, min(c[0] for c in _cov) * 0.97),
-                min(_grid_hi, max(c[1] for c in _cov) * 1.03))
-    else:
-        _fit = (_grid_lo, _grid_hi)
-    _ax1, _ax2 = st.columns(2)
-    # x defaults to log (the wavelength convention here); y to linear, since
-    # transit depth spans a narrow range where log adds nothing.
-    _x_log = _ax1.checkbox("Log x", value=True, key=K("sum_xlog"))
-    _y_log = _ax2.checkbox("Log y", value=False, key=K("sum_ylog"))
 
-# Axis ranges (2026-08-14). These move the WINDOW the figure is drawn in and
-# never the data, so nothing downstream reads them -- the scores, the CSVs and
-# the forecast are unchanged by anything in here. Every axis is the same
-# widget: typed min and max, blank for automatic (see _axis_range).
-with _fig_ctx.expander("Axis ranges"):
+# Default window = the span the SELECTED modes actually cover, so the
+# figure is not mostly empty spectrum. Recomputed from the selection.
+def _series_modes(i: str) -> list:
+    """Mode keys a series id covers. The all-usable entry spans every
+    usable mode; without this it fell through to an empty combo lookup and
+    contributed nothing to the window."""
+    _kind, _key = i.split(":", 1)
+    if _kind == "mode":
+        return [_key]
+    if _kind == "allusable":
+        return [r["mode_key"] for r in _usable]
+    return _combo_members.get(_key, [])
+
+
+_cov = [(ins.MODES[k]["wl_min"], ins.MODES[k]["wl_max"])
+        for i in _sel_series for k in _series_modes(i)
+        if k in ins.MODES]
+_grid_lo, _grid_hi = float(wl_s[0]), float(wl_s[-1])
+if _cov:
+    _fit = (max(_grid_lo, min(c[0] for c in _cov) * 0.97),
+            min(_grid_hi, max(c[1] for c in _cov) * 1.03))
+else:
+    _fit = (_grid_lo, _grid_hi)
+
+# Figure settings (2026-08-14 ranges + 2026-08-15 layout). These move the
+# WINDOW and the SCALES the figure is drawn with and never the data, so
+# nothing downstream reads them -- the scores, the CSVs and the forecast are
+# unchanged by anything in here. One row per axis: typed min and max, blank
+# for automatic (see _axis_range), with that axis's log toggle on the same
+# row. x defaults to log (the wavelength convention here); y to linear,
+# since transit depth spans a narrow range where log adds nothing.
+with _fig_ctx.expander("Figure settings"):
+    _wx, _wlg = st.columns([2.6, 0.9], vertical_alignment="bottom")
     _wl_range = _axis_range(
-        st, "Wavelength", K("sum_x"), _fig_box.warning, unit="um", step=0.1,
+        _wx, "Wavelength", K("sum_x"), _fig_box.warning, unit="um", step=0.1,
         positive=True,
         help="Blank fits the wavelength span the selected modes cover. Set "
              "both to zoom, for example 3.0 to 5.5 for G395H.")
+    _x_log = _wlg.checkbox("Log x", value=True, key=K("sum_xlog"))
+    _dx, _dlg = st.columns([2.6, 0.9], vertical_alignment="bottom")
     _depth_range = _axis_range(
-        st, "Depth", K("sum_y"), _fig_box.warning, unit="ppm", step=1.0,
+        _dx, "Depth", K("sum_y"), _fig_box.warning, unit="ppm", step=1.0,
         help="Blank fits the visible data. Setting both also turns off the "
              "automatic legend headroom, so the legend can overlap the curve.")
+    _y_log = _dlg.checkbox("Log y", value=False, key=K("sum_ylog"))
     # no unit= here: forward.param_axis already carries it inside the label
     # ("[M/H] [dex]"), so passing one again reads "[M/H] [dex] min (dex)"
     _post_xlims = [
