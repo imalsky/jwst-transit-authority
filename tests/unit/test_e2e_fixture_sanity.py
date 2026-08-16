@@ -22,7 +22,7 @@ import pytest
 from jwst_tool import forward
 
 FIXTURE = (Path(__file__).parent.parent / "live" / "data"
-           / "w39b_v32_reference.npz")
+           / "w39b_v33_reference.npz")
 
 
 @pytest.fixture(scope="module")

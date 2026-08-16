@@ -168,12 +168,16 @@ def _restore_goal(state: dict, cp: dict, goal: dict, key, provider: str,
     if method in ("fd", "ad"):
         state[key("jacm")] = method
     if selected_goal == "detect":
-        extras = state[key(f"xmols_{provider}")]
+        net_sfx = _network_suffix(cp)
+        extras = state[key(f"xmols_{provider}{net_sfx}")]
         mol_opts = forward.active_molecules(
-            {"chem_provider": provider, "extra_mols": extras})
+            {"chem_provider": provider,
+             "network": str(cp.get("network", "sncho")),
+             "extra_mols": extras})
         target = goal.get("target_mol")
         if target in mol_opts:
-            state[key(f"mol_{provider}_" + "_".join(sorted(extras)))] = target
+            state[key(f"mol_{provider}{net_sfx}_"
+                      + "_".join(sorted(extras)))] = target
         elif target:
             notes.append(f"detection target {target} is not in the restored "
                          "molecule set and was not restored")
@@ -352,7 +356,16 @@ def _reject_removed_physics(cp: dict) -> None:
             "would change the atmosphere.")
 
 
+def _network_suffix(cp: dict) -> str:
+    """Widget-key suffix for the non-default kinetics network (v33): the
+    sncho keys stay byte-identical to the pre-v33 contract, ncho widgets get
+    their own keys (same pattern as the provider-suffixed molecule keys)."""
+    net = str(cp.get("network", "sncho"))
+    return "" if net == "sncho" else f"_{net}"
+
+
 def _restore_vulcan_physics(state: dict, cp: dict, key, pk) -> None:
+    state[key("network")] = str(cp.get("network", "sncho"))
     mode = str(cp.get("kzz_mode", "const"))
     state[pk("kzzmode")] = mode
     if mode == "const":
@@ -392,7 +405,7 @@ def _restore_rt_state(state: dict, cp: dict, key, provider: str) -> None:
         extras_all = list(pchem.PICASO_EXTRA_MOLECULES)
     else:
         extras_all = list(forward.EXTRA_MOLECULES)
-    state[key(f"xmols_{provider}")] = [
+    state[key(f"xmols_{provider}{_network_suffix(cp)}")] = [
         molecule for molecule in (cp.get("extra_mols") or [])
         if molecule in extras_all]
     state.update({

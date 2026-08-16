@@ -1135,6 +1135,7 @@ with st.sidebar:
     # photo-lock reads the EFFECTIVE differentiation method from session
     # state: the widget value counts only when a Jacobian is actually
     # requested, matching canonical_params' normalization to "fd" otherwise.
+    network = "sncho"                    # picaso has no kinetics network
     if _pic:
         kzz_mode, kzz_x = "const", 1.0
         kzz_const, kzz_kmax, kzz_plev, kzz_kdeep = 1.0e9, 0.0, 0.0, 0.0
@@ -1207,6 +1208,11 @@ with st.sidebar:
                     key=_k("kzzx"))
 
         with st.expander("Photochemistry & transport"):
+            network = st.selectbox(
+                "Chemical network", list(forward.NETWORKS),
+                key=K("network"),
+                format_func={"sncho": "S-N-C-H-O (full, default)",
+                             "ncho": "N-C-H-O (no sulfur, faster)"}.get)
             if _jac_hint == "ad":
                 st.session_state[K("photo")] = True   # AD needs photolysis ON
             use_photo = st.checkbox(
@@ -1232,10 +1238,21 @@ with st.sidebar:
                                  if not _pic else
                                  (picaso_chem.PICASO_MOLECULES,
                                   picaso_chem.PICASO_EXTRA_MOLECULES))
+        # The sulfur-free network removes the S species from both sets; its
+        # widgets get their own keys (same pattern as the provider switch) so
+        # a selection from one network never strands in the other's options.
+        _net_sfx = "" if network == "sncho" else f"_{network}"
+        if network == "ncho":
+            _base_set = [m for m in _base_set
+                         if m not in forward._S_MOLECULES]
+            _extra_set = [m for m in _extra_set
+                          if m not in forward._S_MOLECULES]
+        _no_table = [m for m in _extra_set if m in forward._NO_EXOMOLOP_TABLE]
         st.caption(
-            f"The base set **{' · '.join(_base_set)}** is always on; CS2 and "
-            "C2H6 have no published ExoMolOP k-table and need a "
-            "Mie/line-by-line run."
+            f"The base set **{' · '.join(_base_set)}** is always on"
+            + (f"; {' and '.join(_no_table)} have no published ExoMolOP "
+               "k-table and need a Mie/line-by-line run." if _no_table
+               else ".")
             + (" No SO2 here: in equilibrium, sulfur sits in H2S and "
                "OCS. Making SO2 needs the VULCAN engine." if _pic else ""))
         # Which data the annotations must describe depends on the opacity
@@ -1267,14 +1284,14 @@ with st.sidebar:
             "Extra opacity molecules", list(_extra_set),
             default=[m for m in _extra_set
                      if m not in forward._NO_EXOMOLOP_TABLE],
-            key=K(f"xmols_{chem_provider}"),
+            key=K(f"xmols_{chem_provider}{_net_sfx}"),
             format_func=lambda m: (
                 f"{m}  (no ExoMolOP table -- needs a Mie/line-by-line run)"
                 if m in forward._NO_EXOMOLOP_TABLE
                 else f"{m}  ({_MOL_NOTE[_mol_status[m]]})"))
         # h2he has per-molecule caches; CO is cached ExoMol and ignores the
         # broadening choice
-        _h2he_mols = [m for m in forward.MOLECULES + extra_mols if m != "CO"]
+        _h2he_mols = [m for m in list(_base_set) + extra_mols if m != "CO"]
         _h2he_cached = sum(
             1 for v in datacheck.molecule_linelist_status(
                 _h2he_mols, broadening="h2he").values() if v == datacheck.OK)
@@ -1358,7 +1375,8 @@ with st.sidebar:
     if mie_condensate:
         avail_free = avail_free + list(forward.MIE_FISHER_PARAMS)
     mol_options = forward.active_molecules(
-        {"chem_provider": chem_provider, "extra_mols": extra_mols})
+        {"chem_provider": chem_provider, "network": network,
+         "extra_mols": extra_mols})
 
     goal_param, target_prec, marginalize = None, None, True
     do_fisher = False
@@ -1374,7 +1392,8 @@ with st.sidebar:
             target_mol = st.selectbox(
                 "Molecule to detect", mol_options,
                 index=mol_options.index(_mol_default),
-                key=K(f"mol_{chem_provider}_" + "_".join(sorted(extra_mols))))
+                key=K(f"mol_{chem_provider}{_net_sfx}_"
+                      + "_".join(sorted(extra_mols))))
             target_sig = st.number_input(
                 "Target significance (σ)", 1.0, 10.0, 3.0, 0.5, key=K("tsig"))
             do_fisher = st.checkbox(
@@ -1721,7 +1740,7 @@ with st.sidebar:
         st.button("Reset all settings", on_click=_arm_reset)
 
 params = dict(planet=planet_key, science_mode=science_mode,
-              chem_provider=chem_provider,
+              chem_provider=chem_provider, network=network,
               star_teff=teff, star_logg=logg, star_feh=feh,
               nz=nz, nu_pts=nu_pts, yconv_cri=yconv_cri,
               rp_rjup=rp, gs_cgs=g_ms2 * 100.0, rstar_rsun=rstar,

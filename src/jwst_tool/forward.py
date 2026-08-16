@@ -90,12 +90,24 @@ MOLECULES = ["H2O", "CO2", "CO", "CH4", "SO2"]   # always-on WIDE-profile set
 # network already solves these; extra_mols only exposes them to the RT and the
 # detection scores.
 EXTRA_MOLECULES = ["C2H2", "C2H4", "C2H6", "CS2", "H2S", "HCN", "NH3", "OCS"]
+# VULCAN kinetics network menu (v33). "sncho" is the shipped default; "ncho"
+# drops sulfur (69 vs 89 species) for a cheaper solve when no S species is
+# needed. Values: (VULCAN_JAX_NETWORK, VULCAN_JAX_ATOM_LIST) -- import-frozen
+# in the engine, so the solver subprocess sets both env vars from the
+# canonical parameter before the first engine import.
+NETWORKS = {
+    "sncho": ("thermo/SNCHO_photo_network.txt", "H,O,C,N,S"),
+    "ncho": ("thermo/NCHO_photo_network.txt", "H,O,C,N"),
+}
+# Sulfur-bearing entries of the molecule lists above: absent from the NCHO
+# network, so network="ncho" refuses them rather than dropping them silently.
+_S_MOLECULES = frozenset({"SO2", "H2S", "CS2", "OCS"})
 # Species ExoMolOP publishes no k-table for: refused EARLY under the default
 # opacity_mode (canonical_params), instead of failing minutes later inside
 # exomolop.load_tables. Cross-checked against exomolop.available() by a
 # data-gated test so this set cannot rot when ExoMolOP adds a species.
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
-_VERSION = 32  # model_cache buster: bump whenever the physics or the canonical
+_VERSION = 33  # model_cache buster: bump whenever the physics or the canonical
                # key set changes. Per-version history lives in notes.md.
                # DELIBERATE (reviews keep re-finding it): the cache identity
                # is canonical params + this hand-bumped version, NOT content
@@ -450,7 +462,11 @@ def active_molecules(cp: dict) -> list[str]:
         from jwst_tool import picaso_chem as _pc
         return list(_pc.PICASO_MOLECULES) + [
             m for m in _pc.PICASO_EXTRA_MOLECULES if m in cp["extra_mols"]]
-    return MOLECULES + [m for m in EXTRA_MOLECULES if m in cp["extra_mols"]]
+    base, extras = MOLECULES, EXTRA_MOLECULES
+    if cp.get("network", "sncho") == "ncho":
+        base = [m for m in base if m not in _S_MOLECULES]
+        extras = [m for m in extras if m not in _S_MOLECULES]
+    return base + [m for m in extras if m in cp["extra_mols"]]
 
 # Numerical-resolution knobs layered on the base RT profile in
 # engine_config.WIDE (1-15 um band unchanged). The RT layer count is locked
@@ -863,7 +879,8 @@ _PARAM_KEYS_READ = frozenset({
     "f_diurnal", "fisher_params", "gs_cgs", "jac_method", "kzz_const",
     "kzz_kdeep", "kzz_kmax", "kzz_mode", "kzz_plev", "kzz_x", "log_gamma",
     "log_kappa", "log_kappa_cloud", "met_x_solar", "mie_condensate",
-    "mie_log_mmr", "mie_log_rg", "mie_sigmag", "nu_pts", "nz", "opacity_mode",
+    "mie_log_mmr", "mie_log_rg", "mie_sigmag", "network", "nu_pts", "nz",
+    "opacity_mode",
     "orbit_au", "p_btm_bar", "p_ref_bar", "planet", "rfacv", "rp_rjup",
     "rstar_rsun", "rt_dit_res", "rt_integration", "rt_ptop_bar",
     "science_mode", "sflux", "sl_angle_deg", "star_feh", "star_logg",
@@ -913,6 +930,19 @@ def canonical_params(params: dict) -> dict:
             f"{list(CHEM_PROVIDERS)} ('vulcan' = the VULCAN-JAX kinetics "
             "engine, the default; 'picaso' = PICASO equilibrium chemistry, "
             "FD-only, no photochemistry/SO2, C/O <= 1.10).")
+    network = str(params.get("network", "sncho"))
+    if network not in NETWORKS:
+        raise ValueError(
+            f"unknown network {network!r}: choose from {list(NETWORKS)} "
+            "('sncho' = the shipped S-N-C-H-O kinetics network, the default; "
+            "'ncho' = the sulfur-free N-C-H-O network, a cheaper solve with "
+            "no SO2/H2S/CS2/OCS).")
+    if network != "sncho" and provider == "picaso":
+        raise ValueError(
+            "network='ncho' selects the VULCAN kinetics network and has no "
+            "meaning under chem_provider='picaso' (equilibrium chemistry, no "
+            "kinetics network). Drop the network key or use the vulcan "
+            "provider.")
     needs_picaso = provider == "picaso" or tp_mode == "picaso_climate"
     if needs_picaso and not picaso_experimental_enabled():
         raise RuntimeError(
@@ -1133,6 +1163,7 @@ def canonical_params(params: dict) -> dict:
         # picaso request without its data fails at the API, and any table
         # change self-invalidates every cached spectrum built on it).
         "chem_provider": provider,
+        "network": network,
         "picaso_version": "",
         "picaso_chemgrid_sha1": "",
         "picaso_climate_sha1": "",
@@ -1222,6 +1253,14 @@ def canonical_params(params: dict) -> dict:
             "(HITRAN db id, molmass, VULCAN species name), make sure the SNCHO "
             "network actually solves that species, then list it here in "
             "forward.EXTRA_MOLECULES.")
+    if network == "ncho":
+        _s_req = sorted(set(cp["extra_mols"]) & _S_MOLECULES)
+        if _s_req:
+            raise ValueError(
+                f"extra_mols {_s_req} are sulfur species and do not exist in "
+                "the ncho network. Drop them, or keep network='sncho'. "
+                "(Sulfur species are refused rather than dropped, so the "
+                "model computed is always the model asked for.)")
     if cp["opacity_mode"] == "exomolop":
         # Fail HERE, not deep inside the RT build: ExoMolOP publishes no
         # k-table for these species, so a run selecting them under the
@@ -1479,6 +1518,12 @@ def canonical_params(params: dict) -> dict:
     # (why: module docstring; the raises below carry the full user-facing
     # explanation, and the '91% wrong' wording is test-pinned)
     if cp["use_condense"]:
+        if network == "ncho":
+            raise ValueError(
+                "condensation (use_condense) requires network='sncho': the "
+                "certified recipe condenses S8, which does not exist in the "
+                "sulfur-free ncho network. Keep the sncho network or turn "
+                "condensation off.")
         if cp["fisher_params"]:
             raise ValueError(
                 "condensation (use_condense) cannot be combined with a "
@@ -1868,6 +1913,19 @@ def _assemble_chem(cp: dict, log, clim=None):
     from types import SimpleNamespace
 
     from jwst_tool import engine_config as config
+
+    # Non-default kinetics network (v33): the engine freezes network/atom_list
+    # at ITS first import (setdefault on the env vars), so the selection must
+    # land before vulcan_chem arrives. In the run subprocess this IS the first
+    # engine import; an in-process caller who already imported the engine on a
+    # different network gets vulcan_chem's loud conflict raise, which is the
+    # intended failure.
+    _net_path, _net_atoms = NETWORKS[cp["network"]]
+    if cp["network"] != "sncho":
+        os.environ["VULCAN_JAX_NETWORK"] = _net_path
+        os.environ["VULCAN_JAX_ATOM_LIST"] = _net_atoms
+        log(f"[fwd] kinetics network: {cp['network']} ({_net_path}, "
+            f"atoms {_net_atoms})")
     from vulcan_forward import vulcan_chem
     import jax
 
@@ -1910,6 +1968,12 @@ def _assemble_chem(cp: dict, log, clim=None):
         # VULCAN derives gravity as g = G*Mp/Rp^2; convert the tool's gs_cgs knob
         # to the equivalent planet mass at this radius.
         "Mp": cp["gs_cgs"] * rp_cm**2 / planets.G_CGS,
+        # the cfg network must agree with the import-frozen one (the engine
+        # fail-fasts on a mismatch); S_H stays in the cfg under ncho, which
+        # is harmless with an S-free atom_list (the shipped HD189 precedent)
+        **({"network": _net_path,
+            "atom_list": _net_atoms.split(",")} if cp["network"] != "sncho"
+           else {}),
         "Rp": rp_cm, "r_star": cp["rstar_rsun"],
         "orbit_radius": cp["orbit_au"],
         "sflux_file": f"atm/stellar_flux/{cp['sflux']}",

@@ -83,7 +83,7 @@ def test_v17_to_v18_key_regression():
     # provider keys
     new_keys = {"chem_provider", "picaso_version", "picaso_chemgrid_sha1",
                 "picaso_climate_sha1", "tint_cl", "rfacv", "tio_vo",
-                "climate_rcb", "picaso_ck_node"}
+                "climate_rcb", "picaso_ck_node", "network"}
     cp = forward.canonical_params(_p())
     v17_keys = set(cp) - new_keys
     assert v17_keys == {

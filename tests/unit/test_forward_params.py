@@ -400,6 +400,43 @@ def test_wasp39b_reference_state_is_the_literature_validated_one():
             "before updating W39B_REFERENCE.")
 
 
+def test_network_semantics():
+    """The v33 kinetics-network contract, at the numpy level.
+
+    (a) default sncho, carried in the canonical dict; unknown value refused.
+    (b) ncho removes exactly the sulfur species from the RT sets: SO2 from
+        the base set, H2S/CS2/OCS from the extras; an explicit sulfur extra
+        or wo entry is refused, never dropped.
+    (c) compatibility: refused with the picaso provider (no kinetics
+        network) and with use_condense (the certified recipe condenses S8).
+    (d) cache honesty: sncho and ncho are different keys.
+    """
+    # (a)
+    cp = forward.canonical_params(_p())
+    assert cp["network"] == "sncho"
+    with pytest.raises(ValueError, match="unknown network"):
+        forward.canonical_params(_p(network="chon"))
+    # (b)
+    cpn = forward.canonical_params(_p(network="ncho"))
+    assert cpn["wo_mols"] == [m for m in forward.MOLECULES if m != "SO2"]
+    assert forward.active_molecules(cpn) == cpn["wo_mols"]
+    assert not set(forward.active_molecules(
+        forward.canonical_params(
+            _p(network="ncho",
+               extra_mols=["HCN", "NH3"])))) & forward._S_MOLECULES
+    with pytest.raises(ValueError, match="sulfur species"):
+        forward.canonical_params(_p(network="ncho", extra_mols=["H2S"]))
+    with pytest.raises(ValueError, match="not in this run's RT molecule set"):
+        forward.canonical_params(_p(network="ncho", wo_mols=["SO2"]))
+    # (c)
+    with pytest.raises(ValueError, match="no meaning under"):
+        forward.canonical_params(_p(network="ncho", chem_provider="picaso"))
+    with pytest.raises(ValueError, match="condenses S8"):
+        forward.canonical_params(_p(network="ncho", use_condense=True))
+    # (d)
+    assert forward.params_key(cp) != forward.params_key(cpn)
+
+
 def test_wo_mols_end_to_end_semantics():
     """The v32 leave-one-out contract, end to end at the numpy level.
 
@@ -468,12 +505,15 @@ def test_wo_mols_end_to_end_semantics():
 def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # The key hashes every canonical parameter: if ANY default feeding the
     # reference run changes, this trips even when the pins above still pass.
-    # RE-PINNED at v32 (history: c20582509e215eb0 v31, acba771e80c772a1 v30,
-    # 9b30d6d526e2a78a v29, ead8394cf913ff67 v28, ba52447cad5b40c5 v27,
-    # de55467c4a459b4e v26, f14f4d10512552ea first). v32 added the wo_mols
-    # leave-one-out set to the canonical params, rounded the default co_ratio
-    # to CO_DEFAULT (0.55), made the p_btm_bar default structure-aware, and
-    # normalized the inert nu_pts/rt_dit_res out of the exomolop-mode key.
+    # RE-PINNED at v33 (history: 57c662c1be8b0776 v32, c20582509e215eb0 v31,
+    # acba771e80c772a1 v30, 9b30d6d526e2a78a v29, ead8394cf913ff67 v28,
+    # ba52447cad5b40c5 v27, de55467c4a459b4e v26, f14f4d10512552ea first).
+    # v33 added the network parameter (sncho default / ncho sulfur-free);
+    # the spectrum at the default is bit-identical to v32's. v32 added the
+    # wo_mols leave-one-out set to the canonical params, rounded the default
+    # co_ratio to CO_DEFAULT (0.55), made the p_btm_bar default
+    # structure-aware, and normalized the inert nu_pts/rt_dit_res out of the
+    # exomolop-mode key.
     # v31 removed the interim "ckd" opacity mode
     # (forward 0.8.0); the spectrum is bit-identical to v30's. v30 switched
     # the default opacity DATA to "exomolop" (published ExoMol/HITEMP
@@ -489,10 +529,10 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # published 4.5-4.8 -- that gap is real and open). Both need a full
     # run; SO2 also needs the pandeia backend. Full history: notes.md.
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b", tp_mode="file"))) == "57c662c1be8b0776"
+        dict(planet="wasp39b", tp_mode="file"))) == "92ac1d4902dc7c39"
     # ... and since 2026-08-11 the bare DEFAULT run is that same atmosphere
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "57c662c1be8b0776"
+        dict(planet="wasp39b"))) == "92ac1d4902dc7c39"
     # the sha1 pin is only meaningful re-derived from the file the run
     # actually reads -- this catches the table itself being swapped
     path = forward._shipped_tp_file("wasp39b")

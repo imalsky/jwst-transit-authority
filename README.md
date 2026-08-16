@@ -551,6 +551,36 @@ conventions agree exactly at solar C/O and diverge first-order in ln(C/O) — by
 C/O = 0.7, only 27% above solar, the two differ by ~28% in both C and O, a
 ~0.1 dex metallicity offset.
 
+### Chemical network, and the two measured ways to run faster
+
+The VULCAN kinetics network is a setting (`network`, step 2 in the GUI):
+
+- **`sncho`** (default): the full S-N-C-H-O photochemical network, 89
+  species. The only network that makes SO2, H2S, CS2 and OCS.
+- **`ncho`**: the sulfur-free N-C-H-O network, 69 species. Sulfur species
+  are refused, never silently dropped: SO2 leaves the base molecule set,
+  and requesting a sulfur extra or detection target stops with an error.
+  Condensation (the S8 recipe) is refused too.
+
+Measured on the default WASP-39 b transmission run, fresh solves, one CPU
+(2026-08-16; quote the ratios, the absolute pair drifts with the host):
+
+| configuration | wall | vs default | solver steps |
+|---|---|---|---|
+| default (sncho, photochemistry on) | 124 s | 1.0x | 1413 |
+| `network="ncho"` | 88 s | **1.40x** | 1512 |
+| photochemistry off (sncho) | 65 s | **1.92x** | 121 |
+
+The ncho saving is the cheaper 69-species solve plus one fewer molecule in
+the removed-molecule spectrum block. The photochemistry checkbox (step 2)
+is the larger lever: without photolysis the quench-only chemistry
+certifies in ~120 steps instead of ~1400. Use it only for quench science
+(CH4, NH3, CO, H2O): photochemical products are then thermochemical-only
+-- the same run's SO2 peaks at 1.9e-10, consistent with Tsai et al. 2023's
+statement that equilibrium SO2 stays under 1e-9, i.e. undetectable, and AD
+Jacobians (which need photolysis on) fall back to FD. Repeat runs of any
+configuration are disk-cached and effectively instant either way.
+
 ### Temperature-pressure profiles
 
 Profiles are explicit only. Three options:
