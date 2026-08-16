@@ -1,6 +1,6 @@
 """Operator tests for the count-space measurement operator: constant-depth
-conservation, estimator/variance consistency (Monte Carlo), model-vs-noise
-same-estimator identity, Jacobian linearity, gap handling, strict grid
+conservation, exact sub-cell integration, estimator/variance consistency
+(Monte Carlo), Jacobian linearity, gap/segment handling, strict grid
 validation, and the native-R LSF (flux-weighted) blur."""
 import numpy as np
 import pytest
@@ -18,7 +18,10 @@ def _fake_pixels(rng, n=800, wl0=1.0, wl1=5.0):
     return wl, flux
 
 
-def test_constant_depth_conservation():
+def test_operator_is_linear_and_conserves_constant_depth():
+    """A constant depth passes through binning exactly (up to float64 cumsum
+    roundoff), and binned Jacobian == Jacobian of the binned model (operator
+    linearity)."""
     rng = np.random.default_rng(0)
     wl, flux = _fake_pixels(rng)
     edges = noise_mod.make_bins(1.1, 4.9, 80.0)
@@ -26,8 +29,12 @@ def test_constant_depth_conservation():
     wl_model = np.linspace(0.9, 5.1, 3000)
     d0 = 0.0123
     binned = binning.bin_model(op, wl_model, np.full(wl_model.size, d0))
-    # exact up to float64 cumsum roundoff (sequential sum over the model grid)
     assert np.allclose(binned, d0, rtol=0, atol=1e-12)
+    a = 1e-2 * (1 + np.sin(8 * wl_model))
+    b = 1e-3 * np.cos(5 * wl_model)
+    lhs = binning.bin_model(op, wl_model, 2.0 * a + 3.0 * b)
+    rhs = 2.0 * binning.bin_model(op, wl_model, a) + 3.0 * binning.bin_model(op, wl_model, b)
+    assert np.allclose(lhs, rhs, rtol=1e-12)
 
 
 def test_pl_antideriv_exact_on_audit_counterexample():
@@ -66,20 +73,6 @@ def test_bin_model_exact_for_linear_submodel():
     np.add.at(den, op["pix_bin"], op["pix_w"])
     ref /= den
     assert np.allclose(got, ref, rtol=0, atol=1e-14)
-
-
-def test_model_binning_is_linear():
-    """Binned Jacobian == Jacobian of the binned model (operator linearity)."""
-    rng = np.random.default_rng(1)
-    wl, flux = _fake_pixels(rng)
-    edges = noise_mod.make_bins(1.1, 4.9, 60.0)
-    op = binning.build_operator(wl, flux, edges, wl_lo=0.9, wl_hi=5.1)
-    wl_model = np.linspace(0.9, 5.1, 2000)
-    a = 1e-2 * (1 + np.sin(8 * wl_model))
-    b = 1e-3 * np.cos(5 * wl_model)
-    lhs = binning.bin_model(op, wl_model, 2.0 * a + 3.0 * b)
-    rhs = 2.0 * binning.bin_model(op, wl_model, a) + 3.0 * binning.bin_model(op, wl_model, b)
-    assert np.allclose(lhs, rhs, rtol=1e-12)
 
 
 def test_estimator_mc_mean_and_variance():
@@ -131,9 +124,10 @@ def test_noise_and_model_share_bins_and_estimator():
     assert np.all(nz["var_phot"] >= 1.0 / inv - 1e-18)
 
 
-def test_detector_gap_does_not_leak_model():
+def test_detector_gap_and_invalid_pixels_do_not_leak():
     """Pixels at a detector-gap edge must not average the model across the gap
-    (cell half-widths are capped)."""
+    (cell half-widths are capped), and pixels masked invalid (full saturation)
+    never enter the operator."""
     wl = np.concatenate([np.linspace(2.0, 2.5, 100), np.linspace(3.5, 4.0, 100)])
     flux = np.full(wl.size, 1e3)
     edges = np.array([2.0, 2.6, 3.4, 4.0])
@@ -145,16 +139,14 @@ def test_detector_gap_does_not_leak_model():
     # kept bins are the two detector sides; gap-only bin has no pixels
     assert op["keep"].tolist() == [True, False, True]
     assert np.all(binned < 0.02)
-
-
-def test_full_sat_pixels_excluded_via_valid_mask():
+    # valid-mask exclusion
     rng = np.random.default_rng(4)
-    wl, flux = _fake_pixels(rng, n=200, wl0=2.0, wl1=3.0)
-    valid = np.ones(wl.size, bool)
+    wl2, flux2 = _fake_pixels(rng, n=200, wl0=2.0, wl1=3.0)
+    valid = np.ones(wl2.size, bool)
     valid[:50] = False
-    edges = np.array([2.0, 2.5, 3.0])
-    op = binning.build_operator(wl, flux, edges, wl_lo=1.9, wl_hi=3.1, valid=valid)
-    assert not np.isin(op["pix_idx"], np.where(~valid)[0]).any()
+    op2 = binning.build_operator(wl2, flux2, np.array([2.0, 2.5, 3.0]),
+                                 wl_lo=1.9, wl_hi=3.1, valid=valid)
+    assert not np.isin(op2["pix_idx"], np.where(~valid)[0]).any()
 
 
 def test_rebinning_nested_vs_direct():
@@ -181,8 +173,10 @@ def test_rebinning_nested_vs_direct():
     assert np.allclose(num[den > 0] / den[den > 0], d_c, rtol=1e-12)
 
 
-def test_segment_ids_split_at_detector_gap_only():
-    """NRS1|NRS2-style gap makes two segments; a smooth grid makes one."""
+def test_segment_ids_and_bin_segments():
+    """NRS1|NRS2-style gap makes two segments; a smooth grid makes one; ids
+    are order-independent; duplicate wavelengths never split segments; kept
+    bins take the majority segment."""
     wl = np.concatenate([np.linspace(2.87, 3.72, 300),   # NRS1
                          np.linspace(3.82, 5.18, 400)])   # NRS2 (0.10 um gap)
     seg = binning.segment_ids(wl)
@@ -193,64 +187,51 @@ def test_segment_ids_split_at_detector_gap_only():
     # order-independence: shuffle in, segment ids follow the pixels
     rng = np.random.default_rng(7)
     perm = rng.permutation(wl.size)
-    seg_p = binning.segment_ids(wl[perm])
-    assert np.array_equal(seg_p, seg[perm])
-
-
-def test_bin_segments_assigns_majority_segment():
-    wl = np.concatenate([np.linspace(2.87, 3.72, 300),
-                         np.linspace(3.82, 5.18, 400)])
+    assert np.array_equal(binning.segment_ids(wl[perm]), seg[perm])
+    # duplicates do not split segments; an all-duplicate grid does not crash
+    # on a zero median gap
+    assert (binning.segment_ids(np.array([1.0, 1.0, 1.0, 1.0, 1.001, 1.002])) == 0).all()
+    assert (binning.segment_ids(np.full(5, 2.0)) == 0).all()
+    # every kept bin on the two-detector grid is entirely in one detector, so
+    # bins are a monotonic block of 0s then 1s, both present
     flux = np.full(wl.size, 1e3)
     edges = noise_mod.make_bins(2.9, 5.15, 100.0)
     op = binning.build_operator(wl, flux, edges, wl_lo=2.8, wl_hi=5.2)
-    seg_pix = binning.segment_ids(wl)
-    seg_bin = binning.bin_segments(op, seg_pix)
-    # every kept bin is entirely in one detector, so bins are a monotonic
-    # block of 0s then 1s, both present
+    seg_bin = binning.bin_segments(op, binning.segment_ids(wl))
     assert set(seg_bin.tolist()) == {0, 1}
     assert np.all(np.diff(seg_bin) >= 0)
 
 
-def test_smooth_to_native_r_conserves_flux_and_noops_at_high_r():
+def test_smooth_flux_conservation_and_constant_weight_cases():
+    """The native-R blur conserves the interior mean and no-ops EXACTLY when
+    the kernel is unresolved by the model grid; weight=None and a constant
+    weight are the same operator (L[F d]/L[F] = L[d] for constant F); and a
+    flat transit depth survives the flux-weighted LSF unchanged for ANY
+    stellar-flux weight (L[F c]/L[F] = c), unbiased even under a strong
+    stellar gradient."""
     wl = np.linspace(4.0, 12.0, 20000)
     y = 0.01 + 1e-3 * np.sin(50 * wl)              # structured depth
     # MIRI-like low native R -> blur changes the model, conserves the mean
-    r_lo = np.full(wl.size, 80.0)
-    y_lo = binning.smooth_to_native_r(wl, y, wl, r_lo, 5.0, 11.0)
+    r = np.full(wl.size, 80.0)
+    y_lo = binning.smooth_to_native_r(wl, y, wl, r, 5.0, 11.0)
     assert not np.allclose(y_lo, y)                # something happened
     band = (wl >= 5.5) & (wl <= 10.5)             # interior (no edge effects)
     assert abs(_trapz(y_lo[band], wl[band]) - _trapz(y[band], wl[band])) \
         < 1e-3 * abs(_trapz(y[band], wl[band]))
     # very high native R (>> model sampling) -> kernel unresolved -> exact no-op
-    r_hi = np.full(wl.size, 1e5)
-    y_hi = binning.smooth_to_native_r(wl, y, wl, r_hi, 5.0, 11.0)
+    y_hi = binning.smooth_to_native_r(wl, y, wl, np.full(wl.size, 1e5), 5.0, 11.0)
     assert np.array_equal(y_hi, y)
-
-
-def test_smooth_flux_weight_none_equals_constant_weight():
-    """weight=None and a constant weight are the same operator (the flat blur):
-    L[F d]/L[F] = L[d] when F is constant."""
-    wl = np.linspace(4.0, 12.0, 20000)
-    y = 0.01 + 1e-3 * np.sin(50 * wl)
-    r = np.full(wl.size, 80.0)
-    flat = binning.smooth_to_native_r(wl, y, wl, r, 5.0, 11.0)
+    # weight=None == constant weight
     ones = binning.smooth_to_native_r(wl, y, wl, r, 5.0, 11.0,
                                       weight=np.full(wl.size, 3.7))
-    assert np.allclose(flat, ones, atol=0, rtol=1e-12)
-
-
-def test_smooth_flux_weight_preserves_constant_depth():
-    """A flat transit depth must survive the flux-weighted LSF unchanged for
-    ANY stellar-flux weight: L[F c]/L[F] = c, unbiased even under a strong
-    stellar gradient."""
-    wl = np.linspace(4.0, 12.0, 20000)
+    assert np.allclose(y_lo, ones, atol=0, rtol=1e-12)
+    # flat depth + structured stellar weight -> exactly the constant back
     c = 0.0123
-    y = np.full(wl.size, c)
-    r = np.full(wl.size, 60.0)
+    r2 = np.full(wl.size, 60.0)
     F = 1.0 + 5.0 * (wl - wl[0]) / (wl[-1] - wl[0])       # 6x throughput gradient
     F *= 1.0 + 0.4 * np.exp(-0.5 * ((wl - 8.0) / 0.05) ** 2)   # + a stellar line
-    out = binning.smooth_to_native_r(wl, y, wl, r, 5.0, 11.0, weight=F)
-    band = (wl >= 5.5) & (wl <= 10.5)
+    out = binning.smooth_to_native_r(wl, np.full(wl.size, c), wl, r2,
+                                     5.0, 11.0, weight=F)
     assert np.allclose(out[band], c, atol=1e-12)
 
 
@@ -286,59 +267,42 @@ def test_smooth_flux_weight_matches_direct_ratio_reference():
 
 def test_degenerate_wavelength_pixels_flagged():
     """A pileup of near-duplicate wavelengths (the G395H red-edge artifact)
-    must be flagged; smooth dispersion gradients must not."""
+    must be flagged; smooth dispersion gradients must not; exact duplicates
+    count as degenerate (zero spectral support) even on duplicate-majority
+    grids whose ALL-gap median is zero."""
     base = np.linspace(2.0, 4.0, 500)
     pile = 3.0 + np.arange(300) * 4e-6            # 300 samples within 1.2e-3 um
-    wl = np.concatenate([base, pile])
-    bad = binning.degenerate_wl_mask(wl)
+    bad = binning.degenerate_wl_mask(np.concatenate([base, pile]))
     assert bad[500:].all()
     assert not bad[:499].any()
     # a smooth 5x dispersion change across the band is NOT degenerate
     t = np.linspace(0, 1, 800)
     wl_smooth = 5.0 + np.cumsum(0.001 * (1 + 4 * t))
     assert not binning.degenerate_wl_mask(wl_smooth).any()
-
-
-# --- strict grid validation ---------------------------------------------------
-# Invalid grids must raise loudly at the entry point (never degrade silently),
-# and exact duplicates must count as degenerate.
-
-def test_exact_duplicates_are_degenerate():
-    """Duplicate-majority grid: the zero-gap pixels must be flagged even
-    though the ALL-gap median is zero."""
-    wl = np.array([1.0, 1.0, 1.0, 1.0, 2.0, 3.0])
-    bad = binning.degenerate_wl_mask(wl)
-    assert bad[:4].all()          # zero spectral support
-    assert not bad[4:].any()      # the real pixels survive
+    # duplicate-majority grid: zero-gap pixels flagged, real pixels survive
+    dup = binning.degenerate_wl_mask(np.array([1.0, 1.0, 1.0, 1.0, 2.0, 3.0]))
+    assert dup[:4].all() and not dup[4:].any()
     # fully-duplicated grid: everything degenerate, never all-False
     assert binning.degenerate_wl_mask(np.full(10, 2.5)).all()
 
 
-def test_duplicates_do_not_split_segments():
-    wl = np.array([1.0, 1.0, 1.0, 1.0, 1.001, 1.002])
-    assert (binning.segment_ids(wl) == 0).all()
-    # all-duplicate grid: one segment, no crash on a zero median gap
-    assert (binning.segment_ids(np.full(5, 2.0)) == 0).all()
-
-
-def test_nonfinite_wavelengths_raise_everywhere():
-    wl_nan = np.array([1.0, np.nan, 1.2])
-    wl_inf = np.array([1.0, np.inf, 1.2])
-    w = np.ones(3)
-    edges = np.array([0.9, 1.3])
-    for bad in (wl_nan, wl_inf):
+def test_invalid_inputs_raise_loudly():
+    """Strict grid validation: invalid grids must raise at the entry point,
+    never degrade silently. Non-finite wavelengths raise everywhere; bad
+    weights/shapes/edges/masks raise; an operator left with zero usable
+    pixels raises actionably; bin_model rejects bad model grids."""
+    wl = np.linspace(1.0, 2.0, 10)
+    w = np.ones(10)
+    edges = np.array([1.0, 1.5, 2.0])
+    # non-finite wavelengths raise in every entry point
+    for bad in (np.array([1.0, np.nan, 1.2]), np.array([1.0, np.inf, 1.2])):
         with pytest.raises(ValueError, match="non-finite"):
             binning.degenerate_wl_mask(bad)
         with pytest.raises(ValueError, match="non-finite"):
             binning.segment_ids(bad)
         with pytest.raises(ValueError, match="non-finite"):
-            binning.build_operator(bad, w, edges)
-
-
-def test_invalid_weights_and_edges_raise():
-    wl = np.linspace(1.0, 2.0, 10)
-    w = np.ones(10)
-    edges = np.array([1.0, 1.5, 2.0])
+            binning.build_operator(bad, np.ones(3), np.array([0.9, 1.3]))
+    # invalid weights / shapes / edges / valid mask
     with pytest.raises(ValueError, match="weights"):
         binning.build_operator(wl, np.where(np.arange(10) == 3, np.nan, w), edges)
     with pytest.raises(ValueError, match="weights"):
@@ -353,26 +317,15 @@ def test_invalid_weights_and_edges_raise():
             binning.build_operator(wl, w, bad_edges)
     with pytest.raises(ValueError, match="valid mask"):
         binning.build_operator(wl, w, edges, valid=np.ones(9, bool))
-
-
-def test_all_invalid_operator_raises_actionably():
-    wl = np.linspace(1.0, 2.0, 10)
-    edges = np.array([1.0, 1.5, 2.0])
-    # every pixel zero-weight
+    # zero usable pixels: all zero-weight / all masked / no edge overlap
     with pytest.raises(ValueError, match="no usable pixel"):
         binning.build_operator(wl, np.zeros(10), edges)
-    # every pixel masked invalid
     with pytest.raises(ValueError, match="no usable pixel"):
-        binning.build_operator(wl, np.ones(10), edges, valid=np.zeros(10, bool))
-    # no overlap between pixels and bin edges
+        binning.build_operator(wl, w, edges, valid=np.zeros(10, bool))
     with pytest.raises(ValueError, match="no usable pixel"):
-        binning.build_operator(wl, np.ones(10), np.array([5.0, 6.0]))
-
-
-def test_bin_model_rejects_bad_model_grids():
-    wl = np.linspace(1.0, 2.0, 10)
-    op = binning.build_operator(wl, np.ones(10), np.array([1.0, 1.5, 2.0]),
-                                wl_lo=0.9, wl_hi=2.1)
+        binning.build_operator(wl, w, np.array([5.0, 6.0]))
+    # bin_model rejects non-ascending model grids and non-finite values
+    op = binning.build_operator(wl, w, edges, wl_lo=0.9, wl_hi=2.1)
     good_wl = np.linspace(0.9, 2.1, 50)
     good_y = np.full(50, 0.01)
     with pytest.raises(ValueError, match="ascending"):
@@ -384,20 +337,6 @@ def test_bin_model_rejects_bad_model_grids():
     with pytest.raises(ValueError, match="non-finite model value"):
         binning.bin_model(op, good_wl,
                           np.where(np.arange(50) == 7, np.nan, good_y))
-
-
-def test_smooth_rejects_bad_weight():
-    wl = np.geomspace(1.0, 1.4, 400)
-    y = np.full(400, 0.01)
-    wl_r = np.array([1.0, 1.4])
-    r = np.array([50.0, 50.0])
-    bad_w = np.ones(400)
-    bad_w[5] = np.nan
-    with pytest.raises(ValueError, match="weight"):
-        binning.smooth_to_native_r(wl, y, wl_r, r, 1.05, 1.35, weight=bad_w)
-    with pytest.raises(ValueError, match="weight"):
-        binning.smooth_to_native_r(wl, y, wl_r, r, 1.05, 1.35,
-                                   weight=np.ones(399))
 
 
 def test_smooth_clamped_model_span_preserves_constant_at_band_edge():
@@ -423,6 +362,11 @@ def test_smooth_clamped_model_span_preserves_constant_at_band_edge():
 _WL_R = np.linspace(2.5, 4.0, 50)
 _R_CURVE = np.full(50, 100.0)
 
+# fine grid -> kernel resolved (LSF active); coarse grid -> kernel unresolved
+# by the model grid, which is the no-op early return
+_ACTIVE = np.linspace(3.0, 3.5, 4000)
+_NOOP = np.linspace(3.0, 3.5, 12)
+
 
 def _lsf(wl_model, weight):
     y = np.full_like(wl_model, 0.01)
@@ -430,54 +374,39 @@ def _lsf(wl_model, weight):
                                       3.0, 3.5, weight=weight)
 
 
-# fine grid -> kernel resolved (LSF active); coarse grid -> kernel unresolved
-# by the model grid, which is the no-op early return
-_ACTIVE = np.linspace(3.0, 3.5, 4000)
-_NOOP = np.linspace(3.0, 3.5, 12)
+def test_lsf_weight_validated_on_both_paths():
+    """An invalid stellar-flux weight raises whether or not the kernel is
+    resolved, and a valid constant weight preserves a flat depth on both
+    paths; the diagnosis must not depend on the instrument mode.
 
-
-def test_lsf_active_path_is_actually_active_and_noop_path_is_actually_noop():
-    """Guard the fixture itself: the two grids must exercise DIFFERENT paths,
-    or the validation test below would be vacuous."""
+    First guard the fixture itself: the two grids must exercise DIFFERENT
+    paths, or the validation loop below would be vacuous."""
     y_a = 0.01 + 1e-3 * np.sin(400.0 * _ACTIVE)
     out_a = binning.smooth_to_native_r(_ACTIVE, y_a, _WL_R, _R_CURVE, 3.0, 3.5)
     assert not np.allclose(out_a, y_a)          # blurred
     y_n = 0.01 + 1e-3 * np.sin(400.0 * _NOOP)
     out_n = binning.smooth_to_native_r(_NOOP, y_n, _WL_R, _R_CURVE, 3.0, 3.5)
     assert np.array_equal(out_n, y_n)           # returned unchanged
+    for grid in (_ACTIVE, _NOOP):
+        for make_bad in (lambda g: np.full_like(g, np.nan),
+                         lambda g: np.full_like(g, -1.0),
+                         lambda g: np.full_like(g, np.inf),
+                         lambda g: np.ones(g.size + 1)):    # wrong shape
+            with pytest.raises(ValueError, match="weight"):
+                _lsf(grid, make_bad(grid))
+        out = _lsf(grid, np.full_like(grid, 2.5))
+        assert np.allclose(out, 0.01, rtol=0, atol=1e-15)
 
 
-@pytest.mark.parametrize("grid", [_ACTIVE, _NOOP], ids=["active", "noop"])
-@pytest.mark.parametrize(
-    "make_bad",
-    [lambda g: np.full_like(g, np.nan),
-     lambda g: np.full_like(g, -1.0),
-     lambda g: np.full_like(g, np.inf),
-     lambda g: np.ones(g.size + 1)],
-    ids=["nan", "negative", "inf", "wrong-shape"])
-def test_lsf_weight_validated_on_both_paths(grid, make_bad):
-    """An invalid stellar-flux weight raises whether or not the kernel is
-    resolved; the diagnosis must not depend on the instrument mode."""
-    with pytest.raises(ValueError, match="weight"):
-        _lsf(grid, make_bad(grid))
+def test_smooth_validates_the_native_r_table():
+    """A descending wl_r must RAISE, not silently return R(last) everywhere.
 
-
-@pytest.mark.parametrize("grid", [_ACTIVE, _NOOP], ids=["active", "noop"])
-def test_lsf_valid_weight_preserves_a_flat_depth_on_both_paths(grid):
-    out = _lsf(grid, np.full_like(grid, 2.5))
-    assert np.allclose(out, 0.01, rtol=0, atol=1e-15)
-
-
-# --- native-R table ordering (MIRI LRS dispersion-order pixel grid) -----------
-#
-# The pandeia pixel grid is DISPERSION order, not wavelength order: MIRI LRS
-# ships it descending (13.86 -> 5.02 um). The kernel width is read with
-# np.interp, which requires increasing sample points and silently returns the
-# end value everywhere on a descending table -- so a raw pass-through blurred
-# the whole 5-12 um band at R(red end) = 42 instead of R = 42..208.
-
-def test_smooth_refuses_a_descending_native_r_table():
-    """A descending wl_r must RAISE, not silently return R(last) everywhere."""
+    The pandeia pixel grid is DISPERSION order, not wavelength order: MIRI LRS
+    ships it descending (13.86 -> 5.02 um). The kernel width is read with
+    np.interp, which requires increasing sample points and silently returns
+    the end value everywhere on a descending table -- so a raw pass-through
+    blurred the whole 5-12 um band at R(red end) = 42 instead of R = 42..208.
+    The R curve itself is validated too (shape, positivity, finiteness)."""
     wl = np.geomspace(5.0, 12.0, 4000)
     y = np.full(wl.size, 0.01)
     wl_r = np.linspace(12.0, 5.0, 200)               # dispersion order
@@ -486,17 +415,13 @@ def test_smooth_refuses_a_descending_native_r_table():
         binning.smooth_to_native_r(wl, y, wl_r, r, 5.2, 11.8)
     # ... and the same table sorted is accepted
     binning.smooth_to_native_r(wl, y, wl_r[::-1], r[::-1], 5.2, 11.8)
-
-
-def test_smooth_validates_the_r_curve_itself():
-    wl = np.geomspace(5.0, 12.0, 2000)
-    y = np.full(wl.size, 0.01)
-    wl_r = np.geomspace(5.0, 12.0, 50)
+    # r_curve validation: shape mismatch, non-positive, non-finite
+    wl_r2 = np.geomspace(5.0, 12.0, 50)
     with pytest.raises(ValueError, match="r_curve"):
-        binning.smooth_to_native_r(wl, y, wl_r, np.full(49, 100.0), 5.2, 11.8)
+        binning.smooth_to_native_r(wl, y, wl_r2, np.full(49, 100.0), 5.2, 11.8)
     with pytest.raises(ValueError, match="r_curve"):
-        binning.smooth_to_native_r(wl, y, wl_r, np.full(50, 0.0), 5.2, 11.8)
+        binning.smooth_to_native_r(wl, y, wl_r2, np.full(50, 0.0), 5.2, 11.8)
+    bad = np.full(50, 100.0)
+    bad[7] = np.nan
     with pytest.raises(ValueError, match="r_curve"):
-        bad = np.full(50, 100.0)
-        bad[7] = np.nan
-        binning.smooth_to_native_r(wl, y, wl_r, bad, 5.2, 11.8)
+        binning.smooth_to_native_r(wl, y, wl_r2, bad, 5.2, 11.8)

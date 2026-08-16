@@ -19,7 +19,49 @@ from jwst_tool import forward
 # Pandeia backend path checks (tmp-path injected; mirrors the worker preflight)
 # ---------------------------------------------------------------------------
 
-def test_pandeia_backend_all_missing(tmp_path):
+def _backend_release():
+    from jwst_tool import instruments as ins
+    return ins.BACKEND_RELEASE
+
+
+def _matched_backend(root, rel, psf_rel=None):
+    """python + refdata + PSF triple at ``rel`` (PSF optionally at another)."""
+    py = root / "env" / "bin" / "python"
+    py.parent.mkdir(parents=True)
+    py.touch()
+    ref = root / f"pandeia_data-{rel}-jwst"
+    ref.mkdir()
+    (ref / "VERSION").write_text(f"{rel}\n")
+    psf = root / "psfs"
+    psf.mkdir()
+    (psf / "VERSION_PSF").write_text(f"{psf_rel or rel}\n")
+    return py, ref, psf
+
+
+def test_pandeia_backend_present_reads_version(tmp_path):
+    """A MATCHED triple at the active backend's release reports OK."""
+    rel = _backend_release()
+    py, ref, psf = _matched_backend(tmp_path, rel)
+    items = datacheck.check_pandeia_backend(python=py, refdata=ref,
+                                            psf_dir=str(psf))
+    by = {it.key: it for it in items}
+    assert by["pandeia:python"].status == datacheck.OK
+    assert by["pandeia:refdata"].status == datacheck.OK
+    assert rel in by["pandeia:refdata"].detail           # version surfaced
+    assert by["pandeia:psf"].status == datacheck.OK
+    assert rel in by["pandeia:psf"].detail               # PSF release surfaced
+
+
+def test_pandeia_backend_missing_and_misconfigured(tmp_path):
+    """Grouped failure modes; every failing item must carry a remedy.
+
+    The PSF blocks pin the worker-preflight rules: a PSF tree from a
+    DIFFERENT release must not read as OK (the worker refuses the set, so
+    the status panel has to agree); VERSION_PSF is required, not just an
+    existing directory; and an empty psf_dir is a misconfiguration that
+    must surface, never read as "embedded PSFs".
+    """
+    # all three paths absent
     items = datacheck.check_pandeia_backend(
         python=tmp_path / "nope" / "python",
         refdata=tmp_path / "nope" / "refdata",
@@ -31,73 +73,28 @@ def test_pandeia_backend_all_missing(tmp_path):
     assert all(it.required for it in items)
     assert all(it.remedy for it in items)          # every failure has a remedy
 
-
-def _backend_release():
-    from jwst_tool import instruments as ins
-    return ins.BACKEND_RELEASE
-
-
-def test_pandeia_backend_present_reads_version(tmp_path):
-    """A MATCHED triple at the active backend's release reports OK."""
-    rel = _backend_release()
-    py = tmp_path / "env" / "bin" / "python"
-    py.parent.mkdir(parents=True)
-    py.touch()
-    ref = tmp_path / f"pandeia_data-{rel}-jwst"
-    ref.mkdir()
-    (ref / "VERSION").write_text(f"{rel}\n")
-    psf = tmp_path / "psfs"
-    psf.mkdir()
-    (psf / "VERSION_PSF").write_text(f"{rel}\n")
-    items = datacheck.check_pandeia_backend(python=py, refdata=ref,
-                                            psf_dir=str(psf))
-    by = {it.key: it for it in items}
-    assert by["pandeia:python"].status == datacheck.OK
-    assert by["pandeia:refdata"].status == datacheck.OK
-    assert rel in by["pandeia:refdata"].detail           # version surfaced
-    assert by["pandeia:psf"].status == datacheck.OK
-    assert rel in by["pandeia:psf"].detail               # PSF release surfaced
-
-
-def test_pandeia_psf_release_mismatch_is_reported(tmp_path):
-    """A PSF tree from a DIFFERENT release must not read as OK: the worker
-    refuses the set, and the status panel has to agree."""
+    # PSF tree from a different release than the matched refdata
     rel = _backend_release()
     other = "2026.2" if rel != "2026.2" else "2026.7"
-    py = tmp_path / "env" / "bin" / "python"
-    py.parent.mkdir(parents=True)
-    py.touch()
-    ref = tmp_path / f"pandeia_data-{rel}-jwst"
-    ref.mkdir()
-    (ref / "VERSION").write_text(f"{rel}\n")
-    psf = tmp_path / "psfs"
-    psf.mkdir()
-    (psf / "VERSION_PSF").write_text(f"{other}\n")
+    py, ref, psf = _matched_backend(tmp_path / "mismatch", rel, psf_rel=other)
     by = {it.key: it for it in datacheck.check_pandeia_backend(
         python=py, refdata=ref, psf_dir=str(psf))}
     assert by["pandeia:psf"].status == datacheck.MISSING
     assert "RELEASE MISMATCH" in by["pandeia:psf"].detail
     assert other in by["pandeia:psf"].detail and rel in by["pandeia:psf"].detail
 
-
-def test_pandeia_psf_dir_without_version_file_is_missing(tmp_path):
-    # worker preflight requires VERSION_PSF, not just an existing directory
-    psf = tmp_path / "psfs"
-    psf.mkdir()
-    items = datacheck.check_pandeia_backend(
+    # psf dir that exists but has no VERSION_PSF file
+    bare = tmp_path / "bare_psfs"
+    bare.mkdir()
+    by = {it.key: it for it in datacheck.check_pandeia_backend(
         python=tmp_path / "python", refdata=tmp_path / "ref",
-        psf_dir=str(psf))
-    by = {it.key: it for it in items}
+        psf_dir=str(bare))}
     assert by["pandeia:psf"].status == datacheck.MISSING
     assert "VERSION_PSF" in by["pandeia:psf"].detail
 
-
-def test_pandeia_empty_psf_dir_reports_missing(tmp_path):
-    # every supported backend uses the split-PSF layout: an empty psf_dir is
-    # a misconfiguration and must surface, never read as "embedded PSFs"
-    items = datacheck.check_pandeia_backend(
-        python=tmp_path / "python", refdata=tmp_path / "ref", psf_dir="")
-    by = {it.key: it for it in items}
+    # empty psf_dir string (every supported backend uses the split-PSF layout)
+    by = {it.key: it for it in datacheck.check_pandeia_backend(
+        python=tmp_path / "python", refdata=tmp_path / "ref", psf_dir="")}
     assert by["pandeia:psf"].status == datacheck.MISSING
     assert by["pandeia:psf"].required is True
 
@@ -116,26 +113,24 @@ def _make_cdbs(tmp_path):
     return cdbs
 
 
-def test_cdbs_complete_tree_is_ok(tmp_path):
-    items = datacheck.check_synphot_cdbs(_make_cdbs(tmp_path))
+def test_cdbs_tree_states(tmp_path):
+    # complete tree: all OK
+    cdbs = _make_cdbs(tmp_path)
+    items = datacheck.check_synphot_cdbs(cdbs)
     assert [it.status for it in items] == [datacheck.OK] * 3
 
-
-def test_cdbs_missing_pieces_reported_with_remedies(tmp_path):
+    # missing everything: reported with remedies and recognizable labels
     items = datacheck.check_synphot_cdbs(tmp_path / "empty_cdbs")
     assert [it.status for it in items] == [datacheck.MISSING] * 3
     assert all(it.remedy for it in items)
     labels = " ".join(it.label for it in items)
     assert "PHOENIX" in labels and "Vega" in labels and "Ks" in labels
 
-
-def test_cdbs_dangling_phoenix_symlink_is_missing(tmp_path):
-    cdbs = _make_cdbs(tmp_path)
+    # dangling phoenix symlink (like a fresh clone) must read MISSING
     phx = cdbs / "grid" / "phoenix"
     phx.rmdir()
-    os.symlink(tmp_path / "gone", phx)           # dangling, like a fresh clone
-    items = datacheck.check_synphot_cdbs(cdbs)
-    by = {it.key: it for it in items}
+    os.symlink(tmp_path / "gone", phx)
+    by = {it.key: it for it in datacheck.check_synphot_cdbs(cdbs)}
     assert by["cdbs:phoenix"].status == datacheck.MISSING
     assert "dangling" in by["cdbs:phoenix"].detail
 
@@ -144,7 +139,7 @@ def test_cdbs_dangling_phoenix_symlink_is_missing(tmp_path):
 # Report plumbing (no external deps at all)
 # ---------------------------------------------------------------------------
 
-def test_full_report_structure_and_flags():
+def test_full_report_structure_formatting_and_cache_stats():
     rep = datacheck.full_report(base_mols=forward.MOLECULES,
                                 extra_mols=forward.EXTRA_MOLECULES)
     items = datacheck.all_items(rep)
@@ -156,18 +151,11 @@ def test_full_report_structure_and_flags():
     assert datacheck.required_ok(rep) == (not datacheck.missing_required(rep))
     # every missing/auto item must tell the user how to fix it
     assert all(it.remedy for it in items if it.status != datacheck.OK)
-
-
-def test_format_report_mentions_every_item():
-    rep = datacheck.full_report(base_mols=forward.MOLECULES,
-                                extra_mols=forward.EXTRA_MOLECULES)
+    # the rendered report mentions every item
     text = datacheck.format_report(rep)
-    for it in datacheck.all_items(rep):
+    for it in items:
         assert it.label in text
     assert "Generated caches" in text
-
-
-def test_cache_stats_shape():
     stats = datacheck.cache_stats()
     for key in ("model_cache", "noise_cache"):
         assert set(stats[key]) == {"n", "mb"}
@@ -195,7 +183,7 @@ needs_engine = pytest.mark.skipif(
 
 
 @needs_engine
-def test_molecule_linelist_status_statuses():
+def test_linelist_status_and_broadening_path_layout():
     status = datacheck.molecule_linelist_status(
         forward.MOLECULES + forward.EXTRA_MOLECULES)
     assert set(status) == set(forward.MOLECULES + forward.EXTRA_MOLECULES)
@@ -204,10 +192,6 @@ def test_molecule_linelist_status_statuses():
     # an unknown molecule is MISSING, never silently OK
     assert datacheck.molecule_linelist_status(["NOT_A_MOL"]) == {
         "NOT_A_MOL": datacheck.MISSING}
-
-
-@needs_engine
-def test_linelist_path_broadening_layout():
     p_air = datacheck.linelist_path("H2O", "air")
     p_h2he = datacheck.linelist_path("H2O", "h2he")
     assert p_air is not None and p_air.name == "H2O.h5"

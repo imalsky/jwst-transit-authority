@@ -20,6 +20,17 @@ def _result(seed=0, n_free=2, n_bins=40, saturated=False):
                 seg=np.zeros(n_bins, int), saturated=saturated)
 
 
+def _registry_keys(n):
+    return list(instruments.MODES)[:n]
+
+
+def _mode_result(seed, key, n_bins=30):
+    r = _result(seed=seed, n_bins=n_bins)
+    r["mode_key"] = key
+    r["depth"] = np.full(n_bins, 0.021)
+    return r
+
+
 FREE = ["lnZ", "dlnCO"]
 CENTERS = {"lnZ": 1.0, "dlnCO": 0.55}   # display units: dex, absolute C/O
 CO = 0.55
@@ -27,18 +38,17 @@ CO = 0.55
 
 # --- marginalized_posteriors -------------------------------------------------
 
-def test_labels_are_honest_and_present():
-    out = posteriors.marginalized_posteriors(_result(), FREE, CENTERS,
-                                             co_eval=CO)
+def test_curves_match_fisher_and_are_honestly_labeled():
+    """The statistical core in one place: honesty labels, sigma equal to the
+    Fisher forecast, the display-unit transforms (dlnCO reported as absolute
+    C/O with the exact lognormal curve family), a caller grid used verbatim,
+    and a LIST of results combining via combined_forecast."""
+    r = _result()
+    out = posteriors.marginalized_posteriors(r, FREE, CENTERS, co_eval=CO)
     assert out["kind"] == posteriors.FORECAST_KIND
     for phrase in ("Fisher", "Cramer-Rao", "Not a sampled posterior"):
         assert phrase in out["label"], phrase
-    # per-record labeling rides the combo records too (checked below)
 
-
-def test_curve_matches_fisher_sigma_and_normalizes():
-    r = _result()
-    out = posteriors.marginalized_posteriors(r, FREE, CENTERS, co_eval=CO)
     sig = fisher.mode_forecast(r, FREE)
     for name in FREE:
         rec = out["params"][name]
@@ -67,59 +77,68 @@ def test_curve_matches_fisher_sigma_and_normalizes():
             assert theta.min() == pytest.approx(CENTERS[name] - 5 * want)
             assert theta.max() == pytest.approx(CENTERS[name] + 5 * want)
 
-
-def test_dlnco_display_transform_is_absolute_co():
-    """sigma_display(dlnCO) = C/O * sigma_internal (the fisher-table rule)."""
-    r = _result()
-    sig_int = fisher.mode_forecast(r, FREE)["dlnCO"]
-    out = posteriors.marginalized_posteriors(r, FREE, CENTERS, co_eval=CO)
+    # sigma_display(dlnCO) = C/O * sigma_internal (the fisher-table rule)
     assert out["params"]["dlnCO"]["sigma_display"] == pytest.approx(
-        CO * sig_int, rel=1e-12)
+        CO * sig["dlnCO"], rel=1e-12)
     assert out["params"]["dlnCO"]["unit"] == "C/O ratio"
-    # and dlnCO without co_eval raises, exactly like display_sigma
-    with pytest.raises(ValueError, match="co_eval"):
-        posteriors.marginalized_posteriors(r, FREE, CENTERS)
 
+    # a caller-supplied grid is used verbatim
+    grid = np.linspace(-2.0, 4.0, 33)
+    out2 = posteriors.marginalized_posteriors(
+        r, FREE, CENTERS, co_eval=CO, grids={"lnZ": grid})
+    assert np.array_equal(out2["params"]["lnZ"]["theta"], grid)
 
-def test_broad_co_curve_respects_boundary_and_is_asymmetric():
+    # a list of results combines via combined_forecast
+    rs = [_result(seed=1), _result(seed=2)]
+    outc = posteriors.marginalized_posteriors(rs, FREE, CENTERS, co_eval=CO)
+    sigc = fisher.combined_forecast(rs, FREE)
+    assert outc["n_modes"] == 2
+    for name in FREE:
+        want = fisher.display_sigma(name, sigc[name], co_eval=CO)
+        assert outc["params"][name]["sigma_display"] == pytest.approx(
+            want, rel=1e-12)
+
+    # the broad C/O prior curve respects the positivity boundary and is
+    # asymmetric (lognormal mode below the median)
     curve = posteriors.lognormal_ratio_curve(0.55, sigma_log=1.0)
-    theta, pdf = curve["theta"], curve["pdf"]
-    assert np.all(theta > 0.0)
-    assert theta[np.argmax(pdf)] < 0.55       # lognormal mode below median
-    with pytest.raises(ValueError, match="C/O grid"):
-        posteriors.lognormal_ratio_curve(
-            0.55, 1.0, grid=np.linspace(-0.1, 1.0, 30))
+    assert np.all(curve["theta"] > 0.0)
+    assert curve["theta"][np.argmax(curve["pdf"])] < 0.55
 
 
-def test_null_direction_is_flagged_never_a_fake_curve():
-    """Duplicate Jacobian rows: both parameters must come back unconstrained
-    with NO curve -- never a finite Gaussian."""
+def test_null_directions_are_flagged_never_faked():
+    """Duplicate Jacobian rows: both unconstrained directions must come back
+    with NO curve (never a finite Gaussian) from marginalized_posteriors AND
+    with recovered=False / None shifts (never a number) from mock_recovery."""
+    (k1,) = _registry_keys(1)
     rng = np.random.default_rng(3)
     row = rng.standard_normal(50)
     J = np.stack([row, row, rng.standard_normal(50)])   # [p0, p1, lnR0]
-    r = dict(jac_bins=J, sigma=np.full(50, 1e-4))
+    r = dict(jac_bins=J, sigma=np.full(50, 1e-4), mode_key=k1,
+             depth=np.full(50, 0.02))
     out = posteriors.marginalized_posteriors(
         r, ["p0", "p1"], {"p0": 0.0, "p1": 0.0})
+    real = posteriors.mock_realization([r], seed=0)
+    rec = posteriors.mock_recovery([r], ["p0", "p1"], real)
     for name in ("p0", "p1"):
-        rec = out["params"][name]
-        assert not rec["constrained"]
-        assert rec["theta"] is None and rec["pdf"] is None
-        assert np.isinf(rec["sigma_display"])
+        p = out["params"][name]
+        assert not p["constrained"]
+        assert p["theta"] is None and p["pdf"] is None
+        assert np.isinf(p["sigma_display"])
+        assert rec["recovered"][name] is False
+        assert rec["delta"][name] is None
+        assert rec["delta_display"][name] is None
 
 
-def test_caller_grid_is_used_verbatim():
-    r = _result()
-    grid = np.linspace(-2.0, 4.0, 33)
-    out = posteriors.marginalized_posteriors(
-        r, FREE, CENTERS, co_eval=CO, grids={"lnZ": grid})
-    assert np.array_equal(out["params"]["lnZ"]["theta"], grid)
-
-
-def test_nonfinite_inputs_raise():
+def test_input_validation_raises():
+    """Fail-fast: non-finite sigma/Jacobian/centers, missing centers or
+    co_eval, a free_names list that does not match the [free..., lnR0] row
+    layout, an unconstrained gaussian_curve, and a non-positive C/O grid all
+    raise."""
     r = _result()
     bad_sigma = dict(r, sigma=np.where(np.arange(40) == 5, np.nan, r["sigma"]))
     with pytest.raises(ValueError, match="finite"):
-        posteriors.marginalized_posteriors(bad_sigma, FREE, CENTERS, co_eval=CO)
+        posteriors.marginalized_posteriors(bad_sigma, FREE, CENTERS,
+                                           co_eval=CO)
     bad_jac = dict(r, jac_bins=r["jac_bins"].copy())
     bad_jac["jac_bins"][0, 0] = np.inf
     with pytest.raises(ValueError, match="non-finite"):
@@ -129,42 +148,38 @@ def test_nonfinite_inputs_raise():
     with pytest.raises(ValueError, match="finite"):
         posteriors.marginalized_posteriors(
             r, FREE, {"lnZ": np.nan, "dlnCO": 0.5}, co_eval=CO)
-
-
-def test_row_count_mismatch_raises():
-    """free_names must match the Jacobian's [free..., lnR0] layout."""
-    r = _result(n_free=2)
+    # dlnCO without co_eval raises, exactly like display_sigma
+    with pytest.raises(ValueError, match="co_eval"):
+        posteriors.marginalized_posteriors(r, FREE, CENTERS)
     with pytest.raises(ValueError, match="rows"):
         posteriors.marginalized_posteriors(r, ["lnZ"], {"lnZ": 1.0})
-
-
-def test_gaussian_curve_refuses_inf_sigma():
     with pytest.raises(ValueError, match="unconstrained"):
         posteriors.gaussian_curve(0.0, np.inf)
-
-
-def test_list_of_results_uses_combined_forecast():
-    rs = [_result(seed=1), _result(seed=2)]
-    out = posteriors.marginalized_posteriors(rs, FREE, CENTERS, co_eval=CO)
-    sig = fisher.combined_forecast(rs, FREE)
-    assert out["n_modes"] == 2
-    for name in FREE:
-        want = fisher.display_sigma(name, sig[name], co_eval=CO)
-        assert out["params"][name]["sigma_display"] == pytest.approx(
-            want, rel=1e-12)
+    with pytest.raises(ValueError, match="C/O grid"):
+        posteriors.lognormal_ratio_curve(
+            0.55, 1.0, grid=np.linspace(-0.1, 1.0, 30))
 
 
 # --- named combinations ------------------------------------------------------
 
-def _registry_keys(n):
-    return list(instruments.MODES)[:n]
+def test_combo_forecast_identity_saturation_policy_and_additivity():
+    """combo_forecast's contract in one place.
 
+    A single-mode combo equals mode_forecast (the pinned upstream identity
+    must survive the wrapper). Saturated modes are excluded AND disclosed,
+    with the forecast equal to the usable subset alone (the exclusion is
+    real), and zero usable modes raise rather than reporting nothing.
+    Fisher information is additive over independent modes, so a superset
+    combination can only tighten a marginalized sigma -- pinned on
+    ``combo_forecast`` directly since ``compare_combos`` (a thin wrapper
+    with no production consumer) was removed on 2026-08-14; this invariant
+    is pinned nowhere else. The with-centers path attaches constrained
+    posterior curves."""
+    k1, k2 = _registry_keys(2)
 
-def test_single_mode_combo_equals_mode_forecast():
-    """The pinned upstream identity must survive the combo wrapper."""
-    (key,) = _registry_keys(1)
+    # single-mode identity
     r = _result(seed=4)
-    rec = posteriors.combo_forecast("just one", [key], {key: r}, FREE,
+    rec = posteriors.combo_forecast("just one", [k1], {k1: r}, FREE,
                                     co_eval=CO)
     sig = fisher.mode_forecast(r, FREE)
     for name in FREE:
@@ -174,52 +189,43 @@ def test_single_mode_combo_equals_mode_forecast():
     assert rec["kind"] == posteriors.FORECAST_KIND
     assert rec["posteriors"] is None and rec["posteriors_note"]
 
-
-def test_combo_unknown_mode_key_raises():
-    with pytest.raises(ValueError, match="unknown mode key"):
-        posteriors.combo_forecast("bad", ["not_a_mode"],
-                                  {"not_a_mode": _result()}, FREE, co_eval=CO)
-
-
-def test_combo_saturated_modes_excluded_and_disclosed():
-    k1, k2 = _registry_keys(2)
+    # saturation policy: exclude, disclose, forecast = usable subset alone
     results = {k1: _result(seed=5), k2: _result(seed=6, saturated=True)}
     rec = posteriors.combo_forecast("mixed", [k1, k2], results, FREE,
                                     co_eval=CO)
     assert rec["usable_modes"] == [k1]
     assert [e["mode_key"] for e in rec["excluded"]] == [k2]
     assert "saturated" in rec["excluded"][0]["reason"]
-    # the forecast equals the usable subset alone (exclusion is real)
     sig = fisher.combined_forecast([results[k1]], FREE)
     for name in FREE:
         want = fisher.display_sigma(name, sig[name], co_eval=CO)
         assert rec["sigma_marginalized_display"][name] == pytest.approx(
             want, rel=1e-12)
-
-
-def test_combo_all_saturated_raises():
-    (key,) = _registry_keys(1)
     with pytest.raises(ValueError, match="no usable mode"):
-        posteriors.combo_forecast("dead", [key],
-                                  {key: _result(saturated=True)}, FREE,
+        posteriors.combo_forecast("dead", [k1],
+                                  {k1: _result(saturated=True)}, FREE,
                                   co_eval=CO)
 
-
-def test_combo_with_centers_attaches_curves():
-    k1, k2 = _registry_keys(2)
+    # additivity + the with-centers path
     results = {k1: _result(seed=7), k2: _result(seed=8)}
-    rec = posteriors.combo_forecast("pair", [k1, k2], results, FREE,
-                                    centers=CENTERS, co_eval=CO)
-    post = rec["posteriors"]
+    one = posteriors.combo_forecast("A", [k1], results, FREE, co_eval=CO)
+    both = posteriors.combo_forecast("A + B", [k1, k2], results, FREE,
+                                     centers=CENTERS, co_eval=CO)
+    assert one["name"] == "A" and both["name"] == "A + B"
+    assert (both["sigma_marginalized_display"]["lnZ"]
+            <= one["sigma_marginalized_display"]["lnZ"] * (1 + 1e-12))
+    post = both["posteriors"]
     assert post is not None and post["n_modes"] == 2
     assert post["params"]["lnZ"]["constrained"]
-    # combined sigma tighter than (or equal to) either single mode
     single = fisher.mode_forecast(results[k1], FREE)["lnZ"]
     assert post["sigma_marginalized"]["lnZ"] <= single * (1 + 1e-12)
 
 
-def test_combo_duplicate_keys_and_missing_results_raise():
+def test_combo_input_validation_raises():
     k1, k2 = _registry_keys(2)
+    with pytest.raises(ValueError, match="unknown mode key"):
+        posteriors.combo_forecast("bad", ["not_a_mode"],
+                                  {"not_a_mode": _result()}, FREE, co_eval=CO)
     with pytest.raises(ValueError, match="duplicate"):
         posteriors.combo_forecast("dup", [k1, k1], {k1: _result()}, FREE,
                                   co_eval=CO)
@@ -230,51 +236,57 @@ def test_combo_duplicate_keys_and_missing_results_raise():
 
 # --- mock-observation layer --------------------------------------------------
 
-def _mode_result(seed, key, n_free=2, n_bins=30):
-    r = _result(seed=seed, n_free=n_free, n_bins=n_bins)
-    r["mode_key"] = key
-    r["depth"] = np.full(n_bins, 0.021)
-    return r
-
-
-def test_mock_realization_is_seeded_and_reproducible():
+def test_mock_realization_contract():
+    """The full mock_realization contract: same seed identical, new seed
+    different, depth_mock exactly depth + noise; a mode's stream depends
+    only on (seed, mode_key), so adding or reordering other modes never
+    changes it; the record discloses the seed-scheme version and numpy
+    version (archival reproducibility: default_rng bitstreams are not
+    contractually version-stable); and there are NO side effects -- global
+    numpy RNG state untouched, the caller's result dicts (the noiseless
+    depths and sigmas that feed scores and CSVs) byte-identical."""
     k1, k2 = _registry_keys(2)
     rs = [_mode_result(1, k1), _mode_result(2, k2)]
+    depth_before = np.asarray(rs[0]["depth"]).copy()
+    sigma_before = np.asarray(rs[0]["sigma"]).copy()
+    np.random.seed(123)
+    state_before = np.random.get_state()[1].copy()
+
     a = posteriors.mock_realization(rs, seed=7)
     b = posteriors.mock_realization(rs, seed=7)
     c = posteriors.mock_realization(rs, seed=8)
     assert a["seed"] == 7 and a["kind"] == posteriors.MOCK_KIND
-    for k in (k1, k2):
+    for i, k in enumerate((k1, k2)):
         assert np.array_equal(a["modes"][k]["noise"], b["modes"][k]["noise"])
         assert not np.array_equal(a["modes"][k]["noise"],
                                   c["modes"][k]["noise"])
-        assert np.array_equal(
-            a["modes"][k]["depth_mock"],
-            np.asarray(rs[[k1, k2].index(k)]["depth"])
-            + a["modes"][k]["noise"])
+        assert np.array_equal(a["modes"][k]["depth_mock"],
+                              np.asarray(rs[i]["depth"])
+                              + a["modes"][k]["noise"])
+    alone = posteriors.mock_realization([rs[0]], seed=7)
+    reordered = posteriors.mock_realization([rs[1], rs[0]], seed=7)
+    for real in (alone, reordered):
+        assert np.array_equal(real["modes"][k1]["noise"],
+                              a["modes"][k1]["noise"]), \
+            "a mode's draw must depend only on (seed, mode_key)"
+
+    assert a["seed_scheme"] == posteriors.SEED_SCHEME
+    assert a["numpy_version"] == np.__version__
+    assert posteriors.SEED_SCHEME.startswith("v1:")
+
+    assert np.array_equal(np.random.get_state()[1], state_before)
+    assert np.array_equal(np.asarray(rs[0]["depth"]), depth_before)
+    assert np.array_equal(np.asarray(rs[0]["sigma"]), sigma_before)
+    assert a["modes"][k1]["depth_mock"] is not rs[0]["depth"]
 
 
-def test_mock_realization_per_mode_stream_is_selection_independent():
-    """A mode's draw depends only on (seed, mode_key): adding or reordering
-    other modes must not change it."""
+def test_mock_layer_validates_loudly():
+    """Refusals: bad seed, empty selection, non-positive sigma, missing
+    mode_key, a recovery against a realization that does not cover the
+    results, and a crc32 stream collision between mode keys (which would
+    silently share noise draws; today's registry has none)."""
+    import zlib
     k1, k2 = _registry_keys(2)
-    r1, r2 = _mode_result(1, k1), _mode_result(2, k2)
-    alone = posteriors.mock_realization([r1], seed=3)
-    both = posteriors.mock_realization([r2, r1], seed=3)
-    assert np.array_equal(alone["modes"][k1]["noise"],
-                          both["modes"][k1]["noise"])
-
-
-def test_mock_realization_never_touches_global_numpy_state():
-    (k1,) = _registry_keys(1)
-    np.random.seed(123)
-    before = np.random.get_state()[1].copy()
-    posteriors.mock_realization([_mode_result(1, k1)], seed=0)
-    assert np.array_equal(np.random.get_state()[1], before)
-
-
-def test_mock_realization_validates_loudly():
-    (k1,) = _registry_keys(1)
     r = _mode_result(1, k1)
     with pytest.raises(ValueError, match="seed"):
         posteriors.mock_realization([r], seed=-1)
@@ -286,15 +298,29 @@ def test_mock_realization_validates_loudly():
     with pytest.raises(ValueError, match="mode_key"):
         posteriors.mock_realization([{"depth": r["depth"],
                                       "sigma": r["sigma"]}], seed=0)
+    r2 = _mode_result(32, k2)
+    real_one = posteriors.mock_realization([r], seed=0)
+    with pytest.raises(ValueError, match="no draw for mode"):
+        posteriors.mock_recovery([r, r2], FREE, real_one)
+    with pytest.raises(ValueError, match="mock_realization record"):
+        posteriors.mock_recovery([r], FREE, {"seed": 0})
+    # today's registry is collision-free; a genuine crc32 collision (classic
+    # colliding pair) is refused loudly
+    posteriors._assert_mode_streams_distinct(instruments.MODES.keys())
+    a, b = "plumless", "buckeroo"
+    assert zlib.crc32(a.encode()) == zlib.crc32(b.encode())
+    with pytest.raises(ValueError, match="collide"):
+        posteriors._assert_mode_streams_distinct([a, b])
 
 
-def test_mock_recovery_zero_mean_and_fisher_covariance():
+def test_mock_recovery_zero_mean_fisher_covariance_and_labels():
     """Monte Carlo pin of the linearization identities: over realizations,
     E[delta_theta] = 0 and Cov[delta_theta] = (F^-1)_free on the SAME
-    stacked nuisance-augmented system as combined_forecast."""
+    stacked nuisance-augmented system as combined_forecast. Also pins the
+    record's honesty labels and the display transform (mirrors
+    fisher.display_sigma: dlnCO -> C/O, lnZ -> dex)."""
     k1, k2 = _registry_keys(2)
     rs = [_mode_result(11, k1), _mode_result(12, k2)]
-    results = {k1: rs[0], k2: rs[1]}
     n_f = len(FREE)
 
     # expected covariance: free-block of the inverse joint Fisher matrix
@@ -308,8 +334,7 @@ def test_mock_recovery_zero_mean_and_fisher_covariance():
     deltas = np.empty((n_draw, n_f))
     for i in range(n_draw):
         real = posteriors.mock_realization(rs, seed=i)
-        rec = posteriors.mock_recovery(list(results.values()), FREE, real,
-                                       co_eval=CO)
+        rec = posteriors.mock_recovery(rs, FREE, real, co_eval=CO)
         deltas[i] = [rec["delta"][n] for n in FREE]
     mean = deltas.mean(axis=0)
     cov = np.cov(deltas.T)
@@ -324,9 +349,7 @@ def test_mock_recovery_zero_mean_and_fisher_covariance():
     for j, name in enumerate(FREE):
         assert deltas[:, j].std() == pytest.approx(marg[name], rel=0.1)
 
-
-def test_mock_recovery_display_transform_and_labels():
-    (k1,) = _registry_keys(1)
+    # labels + display transform on a single-mode recovery
     r = _mode_result(21, k1)
     real = posteriors.mock_realization([r], seed=5)
     rec = posteriors.mock_recovery([r], FREE, real, co_eval=CO)
@@ -334,7 +357,6 @@ def test_mock_recovery_display_transform_and_labels():
     assert "not a retrieval" in rec["label"]
     assert rec["seed"] == 5
     assert rec["recovered"] == {n: True for n in FREE}
-    # display transform mirrors fisher.display_sigma (linear): dlnCO -> C/O
     assert rec["delta_display"]["dlnCO"] == pytest.approx(
         CO * rec["delta"]["dlnCO"], rel=1e-12)
     assert rec["delta_display"]["lnZ"] == pytest.approx(
@@ -342,60 +364,15 @@ def test_mock_recovery_display_transform_and_labels():
     assert rec["units"]["dlnCO"] == "C/O ratio"
 
 
-def test_mock_recovery_null_direction_has_no_recovered_value():
-    """Duplicate Jacobian rows: the unconstrained directions must come back
-    recovered=False with None shifts -- never a number."""
-    (k1,) = _registry_keys(1)
-    rng = np.random.default_rng(6)
-    row = rng.standard_normal(30)
-    J = np.stack([row, row, rng.standard_normal(30)])
-    r = dict(jac_bins=J, sigma=np.full(30, 1e-4), mode_key=k1,
-             depth=np.full(30, 0.02))
-    real = posteriors.mock_realization([r], seed=0)
-    rec = posteriors.mock_recovery([r], ["p0", "p1"], real)
-    for name in ("p0", "p1"):
-        assert rec["recovered"][name] is False
-        assert rec["delta"][name] is None
-        assert rec["delta_display"][name] is None
-
-
-def test_mock_recovery_requires_matching_realization():
-    k1, k2 = _registry_keys(2)
-    r1, r2 = _mode_result(31, k1), _mode_result(32, k2)
-    real_one = posteriors.mock_realization([r1], seed=0)
-    with pytest.raises(ValueError, match="no draw for mode"):
-        posteriors.mock_recovery([r1, r2], FREE, real_one)
-    with pytest.raises(ValueError, match="mock_realization record"):
-        posteriors.mock_recovery([r1], FREE, {"seed": 0})
-
-
-def test_mock_realization_never_mutates_the_inputs():
-    """The draw is a NEW array layered on top: the caller's result dicts
-    (the noiseless depths and sigmas that feed scores and CSVs) must come
-    back byte-identical."""
-    (k1,) = _registry_keys(1)
-    r = _mode_result(41, k1)
-    depth_before = np.asarray(r["depth"]).copy()
-    sigma_before = np.asarray(r["sigma"]).copy()
-    real = posteriors.mock_realization([r], seed=2)
-    assert np.array_equal(np.asarray(r["depth"]), depth_before)
-    assert np.array_equal(np.asarray(r["sigma"]), sigma_before)
-    assert real["modes"][k1]["depth_mock"] is not r["depth"]
-
-
 def test_scoring_modules_never_reference_the_mock_layer():
     """Structural pin of the ONE-DIRECTIONAL rule (not "display only": the
     draw IS fitted by mock_recovery, whose recovered-parameter shift the GUI
-    overlays on the posterior panels).
-
-    What this pins is the direction of the dependency: the scoring, forecast
-    and export modules must carry NO reference to the mock-observation layer
-    -- no `posteriors` import, no mock_realization/mock_recovery/depth_mock
-    name. The draw is consumed only in app.py, for the plotted points, the
-    recovery overlay, and the clearly-named mock CSV; it can never flow back
-    into a score, a cache, or a noiseless export. Checks the parsed AST, not
-    raw text, so this docstring cannot trip it.
-    """
+    overlays on the posterior panels). The scoring, forecast and export
+    modules must carry NO reference to the mock-observation layer -- no
+    `posteriors` import, no mock_realization/mock_recovery/depth_mock name
+    -- so the draw can never flow back into a score, a cache, or a noiseless
+    export. Checks the parsed AST, not raw text, so this docstring cannot
+    trip it."""
     import ast
     import pathlib
 
@@ -422,50 +399,6 @@ def test_scoring_modules_never_reference_the_mock_layer():
                 f"{mod}:{node.lineno} references {hit!r} -- the mock draw "
                 "must never enter scores, caches, or result exports (it is "
                 "fitted only by mock_recovery, consumed in app.py)")
-
-
-def test_adding_a_mode_cannot_loosen_the_marginalized_bound():
-    """Fisher information is additive over independent modes, so a superset
-    combination can only tighten a marginalized sigma.
-
-    Pinned on ``combo_forecast`` directly since ``compare_combos`` (a thin
-    ordering/duplicate-checking wrapper with no production consumer) was
-    removed on 2026-08-14; this invariant is pinned nowhere else.
-    """
-    k1, k2 = _registry_keys(2)
-    results = {k1: _result(seed=9), k2: _result(seed=10)}
-    one = posteriors.combo_forecast("A", [k1], results, FREE, co_eval=CO)
-    both = posteriors.combo_forecast("A + B", [k1, k2], results, FREE,
-                                     co_eval=CO)
-    assert one["name"] == "A" and both["name"] == "A + B"
-    assert (both["sigma_marginalized_display"]["lnZ"]
-            <= one["sigma_marginalized_display"]["lnZ"] * (1 + 1e-12))
-
-
-def test_mock_realization_records_seed_scheme_provenance():
-    """The mock record carries the seed-scheme version and numpy version
-    (archival reproducibility: default_rng bitstreams are not contractually
-    version-stable)."""
-    r = _result(seed=1)
-    r["mode_key"] = "nirspec_g395h"
-    r["depth"] = np.full(40, 0.021)
-    mock = posteriors.mock_realization([r], seed=5)
-    assert mock["seed_scheme"] == posteriors.SEED_SCHEME
-    assert mock["numpy_version"] == np.__version__
-    assert posteriors.SEED_SCHEME.startswith("v1:")
-
-
-def test_mode_stream_crc_collision_refused_and_registry_clean():
-    """A crc32 collision between mode keys would silently share noise
-    draws; the guard refuses it, and today's registry has none."""
-    import zlib
-    # today's registry is collision-free
-    posteriors._assert_mode_streams_distinct(instruments.MODES.keys())
-    # a genuine crc32 collision is refused loudly (classic colliding pair)
-    a, b = "plumless", "buckeroo"
-    assert zlib.crc32(a.encode()) == zlib.crc32(b.encode())
-    with pytest.raises(ValueError, match="collide"):
-        posteriors._assert_mode_streams_distinct([a, b])
 
 
 def test_mock_draw_uses_the_same_sigma_as_the_reported_error_bars():

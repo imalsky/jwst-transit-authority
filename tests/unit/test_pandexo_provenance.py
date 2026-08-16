@@ -66,9 +66,10 @@ def _pandexo_checkout(root: Path) -> tuple[Path, str]:
     return pkg, _git(root, "rev-parse", "HEAD")
 
 
-def test_unrelated_enclosing_repo_is_not_pandexo(worker, git_env, tmp_path):
-    """The reproduced defect: a package directory inside SOME OTHER git repo
-    (one with a pyproject.toml, like this one) must not inherit its HEAD."""
+def test_non_pandexo_trees_return_none(worker, git_env, tmp_path):
+    """Fail-closed cases: three trees that must NOT report a commit."""
+    # The reproduced defect: a package directory inside SOME OTHER git repo
+    # (one with a pyproject.toml, like this one) must not inherit its HEAD.
     repo = tmp_path / "enclosing"
     (repo / "pkg").mkdir(parents=True)
     (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n")
@@ -78,27 +79,27 @@ def test_unrelated_enclosing_repo_is_not_pandexo(worker, git_env, tmp_path):
     _git(repo, "commit", "-q", "-m", "x")
     assert worker._pandexo_commit(str(repo / "pkg")) is None
 
+    # Tracking the imported __init__.py is necessary but not sufficient:
+    # the repo must ship PandExo's engine (engine/justdoit.py).
+    repo2 = tmp_path / "notpandexo"
+    (repo2 / "pandexo").mkdir(parents=True)
+    (repo2 / "pandexo" / "__init__.py").write_text("")
+    _git(repo2, "init", "-q")
+    _git(repo2, "add", "-A")
+    _git(repo2, "commit", "-q", "-m", "x")
+    assert worker._pandexo_commit(str(repo2 / "pandexo")) is None
 
-def test_tracked_package_without_engine_is_not_pandexo(worker, git_env,
-                                                       tmp_path):
-    """Tracking the imported __init__.py is necessary but not sufficient:
-    the repo must ship PandExo's engine (engine/justdoit.py)."""
-    repo = tmp_path / "notpandexo"
-    (repo / "pandexo").mkdir(parents=True)
-    (repo / "pandexo" / "__init__.py").write_text("")
-    _git(repo, "init", "-q")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "x")
-    assert worker._pandexo_commit(str(repo / "pandexo")) is None
+    # A plain directory outside any repository.
+    d = tmp_path / "plain" / "pandexo"
+    d.mkdir(parents=True)
+    (d / "__init__.py").write_text("")
+    assert worker._pandexo_commit(str(d)) is None
 
 
-def test_genuine_checkout_reports_head(worker, git_env, tmp_path):
+def test_genuine_checkout_reports_head_and_dirty_flag(worker, git_env,
+                                                      tmp_path):
     pkg, head = _pandexo_checkout(tmp_path / "PandExo")
     assert worker._pandexo_commit(str(pkg)) == head
-
-
-def test_dirty_checkout_is_flagged(worker, git_env, tmp_path):
-    pkg, head = _pandexo_checkout(tmp_path / "PandExo")
     (pkg / "engine" / "justdoit.py").write_text("changed")
     assert worker._pandexo_commit(str(pkg)) == head + "-dirty"
 
@@ -112,13 +113,6 @@ def test_worktree_checkout_reports_head(worker, git_env, tmp_path):
     _git(main, "worktree", "add", "-q", str(wt))
     head = _git(wt, "rev-parse", "HEAD")
     assert worker._pandexo_commit(str(wt / "pandexo")) == head
-
-
-def test_plain_directory_returns_none(worker, git_env, tmp_path):
-    d = tmp_path / "plain" / "pandexo"
-    d.mkdir(parents=True)
-    (d / "__init__.py").write_text("")
-    assert worker._pandexo_commit(str(d)) is None
 
 
 def test_direct_url_accepted_only_with_containment_and_full_hash(

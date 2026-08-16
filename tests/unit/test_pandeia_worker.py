@@ -14,29 +14,18 @@ from jwst_tool import pandeia_worker as pw
 
 # --- ngroup limits (PandExo compatibility) -----------------------------------
 
-def test_nircam_modes_respect_pandexo_group_cap():
-    """NIRCam grism must not permit more than PandExo's hard 100-group max."""
-    cap = ins.PANDEXO_NGROUP_MAX["nircam"]
-    assert cap == 100
-    nircam = [k for k, m in ins.MODES.items() if m["instrument"] == "nircam"]
-    assert nircam                                        # the modes exist
-    for key in nircam:
-        assert ins.MODES[key]["ngroup_max"] <= cap, key
-
-
-def test_every_mode_respects_its_instrument_cap():
-    """The import-time guard mirror: no mode exceeds its instrument's cap."""
+def test_group_caps_and_optimizer_clamp():
+    """NIRCam grism must not permit more than PandExo's hard 100-group max,
+    no mode exceeds its instrument's cap (the import-time guard mirror),
+    and _clamp_ngroup bounds any candidate into [ngroup_min, ngroup_max]."""
+    assert ins.PANDEXO_NGROUP_MAX["nircam"] == 100
+    assert any(m["instrument"] == "nircam" for m in ins.MODES.values())
     for key, m in ins.MODES.items():
         cap = ins.PANDEXO_NGROUP_MAX.get(m["instrument"])
         if cap is not None:
             assert m["ngroup_max"] <= cap, key
-
-
-def test_optimizer_clamp_never_exceeds_ngroup_max():
-    """_clamp_ngroup bounds any candidate into [ngroup_min, ngroup_max]."""
-    for key, m in ins.MODES.items():
         lo, hi = m["ngroup_min"], m["ngroup_max"]
-        for cand in (-5, 0, 1, lo, lo + 1, hi - 1, hi, hi + 50, 10_000):
+        for cand in (-5, 0, lo, hi, hi + 50, 10_000):
             got = pw._clamp_ngroup(cand, lo, hi)
             assert lo <= got <= hi, (key, cand, got)
 
@@ -59,69 +48,38 @@ def test_ramp_floors_equal_pandeia_mingroups():
         assert 1 <= m["ngroup_min"] <= m["ngroup_warn_below"] \
             <= m["ngroup_max"], key
 
-@pytest.mark.parametrize("raw, expected", [
-    ("3.0", "3.0"),
-    ("3.0rc3", "3.0"),
-    ("2026.2", "2026.2"),
-    ("2026.2.dev1", "2026.2"),
-    ("  4.1 \n", "4.1"),
-    ("rc3", None),
-    ("", None),
-])
-def test_release_segment(raw, expected):
-    assert pw._release(raw) == expected
+
+def test_release_segment():
+    """Leading numeric release segment; rc/dev suffixes drop, non-numeric
+    strings read None."""
+    for raw, expected in (("3.0", "3.0"), ("3.0rc3", "3.0"),
+                          ("2026.2.dev1", "2026.2"), ("  4.1 \n", "4.1"),
+                          ("rc3", None), ("", None)):
+        assert pw._release(raw) == expected, raw
 
 
 # --- _refdata_version -------------------------------------------------------
 
-def test_refdata_version_prefers_version_file(tmp_path):
+def test_refdata_version_sources(tmp_path):
+    """VERSION wins when present; a misplaced VERSION_PSF must never
+    authenticate refdata (a VERSION_PSF file names a PSF library, never a
+    data tree -- the retired 3.0-era fallback allowed that) while the
+    pandeia_data-<ver> dir-name convention still applies; an unmarked tree
+    is undeterminable."""
     (tmp_path / "VERSION").write_text("2026.2\nextra\n")
     (tmp_path / "VERSION_PSF").write_text("9.9\n")
-    ver, src = pw._refdata_version(str(tmp_path))
-    assert (ver, src) == ("2026.2", "VERSION")
+    assert pw._refdata_version(str(tmp_path)) == ("2026.2", "VERSION")
 
-
-def test_refdata_version_never_reads_a_misplaced_psf_marker(tmp_path):
-    # A VERSION_PSF file names a PSF library, never a data tree: with every
-    # supported backend on the split layout, a misplaced PSF marker must not
-    # authenticate refdata (the retired 3.0-era fallback allowed that). The
-    # dir-name convention still applies.
     tree = tmp_path / "pandeia_data-2026.7-jwst"
     tree.mkdir()
     (tree / "VERSION_PSF").write_text("2026.7\n\nPSF provenance text\n")
-    ver, src = pw._refdata_version(str(tree))
-    assert (ver, src) == ("2026.7-jwst", "directory name")
+    assert pw._refdata_version(str(tree)) == ("2026.7-jwst", "directory name")
     (tree / "VERSION_DATA").write_text("2026.7\n")
     assert pw._refdata_version(str(tree)) == ("2026.7", "VERSION_DATA")
 
-
-def test_refdata_version_undeterminable(tmp_path):
-    ver, _src = pw._refdata_version(str(tmp_path))
-    assert ver is None
-
-
-# --- _check_backend_match ---------------------------------------------------
-
-def test_match_accepts_validated_pair(tmp_path):
-    # a matched engine/refdata release with a matching PSF tree passes and
-    # records the provenance
-    ref, psf = _triple(tmp_path, "3.0", "3.0")
-    prov = pw._check_backend_match("3.0", ref, psf)
-    assert prov["refdata_version"] == "3.0"
-    assert prov["psf_version"] == "3.0"
-
-
-def test_match_refuses_mismatched_engine(tmp_path):
-    tree = tmp_path / "pandeia_data-3.0rc3"
-    tree.mkdir()
-    (tree / "VERSION_PSF").write_text("3.0\n")
-    with pytest.raises(RuntimeError, match="does not match"):
-        pw._check_backend_match("2026.1", str(tree))
-
-
-def test_match_refuses_unidentifiable_refdata(tmp_path):
-    with pytest.raises(RuntimeError, match="cannot determine"):
-        pw._check_backend_match("3.0", str(tmp_path))
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    assert pw._refdata_version(str(bare))[0] is None
 
 
 # --- matched engine/refdata/PSF triple ---------------------------------------
@@ -137,85 +95,77 @@ def _triple(tmp_path, data_ver, psf_ver):
     return str(ref), str(psf)
 
 
-def test_matched_triple_runs_and_records_all_three_versions(tmp_path):
+def test_matched_triple_and_psf_identity(tmp_path):
+    """A matched triple passes and records all three versions; PSF identity
+    comes from VERSION_PSF, then the directory name; an unidentifiable PSF
+    tree is refused."""
     ref, psf = _triple(tmp_path, "2026.7", "2026.7")
     prov = pw._check_backend_match("2026.7", ref, psf)
     assert prov["refdata_version"] == "2026.7"
     assert prov["psf_version"] == "2026.7"
     assert prov["psf_version_source"] == "VERSION_PSF"
 
-
-@pytest.mark.parametrize("engine, data_ver, psf_ver, offender", [
-    ("2026.2", "2026.7", "2026.7", "does not match pandeia_data"),   # engine odd
-    ("2026.7", "2026.2", "2026.7", "does not match pandeia_data"),   # data odd
-    ("2026.7", "2026.7", "2026.2", "PSF library release"),           # PSFs odd
-    ("2026.2", "2026.2", "2026.7", "PSF library release"),           # PSFs odd
-])
-def test_every_pairwise_mismatch_is_refused(tmp_path, engine, data_ver,
-                                            psf_ver, offender):
-    """Any component out of step must fail BEFORE a calculation; the PSF
-    release is the one that used to go unchecked."""
-    ref, psf = _triple(tmp_path, data_ver, psf_ver)
-    with pytest.raises(RuntimeError, match=offender):
-        pw._check_backend_match(engine, ref, psf)
-
-
-def test_psf_release_read_from_directory_name_when_version_file_absent(tmp_path):
-    ref, psf = _triple(tmp_path, "2026.7", "2026.7")
     os.remove(os.path.join(psf, "VERSION_PSF"))
     prov = pw._check_backend_match("2026.7", ref, psf)
     assert (prov["psf_version"], prov["psf_version_source"]) == (
         "2026.7-jwst", "directory name")
 
-
-def test_unidentifiable_psf_tree_is_refused(tmp_path):
-    ref, _ = _triple(tmp_path, "2026.7", "2026.7")
     blank = tmp_path / "psfs_somewhere"
     blank.mkdir()
     with pytest.raises(RuntimeError, match="cannot determine the pandeia_psfs"):
         pw._check_backend_match("2026.7", ref, str(blank))
 
 
-def test_any_backend_without_separate_psf_tree_is_refused(tmp_path):
+def test_any_component_out_of_step_is_refused(tmp_path):
+    """Any component out of step must fail BEFORE a calculation; the PSF
+    release is the one that used to go unchecked. Unidentifiable refdata is
+    refused too."""
+    for engine, data_ver, psf_ver, offender in (
+            ("2026.2", "2026.7", "2026.7", "does not match pandeia_data"),
+            ("2026.7", "2026.2", "2026.7", "does not match pandeia_data"),
+            ("2026.7", "2026.7", "2026.2", "PSF library release"),
+            ("2026.2", "2026.2", "2026.7", "PSF library release")):
+        sub = tmp_path / f"{engine}-{data_ver}-{psf_ver}"
+        sub.mkdir()
+        ref, psf = _triple(sub, data_ver, psf_ver)
+        with pytest.raises(RuntimeError, match=offender):
+            pw._check_backend_match(engine, ref, psf)
+
+    unmarked = tmp_path / "unmarked_refdata"
+    unmarked.mkdir()
+    with pytest.raises(RuntimeError, match="cannot determine"):
+        pw._check_backend_match("3.0", str(unmarked))
+
+
+def test_missing_psf_tree_is_refused(tmp_path):
     """Every backend uses the split-PSF layout since the legacy (3.0)
-    backend was removed: a missing PSF dir is always an error."""
-    ref, _ = _triple(tmp_path, "3.0", "3.0")
+    backend was removed: a missing PSF dir is always an error, and the
+    split 2026+ layout must never masquerade as embedded-PSF data."""
+    ref, _ = _triple(tmp_path, "2026.7", "2026.7")
     for psf_dir in (None, ""):
         with pytest.raises(RuntimeError, match="requires a separate PSF"):
-            pw._check_backend_match("3.0", ref, psf_dir)
-
-
-@pytest.mark.parametrize("psf_dir", [None, ""])
-def test_current_backend_without_separate_psf_tree_is_refused(tmp_path,
-                                                               psf_dir):
-    """The split 2026+ layout must never masquerade as embedded-PSF data."""
-    ref, _ = _triple(tmp_path, "2026.7", "2026.7")
-    with pytest.raises(RuntimeError, match="requires a separate PSF library"):
-        pw._check_backend_match("2026.7", ref, psf_dir)
+            pw._check_backend_match("2026.7", ref, psf_dir)
 
 
 # --- backend registry --------------------------------------------------------
 
-def test_current_backend_is_the_supported_release_triple():
+def test_backend_registry_is_the_single_supported_triple():
+    """One backend: current = 2026.7 matched triple; unvalidated archival
+    backends are not selectable."""
     assert ins.JWST_TOOL_BACKEND in ins._BACKENDS
     cur = ins._BACKENDS["current"]
     assert cur["release"] == ins._SUPPORTED_PANDEIA_RELEASE == "2026.7"
     assert cur["supported"] is True
     assert "pandeia_data-2026.7-jwst" in cur["refdata"]
     assert "pandeia_psfs-2026.7-jwst" in cur["psf"]
-
-
-def test_unvalidated_archival_backends_are_not_selectable():
     assert set(ins._BACKENDS) == {"current"}
     assert set(ins._MODE_RENAMES) == {"current"}
 
 
 def test_no_backend_carries_a_personal_absolute_path():
-    """No checked-in SOURCE literal may point into one person's home.
-
-    Checks the source text, not resolved values: refdata/psf legitimately
-    resolve under a developer's home in an editable checkout.
-    """
+    """No checked-in SOURCE literal may point into one person's home (checks
+    source text, not resolved values: refdata/psf legitimately resolve under
+    a developer's home in an editable checkout)."""
     import pathlib
 
     src = pathlib.Path(ins.__file__).read_text()

@@ -2,7 +2,9 @@
 
 The mapping must restore exactly the widget state the download described, and
 an invalid file must raise before anything could be applied. No Streamlit, no
-pandeia, no JAX: the mapping is pure dict work over canonical params.
+pandeia, no JAX: the mapping is pure dict work over canonical params. Pruned
+2026-08-15 (maintainer: fewer, stronger tests): refusal micro-tests are
+merged into consolidated fail-closed tests; every assertion survives.
 """
 import pytest
 
@@ -20,6 +22,9 @@ def _canon(**over):
 
 
 def test_round_trip_restores_the_full_run():
+    """Constrain goal, detect goal, and a bare canonical dict all restore
+    exactly the widget state the download described (widget KEYS are a
+    shipped contract)."""
     canon = _canon(met_x_solar=7.0, co_ratio=0.6, kzz_mode="const",
                    kzz_const=1.0e9, extra_mols=["HCN", "NH3"],
                    cloud_on=True, log_kappa_cloud=-2.0, alpha_cloud=1.0,
@@ -37,22 +42,18 @@ def test_round_trip_restores_the_full_run():
                          show_noise=False, seed=0))
     state, notes = share_config.widget_state(share, _key)
     assert not notes
-
     # target + system (per-planet keys)
     assert state["n0_planet"] == "wasp39b"
     assert state["n0_wasp39b_teff"] == canon["star_teff"]
     assert state["n0_wasp39b_g"] == pytest.approx(canon["gs_cgs"] / 100.0)
-    assert state["n0_wasp39b_ks"] == 9.0
-    assert state["n0_wasp39b_t14"] == 2.8
+    assert state["n0_wasp39b_ks"] == 9.0 and state["n0_wasp39b_t14"] == 2.8
     # atmosphere
     assert state["n0_wasp39b_tp"] == "guillot"
     assert state["n0_wasp39b_tirr"] == canon["Tirr"]
-    assert state["n0_met"] == 7.0
-    assert state["n0_co"] == 0.6
+    assert state["n0_met"] == 7.0 and state["n0_co"] == 0.6
     assert state["n0_wasp39b_kzz"] == pytest.approx(9.0)   # log10(kzz_const)
     assert state["n0_xmols_vulcan"] == ["HCN", "NH3"]
-    assert state["n0_cloud"] is True
-    assert state["n0_ck"] == -2.0
+    assert state["n0_cloud"] is True and state["n0_ck"] == -2.0
     # science goal (dynamic widget-key suffixes)
     assert state["n0_goal"] == "constrain"
     assert state["n0_gp_vulcan_guillot_1_0"] == "lnZ"
@@ -60,17 +61,14 @@ def test_round_trip_restores_the_full_run():
     assert state["n0_fx_vulcan_guillot_1_0"] == ["lnKzz"]
     # observation
     assert state["n0_modes"] == ["nirspec_g395h"]
-    assert state["n0_ntr"] == 2
-    assert state["n0_rbin"] == 100
+    assert state["n0_ntr"] == 2 and state["n0_rbin"] == 100
     assert state["n0_floormode"] == "constant"
     assert state["n0_floor_nirspec_g395h"] == 15.0
     assert state["n0_infl_nirspec_g395h"] == 1.05
 
-
-def test_detect_goal_maps_the_molecule_widget_key():
-    canon = _canon(extra_mols=["C2H2", "HCN"])
+    # a detect goal maps the per-selection molecule widget key
     share = share_config.build_share(
-        canon,
+        _canon(extra_mols=["C2H2", "HCN"]),
         goal=dict(goal="detect", target_mol="SO2", target_sig=3.0,
                   marginalize=True, do_fisher=False, fisher_params=[],
                   jac_method="fd"),
@@ -80,14 +78,38 @@ def test_detect_goal_maps_the_molecule_widget_key():
     assert state["n0_mol_vulcan_C2H2_HCN"] == "SO2"
     assert state["n0_dofish"] is False
 
-
-def test_bare_canonical_dict_is_accepted():
+    # a bare canonical dict is accepted
     state, _ = share_config.widget_state(_canon(), _key)
     assert state["n0_planet"] == "wasp39b"
     assert "n0_modes" not in state          # no observation section to restore
 
 
-def test_unknown_entries_are_dropped_with_a_note_not_applied():
+def test_invalid_input_is_refused_before_anything_applies():
+    """Fail closed: malformed files, unknown parameters, a missing uploaded
+    table, and an unsupported format version all raise before any state
+    could be applied; recoverable unknown entries are dropped WITH a note,
+    never silently."""
+    with pytest.raises(ValueError):
+        share_config.widget_state({"foo": 1}, _key)
+    with pytest.raises(ValueError):
+        share_config.widget_state(
+            {"canonical_params": {"planet": "wasp39b", "nz": 5}}, _key)
+    with pytest.raises(ValueError):
+        share_config.widget_state([1, 2, 3], _key)
+    # a config referencing an uploaded table this machine does not hold
+    cfg = {"canonical_params": dict(
+        planet="wasp39b", tp_mode="file", tp_file=forward.TP_FILE_UPLOAD,
+        tp_file_sha1="0000000000000000")}
+    with pytest.raises(ValueError, match="upload the table again"):
+        share_config.widget_state(cfg, _key)
+    # unsupported format version; the marker written is the marker read
+    share = share_config.build_share(_canon(), goal={}, observation={})
+    share["jwst_tool_config"] = 999
+    with pytest.raises(ValueError, match="format 999"):
+        share_config.widget_state(share, _key)
+    assert share_config.build_share(_canon(), {}, {})["jwst_tool_config"] \
+        == share_config.SHARE_FORMAT
+    # unknown entries are dropped with a note, not applied
     share = share_config.build_share(
         _canon(), goal={},
         observation=dict(modes=["nirspec_g395h", "not_a_mode"]))
@@ -96,88 +118,12 @@ def test_unknown_entries_are_dropped_with_a_note_not_applied():
     assert any("not_a_mode" in n for n in notes)
 
 
-def test_invalid_file_raises_before_anything_applies():
-    with pytest.raises(ValueError):
-        share_config.widget_state({"foo": 1}, _key)
-    with pytest.raises(ValueError):
-        share_config.widget_state(
-            {"canonical_params": {"planet": "wasp39b", "nz": 5}}, _key)
-    with pytest.raises(ValueError):
-        share_config.widget_state([1, 2, 3], _key)
+def test_embedded_tp_table_is_all_or_nothing(tmp_path):
+    """All-or-nothing includes the filesystem: a config that fails validation
+    must not deposit its embedded table in the uploads archive; a valid
+    embedded table is archived and its restored path round-trips."""
+    from pathlib import Path
 
-
-def test_missing_uploaded_tp_table_is_a_loud_error():
-    cfg = {"canonical_params": dict(
-        planet="wasp39b", tp_mode="file", tp_file=forward.TP_FILE_UPLOAD,
-        tp_file_sha1="0000000000000000")}
-    with pytest.raises(ValueError, match="upload the table again"):
-        share_config.widget_state(cfg, _key)
-
-
-def test_unsupported_format_version_is_refused():
-    share = share_config.build_share(_canon(), goal={}, observation={})
-    share["jwst_tool_config"] = 999
-    with pytest.raises(ValueError, match="format 999"):
-        share_config.widget_state(share, _key)
-    # the marker this tool writes is the one it reads
-    assert share_config.build_share(_canon(), {}, {})["jwst_tool_config"] \
-        == share_config.SHARE_FORMAT
-
-
-def test_share_records_release_provenance_without_machine_paths():
-    share = share_config.build_share(
-        _canon(), {}, {"seed": 73})
-    prov = share["provenance"]
-    assert prov["random_seed"] == 73
-    assert set(prov["cache_schema"]) == {"model", "pandeia_worker"}
-    assert "vulcan-jwst-tool" in prov["software"]
-    assert "pandeia_stack" in prov and "datasets" in prov
-    serialized = __import__("json").dumps(prov)
-    assert "/Users/" not in serialized and "\\Users\\" not in serialized
-
-
-def test_provenance_reports_every_declared_repository():
-    """A repository is never silently ABSENT from the block.
-
-    The first version keyed on the GitHub name (`jax-vulcan`) while the working
-    copy is `VULCAN-JAX`, and dropped what it did not find -- so the solver, the
-    most science-critical revision in the bundle, was missing from every export
-    and the omission looked like "nothing to record".
-    """
-    from jwst_tool import provenance
-    share = share_config.build_share(_canon(), {}, {"seed": 1})
-    repos = share["provenance"]["repositories"]
-    assert set(repos) == set(provenance.REPOSITORIES), (
-        "every declared repository must appear, even when absent")
-    for name, rec in repos.items():
-        assert rec["commit"], f"{name} carries no commit field"
-
-
-def test_provenance_finds_the_solver_under_either_directory_name(tmp_path):
-    """VULCAN-JAX and jax-vulcan are the same repository."""
-    from jwst_tool import provenance
-    for directory in ("VULCAN-JAX", "jax-vulcan"):
-        workspace = tmp_path / directory
-        workspace.mkdir()
-        (workspace / directory).mkdir()
-        (workspace / directory / ".git").mkdir()
-        rec = provenance._repo_identity(
-            workspace, provenance.REPOSITORIES["vulcan-jax"])
-        assert rec["directory"] == directory, rec
-    # An unversioned copy is reported as such, never as a clean checkout.
-    plain = tmp_path / "plain"
-    (plain / "VULCAN-master").mkdir(parents=True)
-    rec = provenance._repo_identity(
-        plain, provenance.REPOSITORIES["VULCAN-master"])
-    assert rec["commit"] == "unversioned", rec
-    # A genuinely missing repository is explicit.
-    rec = provenance._repo_identity(plain, ("nope-not-here",))
-    assert rec["commit"] == "absent" and rec["directory"] is None, rec
-
-
-def test_invalid_embedded_tp_table_leaves_no_file_behind():
-    """All-or-nothing includes the filesystem: a config that fails
-    validation must not deposit its embedded table in the uploads archive."""
     up = forward._uploads_dir()
     before = set(up.glob("*")) if up.exists() else set()
     cfg = {"canonical_params": dict(planet="wasp39b", tp_mode="file",
@@ -188,22 +134,57 @@ def test_invalid_embedded_tp_table_leaves_no_file_behind():
     after = set(up.glob("*")) if up.exists() else set()
     assert after == before, "invalid config left files in the uploads archive"
 
-
-def test_valid_embedded_tp_table_is_archived_and_restored(tmp_path):
-    from pathlib import Path
-
     text = forward._shipped_tp_file("wasp39b").read_text()
     src = tmp_path / "table.txt"
     src.write_text(text)
     canon = forward.canonical_params(dict(
         planet="wasp39b", tp_mode="file", tp_file=forward.TP_FILE_UPLOAD,
         tp_file_path=str(src)))
-    cfg = {"canonical_params": canon, "tp_table_text": text}
-    state, _notes = share_config.widget_state(cfg, _key)
+    state, _notes = share_config.widget_state(
+        {"canonical_params": canon, "tp_table_text": text}, _key)
     p = Path(state["restored_tp_path"])
     assert p.parent == forward._uploads_dir()
     assert p.suffix == ".txt" and p.exists()
     assert p.read_text() == text
+
+
+def test_provenance_block_is_complete_and_portable(tmp_path):
+    """Release provenance carries no machine paths and reports EVERY declared
+    repository -- the first version keyed on the GitHub name (`jax-vulcan`),
+    missed the working copy (`VULCAN-JAX`), and silently dropped the solver
+    from every export. The identity helper must find the solver under either
+    directory name, report an unversioned copy as such, and make a missing
+    repository explicit."""
+    from jwst_tool import provenance
+    share = share_config.build_share(_canon(), {}, {"seed": 73})
+    prov = share["provenance"]
+    assert prov["random_seed"] == 73
+    assert set(prov["cache_schema"]) == {"model", "pandeia_worker"}
+    assert "vulcan-jwst-tool" in prov["software"]
+    assert "pandeia_stack" in prov and "datasets" in prov
+    serialized = __import__("json").dumps(prov)
+    assert "/Users/" not in serialized and "\\Users\\" not in serialized
+    repos = prov["repositories"]
+    assert set(repos) == set(provenance.REPOSITORIES), (
+        "every declared repository must appear, even when absent")
+    for name, rec in repos.items():
+        assert rec["commit"], f"{name} carries no commit field"
+
+    # VULCAN-JAX and jax-vulcan are the same repository
+    for directory in ("VULCAN-JAX", "jax-vulcan"):
+        workspace = tmp_path / directory
+        (workspace / directory / ".git").mkdir(parents=True)
+        rec = provenance._repo_identity(
+            workspace, provenance.REPOSITORIES["vulcan-jax"])
+        assert rec["directory"] == directory, rec
+    # unversioned copy reported as such; genuinely missing repo explicit
+    plain = tmp_path / "plain"
+    (plain / "VULCAN-master").mkdir(parents=True)
+    rec = provenance._repo_identity(
+        plain, provenance.REPOSITORIES["VULCAN-master"])
+    assert rec["commit"] == "unversioned", rec
+    rec = provenance._repo_identity(plain, ("nope-not-here",))
+    assert rec["commit"] == "absent" and rec["directory"] is None, rec
 
 
 def test_combos_round_trip_and_invalid_entries_are_noted():
@@ -244,42 +225,63 @@ def test_combos_round_trip_and_invalid_entries_are_noted():
     assert state["n0_combos"] == [
         dict(name="partial", modes=["nirspec_g395h"])]
     joined = " | ".join(notes)
-    assert "not_a_mode" in joined
-    assert "hollow" in joined
-    assert "without a name" in joined
-    assert "duplicate" in joined.lower()
+    assert "not_a_mode" in joined and "hollow" in joined
+    assert "without a name" in joined and "duplicate" in joined.lower()
 
 
-def test_removed_noise_scenario_is_noted_not_restored():
-    """Correlated-floor noise scenarios were removed in 0.28.0. An old config
-    that selected one loads with a note; the widget state never carries a
-    scenario key. scenario="random" (the old default) loads silently."""
+def test_noise_model_config_evolution_round_trips():
+    """The global "Noise multiplier" and the per-mode multipliers round-trip
+    as SEPARATE factors (the app composes them; recording the product would
+    re-multiply on restore); a file predating the global knob restores the
+    OLD behavior (no scale invented, no failure); and the 0.28.0-removed
+    correlated-floor scenarios load with a note (they never changed the
+    model) while scenario="random", the old default, loads silently."""
+    goal = dict(goal="detect", goal_mol="H2O", target_sig=3.0)
+
+    def _obs(**over):
+        base = dict(ks_mag=9.0, t14=2.8, t_base=2.8, sat_limit=0.8,
+                    modes=["nirspec_g395h"], n_transits=1, r_bin=100,
+                    floor_mode="constant", floors={"nirspec_g395h": 15.0},
+                    noise_infl={"nirspec_g395h": 1.5},
+                    show_noise=True, seed=0)
+        base.update(over)
+        return base
+
     share = share_config.build_share(
-        _canon(),
-        goal=dict(goal="detect", goal_param=None, target_prec=None,
-                  target_sig=3.0, marginalize=False, do_fisher=False,
-                  fisher_params=[], jac_method="fd"),
-        observation=dict(modes=["nirspec_g395h"], n_transits=1, r_bin=100,
-                         floor_mode="none", floors={}, noise_infl={},
-                         show_noise=False, seed=0))
+        _canon(), goal=goal, observation=_obs(noise_scale=2.0))
+    state, notes = share_config.widget_state(share, _key)
+    assert not notes, notes
+    assert state[_key("infl_nirspec_g395h")] == 1.5, state
+    assert state[_key("noisescale")] == 2.0, state
+
+    # a config written before the global knob existed
+    share = share_config.build_share(_canon(), goal=goal, observation=_obs())
+    share["observation"].pop("noise_scale", None)
+    state, notes = share_config.widget_state(share, _key)
+    assert not notes, notes
+    assert state[_key("infl_nirspec_g395h")] == 1.5, state
+    assert _key("noisescale") not in state, state
+
+    # removed correlated-floor scenario: noted, never restored
     share["observation"]["scenario"] = "conservative"
     state, notes = share_config.widget_state(share, _key)
     assert not any("scenario" in k for k in state)
     assert any("scenario" in n for n in notes)
-
     share["observation"]["scenario"] = "random"
     state, notes = share_config.widget_state(share, _key)
     assert not any("scenario" in k for k in state)
     assert not any("scenario" in n for n in notes)
 
 
-# ---------------------------------------------------------------------------
-# GUI-removed physics (2026-08-13): condensation, settling, escape, BC fluxes
-# ---------------------------------------------------------------------------
-
-def test_default_removed_physics_still_loads_normally():
-    """Nothing is lost when the removed switches sit at their defaults: the
-    overwhelming majority of shared configurations never touched them."""
+def test_gui_removed_physics_defaults_load_and_nondefaults_refuse():
+    """Condensation, settling, escape and BC fluxes are API-only
+    (2026-08-13). Defaults load normally, but a configuration that ENABLES
+    any of them must RAISE, not load with a note: these switches change the
+    atmosphere the model computes, so pinning them off would show a
+    successful restore while Run computed something the file does not
+    describe -- the class of silent behavior change the fail-fast rule
+    forbids. (The removed noise scenarios only get a note: those never
+    changed the model.) The settings remain reachable through the API."""
     canon = _canon()
     assert canon["use_condense"] is False and canon["use_settling"] is False
     assert not canon["diff_esc"] and not canon["top_flux"]
@@ -287,72 +289,17 @@ def test_default_removed_physics_still_loads_normally():
     assert not notes
     assert state["n0_planet"] == "wasp39b"
 
-
-@pytest.mark.parametrize("over,needle", [
-    (dict(use_condense=True, use_photo=True, use_moldiff=True),
-     "condensation"),
-    (dict(use_settling=True, use_moldiff=True), "gravitational settling"),
-    (dict(diff_esc=["H2"], use_moldiff=True),
-     "diffusion-limited escape"),
-    (dict(top_flux=[["H2O", "1.0e8"]]), "top-boundary"),
-    (dict(bot_flux=[["SO2", "1.0e9", "0.1"]]), "bottom-boundary"),
-])
-def test_nondefault_removed_physics_is_refused_not_silently_dropped(over,
-                                                                   needle):
-    """A configuration that ENABLES physics the GUI no longer offers must
-    RAISE, not load with a note.
-
-    These switches change the atmosphere the model computes. Restoring such a
-    file while pinning them off would look like a successful load and then Run
-    would silently compute something the file does not describe -- exactly the
-    class of silent behavior change the fail-fast rule forbids. (Contrast the
-    removed correlated-noise scenarios, which only get a note: those never
-    changed the model.) The settings remain reachable through the API.
-    """
-    canon = _canon(**over)
-    with pytest.raises(ValueError, match=needle):
-        share_config.widget_state(canon, _key)
-    with pytest.raises(ValueError, match="programmatic interface"):
-        share_config.widget_state(canon, _key)
-
-
-def test_global_noise_scale_round_trips_separately_from_per_mode():
-    """The global "Noise multiplier" and the per-mode multipliers are recorded
-    as SEPARATE factors, and a restore reproduces each exactly once.
-
-    The app composes them (effective = global x per-mode). If the download had
-    written the product into ``noise_infl``, a restore would put the product
-    into the per-mode widget and multiply by the global scale AGAIN.
-    """
-    share = share_config.build_share(
-        _canon(),
-        goal=dict(goal="detect", goal_mol="H2O", target_sig=3.0),
-        observation=dict(ks_mag=9.0, t14=2.8, t_base=2.8, sat_limit=0.8,
-                         modes=["nirspec_g395h"], n_transits=1, r_bin=100,
-                         floor_mode="constant",
-                         floors={"nirspec_g395h": 15.0},
-                         noise_infl={"nirspec_g395h": 1.5},
-                         noise_scale=2.0, show_noise=True, seed=0))
-    state, notes = share_config.widget_state(share, _key)
-    assert not notes, notes
-    assert state[_key("infl_nirspec_g395h")] == 1.5, state
-    assert state[_key("noisescale")] == 2.0, state
-
-
-def test_a_config_predating_the_noise_scale_key_restores_unscaled():
-    """A file written before the global knob existed must restore the OLD
-    behavior (no global scale), not fail and not invent one."""
-    share = share_config.build_share(
-        _canon(),
-        goal=dict(goal="detect", goal_mol="H2O", target_sig=3.0),
-        observation=dict(ks_mag=9.0, t14=2.8, t_base=2.8, sat_limit=0.8,
-                         modes=["nirspec_g395h"], n_transits=1, r_bin=100,
-                         floor_mode="constant",
-                         floors={"nirspec_g395h": 15.0},
-                         noise_infl={"nirspec_g395h": 1.5},
-                         show_noise=True, seed=0))
-    share["observation"].pop("noise_scale", None)
-    state, notes = share_config.widget_state(share, _key)
-    assert not notes, notes
-    assert state[_key("infl_nirspec_g395h")] == 1.5, state
-    assert _key("noisescale") not in state, state
+    cases = [
+        (dict(use_condense=True, use_photo=True, use_moldiff=True),
+         "condensation"),
+        (dict(use_settling=True, use_moldiff=True), "gravitational settling"),
+        (dict(diff_esc=["H2"], use_moldiff=True), "diffusion-limited escape"),
+        (dict(top_flux=[["H2O", "1.0e8"]]), "top-boundary"),
+        (dict(bot_flux=[["SO2", "1.0e9", "0.1"]]), "bottom-boundary"),
+    ]
+    for over, needle in cases:
+        canon = _canon(**over)
+        with pytest.raises(ValueError, match=needle):
+            share_config.widget_state(canon, _key)
+        with pytest.raises(ValueError, match="programmatic interface"):
+            share_config.widget_state(canon, _key)

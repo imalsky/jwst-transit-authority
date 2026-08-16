@@ -47,9 +47,10 @@ def _panel_sized(mu=1.0, sigma=0.1):
     return pan
 
 
-def test_forecast_panel_xlim_is_used_verbatim():
+def test_panel_xlim_verbatim_when_given_automatic_otherwise():
     """An explicit panel window is applied exactly as typed, and only to the
-    panel it belongs to.
+    panel it belongs to; None, [] and a short list all keep the automatic
+    +/- N sigma window.
 
     The curve is NOT resampled: posteriors.gaussian_curve's grid is MC-pinned
     elsewhere, so this must stay a pure window -- the same curve, a different
@@ -58,32 +59,28 @@ def test_forecast_panel_xlim_is_used_verbatim():
     pair in the parameter's own units, not a width.)
     """
     mu, sigma = 1.0, 0.1
+    auto_want = (mu - summary_figure._XLIM_SIGMA * sigma,
+                 mu + summary_figure._XLIM_SIGMA * sigma)
     fig = summary_figure.compose_summary_figure(
         _spectrum(with_points=False),
         posterior_panels=[_panel_sized(mu, sigma), _panel_sized(mu, sigma)],
         panel_xlims=[(0.42, 1.77), None])
     try:
         assert fig.axes[1].get_xlim() == pytest.approx((0.42, 1.77), rel=1e-12)
-        # the second panel got None and keeps the automatic +/-3.5 sigma
-        auto = fig.axes[2].get_xlim()
-        assert auto == pytest.approx(
-            (mu - summary_figure._XLIM_SIGMA * sigma,
-             mu + summary_figure._XLIM_SIGMA * sigma), rel=1e-12)
+        # the second panel got None and keeps the automatic window
+        assert fig.axes[2].get_xlim() == pytest.approx(auto_want, rel=1e-12)
     finally:
         plt.close(fig)
-
-
-def test_absent_panel_xlims_keep_the_automatic_window():
-    """None, [] and a short list must all leave the panel automatic."""
-    figs = [summary_figure.compose_summary_figure(
-        _spectrum(with_points=False), posterior_panels=[_panel_sized()],
-        panel_xlims=x) for x in (None, [], [None])]
-    try:
-        assert figs[0].axes[1].get_xlim() == figs[1].axes[1].get_xlim()
-        assert figs[0].axes[1].get_xlim() == figs[2].axes[1].get_xlim()
-    finally:
-        for f in figs:
-            plt.close(f)
+    # absent forms must all leave the panel automatic
+    for xlims in (None, [], [None]):
+        fig = summary_figure.compose_summary_figure(
+            _spectrum(with_points=False),
+            posterior_panels=[_panel_sized(mu, sigma)], panel_xlims=xlims)
+        try:
+            assert fig.axes[1].get_xlim() == pytest.approx(
+                auto_want, rel=1e-12), f"panel_xlims={xlims!r}"
+        finally:
+            plt.close(fig)
 
 
 def test_explicit_depth_range_is_used_verbatim():
@@ -100,9 +97,15 @@ def test_explicit_depth_range_is_used_verbatim():
         plt.close(fig)
 
 
-def test_full_figure_composes_and_exports_png_and_pdf():
+def test_figure_composes_exports_and_never_mutates_inputs():
+    """The full spectrum+panels figure and the minimal spectrum-only figure
+    both compose and export (PNG and vector PDF), and the caller's arrays
+    come back untouched."""
+    spec = _spectrum()
+    wl_before = spec["wl_um"].copy()
+    d_before = spec["depth_ppm"].copy()
     fig = summary_figure.compose_summary_figure(
-        _spectrum(), posterior_panels=[_panel(), _panel()],
+        spec, posterior_panels=[_panel(), _panel()],
         title="WASP-39 b -- transmission forecast",
         footnote="Linearized Fisher (Cramer-Rao) forecast; not a sampled "
                  "posterior.")
@@ -116,9 +119,9 @@ def test_full_figure_composes_and_exports_png_and_pdf():
         assert len(fig.axes) == 3
     finally:
         plt.close(fig)
-
-
-def test_minimal_figure_spectrum_only():
+    assert np.array_equal(spec["wl_um"], wl_before)
+    assert np.array_equal(spec["depth_ppm"], d_before)
+    # spectrum-only still composes
     fig = summary_figure.compose_summary_figure(_spectrum(with_points=False))
     try:
         buf = io.BytesIO()
@@ -139,16 +142,6 @@ def test_unconstrained_panel_renders_note_without_curve():
         assert any("unconstrained" in t for t in texts)
     finally:
         plt.close(fig)
-
-
-def test_inputs_are_never_mutated():
-    spec = _spectrum()
-    wl_before = spec["wl_um"].copy()
-    d_before = spec["depth_ppm"].copy()
-    fig = summary_figure.compose_summary_figure(spec)
-    plt.close(fig)
-    assert np.array_equal(spec["wl_um"], wl_before)
-    assert np.array_equal(spec["depth_ppm"], d_before)
 
 
 def test_validation_is_loud():

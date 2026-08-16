@@ -20,7 +20,9 @@ def test_fetch_specs_are_well_formed():
     assert [f.key for f in tarred] == ["cdbs:phoenix"]
 
 
-def test_manual_block_names_the_unscriptable_pieces():
+def test_manual_block_names_pieces_and_renders():
+    from jwst_tool import instruments as ins
+
     txt = fetch.MANUAL
     # STScI's installation page, not a release-specific Box link: the page
     # always lists the supported release, so instructions cannot rot.
@@ -30,18 +32,13 @@ def test_manual_block_names_the_unscriptable_pieces():
     # the triple must be stated, and the release must come from the backend
     assert "MATCHED TRIPLE" in txt
     assert "{release}" in txt and "{env_suffix}" in txt
-
-
-def test_manual_block_renders_with_the_active_backend_release():
-    from jwst_tool import instruments as ins
-
     rel = ins.BACKEND_RELEASE
-    txt = fetch.MANUAL.format(refdata="/ref", psf="/psf", release=rel,
-                              env_suffix=rel.replace(".", "_"))
-    assert f"pandeia_data-{rel}-jwst" in txt
-    assert f"pandeia_psfs-{rel}-jwst" in txt
-    assert f"pandeia.engine=={rel}" in txt
-    assert "{" not in txt.replace("%2B", "")        # every field substituted
+    rendered = fetch.MANUAL.format(refdata="/ref", psf="/psf", release=rel,
+                                   env_suffix=rel.replace(".", "_"))
+    assert f"pandeia_data-{rel}-jwst" in rendered
+    assert f"pandeia_psfs-{rel}-jwst" in rendered
+    assert f"pandeia.engine=={rel}" in rendered
+    assert "{" not in rendered.replace("%2B", "")   # every field substituted
 
 
 class _FakeResponse(io.BytesIO):
@@ -56,7 +53,9 @@ class _FakeResponse(io.BytesIO):
         return False
 
 
-def test_download_streams_and_replaces_atomically(tmp_path, monkeypatch):
+def test_download_replaces_atomically_and_refuses_truncation(tmp_path,
+                                                             monkeypatch):
+    # full payload: streamed to <name>.part, atomically replaced
     payload = b"x" * 5000
     monkeypatch.setattr(fetch.urllib.request, "urlopen",
                         lambda req: _FakeResponse(payload))
@@ -65,22 +64,17 @@ def test_download_streams_and_replaces_atomically(tmp_path, monkeypatch):
     assert out.read_bytes() == payload
     assert not out.with_suffix(".bin.part").exists()
 
-
-def test_download_refuses_truncation(tmp_path, monkeypatch):
-    class _Short(_FakeResponse):
-        def __init__(self):
-            super().__init__(b"abc")
-            self.headers = {"Content-Length": "9999"}
-
-    monkeypatch.setattr(fetch.urllib.request, "urlopen",
-                        lambda req: _Short())
-    out = tmp_path / "f.bin"
+    # a body shorter than Content-Length is refused and leaves nothing behind
+    short = _FakeResponse(b"abc")
+    short.headers = {"Content-Length": "9999"}
+    monkeypatch.setattr(fetch.urllib.request, "urlopen", lambda req: short)
+    trunc = tmp_path / "trunc.bin"
     with pytest.raises(RuntimeError, match="truncated"):
-        fetch._download("https://example.invalid/f", out, "test")
-    assert not out.exists()
+        fetch._download("https://example.invalid/f", trunc, "test")
+    assert not trunc.exists()
 
 
-def test_extract_subtree_strips_prefix_and_ignores_the_rest(tmp_path):
+def test_extract_subtree_strips_prefix_and_requires_a_match(tmp_path):
     tar_path = tmp_path / "a.tar"
     with tarfile.open(tar_path, "w") as tf:
         for name, data in (("grp/redcat/trds/grid/phoenix/cat.fits", b"A"),
@@ -95,13 +89,6 @@ def test_extract_subtree_strips_prefix_and_ignores_the_rest(tmp_path):
     assert (dest / "cat.fits").read_bytes() == b"A"
     assert (dest / "sub" / "m.fits").read_bytes() == b"B"
     assert not (dest / "junk.txt").exists()
-
-
-def test_extract_subtree_raises_on_empty_match(tmp_path):
-    tar_path = tmp_path / "a.tar"
-    with tarfile.open(tar_path, "w") as tf:
-        info = tarfile.TarInfo("elsewhere/x")
-        info.size = 1
-        tf.addfile(info, io.BytesIO(b"z"))
+    # a prefix matching no member raises rather than "extracting" nothing
     with pytest.raises(RuntimeError, match="no members"):
-        fetch._extract_subtree(tar_path, "grid/phoenix", tmp_path / "d")
+        fetch._extract_subtree(tar_path, "grid/phoenix", tmp_path / "d2")

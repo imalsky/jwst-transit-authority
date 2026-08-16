@@ -18,15 +18,18 @@ import re
 import sys
 from pathlib import Path
 
-import pytest
-
 from jwst_tool import instruments as ins
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "parity" / "scripts"
 
 
-def test_every_mode_has_color_marker_and_literature_factor():
-    """A mode key missing any per-mode table entry is a half-registered mode."""
+def test_display_encodings_are_complete_and_unique():
+    """A mode key missing any per-mode table entry is a half-registered mode,
+    and while len(MODES) fits the 8-slot palettes every mode must get a
+    DISTINCT color and marker (grayscale print, CVD)."""
+    assert len(ins.MODES) <= 8, (
+        "MODES outgrew the 8-slot color/marker palettes -- extend _COLORS/"
+        "_MARKERS (palette-checker validated) before adding the mode")
     for key in ins.MODES:
         assert key in ins.MODE_COLOR, f"{key}: no MODE_COLOR"
         assert re.fullmatch(r"#[0-9a-f]{6}", ins.MODE_COLOR[key]), (
@@ -38,14 +41,6 @@ def test_every_mode_has_color_marker_and_literature_factor():
             f"{key}: no LITERATURE_NOISE_FACTORS reference entry")
         f = ins.LITERATURE_NOISE_FACTORS[key]
         assert 1.0 <= f <= 2.0, f"{key}: implausible noise factor {f!r}"
-
-
-def test_colors_and_markers_are_unique_across_modes():
-    """The palettes cycle at their length; while len(MODES) fits, every mode
-    must get a DISTINCT color and marker (grayscale print, CVD)."""
-    assert len(ins.MODES) <= 8, (
-        "MODES outgrew the 8-slot color/marker palettes -- extend _COLORS/"
-        "_MARKERS (palette-checker validated) before adding the mode")
     colors = list(ins.MODE_COLOR.values())
     markers = list(ins.MODE_MARKER.values())
     assert len(set(colors)) == len(colors), "duplicate MODE_COLOR"
