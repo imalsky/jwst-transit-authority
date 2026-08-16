@@ -225,3 +225,63 @@ def test_engine_data_unavailable_is_one_loud_item(monkeypatch):
     assert len(items) == 1
     assert items[0].status == datacheck.MISSING and items[0].required
     assert "tree not found" in items[0].detail
+
+
+# --- ExoMolOP k-table coverage (v31) -----------------------------------------
+
+class _FakeEngineCfg:
+    """Just enough engine-config surface for check_engine_data."""
+
+    def __init__(self, root):
+        self.DATA_DIR = root
+        self.EXOMOLOP_DIR = root / "exomolop"
+        self.DEMO_DATABASE = root / "exojax_linelists"
+        self.CIA_H2H2_FILE = root / "opacity_cache" / "H2-H2_2011.cia"
+        self.CIA_H2HE_FILE = root / "opacity_cache" / "H2-He_2011.cia"
+        self.CO_CACHED_DIR = root / "opacity_cache" / "CO"
+        self.MOLECULES = {m: {"source": "hitran", "db": m}
+                          for m in ("H2O", "CO2", "SO2", "HCN")}
+
+
+def _fake_root(tmp_path, ktables=()):
+    (tmp_path / "exomolop").mkdir()
+    for m in ktables:
+        # datacheck only stats paths, so an empty file stands in for 389 MB
+        (tmp_path / "exomolop" / f"{m}.ktable.h5").touch()
+    return tmp_path
+
+
+def test_exomolop_status_never_auto(tmp_path, monkeypatch):
+    cfg = _FakeEngineCfg(_fake_root(tmp_path, ["H2O"]))
+    monkeypatch.setattr(datacheck, "_engine_config", lambda: cfg)
+    status = datacheck.exomolop_table_status(["H2O", "CO2"])
+    assert status == {"H2O": datacheck.OK, "CO2": datacheck.MISSING}
+
+
+def test_missing_ktables_are_required_items_with_the_fetch_command(
+        tmp_path, monkeypatch):
+    # Before v31 `jwst-tool data` reported green while the data behind the
+    # DEFAULT opacity_mode could be entirely absent -- the false green this
+    # check exists to prevent.
+    cfg = _FakeEngineCfg(_fake_root(tmp_path, ["H2O"]))
+    monkeypatch.setattr(datacheck, "_engine_config", lambda: cfg)
+    items = {i.key: i for i in datacheck.check_engine_data(
+        ["H2O", "CO2"], ["HCN", "CS2"])}
+    assert items["ktable:H2O"].status == datacheck.OK
+    assert items["ktable:H2O"].required
+    assert items["ktable:CO2"].status == datacheck.MISSING
+    assert items["ktable:CO2"].required
+    assert items["ktable:HCN"].status == datacheck.MISSING
+    assert not items["ktable:HCN"].required
+    # CS2 has no published table and is refused upstream: no item for it
+    assert "ktable:CS2" not in items
+    assert "fetch_exomolop --molecules CO2,HCN" in items["ktable:CO2"].remedy
+
+
+@needs_engine
+def test_exomolop_path_matches_the_engine_convention():
+    # datacheck rebuilds <MOL>.ktable.h5 from EXOMOLOP_DIR without importing
+    # the RT stack; pin it against the engine's own table_path so the two
+    # conventions cannot drift.
+    from vulcan_forward import exomolop
+    assert datacheck.exomolop_table_path("H2O") == exomolop.table_path("H2O")

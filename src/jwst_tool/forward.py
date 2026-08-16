@@ -88,7 +88,12 @@ MOLECULES = ["H2O", "CO2", "CO", "CH4", "SO2"]   # always-on WIDE-profile set
 # network already solves these; extra_mols only exposes them to the RT and the
 # detection scores.
 EXTRA_MOLECULES = ["C2H2", "C2H4", "C2H6", "CS2", "H2S", "HCN", "NH3", "OCS"]
-_VERSION = 27  # model_cache buster: bump whenever the physics or the canonical
+# Species ExoMolOP publishes no k-table for: refused EARLY under the default
+# opacity_mode (canonical_params), instead of failing minutes later inside
+# exomolop.load_tables. Cross-checked against exomolop.available() by a
+# data-gated test so this set cannot rot when ExoMolOP adds a species.
+_NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
+_VERSION = 31  # model_cache buster: bump whenever the physics or the canonical
                # key set changes. Per-version history lives in notes.md.
                # DELIBERATE (reviews keep re-finding it): the cache identity
                # is canonical params + this hand-bumped version, NOT content
@@ -222,6 +227,29 @@ P_BTM_RANGE = (P_BTM_TRANSMISSION_BAR, 300.0)
 # an ART grid reaching below the chemistry (deep clamping would fabricate
 # chemistry). The shipped pair was 7.0 / 7.6 bar; keep that ratio at any depth.
 ART_PBTM_FRACTION = 7.0 / 7.6
+
+
+def default_opacity_mode(params: dict) -> str:
+    """The published ExoMolOP opacities, correlated-k, for both observables.
+
+    Two modes exist. "exomolop" (the default) is correlated-k over the
+    published ExoMol/HITEMP high-temperature k-tables. "lbl" samples the
+    cross section directly on the output grid, far below exojax's critical
+    resolution, and is measurably biased in BOTH observables -- worst in
+    emission, where it suppressed more than half the emergent flux
+    (measurements: vulcan-forward README, the two Opacity sections; the
+    engine's interim HITRAN-built "ckd" mode was removed with forward 0.8.0).
+
+    ONE case keeps "lbl", and it is physics, not preference: a MIE CONDENSATE
+    DECK. Mie extinction has structure across a band, so it cannot be folded
+    into a k-distribution built from line opacity.
+
+    Choosing the mode from the inputs is a default, not a fallback: asking
+    for a correlated-k mode explicitly alongside a Mie deck still raises.
+    """
+    if str(params.get("mie_condensate", "") or ""):
+        return "lbl"
+    return "exomolop"
 
 
 def default_p_btm_bar(params: dict) -> float:
@@ -821,7 +849,51 @@ CONDEN_CFG = {
 }
 
 
+# Every input key canonical_params (and the helpers it calls) actually reads.
+# Pinned by an AST-walking test (test_forward_params) that re-derives this set
+# from the source, so it cannot rot when a parameter is added.
+_PARAM_KEYS_READ = frozenset({
+    "Tint", "Tirr", "alpha_cloud", "bot_flux", "broadening", "chem_provider",
+    "climate_rcb", "cloud_on", "co_ratio", "diff_esc", "extra_mols",
+    "f_diurnal", "fisher_params", "gs_cgs", "jac_method", "kzz_const",
+    "kzz_kdeep", "kzz_kmax", "kzz_mode", "kzz_plev", "kzz_x", "log_gamma",
+    "log_kappa", "log_kappa_cloud", "met_x_solar", "mie_condensate",
+    "mie_log_mmr", "mie_log_rg", "mie_sigmag", "nu_pts", "nz", "opacity_mode",
+    "orbit_au", "p_btm_bar", "p_ref_bar", "planet", "rfacv", "rp_rjup",
+    "rstar_rsun", "rt_dit_res", "rt_integration", "rt_ptop_bar",
+    "science_mode", "sflux", "sl_angle_deg", "star_feh", "star_logg",
+    "star_teff", "tint_cl", "tio_vo", "top_flux", "tp_file", "tp_file_path",
+    "tp_file_sha1", "tp_mode", "use_condense", "use_moldiff", "use_photo",
+    "use_rayleigh", "use_settling", "use_vm_mol", "yconv_cri",
+})
+# Output-only keys of the canonical dict itself: a SAVED canonical payload
+# round-trips through canonical_params for validation (share_config), so its
+# echo fields must not be rejected as unknown.
+_PARAM_KEYS_ECHOED = frozenset({
+    "version", "picaso_version", "picaso_chemgrid_sha1",
+    "picaso_climate_sha1", "picaso_ck_node",
+})
+_KNOWN_PARAM_KEYS = _PARAM_KEYS_READ | _PARAM_KEYS_ECHOED
+
+# Misspellings worth a pointed hint. "mode" is not hypothetical: a validation
+# driver passed {"mode": "emission"}, the key was silently ignored, and a
+# TRANSMISSION spectrum was scored against eclipse data (chi2/N ~ 5e5). An
+# unknown key must never be dropped quietly (standing fail-loud rule).
+_PARAM_KEY_HINTS = {"mode": "science_mode", "opacity": "opacity_mode",
+                    "metallicity": "met_x_solar", "co": "co_ratio"}
+
+
 def canonical_params(params: dict) -> dict:
+    unknown = sorted(set(params) - _KNOWN_PARAM_KEYS)
+    if unknown:
+        hints = "".join(
+            f" (did you mean {_PARAM_KEY_HINTS[k]!r} instead of {k!r}?)"
+            for k in unknown if k in _PARAM_KEY_HINTS)
+        raise ValueError(
+            f"unknown parameter key(s) {unknown}.{hints} Unknown keys are "
+            "refused rather than ignored, because a silently dropped key "
+            "means the model computed is not the model you asked for. The "
+            "canonical key set is forward._KNOWN_PARAM_KEYS.")
     tp_mode = str(params.get("tp_mode", _default_tp_mode(params)))
     if tp_mode not in TP_PARAM_NAMES:
         raise ValueError(
@@ -998,6 +1070,14 @@ def canonical_params(params: dict) -> dict:
         "rt_ptop_bar": float(f"{float(params.get('rt_ptop_bar', 1.0e-8)):.6e}"),
         "rt_integration": str(params.get("rt_integration", "simpson")),
         "rt_dit_res": round(float(params.get("rt_dit_res", 1.0)), 3),
+        # opacity_mode (v28 transmission, v29 emission, v30/v31 ExoMolOP):
+        # "exomolop" = correlated-k over the published k-tables, "lbl" = the
+        # old direct sampling, kept only for the Mie deck. The sampled path
+        # was measurably biased in both observables -- the decision and every
+        # measured number live in the vulcan-forward README (Opacity
+        # sections); the history is in notes.md (2026-08-15 entry).
+        "opacity_mode": str(params.get("opacity_mode",
+                                       default_opacity_mode(params))),
         # p_ref_bar (v26): the pressure at which rp_rjup and gs_cgs are taken to
         # apply. A catalogue radius comes from a white-light TRANSIT fit, so it
         # is the transit radius at roughly the terminator photosphere, NOT the
@@ -1072,6 +1152,20 @@ def canonical_params(params: dict) -> dict:
             "at which rp_rjup and gs_cgs are defined, so the grid has to "
             "cover it. 1e-3 bar is the validated default for a "
             "transit-derived radius.")
+    if cp["opacity_mode"] not in ("exomolop", "lbl"):
+        raise ValueError(
+            f"opacity_mode={cp['opacity_mode']!r}: choose 'exomolop' "
+            "(correlated-k over the published ExoMolOP high-temperature "
+            "tables -- the default and the only one whose line data suits a "
+            "hot hydrogen atmosphere) or 'lbl' (direct sampling, kept for "
+            "the Mie deck and pre-v28 results). The interim 'ckd' mode was "
+            "removed with forward 0.8.0 (v31).")
+    if cp["opacity_mode"] == "exomolop" and cp["mie_condensate"]:
+        raise ValueError(
+            "a Mie condensate deck needs opacity_mode='lbl': Mie extinction "
+            "has structure across a band, so folding it into a k-distribution "
+            "built from line opacity would be wrong. Set opacity_mode='lbl' "
+            "knowingly, and read the resolution warning it prints.")
     if cp["rt_integration"] not in ("simpson", "trapezoid"):
         raise ValueError(
             f"rt_integration={cp['rt_integration']!r}: exojax ArtTransPure "
@@ -1109,6 +1203,22 @@ def canonical_params(params: dict) -> dict:
             "(HITRAN db id, molmass, VULCAN species name), make sure the SNCHO "
             "network actually solves that species, then list it here in "
             "forward.EXTRA_MOLECULES.")
+    if cp["opacity_mode"] == "exomolop":
+        # Fail HERE, not deep inside the RT build: ExoMolOP publishes no
+        # k-table for these species, so a run selecting them under the
+        # default mode would die minutes later in exomolop.load_tables.
+        # (After the molecule-universe checks above, so an unknown or
+        # provider-refused species keeps its more fundamental error.) The
+        # frozenset is cross-checked against exomolop.available() by a
+        # data-gated test, so it cannot rot silently.
+        no_table = sorted(set(cp["extra_mols"]) & _NO_EXOMOLOP_TABLE)
+        if no_table:
+            raise ValueError(
+                f"extra_mols {no_table} have no published ExoMolOP k-table, "
+                "so they cannot run under opacity_mode='exomolop' (the "
+                "default). Drop them, or set opacity_mode='lbl' knowingly "
+                "(sampled line-by-line, measurably biased -- vulcan-forward "
+                "README, Opacity sections).")
     if not 0.1 <= cp["co_ratio"] <= 2.0:
         raise ValueError(
             f"co_ratio={cp['co_ratio']} outside [0.1, 2.0] (the network was "
@@ -1672,6 +1782,7 @@ def _rt_profile_common(cp: dict, config) -> dict:
     profile["rt_integration"] = cp["rt_integration"]
     profile["dit_grid_resolution"] = cp["rt_dit_res"]
     profile["p_ref_bar"] = cp["p_ref_bar"]
+    profile["opacity_mode"] = cp["opacity_mode"]
     # Mie condensate deck (v16): the engine builds the OpaMie deck from a
     # pre-generated miegrid under DATA_DIR/exojax_mie and ECHOES mie_condensate
     # on the rt namespace; run_model verifies that echo below (an engine too old
@@ -2100,7 +2211,8 @@ def run_model(params: dict, log=print) -> Path:
              "art_pbtm_bar": profile["art_pbtm_bar"],
              "rt_integration": cp["rt_integration"],
              "dit_grid_resolution": cp["rt_dit_res"],
-             "p_ref_bar": cp["p_ref_bar"]}
+             "p_ref_bar": cp["p_ref_bar"],
+             "opacity_mode": cp["opacity_mode"]}
     for k, want in _echo.items():
         got = getattr(rt, k, None)
         if got != want:

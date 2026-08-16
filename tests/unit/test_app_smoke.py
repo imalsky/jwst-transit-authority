@@ -36,7 +36,6 @@ def _synthetic_out(science_mode="transmission", saturated=False,
     the forecast posteriors, and the summary figure all render.
     """
     import json
-    import numpy as np
 
     n = 40
     wl = np.linspace(1.0, 5.0, n)
@@ -96,6 +95,18 @@ def _synthetic_out(science_mode="transmission", saturated=False,
         r_bin=100, planet="WASP-39 b",
         floor_mode="constant")
     return out, out_meta
+
+
+def _run_with_result(out, out_meta, **state):
+    """AppTest primed with a cached result (plus optional session state), run
+    once. Post-run rendering only; no forward model is launched."""
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["out"] = out
+    at.session_state["out_meta"] = out_meta
+    for key, val in state.items():
+        at.session_state[key] = val
+    at.run()
+    return at
 
 
 def test_app_renders_without_exception():
@@ -162,10 +173,7 @@ def test_sidebar_molecule_annotations_present():
 def test_results_render_with_synthetic_run():
     """Full post-Run render path on a synthetic result (no forward model)."""
     out, out_meta = _synthetic_out()
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.session_state["out"] = out
-    at.session_state["out_meta"] = out_meta
-    at.run()
+    at = _run_with_result(out, out_meta)
     assert not at.exception, at.exception
     # every figure and table must offer a download
     dl_labels = {b.label for b in at.get("download_button")}
@@ -208,8 +216,7 @@ def test_tp_example_download_is_deferred_too():
 def test_no_intro_gate():
     """The first render is the tool itself: sidebar widgets exist immediately,
     with no acknowledgment button blocking them."""
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.run()
+    at = _run_app()
     assert not at.exception, at.exception
     assert at.selectbox(key="n0_planet").value is not None
     assert not [b for b in at.button if "I understand" in (b.label or "")]
@@ -222,8 +229,7 @@ def test_noise_floor_defaults_to_constant_and_file_still_blocks():
     the default is the CONSERVATIVE choice, not a neutral one -- and it is
     still recorded with the run and editable per mode. "Wavelength table" with
     no file uploaded is the remaining state that blocks the run."""
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.run()
+    at = _run_app()
     assert not at.exception, at.exception
 
     def _floor_error(app):
@@ -250,17 +256,6 @@ def test_noise_floor_defaults_to_constant_and_file_still_blocks():
     at.radio(key="n0_floormode").set_value("file").run()
     assert not at.exception, at.exception
     assert _floor_error(at), [e.value for e in at.error]
-
-
-def test_constant_floor_prefill_renders_per_mode_inputs():
-    """Choosing the constant floor renders one editable input per mode
-    (the 2026-08-12 caption trim removed the prose; the widgets stay)."""
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.run()
-    at.radio(key="n0_floormode").set_value("constant").run()
-    assert not at.exception, at.exception
-    keys = {w.key for w in at.get("number_input")}
-    assert any(k and k.startswith("n0_floor_") for k in keys)
 
 
 def test_global_noise_multiplier_composes_and_round_trips():
@@ -349,15 +344,9 @@ def test_fisher_table_is_static_and_cannot_be_resorted():
     # the blanking that makes a re-sort unsafe is still what it protects
     assert '_r2["mode"] = ""' in block, \
         "mode names are no longer blanked; re-check whether st.table is needed"
-
-
-def test_the_fisher_csv_carries_a_mode_on_every_row():
-    """The DISPLAY blanks repeated mode names; the CSV must not.
-
-    A machine-readable file whose key column is empty on half its rows is
-    unusable, so the download is built from the UNBLANKED rows.
-    """
-    src = APP.read_text()
+    # the flip side: the DISPLAY blanks repeated mode names, the CSV must not
+    # (a machine-readable file with an empty key column on half its rows is
+    # unusable), so the download is built from the UNBLANKED rows
     assert "_csv_bytes(pd.DataFrame(frows))" in src, \
         "the Fisher CSV is no longer built from the unblanked rows"
 
@@ -411,10 +400,7 @@ def test_emission_results_use_eclipse_terms():
     """
     out, out_meta = _synthetic_out(science_mode="emission",
                                    sigma_detect=8.0, n_transits=3)
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.session_state["out"] = out
-    at.session_state["out_meta"] = out_meta
-    at.run()
+    at = _run_with_result(out, out_meta)
     assert not at.exception, at.exception
     assert not at.success, \
         f"an above-target result must render no banner: {[s.value for s in at.success]}"
@@ -438,10 +424,7 @@ def test_all_saturated_state_has_no_best_mode():
     """All modes saturated: warning verdict, no "best" mode, and no error
     alert for what is a valid calculation."""
     out, out_meta = _synthetic_out(saturated=True, sigma_detect=5.0)
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.session_state["out"] = out
-    at.session_state["out_meta"] = out_meta
-    at.run()
+    at = _run_with_result(out, out_meta)
     assert not at.exception, at.exception
     warns = [w.value for w in at.warning]
     assert any("all selected modes saturate" in w for w in warns), warns
@@ -464,12 +447,9 @@ def test_saturated_mode_gets_no_score_and_no_plotted_points():
         return _real(spectrum, **kw)
 
     out, out_meta = _synthetic_out(saturated=True, sigma_detect=5.0)
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.session_state["out"] = out
-    at.session_state["out_meta"] = out_meta
     sf.compose_summary_figure = _spy
     try:
-        at.run()
+        at = _run_with_result(out, out_meta)
     finally:
         sf.compose_summary_figure = _real
     assert not at.exception, at.exception
@@ -483,10 +463,7 @@ def test_valid_below_target_result_is_warning_not_error():
     """A run that works but finds no signal is a scientific outcome, not a
     software failure: it must render as a warning, never an error."""
     out, out_meta = _synthetic_out(sigma_detect=0.0)
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.session_state["out"] = out
-    at.session_state["out_meta"] = out_meta
-    at.run()
+    at = _run_with_result(out, out_meta)
     assert not at.exception, at.exception
     assert any("No signal" in w.value for w in at.warning)
     assert not any("Best mode" in e.value for e in at.error)
@@ -532,8 +509,6 @@ def test_picaso_constrain_goal_renders(monkeypatch):
 def test_display_smoothing_is_nondestructive_and_actually_smooths():
     """Display smoothing must not touch the caller's native array (the CSV
     download exports it) and must measurably reduce spikiness."""
-    import numpy as np
-
     from jwst_tool import binning
 
     wl = np.geomspace(1.0, 12.0, 4000)          # the real native grid shape
@@ -628,23 +603,6 @@ def test_custom_sflux_nearest_caption_discloses_and_never_flips():
         "sflux-W39b_Tsai2023.txt"
 
 
-def test_intro_carries_no_beta_or_quality_check_prose():
-    """Both paragraphs were REMOVED 2026-08-13 (maintainer): the beta
-    disclaimer and the numerical-quality-checks sentence.
-
-    Inverted rather than deleted -- the removal is the requirement now, and a
-    future edit that reintroduces either should fail here. The caveats they
-    carried live in README.md, per the standing GUI prose policy.
-    """
-    at = _run_app()
-    assert not at.exception, at.exception
-    md = " ".join(m.value for m in at.markdown)
-    assert "Beta" not in md
-    assert "full retrieval" not in md
-    assert "numerical quality checks" not in md
-    assert "uncertified spectrum" not in md
-
-
 def test_mock_observation_controls():
     """The Jitter toggle + seed render; the 'New draw' BUTTON is gone.
 
@@ -674,12 +632,7 @@ def test_mock_observation_render_disclosure_and_download():
     export and never contaminates the noiseless result CSVs.
     """
     out, out_meta = _synthetic_out(sigma_detect=8.0)
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.session_state["out"] = out
-    at.session_state["out_meta"] = out_meta
-    at.session_state["n0_shownoise"] = True
-    at.session_state["n0_seed"] = 7
-    at.run()
+    at = _run_with_result(out, out_meta, n0_shownoise=True, n0_seed=7)
     assert not at.exception, at.exception
     dl = {b.label for b in at.get("download_button")}
     # the mock CSV is the disclosure: it is named with its seed and is the
@@ -693,10 +646,7 @@ def test_combo_builder_and_summary_figure_render_with_jacobians():
     puts its rows in the Fisher table,
     and the proposal summary figure offers PDF + PNG downloads."""
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.session_state["out"] = out
-    at.session_state["out_meta"] = out_meta
-    at.run()
+    at = _run_with_result(out, out_meta)
     assert not at.exception, at.exception
     subs = [s.value for s in at.subheader]
     # EVERY results section is a collapsible expander (maintainer,
@@ -745,12 +695,8 @@ def test_combo_and_posterior_widgets_survive_reset():
     """The confirm-step reset clears combos and the posterior selections
     (nonce-namespaced keys + un-namespaced pending notes)."""
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.session_state["out"] = out
-    at.session_state["out_meta"] = out_meta
-    at.session_state["n0_combos"] = [dict(name="X",
-                                          modes=["nirspec_g395h"])]
-    at.run()
+    at = _run_with_result(out, out_meta,
+                          n0_combos=[dict(name="X", modes=["nirspec_g395h"])])
     assert not at.exception, at.exception
     # arm + confirm the reset (labels, not keys: the reset buttons are keyless)
     [b for b in at.button if (b.label or "") == "Reset all settings"][0] \
@@ -766,12 +712,7 @@ def test_posterior_panel_mock_recovery_overlay_renders():
     """Mock layer ON + Jacobians: the results render with the mock layer and
     the seeded mock export, with no exception from the recovery overlay."""
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.session_state["out"] = out
-    at.session_state["out_meta"] = out_meta
-    at.session_state["n0_shownoise"] = True
-    at.session_state["n0_seed"] = 3
-    at.run()
+    at = _run_with_result(out, out_meta, n0_shownoise=True, n0_seed=3)
     assert not at.exception, at.exception
     dl = {b.label for b in at.get("download_button")}
     assert "Mock observation (CSV)" in dl
@@ -823,13 +764,8 @@ def test_removed_sections_and_prose_are_gone():
     assert "modeling choices that can move the spectrum" not in body
     assert "Read the results as optimistic" not in body
     assert "Treat mode rankings as more robust" not in body
-
-
-def test_more_settings_widgets_carry_no_help_tooltips():
-    """No '?' icons under More settings: the labels stand alone and the
-    reference material lives in README.md (GUI prose policy)."""
-    at = _run_app()
-    assert not at.exception, at.exception
+    # no '?' icons under More settings: the labels stand alone and the
+    # reference material lives in README.md (GUI prose policy)
     for key in ("n0_nz", "n0_yconv", "n0_rtptop", "n0_rtint", "n0_rtdit"):
         found = [w for w in at.get("number_input") + at.get("selectbox")
                  if w.key == key]
@@ -841,7 +777,8 @@ def test_more_settings_widgets_carry_no_help_tooltips():
 
 def test_intro_prose_is_short_and_carries_no_methodology():
     """2026-08-13 (maintainer): the model expander is retitled and its five
-    steps rewritten in STE; the Fisher caveat block drops to four bullets.
+    steps rewritten in STE; the Fisher caveat block drops to four bullets;
+    the beta disclaimer and the numerical-quality-checks sentence are gone.
 
     Inverted assertions -- the REMOVAL is the requirement, so a future edit
     that restores the long form fails here. The displaced methodology (the
@@ -852,10 +789,12 @@ def test_intro_prose_is_short_and_carries_no_methodology():
     assert not at.exception, at.exception
     page = " ".join(m.value for m in at.markdown)
     assert "and its limits" not in page
-    # cut phrasings
+    # cut phrasings (incl. the beta + quality-check paragraphs)
     for gone in ("steady-state photochemical kinetics",
                  "radiative-convective climate profile",
-                 "conditional template S/N per molecule"):
+                 "conditional template S/N per molecule",
+                 "Beta", "full retrieval",
+                 "numerical quality checks", "uncertified spectrum"):
         assert gone not in page, f"long-form intro phrase survived: {gone!r}"
     # kept: engine names and the LIVE Pandeia version (never hardcoded).
     # PHOENIX left this list 2026-08-13 when the maintainer rewrote the five
@@ -866,10 +805,9 @@ def test_intro_prose_is_short_and_carries_no_methodology():
         assert kept in page, f"engine name lost: {kept!r}"
     _readme = (APP.parent.parent.parent / "README.md").read_text()
     assert "PHOENIX" in _readme, "the stellar model is now disclosed nowhere"
-    import re as _re
     # ins.BACKEND_STATUS.split(" /")[0] == "Pandeia 2026.7": a live version,
     # never a hardcoded one. Match the year so a literal string would fail.
-    assert _re.search(r"Pandeia \d{4}\.\d", page), \
+    assert re.search(r"Pandeia \d{4}\.\d", page), \
         "the live Pandeia version is no longer interpolated"
 
 
@@ -884,10 +822,7 @@ def test_every_axis_control_is_a_typed_min_max_pair():
     modes, so selecting modes remains a wavelength control on its own.
     """
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.session_state["out"] = out
-    at.session_state["out_meta"] = out_meta
-    at.run()
+    at = _run_with_result(out, out_meta)
     assert not at.exception, at.exception
     assert not [r for r in at.radio if r.key == "n0_sum_wlmode"], \
         "the wavelength-range radio should be gone"
@@ -912,8 +847,9 @@ def test_every_axis_control_is_a_typed_min_max_pair():
 @pytest.mark.parametrize(
     "widget,value,field",
     # the molecule selectbox keys on the extra-molecule selection, so the key
-    # carries the default extra set (jwst_tool.app: K("mol_<provider>_<mols>"))
-    [("n0_mol_vulcan_C2H2_C2H4_C2H6_CS2_H2S_HCN_NH3_OCS", "CO2",
+    # carries the default extra set (jwst_tool.app: K("mol_<provider>_<mols>"));
+    # CS2/C2H6 left the default at v31 (no ExoMolOP table)
+    [("n0_mol_vulcan_C2H2_C2H4_H2S_HCN_NH3_OCS", "CO2",
       "target_mol"),                                # the reported bug
      ("n0_ntr", 4, "n_transits"),
      ("n0_rbin", 60, "r_bin"),
@@ -943,10 +879,7 @@ def test_changing_any_run_input_marks_the_result_stale(widget, value, field,
 
     monkeypatch.setattr(_sc, "build_share", _spy)
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.session_state["out"] = out
-    at.session_state["out_meta"] = out_meta
-    at.run()
+    at = _run_with_result(out, out_meta)
     assert not at.exception, at.exception
     # Adopt the page's OWN canonical params and run signature as the cached
     # run's, so an untouched sidebar reads as fresh and the ONLY difference
@@ -982,12 +915,8 @@ def test_a_nonpositive_bound_on_a_log_axis_warns_instead_of_killing_the_page(
     defect. Warn, fall back to the automatic fit, keep the page alive.
     """
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.session_state["out"] = out
-    at.session_state["out_meta"] = out_meta
-    at.session_state[f"{key}_min"] = 0.0
-    at.session_state[f"{key}_max"] = 5.0
-    at.run()
+    at = _run_with_result(out, out_meta,
+                          **{f"{key}_min": 0.0, f"{key}_max": 5.0})
     assert not at.exception, at.exception
     assert any("log axis" in w.value and label in w.value for w in at.warning), \
         [w.value for w in at.warning]
@@ -998,11 +927,8 @@ def test_summary_refuses_a_one_sided_depth_range():
     summary_figure. The page must SAY it fell back rather than invent the
     other bound -- and it must still render the figure."""
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.session_state["out"] = out
-    at.session_state["out_meta"] = out_meta
-    at.session_state["n0_sum_y_min"] = 20500.0      # max left blank
-    at.run()
+    at = _run_with_result(out, out_meta,
+                          n0_sum_y_min=20500.0)     # max left blank
     assert not at.exception, at.exception
     assert any("both boxes" in w.value for w in at.warning), \
         [w.value for w in at.warning]
@@ -1034,16 +960,10 @@ def test_typed_axis_windows_reach_the_figure(monkeypatch):
 
     monkeypatch.setattr(_sf, "compose_summary_figure", _spy)
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.session_state["out"] = out
-    at.session_state["out_meta"] = out_meta
-    at.session_state["n0_sum_x_min"] = 3.0
-    at.session_state["n0_sum_x_max"] = 5.5
-    at.session_state["n0_sum_y_min"] = 20500.0
-    at.session_state["n0_sum_y_max"] = 21500.0
-    at.session_state["n0_sum_post_lnZ_min"] = -0.4
-    at.session_state["n0_sum_post_lnZ_max"] = 0.4
-    at.run()
+    at = _run_with_result(out, out_meta,
+                          n0_sum_x_min=3.0, n0_sum_x_max=5.5,
+                          n0_sum_y_min=20500.0, n0_sum_y_max=21500.0,
+                          n0_sum_post_lnZ_min=-0.4, n0_sum_post_lnZ_max=0.4)
     assert not at.exception, at.exception
     assert seen["wl_range"] == pytest.approx((3.0, 5.5))
     assert seen["depth_range"] == pytest.approx((20500.0, 21500.0))
@@ -1055,13 +975,10 @@ def test_all_usable_row_is_renamed_and_combos_lead_the_table():
     user's own name with no 'COMBO: ' prefix, and combination rows sort to the
     TOP of the constraint table."""
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.session_state["out"] = out
-    at.session_state["out_meta"] = out_meta
-    at.session_state["n0_combos"] = [dict(name="My set",
+    at = _run_with_result(out, out_meta,
+                          n0_combos=[dict(name="My set",
                                           modes=["nirspec_g395h",
-                                                 "nirspec_prism"])]
-    at.run()
+                                                 "nirspec_prism"])])
     assert not at.exception, at.exception
     # the CONSTRAINT table specifically -- Mode details also has a "mode"
     # column and renders first, so identify by the parameter column
@@ -1124,10 +1041,7 @@ def test_mixing_ratio_panel_selects_species_by_name(monkeypatch):
 
     monkeypatch.setattr(plotting, "build_vmr_figure", _spy)
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.session_state["out"] = out
-    at.session_state["out_meta"] = out_meta
-    at.run()
+    at = _run_with_result(out, out_meta)
     assert not at.exception, at.exception
     got = {name: float(np.asarray(y)[0]) for name, y in seen["columns"]}
     # the fixture puts H2 first at 0.85; it is NOT an RT molecule and must not

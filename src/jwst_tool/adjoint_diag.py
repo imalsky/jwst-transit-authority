@@ -68,6 +68,7 @@ def adjoint_key(params: dict, species: str) -> str:
                             "use_rayleigh", "broadening", "cloud_on",
                             "log_kappa_cloud", "alpha_cloud", "extra_mols",
                             "rt_ptop_bar", "rt_integration", "rt_dit_res",
+                            "opacity_mode",
                             "mie_condensate", "mie_log_rg", "mie_sigmag",
                             "mie_log_mmr", "science_mode", "star_teff",
                             "star_logg", "star_feh")}

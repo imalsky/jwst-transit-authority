@@ -60,7 +60,7 @@ def _pc(**kw):
 
 def test_vulcan_defaults_carry_inert_picaso_keys():
     cp = forward.canonical_params(_p())
-    assert cp["version"] == 27
+    assert cp["version"] == forward._VERSION
     assert cp["chem_provider"] == "vulcan"
     assert cp["picaso_version"] == ""
     assert cp["picaso_chemgrid_sha1"] == ""
@@ -86,7 +86,12 @@ def test_v17_to_v18_key_regression():
         "tp_file", "tp_file_sha1", "Tirr", "Tint", "log_kappa",
         "log_gamma", "use_photo", "sl_angle_deg", "f_diurnal", "use_moldiff",
         "use_vm_mol", "use_rayleigh", "broadening", "rt_ptop_bar",
-        "rt_integration", "rt_dit_res", "cloud_on", "log_kappa_cloud",
+        "rt_integration", "rt_dit_res",
+        # v28: correlated-k versus direct line-by-line sampling. The old
+        # sampled grid sat 474x below exojax's own critical resolution and was
+        # measurably biased; see forward.default_opacity_mode.
+        "opacity_mode",
+        "cloud_on", "log_kappa_cloud",
         "alpha_cloud", "mie_condensate", "mie_log_rg", "mie_sigmag",
         "mie_log_mmr", "use_condense", "use_settling", "diff_esc",
         "top_flux", "bot_flux", "extra_mols", "fisher_params", "jac_method",
@@ -161,8 +166,13 @@ def test_picaso_extras_accepted():
     cp = forward.canonical_params(_pp(extra_mols=["HCN", "NH3"]))
     assert forward.active_molecules(cp) == ["H2O", "CO2", "CO", "CH4", "H2S",
                                             "HCN", "NH3"]
-    # hydrocarbon extras ride the Visscher gas columns under picaso
-    cp = forward.canonical_params(_pp(extra_mols=["C2H4", "C2H6"]))
+    # hydrocarbon extras ride the Visscher gas columns under picaso.
+    # C2H6 has no published ExoMolOP k-table, so it needs an explicit
+    # opacity_mode="lbl"; under the default mode it is refused EARLY (v31)
+    with pytest.raises(ValueError, match="no published ExoMolOP k-table"):
+        forward.canonical_params(_pp(extra_mols=["C2H4", "C2H6"]))
+    cp = forward.canonical_params(_pp(extra_mols=["C2H4", "C2H6"],
+                                      opacity_mode="lbl"))
     assert forward.active_molecules(cp) == ["H2O", "CO2", "CO", "CH4", "H2S",
                                             "C2H4", "C2H6"]
 

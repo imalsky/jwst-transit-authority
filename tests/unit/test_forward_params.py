@@ -230,7 +230,10 @@ def test_tp_table_window_check_is_chemistry_grid_scoped():
 
 def test_isothermal_is_removed():
     with pytest.raises(ValueError, match="isothermal profile"):
-        forward.canonical_params(_p(tp_mode="isothermal", T_iso=1100.0))
+        forward.canonical_params(_p(tp_mode="isothermal"))
+    # its old T_iso companion key is unknown now, and unknown keys REFUSE
+    with pytest.raises(ValueError, match="unknown parameter"):
+        forward.canonical_params(_p(T_iso=1100.0))
 
 
 def test_guillot_const_are_accepted():
@@ -467,6 +470,85 @@ def test_wasp39b_reference_state_is_the_literature_validated_one():
 
 
 def test_wasp39b_reference_cache_key_is_stable():
+    # RE-PINNED at v31 (was acba771e80c772a1 at v30, 9b30d6d526e2a78a at v29,
+    # ead8394cf913ff67 at v28, ba52447cad5b40c5 at v27). v31 removes the
+    # interim "ckd" opacity mode with forward 0.8.0 -- a previously-canonical
+    # value is now rejected, so the buster moves; the reference spectrum is
+    # bit-identical to v30's. v30 changed the OPACITY DATA: the default
+    # opacity_mode is "exomolop", the published ExoMol/HITEMP k-tables with
+    # H2/He broadening, replacing tables built here from HITRAN's 296 K
+    # air-broadened lines.
+    #
+    # Measured on WASP-39 b with the published Tsai et al. 2023 chemistry, T-P,
+    # geometry and pressure grid held fixed, R=100 over 1.02-5.26 um. Spectral
+    # amplitude (std of the binned depth), against the JWST PRISM data:
+    #     R = 1,477 HITRAN            1256 ppm   (2.80x the data)
+    #     R = 700,000 HITRAN           870 ppm   (1.94x)
+    #     ExoMolOP, 5 species          695 ppm   (1.55x)
+    #     ExoMolOP, 6 species (+H2S)   663 ppm   (1.48x)
+    #     published gCMCRT             622 ppm   (1.39x)
+    #     the data itself              448 ppm
+    #
+    # The old "~2.2x amplitude gap vs the published spectra" was RESOLVED
+    # 2026-08-15: it was a decode error in OUR comparison harness, not a
+    # model discrepancy. The published gCMCRT files decode as
+    # depth = (H(1)^2 + 2*col2)/Rstar^2 with H(1) = each file's OWN header
+    # value (proved from gCMCRT's source); the earlier R_ref^2 + col2 rule
+    # halved their amplitude (311 ppm) and manufactured the gap. Correctly
+    # decoded, the residual vs the published model is ~8% in amplitude, and
+    # this engine's RT is separately verified against petitRADTRANS to
+    # 0.0013-0.096% rms (vulcan-forward README + its committed e2e fixtures).
+    # Full decode walkthrough: vulcan-forward README, gCMCRT section.
+    #
+    # NOT RE-MEASURED at v30, and required before this key is quoted as a
+    # science result: the tool's own default-geometry median depth (it was
+    # 19,712 ppm at v28-v29 under p_ref_bar = 1e-3, and ExoMolOP adds window
+    # opacity so it will be deeper) and the G395H SO2 significance (2.89 at
+    # v27). Both need a full run; the SO2 number additionally needs the pandeia
+    # backend, which was not configured where this key was re-pinned.
+    #
+    # Earlier history, still accurate for the runs it describes:
+    # RE-PINNED at v29 (was ead8394cf913ff67 at v28, ba52447cad5b40c5 at v27).
+    # v29 moved EMISSION to correlated-k as well. This reference run is
+    # TRANSMISSION, so its spectrum is bit-identical to v28's -- the key moves
+    # only because forward._VERSION is itself a canonical parameter, which is
+    # the point of the buster. Every measured number below still stands.
+    #
+    # Emission needed the move far more than transmission did. Flux carries
+    # exp(-tau) where a transit depth carries ln(tau), so the same "too opaque"
+    # sampling bias that cost transmission a contrast error suppressed most of
+    # the emergent flux: measured over 3-5 um against an R = 700,000 emission
+    # reference on the identical atmosphere, R = 1,477 returned 45% of the
+    # correct band-integrated flux (59% rms per R=100 bin, spectral contrast
+    # 70% where the truth is 47%). Correlated-k gives 1.9% rms, +0.6% bias.
+    #
+    # v28 notes, still current:
+    # Transmission moved to correlated-k, and "opacity_mode" joined the
+    # canonical set.
+    #
+    # WHY: exojax evaluates a cross section on the grid it is handed, and its
+    # own wavenumber_grid warns below R = 700,000. This tool ran at R = 1,477.
+    # Measured on WASP-39 b with the published Tsai et al. 2023 chemistry, T-P,
+    # geometry and pressure grid held fixed, binned to R = 100 over 1.02-5.3 um
+    # against the NIRSpec PRISM data: 2.80x the observed spectral contrast at
+    # R = 1,477 versus 1.93x at R = 700,000. Correlated-k reproduces the
+    # R = 700,000 line-by-line spectrum to 32 ppm rms (median data uncertainty
+    # 105 ppm) in 2.8 s instead of ~20 minutes.
+    #
+    # RE-MEASURED on the run this key names: median 3.0-5.5 um depth 19,712 ppm
+    # against the JWST ERS FIREFLy 21,381 (-7.8%), where v27 sat at 21,126
+    # (-1.2%). That is NOT a regression: roughly 1500 ppm of the old agreement
+    # was the grid bias (which made the column too opaque) cancelling against
+    # the p_ref_bar = 1e-3 default. With the bias removed, p_ref_bar is exposed
+    # for what it is -- a free normalization degenerate with Rp, which every
+    # published model fits as a vertical offset. It has deliberately NOT been
+    # re-tuned to make the default land on the data; doing that would be
+    # fitting a nuisance parameter to the answer.
+    #
+    # NOT RE-MEASURED, and required before this key is quoted as a science
+    # result: the G395H SO2 significance. It was 2.89 at v27. Re-running it
+    # needs the pandeia backend (JWST_TOOL_PANDEIA_PYTHON), which was not
+    # configured where this key was re-pinned.
     # The key hashes every canonical parameter: if ANY default feeding the
     # reference run changes, this trips even when the pins above still pass.
     # RE-PINNED at v27 (was de55467c4a459b4e at v26, f14f4d10512552ea before
@@ -486,11 +568,11 @@ def test_wasp39b_reference_cache_key_is_stable():
     # here. The tool therefore forecasts BELOW the published 4.5-4.8 sigma
     # detection, and that gap is real and open, not a regression from v26.
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b", tp_mode="file"))) == "ba52447cad5b40c5"
+        dict(planet="wasp39b", tp_mode="file"))) == "c20582509e215eb0"
     # ... and since 2026-08-11 the bare DEFAULT run is that same atmosphere:
     # a default W39b forecast is the literature-validated configuration.
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "ba52447cad5b40c5"
+        dict(planet="wasp39b"))) == "c20582509e215eb0"
 
 
 def test_wasp39b_shipped_table_bytes_are_unchanged():
@@ -860,3 +942,113 @@ def test_emission_defaults_to_the_dayside_temperature():
         cp = forward.canonical_params(dict(planet="wasp39b", tp_mode="guillot",
                                            science_mode=mode, Tirr=1234.0))
         assert cp["Tirr"] == 1234.0
+
+
+# --- unknown-key rejection (v31) ---------------------------------------------
+
+def test_unknown_keys_are_refused_with_a_hint():
+    # The bug this pins: a validation driver passed {"mode": "emission"}, the
+    # key was silently ignored, and a TRANSMISSION spectrum was scored against
+    # eclipse data (chi2/N ~ 5e5). Unknown keys must refuse, never drop.
+    with pytest.raises(ValueError, match="science_mode"):
+        forward.canonical_params(_p(mode="emission"))
+    with pytest.raises(ValueError, match="opacity_mode"):
+        forward.canonical_params(_p(opacity="exomolop"))
+    with pytest.raises(ValueError, match="unknown parameter"):
+        forward.canonical_params(_p(totally_made_up=1))
+
+
+def test_canonical_output_round_trips_through_validation():
+    # share_config validates a SAVED canonical payload by feeding it back in;
+    # every output key (echo fields included) must therefore be accepted.
+    cp = forward.canonical_params(dict(planet="wasp39b"))
+    assert set(cp) <= forward._KNOWN_PARAM_KEYS
+    cp2 = forward.canonical_params(dict(cp))
+    assert cp2 == cp
+
+
+def test_param_keys_read_matches_the_source():
+    # _PARAM_KEYS_READ is re-derived from the AST of canonical_params and the
+    # helpers it calls, so adding a parameter without updating the allowlist
+    # fails here instead of silently rejecting the new key at run time.
+    import ast
+    import inspect
+
+    src = inspect.getsource(forward)
+    tree = ast.parse(src)
+    funcs = {"canonical_params", "_resolve_tp_file", "default_p_btm_bar",
+             "default_opacity_mode", "_default_tp_mode"}
+    keys = set()
+
+    class V(ast.NodeVisitor):
+        def visit_Call(self, node):
+            f = node.func
+            if (isinstance(f, ast.Attribute) and f.attr == "get"
+                    and isinstance(f.value, ast.Name) and f.value.id == "params"
+                    and node.args and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)):
+                keys.add(node.args[0].value)
+            self.generic_visit(node)
+
+        def visit_Subscript(self, node):
+            if (isinstance(node.value, ast.Name) and node.value.id == "params"
+                    and isinstance(node.slice, ast.Constant)
+                    and isinstance(node.slice.value, str)):
+                keys.add(node.slice.value)
+            self.generic_visit(node)
+
+        def visit_Compare(self, node):
+            if (len(node.comparators) == 1 and isinstance(node.ops[0], ast.In)
+                    and isinstance(node.comparators[0], ast.Name)
+                    and node.comparators[0].id == "params"
+                    and isinstance(node.left, ast.Constant)
+                    and isinstance(node.left.value, str)):
+                keys.add(node.left.value)
+            self.generic_visit(node)
+
+    scanned = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name in funcs:
+            scanned.add(node.name)
+            V().visit(node)
+    assert scanned == funcs, f"missing helper(s): {funcs - scanned}"
+    assert keys == set(forward._PARAM_KEYS_READ)
+
+
+# --- ExoMolOP no-table gate (v31) --------------------------------------------
+
+def test_species_without_an_exomolop_table_refuse_early_under_the_default():
+    # ExoMolOP publishes no CS2/C2H6 k-table: under the default opacity_mode
+    # the run must refuse at the API, not minutes later inside the RT build.
+    for mol in sorted(forward._NO_EXOMOLOP_TABLE):
+        with pytest.raises(ValueError, match="no published ExoMolOP k-table"):
+            forward.canonical_params(_p(extra_mols=[mol]))
+        cp = forward.canonical_params(_p(extra_mols=[mol],
+                                         opacity_mode="lbl"))
+        assert mol in cp["extra_mols"]
+
+
+def test_no_exomolop_table_set_matches_the_installed_tables():
+    # Data-gated cross-check: every OTHER extra must have a table installed,
+    # and the frozenset's species must genuinely lack one. Skips without the
+    # data root so light CI stays green.
+    import importlib.util
+    if importlib.util.find_spec("vulcan_forward") is None:
+        pytest.skip("vulcan_forward not installed")
+    from vulcan_forward import exomolop, paths as _fp
+    try:
+        _fp.data_root()
+    except RuntimeError:
+        pytest.skip("VULCAN_FORWARD_DATA not configured")
+    have = set(exomolop.available())
+    if not have:
+        pytest.skip("no ExoMolOP tables installed")
+    for mol in forward._NO_EXOMOLOP_TABLE:
+        assert mol not in have, (
+            f"{mol} now HAS an ExoMolOP table -- remove it from "
+            "forward._NO_EXOMOLOP_TABLE and re-enable it in the GUI default")
+    missing = (set(forward.MOLECULES) | set(forward.EXTRA_MOLECULES)) \
+        - forward._NO_EXOMOLOP_TABLE - have
+    assert not missing, (
+        f"species {sorted(missing)} have no installed ExoMolOP table; fetch "
+        "them or add them to forward._NO_EXOMOLOP_TABLE with a reason")

@@ -1207,8 +1207,10 @@ with st.sidebar:
         st.caption(
             "The opacity always includes the base set "
             f"**{' · '.join(_base_set)}**. The extras are "
-            f"**{' · '.join(_extra_set)}**, all on by default. Deselect "
-            "any to save about 7 s each on a new run."
+            f"**{' · '.join(_extra_set)}**, on by default except the two "
+            "without a published ExoMolOP table (CS2, C2H6 -- selectable, "
+            "but they need a Mie/line-by-line run). Deselect any to save "
+            "about 7 s each on a new run."
             + (" No SO2 here: in equilibrium, sulfur sits in H2S and "
                "OCS. Making SO2 needs the VULCAN engine." if _pic else ""))
         # live line-list availability for the CURRENT broadening choice
@@ -1219,13 +1221,20 @@ with st.sidebar:
         _MOL_NOTE = {datacheck.OK: "opacity cached",
                      datacheck.AUTO: "downloads on first use",
                      datacheck.MISSING: "engine data missing"}
-        # All extras default ON: ~7 s each on a new run; a complete detection
-        # report is worth more than a faster first run.
+        # Extras default ON (a complete detection report is worth more than a
+        # faster first run) EXCEPT the species with no published ExoMolOP
+        # k-table: under the default opacity_mode canonical_params refuses
+        # them loudly (v31), so preselecting them would make the default
+        # configuration invalid. They stay selectable -- never auto-dropped.
         extra_mols = st.multiselect(
             "Extra opacity molecules", list(_extra_set),
-            default=list(_extra_set),
+            default=[m for m in _extra_set
+                     if m not in forward._NO_EXOMOLOP_TABLE],
             key=K(f"xmols_{chem_provider}"),
-            format_func=lambda m: f"{m}  ({_MOL_NOTE[_mol_status[m]]})")
+            format_func=lambda m: (
+                f"{m}  (no ExoMolOP table -- needs a Mie/line-by-line run)"
+                if m in forward._NO_EXOMOLOP_TABLE
+                else f"{m}  ({_MOL_NOTE[_mol_status[m]]})"))
         # h2he has per-molecule caches; CO is cached ExoMol and ignores the
         # broadening choice
         _h2he_mols = [m for m in forward.MOLECULES + extra_mols if m != "CO"]

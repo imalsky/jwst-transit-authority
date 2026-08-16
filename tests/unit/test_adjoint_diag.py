@@ -53,6 +53,7 @@ def test_adjoint_key_ignores_rt_only_knobs():
     # once re-triggered the multi-hour adjoint on an identical chemistry state
     assert adjoint_diag.adjoint_key(
         _p(rt_ptop_bar=1.0e-9, rt_integration="trapezoid", rt_dit_res=0.5,
+           opacity_mode="lbl",
            mie_condensate="MgSiO3", mie_log_rg=-5.0, mie_sigmag=2.0,
            mie_log_mmr=-6.0), "SO2") == k0
 

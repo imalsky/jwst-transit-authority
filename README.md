@@ -402,10 +402,12 @@ wavelength-response matrix. This approximation has not yet been validated
 against mode-specific Pandeia impulse responses.
 
 ExoJAX capabilities that exist upstream but are not wired here: reflected-light
-spectra, scattering emission, correlated-k opacities, H-minus continuum, atomic
-and FeH line lists, rotational broadening, ExoJAX's own instrumental-broadening
-operator (the tool applies its Gaussian R(λ) approximation instead), and GP
-noise kernels.
+spectra, scattering emission, H-minus continuum, atomic and FeH line lists,
+rotational broadening, ExoJAX's own instrumental-broadening operator (the tool
+applies its Gaussian R(λ) approximation instead), and GP noise kernels.
+Correlated-k over the published ExoMolOP tables IS wired as of 0.35.0 and is
+the default for BOTH observables (Open gaps records the decision and the
+discard rule for older emission forecasts).
 
 Physics conventions, default structures, and the backend policy are in
 [Physics and conventions](#physics-and-conventions) below. Read
@@ -1054,6 +1056,65 @@ deferred in this tool. Keep it current: close items here when they land, add
 new ones as they are found. The reasoning behind every decision lives in
 notes.md, Decision records; scope and conventions live in
 [Physics and conventions](#physics-and-conventions).
+
+* **Both observables moved to correlated-k over the published ExoMolOP
+  opacities in 0.35.0.** The old sampled line-by-line path ran far below
+  exojax's critical resolution and its HITRAN line data was wrong for a hot
+  hydrogen atmosphere; emission was hit hardest (the sampled path returned
+  **45% of the correct band-integrated flux**). **Discard, do not rescale,
+  any emission forecast produced before 0.35.0** -- the error is
+  wavelength-dependent, so it moved feature contrast as well as the level.
+  Every measured number behind the decision lives in the vulcan-forward
+  README (the two Opacity sections); tables fetch once with `python -m
+  vulcan_forward.fetch_exomolop` (~389 MB per species) and `jwst-tool data`
+  now reports per-molecule k-table coverage. **CS2 and C2H6 have no ExoMolOP
+  table**: they start deselected, and selecting one under the default mode
+  stops with an error naming the alternative (`opacity_mode="lbl"`,
+  knowingly) rather than substituting.
+
+* **Both observables are verified against petitRADTRANS 3.4.0 reading the
+  same k-table files** (transmission rms 0.0013-0.096%, emission rms 0.020%,
+  plus the analytic grey and blackbody limits), and the verification is
+  PINNED: committed pRT reference fixtures + end-to-end tests in
+  vulcan-forward (`tests/test_e2e_rt_reference.py`), and a full-chain
+  chemistry-to-spectrum reference test here
+  (`tests/live/test_e2e_run_model.py`, `JWST_TOOL_RUN_SLOW=1`) whose fixture
+  goes loudly stale on any `forward._VERSION` bump.
+
+* **A cloud-free model here agrees with the published WASP-39 b comparison
+  spectra to about 8% in amplitude.** Terminator-averaged, R = 100 over
+  3.05-4.95 um: published std 538 ppm and amplitude 2185 ppm, this tool 622 and
+  2361. Amplitude ratio 1.080, std ratio 1.155, shape correlation 0.9949, with
+  102 ppm of scatter about a fitted offset (19% of the spectral variation). The
+  SO2-only feature agrees to the same 7%, 233 ppm peak here against their
+  218 ppm. Both models are cloud-free and both exceed the data's amplitude,
+  theirs by 1.04-1.11x and this tool by 1.18-1.23x; with a fitted offset,
+  chi2/N is 1.56 (published) against 2.65 (here) on G395H, and 1.83 against
+  3.58 on PRISM. Why the remaining ~8-15% is there is open.
+
+* **Reading the published gCMCRT spectra: `depth = (H(1)^2 + 2*col2)/Rstar^2`,
+  with H(1) the header's FIRST number, per file.** This is fixed by gCMCRT's own
+  source (`exp_3D_sph_atm_trans.f90` L306/L403/L429, `mc_k_source_pac_inc.f90`
+  L86, `mc_k_raytrace.f90` L274-277): column 2 is the Monte Carlo estimate of
+  `int (1 - T(b)) b db`, an area over 2 pi. Using `R_ref^2 + col2` drops the
+  factor of two on the atmospheric annulus and anchors to the wrong radius,
+  which halves the apparent amplitude and manufactures a 2.2x discrepancy that
+  is not real. An earlier version of this section reported exactly that
+  artifact.
+
+* **`p_ref_bar` is a free normalization and is no longer tuned to the data.**
+  It sets the pressure at which the catalogue radius applies, and it is
+  degenerate with Rp; every published model fits it as a vertical offset. Under
+  the old sampled grid the 1e-3 bar default happened to cancel the grid bias,
+  putting the default WASP-39 b run within 1.2% of the observed level. With the
+  bias removed the same default sits 7.8% low (19,712 ppm against 21,381). It
+  has deliberately not been re-tuned: fitting a nuisance parameter to the
+  answer would hide the remaining opacity error rather than fix it.
+
+* **The G395H SO2 significance has not been re-measured under 0.35.0.** It was
+  2.89 at 0.32.0. Re-running it needs the pandeia backend
+  (`JWST_TOOL_PANDEIA_PYTHON`), which was not configured where the correlated-k
+  and ExoMolOP changes were validated.
 
 * `app.py`'s post-run section is still one long top-level block sharing
   implicit variables; extracting pure result builders (mode performance,

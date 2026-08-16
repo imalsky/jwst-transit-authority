@@ -53,6 +53,10 @@ _LAZY = {
                               / MOLECULES["CO"]["db"]),
     "CIA_H2H2_FILE": lambda: _fwd_paths.cia_h2h2_file(),
     "CIA_H2HE_FILE": lambda: _fwd_paths.cia_h2he_file(),
+    # ExoMolOP k-table tree (the DEFAULT opacity_mode reads it). No existence
+    # check in the engine accessor, so datacheck can report per-molecule
+    # MISSING items even when the whole tree is absent.
+    "EXOMOLOP_DIR": lambda: _fwd_paths.exomolop_dir(),
 }
 
 
