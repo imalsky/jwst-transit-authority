@@ -1268,14 +1268,15 @@ with st.sidebar:
                 f"H2/He blend (planetary, {_h2he_cached}/{len(_h2he_mols)} "
                 "line-list caches present)"))
         nu_pts = st.number_input(
-            "Native spectral grid points", *forward.NU_PTS_RANGE,
+            "Native spectral grid points (line-by-line mode only)",
+            *forward.NU_PTS_RANGE,
             forward.NU_PTS_DEFAULT, 500, key=K("nupts"),
-            help="Wavelength sampling of the model spectrum across "
-                 "1-15 µm, shared by all instrument modes; not an "
-                 "instrument setting. Model R is about nu_pts/2.7 "
-                 "(4000 = R 1500), well above the analysis binning. Weak "
-                 "mid-infrared features still gain at the 8000 cap, so "
-                 "quote weak-band MIRI results as lower bounds.")
+            help="Wavelength sampling of the model spectrum across 1-15 µm, "
+                 "used ONLY when the opacity mode is line-by-line (that is, "
+                 "with a Mie condensate deck). There it sets model R to about "
+                 "nu_pts/2.7. Under the default correlated-k mode the "
+                 "wavelength grid comes from the published k-tables at R=1000 "
+                 "and this setting does not change the spectrum.")
 
     with st.expander("Clouds & scattering (ExoJAX)"):
         if science_mode == "emission":
@@ -1749,16 +1750,29 @@ except (ValueError, RuntimeError) as e:  # stale widget combo mid-rerun, or a
 if tp_mode == "file" and not tp_file_ok and params_error is None:
     params_error = "file-mode T-P selected but no valid table is loaded"
 
+# Which opacity path this run will take. Read from the canonical params when
+# they resolved, else from the same chooser the engine uses -- never assumed,
+# because nu_pts and rt_dit_res are inert under correlated-k and every label
+# built from them is wrong there.
+_lbl_mode = (str((_canon or {}).get("opacity_mode")
+                 or forward.default_opacity_mode(params)) == "lbl")
+
 # rough runtime hint keyed off the resolution settings
 if _pic:
     # equilibrium states are seconds; the RT/opacity build dominates
     base_min = 0.6 + 0.25 * len(extra_mols)
 else:
-    base_min = 0.8 + 0.010 * nz + 0.00005 * (nu_pts - forward.NU_PTS_DEFAULT)
+    base_min = 0.8 + 0.010 * nz
+    if _lbl_mode:                    # nu_pts sets the grid only on this path
+        base_min += 0.00005 * (nu_pts - forward.NU_PTS_DEFAULT)
     if yconv_cri <= 1.5e-3:          # strict convergence costs extra iterations
         base_min += 0.5
     base_min += 0.25 * len(extra_mols)   # opa build + removed spectrum per extra
-if rt_dit_res < 1.0:                 # finer broadening grid = slower opa builds
+# A finer broadening grid slows the premodit opacity builds -- but ONLY in
+# line-by-line mode. Under correlated-k the k-tables carry the line opacity
+# and _build_opa is skipped entirely, so charging for it here overstated the
+# estimate on every default run (2026-08-16).
+if rt_dit_res < 1.0 and _lbl_mode:
     base_min += 0.3 * (5 + len(extra_mols))
 # cool columns (<~900 K) converge much more slowly (a W107b run took ~5 min)
 t_char = {"guillot": tp_kwargs.get("Tirr", 1560.0) / np.sqrt(2.0),
@@ -1788,8 +1802,15 @@ else:
     fd_min = (n_fd_comp * 4 * (_solve_min + (0.0 if _pic else 0.8))
               + n_fd_theta * 4 * _solve_min + 0.2 * n_cloud_rows)
 fd_min += _tint_min
-native_r = int(round(nu_pts * 2950 / 8000 / 50) * 50)
-grid_lbl = f"{nz}-layer, native R≈{native_r}"
+# Report the resolving power the run will ACTUALLY use. Under correlated-k
+# (the default) that is the k-tables' own band grid, R=1000, and nu_pts is
+# inert; the nu_pts-derived number described the line-by-line path only and
+# read "native R≈1500" on every default run (2026-08-16).
+if _lbl_mode:
+    grid_lbl = (f"{nz}-layer, line-by-line R≈"
+                f"{int(round(nu_pts * 2950 / 8000 / 50) * 50)}")
+else:
+    grid_lbl = f"{nz}-layer, correlated-k R=1000"
 est = "instant (cached)" if cached else (
     f"~{base_min + fd_min:.0f} min (local {grid_lbl} run"
     + (f" + {len(fisher_params)} Jacobian rows" if fisher_params else "")
