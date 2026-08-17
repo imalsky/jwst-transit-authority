@@ -113,11 +113,15 @@ def refusals_last_24h() -> int:
 def _maybe_alert() -> None:
     """Send at most one capacity alert per ``ALERT_MIN_INTERVAL_S``.
 
-    Enabled only when ``JWST_TOOL_ALERT_NTFY_TOPIC`` is set (a Space
-    secret); the stamp file is flock'd so concurrent refusals cannot
-    double-send, and it is only written on a successful send."""
-    topic = os.environ.get("JWST_TOOL_ALERT_NTFY_TOPIC")
-    if not topic:
+    Channels come from env vars (Space secrets): an ntfy.sh push when
+    ``JWST_TOOL_ALERT_NTFY_TOPIC`` is set, and a Gmail message when
+    ``JWST_TOOL_ALERT_EMAIL`` + ``JWST_TOOL_ALERT_SMTP_PASS`` (an app
+    password) are set. The stamp file is flock'd so concurrent refusals
+    cannot double-send, and it is only written on a successful send."""
+    env = os.environ
+    if not (env.get("JWST_TOOL_ALERT_NTFY_TOPIC")
+            or (env.get("JWST_TOOL_ALERT_EMAIL")
+                and env.get("JWST_TOOL_ALERT_SMTP_PASS"))):
         return
     fh = open(SLOT_DIR / ALERT_STAMP_NAME, "a+")
     try:
@@ -128,7 +132,7 @@ def _maybe_alert() -> None:
         st = os.fstat(fh.fileno())
         if st.st_size and time.time() - st.st_mtime < ALERT_MIN_INTERVAL_S:
             return
-        if _send_alert(topic):
+        if _send_alert():
             fh.truncate(0)
             fh.write(str(time.time()))
             fh.flush()
@@ -136,23 +140,57 @@ def _maybe_alert() -> None:
         fh.close()
 
 
-def _send_alert(topic: str) -> bool:
-    import urllib.request
+_ALERT_TITLE = "jwst-tool Space at capacity"
 
+
+def _send_alert() -> bool:
+    """True if at least one configured channel delivered."""
     body = (f"jwst-tool: all {MAX_CONCURRENT} run slots are busy and a "
             f"visitor's run was declined ({refusals_last_24h()} refusal(s) "
             f"in the last 24 h). Log: run_slots/{REFUSAL_LOG_NAME}")
+    ok = False
+    topic = os.environ.get("JWST_TOOL_ALERT_NTFY_TOPIC")
+    if topic:
+        ok |= _post_ntfy(topic, body)
+    email = os.environ.get("JWST_TOOL_ALERT_EMAIL")
+    smtp_pass = os.environ.get("JWST_TOOL_ALERT_SMTP_PASS")
+    if email and smtp_pass:
+        ok |= _send_email(email, smtp_pass, body)
+    return ok
+
+
+def _post_ntfy(topic: str, body: str) -> bool:
+    import urllib.request
+
     req = urllib.request.Request(f"https://ntfy.sh/{topic}",
                                  data=body.encode(), method="POST")
-    req.add_header("Title", "jwst-tool Space at capacity")
-    email = os.environ.get("JWST_TOOL_ALERT_EMAIL")
-    if email:
-        req.add_header("Email", email)
+    req.add_header("Title", _ALERT_TITLE)
     try:
         urllib.request.urlopen(req, timeout=5).close()
         return True
     except Exception as exc:
-        print(f"jwst_tool.runlimit: capacity alert send failed: {exc!r}",
+        print(f"jwst_tool.runlimit: ntfy alert failed: {exc!r}",
+              file=sys.stderr)
+        return False
+
+
+def _send_email(email: str, smtp_pass: str, body: str) -> bool:
+    """Self-addressed Gmail via an app password (both ends = ``email``)."""
+    import smtplib
+    from email.message import EmailMessage
+
+    msg = EmailMessage()
+    msg["Subject"] = _ALERT_TITLE
+    msg["From"] = email
+    msg["To"] = email
+    msg.set_content(body)
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as s:
+            s.login(email, smtp_pass)
+            s.send_message(msg)
+        return True
+    except Exception as exc:
+        print(f"jwst_tool.runlimit: email alert failed: {exc!r}",
               file=sys.stderr)
         return False
 
