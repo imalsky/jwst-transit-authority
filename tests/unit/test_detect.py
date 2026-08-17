@@ -110,6 +110,20 @@ def test_jacobian_lsf_does_not_depend_on_baseline_shape():
     assert np.max(np.abs(r_none["jac_bins"][0] - r_flat["jac_bins"][0])) > 5e-6
 
 
+def test_r_bin_beyond_model_resolution_refuses():
+    """Bins finer than the model's own grid would report interpolated
+    structure the model does not contain (the pixel-level high-R-grating
+    ask); refused loudly, never silently interpolated. At or below the
+    model's resolving power the band mean is sound and the run proceeds."""
+    kw = dict(target_mol=None, t_in_s=3600.0, t_out_s=3600.0,
+              n_transits=1, floor_spec=None)
+    mr, model = _lsf_mode_inputs(lambda wl: np.zeros(wl.size))
+    with pytest.raises(ValueError, match="resolving power"):
+        detect.evaluate_mode("nirspec_prism", mr, model, R_bin=20000.0, **kw)
+    r = detect.evaluate_mode("nirspec_prism", mr, model, R_bin=200.0, **kw)
+    assert np.isfinite(r["median_sigma_ppm"])
+
+
 def _miri_mode_inputs(ngroup):
     """Minimal evaluate_mode inputs inside the MIRI LRS band (5-12 um)."""
     wl_pix = np.linspace(5.0, 7.0, 300)

@@ -35,6 +35,7 @@ def test_round_trip_restores_the_full_run():
                   target_sig=3.0, marginalize=True, do_fisher=False,
                   fisher_params=["lnZ", "lnKzz"], jac_method="fd"),
         observation=dict(ks_mag=9.0, t14=2.8, t_base=2.8, sat_limit=0.8,
+                         star_teff=5485.0, star_logg=4.47, star_feh=0.0,
                          modes=["nirspec_g395h"], n_transits=2, r_bin=100,
                          floor_mode="constant",
                          floors={"nirspec_g395h": 15.0},
@@ -42,9 +43,10 @@ def test_round_trip_restores_the_full_run():
                          show_noise=False, seed=0))
     state, notes = share_config.widget_state(share, _key)
     assert not notes
-    # target + system (per-planet keys)
+    # target + system (per-planet keys); the Pandeia star restores from the
+    # observation block (the transmission canonical block zeroes it)
     assert state["n0_planet"] == "wasp39b"
-    assert state["n0_wasp39b_teff"] == canon["star_teff"]
+    assert state["n0_wasp39b_teff"] == 5485.0
     assert state["n0_wasp39b_g"] == pytest.approx(canon["gs_cgs"] / 100.0)
     assert state["n0_wasp39b_ks"] == 9.0 and state["n0_wasp39b_t14"] == 2.8
     # atmosphere
@@ -72,7 +74,8 @@ def test_round_trip_restores_the_full_run():
         goal=dict(goal="detect", target_mol="SO2", target_sig=3.0,
                   marginalize=True, do_fisher=False, fisher_params=[],
                   jac_method="fd"),
-        observation=dict(modes=["nirspec_prism"], n_transits=1))
+        observation=dict(modes=["nirspec_prism"], n_transits=1,
+                         star_teff=5485.0, star_logg=4.47, star_feh=0.0))
     state, notes = share_config.widget_state(share, _key)
     assert not notes
     assert state["n0_mol_vulcan_C2H2_HCN"] == "SO2"
@@ -197,6 +200,7 @@ def test_combos_round_trip_and_invalid_entries_are_noted():
                   target_sig=3.0, marginalize=True, do_fisher=False,
                   fisher_params=["lnZ"], jac_method="fd"),
         observation=dict(modes=["nirspec_g395h", "niriss_soss", "miri_lrs"],
+                         star_teff=5485.0, star_logg=4.47, star_feh=0.0,
                          n_transits=1, r_bin=100, floor_mode="none",
                          floors={}, noise_infl={}, show_noise=True, seed=42,
                          combos=[
@@ -240,6 +244,7 @@ def test_noise_model_config_evolution_round_trips():
 
     def _obs(**over):
         base = dict(ks_mag=9.0, t14=2.8, t_base=2.8, sat_limit=0.8,
+                    star_teff=5485.0, star_logg=4.47, star_feh=0.0,
                     modes=["nirspec_g395h"], n_transits=1, r_bin=100,
                     floor_mode="constant", floors={"nirspec_g395h": 15.0},
                     noise_infl={"nirspec_g395h": 1.5},
@@ -262,6 +267,13 @@ def test_noise_model_config_evolution_round_trips():
     assert state[_key("infl_nirspec_g395h")] == 1.5, state
     assert _key("noisescale") not in state, state
 
+    # unknown floor type: noted, floor settings keep their current values
+    share2 = share_config.build_share(_canon(), goal=goal,
+                                      observation=_obs(floor_mode="bogus"))
+    state2, notes2 = share_config.widget_state(share2, _key)
+    assert _key("floormode") not in state2
+    assert any("noise-floor type" in n for n in notes2)
+
     # removed correlated-floor scenario: noted, never restored
     share["observation"]["scenario"] = "conservative"
     state, notes = share_config.widget_state(share, _key)
@@ -271,6 +283,132 @@ def test_noise_model_config_evolution_round_trips():
     state, notes = share_config.widget_state(share, _key)
     assert not any("scenario" in k for k in state)
     assert not any("scenario" in n for n in notes)
+
+
+def test_out_of_range_values_refuse_loudly():
+    """Streamlit does not reject an out-of-range session-state value -- it
+    silently discards it and the widget falls back to its default, running a
+    different model than the file describes. The restore must therefore
+    refuse loudly BEFORE anything applies. Covers the observation family,
+    the per-mode families, and a widget-only bound the engine itself never
+    validates (Guillot T_irr)."""
+    def _share(**obs_over):
+        obs = dict(ks_mag=9.0, t14=2.8, t_base=2.8, sat_limit=0.8,
+                   star_teff=5485.0, star_logg=4.47, star_feh=0.0,
+                   modes=["nirspec_g395h"], n_transits=1, r_bin=100,
+                   floor_mode="constant", floors={"nirspec_g395h": 15.0},
+                   noise_infl={"nirspec_g395h": 1.05},
+                   show_noise=True, seed=0)
+        obs.update(obs_over)
+        return share_config.build_share(_canon(), goal={}, observation=obs)
+
+    cases = [
+        (dict(r_bin=2700), "rbin"),                       # the pixel-level ask
+        (dict(noise_scale=0.2), "noisescale"),
+        (dict(floors={"nirspec_g395h": 500.0}), "floor"),
+        (dict(star_teff=50000.0), "teff"),
+        (dict(sat_limit=0.99), "sat"),
+        (dict(noise_infl={"nirspec_g395h": 5.0}), "multiplier"),
+    ]
+    for over, needle in cases:
+        with pytest.raises(ValueError, match=needle):
+            share_config.widget_state(_share(**over), _key)
+    with pytest.raises(ValueError, match="tirr"):
+        share_config.widget_state(
+            share_config.build_share(_canon(Tirr=5000.0), {}, {}), _key)
+
+
+def test_noise_star_round_trips_and_legacy_files_get_a_note():
+    """The transmission canonical block carries a zeroed star (cache
+    hygiene), so the observation block records the Pandeia star. The zero
+    sentinel must never reach the widget keys; a file without the record
+    says so instead of silently keeping the session's values; an emission
+    file restores the star from the canonical block itself."""
+    canon = _canon()
+    assert canon["star_teff"] == 0.0        # the transmission sentinel
+    share = share_config.build_share(
+        canon, goal={}, observation=dict(
+            ks_mag=9.0, star_teff=5485.0, star_logg=4.47, star_feh=0.0))
+    state, notes = share_config.widget_state(share, _key)
+    assert state["n0_wasp39b_teff"] == 5485.0
+    assert state["n0_wasp39b_logg"] == 4.47
+    assert not any("stellar parameters" in n for n in notes)
+    # legacy file: an observation block without the star record
+    share = share_config.build_share(canon, goal={},
+                                     observation=dict(ks_mag=9.0))
+    state, notes = share_config.widget_state(share, _key)
+    assert "n0_wasp39b_teff" not in state
+    assert any("stellar parameters" in n for n in notes)
+    # emission: the canonical block carries the real star
+    canon_em = forward.canonical_params(dict(
+        planet="wasp39b", tp_mode="guillot", science_mode="emission",
+        star_teff=5485.0, star_logg=4.47, star_feh=0.0))
+    state, notes = share_config.widget_state(
+        share_config.build_share(canon_em, {}, {}), _key)
+    assert state["n0_wasp39b_teff"] == 5485.0
+
+
+def test_restore_bounds_match_the_widgets():
+    """The range tables mirror app.py's widget bounds; this AST check pins
+    the mirror so a widget-range edit cannot silently diverge from the
+    restore path. Bounds shared through a constant (forward.*_RANGE,
+    planets.CUSTOM_FIELD_RANGES) cannot drift and are excluded."""
+    import ast
+    import importlib.util
+    from pathlib import Path
+
+    from jwst_tool import planets
+
+    src = Path(importlib.util.find_spec("jwst_tool.app").origin).read_text()
+
+    def _const(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value,
+                                                         (int, float)):
+            return float(node.value)
+        if (isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub)
+                and isinstance(node.operand, ast.Constant)):
+            return -float(node.operand.value)
+        return None
+
+    found: dict = {}
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "number_input"):
+            continue
+        key_arg = next((kw.value for kw in node.keywords
+                        if kw.arg == "key"), None)
+        if not (isinstance(key_arg, ast.Call) and key_arg.args):
+            continue
+        ka = key_arg.args[0]
+        if isinstance(ka, ast.Constant):
+            suffix = str(ka.value)
+        elif (isinstance(ka, ast.JoinedStr) and ka.values
+                and isinstance(ka.values[0], ast.Constant)):
+            suffix = str(ka.values[0].value) + "*"       # dynamic family
+        else:
+            continue
+        if len(node.args) >= 3:
+            lo, hi = _const(node.args[1]), _const(node.args[2])
+            if lo is not None and hi is not None:
+                found.setdefault(suffix, set()).add((lo, hi))
+
+    shared = ({"mierg", "miesg", "miemmr", "nupts", "nz"}
+              | set(planets.CUSTOM_FIELD_RANGES))
+    for table in (share_config._GLOBAL_BOUNDS, share_config._PLANET_BOUNDS):
+        for widget, (lo, hi) in table.items():
+            if widget in shared:
+                continue
+            assert widget in found, (
+                f"share_config restores widget {widget!r} but app.py has no "
+                "number_input with that key and literal bounds")
+            assert (float(lo), float(hi)) in found[widget], (
+                f"bounds for {widget!r} differ: share_config has "
+                f"({lo}, {hi}), app.py has {found[widget]}")
+    assert found.get("floor_*") == {share_config._FLOOR_BOUNDS}
+    assert found.get("infl_*") == {share_config._INFL_BOUNDS}
+    assert found.get("tgt_*") == {share_config._TGT_BOUNDS_K,
+                                  share_config._TGT_BOUNDS}
 
 
 def test_gui_removed_physics_defaults_load_and_nondefaults_refuse():

@@ -287,7 +287,7 @@ def test_source_pins_fig_width_fisher_table_and_noise_recording():
     use = next(i for i, l in enumerate(lines)
                if "st.pyplot(fig, width=_FIG_DISPLAY_PX)" in l)
     assert define < use, (define, use)
-    i = src.index('with st.expander("Parameter constraint forecast (Fisher)")')
+    i = src.index('with st.expander("Parameter constraint forecast (local Fisher)")')
     j = src.index('st.download_button("Constraint forecast (CSV)"', i)
     block = src[i:j]
     assert "st.table(" in block and "st.dataframe(" not in block, \
@@ -492,10 +492,10 @@ def test_combo_builder_fisher_table_naming_and_reset():
     exps = [e.label for e in at.get("expander")]
     assert "Add a custom mode set" in exps, exps
     assert "Mode combinations" not in exps, exps
-    assert "Parameter constraint forecast (Fisher)" in exps, exps
+    assert "Parameter constraint forecast (local Fisher)" in exps, exps
     assert "Physical structure (T-P profile, mixing ratios)" in exps, exps
-    assert "Marginalized forecast posteriors" in exps, exps
-    assert "Marginalized forecast posteriors" not in subs, subs
+    assert "Marginalized Fisher forecasts" in exps, exps
+    assert "Marginalized Fisher forecasts" not in subs, subs
     assert any("forecast summary" in e for e in exps), exps
     assert not any("forecast summary" in s for s in subs), subs
     assert "Figure (PDF, vector)" in {b.label

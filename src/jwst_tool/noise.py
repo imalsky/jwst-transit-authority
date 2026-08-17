@@ -52,33 +52,11 @@ from . import proc as proc_mod
 
 _BACKEND_FINGERPRINT = None
 
-# The production Pandeia-worker version: part of every noise-cache key AND the
-# identity the parity gate (tests/parity/scripts/parity_gate.py) requires of a
-# committed artifact. Bump whenever pandeia_worker.py output changes (history:
-# notes.md); a bump without a fresh parity run fails the gate test.
-# v8 (2026-08-09): ramp-search floors adopt pandeia mingroups (NIR modes drop
-# 2 -> 1, MIRI LRS 5 -> 2), matching PandExo's search space; not required for
-# cache correctness (ngroup_min is in the job key) but the search-policy
-# change is part of the parity-artifact identity.
-# v9 (2026-08-09, same-day review fix): group selection returns the LARGEST
-# measured-safe count via a bidirectional measured search, and "saturated"
-# means the measured floor exceeds the limit. v8's min-then-verify-down
-# search under-selected (a needless 1-group SOSS ramp with ~7x the noise);
-# v8 cached results are wrong on short ramps, so the version bump is
-# REQUIRED for cache correctness here, not just artifact identity.
-# v10 (2026-08-09, review round 2): maximality is PROVEN by a bracket
-# search (complete only when the next integer measured unsafe or the cap is
-# reached; v9's predictor-stall exit could sit one integer low on offset
-# ramps), and the payload gains ramp_search_complete (budget exhaustion is
-# reported, never presented as maximal).
-# v11 (2026-08-14 collaborator audit): retain the native wavelength grid and
-# partial/full saturation curves before the finite-noise filter.  The parity
-# gate now compares those masks pixel by pixel; aggregate counts alone could
-# hide an alignment or report-key error.
-# v12 (2026-08-16 resolution audit): _native_r finds the NIRCam LW grism
-# dispersion file (jwst_nircam_disp_*.fits carries no disperser token, so
-# the *grismr* pattern matched nothing). NIRCam results now export r_native
-# instead of a "no dispersion file" note that read as a refdata error.
+# The production Pandeia-worker version: part of every noise-cache key AND
+# the identity the parity gate (tests/parity/scripts/parity_gate.py)
+# requires of a committed artifact. Bump whenever pandeia_worker.py output
+# changes (per-version history: notes.md); a bump without a fresh parity run
+# fails the gate test.
 WORKER_VERSION = 12
 
 

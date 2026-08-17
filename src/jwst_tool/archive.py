@@ -245,8 +245,8 @@ def custom_fill(row: dict) -> tuple[dict, list[str]]:
                          "derived from the archive best mass and radius, "
                          f"which may come from different publications{extra}.")
 
-    # The UV-spectrum menu is NEVER touched by the fill (maintainer rule,
-    # 2026-08-09: no substitute value stands in for the actual star). The
+    # The UV-spectrum menu is NEVER touched by the fill (standing rule:
+    # no substitute value stands in for the actual star). The
     # archive carries no UV spectra; the note below only points at the
     # nearest-Teff shipped template so the user can choose it deliberately,
     # and the GUI caption shows the same suggestion live.

@@ -9,59 +9,31 @@ Two faces:
   "[fwd] ..." lines; "[fwd] PROG <frac> <label>" lines drive the GUI bar.
 
 Every planet in ``planets.PLANETS`` (plus "custom") runs the same
-W39b-validated SNCHO machinery -- one shared code path, not per-planet
-validation (see notes.md, Decision records section). The planet identity
-enters via cfg_overrides (chemistry) and profile rp_cm/gs_cgs/rstar_cm (RT).
-A GCM profile is never silently substituted.
+W39b-validated SNCHO machinery -- one shared code path (see notes.md,
+Decision records). The planet identity enters via cfg_overrides (chemistry)
+and profile rp_cm/gs_cgs/rstar_cm (RT); a GCM profile is never silently
+substituted.
 
-Resolution knobs: nz (chemistry layers; the RT grid is locked equal in
-run_model) and yconv_cri (steady-state convergence tolerance). nu_pts
-(native wavenumber points over 1-15 um, native R ~ nu_pts/2.7) is
-LINE-BY-LINE mode only; the default correlated-k mode takes its grid from
-the published k-tables at R = 1000 and ignores it, and canonical_params
-normalizes it (and rt_dit_res) to the defaults there so the cache key
-never varies with an inert setting.
+Any T-P outside the modelable opacity window [320, 2980] K is REJECTED,
+never clipped.
 
-Structure and physics knobs: tp_mode ("guillot"; "file" = explicit tabulated
-T(P) [+ Kzz(P)], cache-keyed by content hash, no T-P Fisher rows -- file-mode
-forecasts condition on the profile and are stated optimistic;
- kzz_mode (const / Pfunc / JM16 / file); structural
-composition (met_x_solar scales the cfg O/C/N/S together, co_ratio sets
-C_H = co_ratio * O_H, FastChem re-initializes at the requested values -- one
-path for every composition, including C-rich); use_photo, sl_angle_deg,
-f_diurnal, use_moldiff, use_rayleigh; the power-law and Mie cloud decks
-(deck parameters can be freed as RT-only Fisher rows); boundary conditions
-(use_settling, diff_esc, top_flux, bot_flux); extra_mols; and the
-echo-checked RT knobs rt_ptop_bar / rt_integration / rt_dit_res.
+Condensation is DETECTION-ONLY (certified S8 recipe, CONDEN_CFG): the
+fix-species pin freezes the reservoir at a step-sequence-dependent
+transient, so no derivative through it is trustworthy (measured jvp-vs-FD
+relative error ~0.91, order-unity wrong). ``canonical_params`` refuses
+use_condense with fisher_params, with photo off, and with use_moldiff off.
+For aerosol opacity in a forecast use the differentiable cloud/Mie decks.
 
-Any T-P outside the modelable opacity window [320, 2980] K is REJECTED with
-a clear error, never clipped -- same rule as the retrieval.
-
-Condensation is DETECTION-ONLY (certified S8 recipe, CONDEN_CFG). The
-fix-species pin freezes the reservoir at a step-sequence-dependent transient,
-so the state is not a reproducible function of the inputs; measured jvp-vs-FD
-relative error ~0.91 (the tangent is order-unity WRONG), and FD of pinned
-transients is equally untrustworthy. ``canonical_params`` refuses
-use_condense with fisher_params (any jac_method), with photo off, and with
-use_moldiff off; adjoint_diag refuses condensing states too. Documented
-footgun: a column too hot to condense still pins S8 at its end-of-window
-value -- conden-on does not reduce to conden-off. For aerosol opacity in a
-forecast use the differentiable ExoJax cloud deck, never condensation.
-
-Fisher machinery: with ``fisher_params`` set, the runner computes the
-spectrum Jacobian row by row; the method is recorded per row in the npz
-(``jac_row_method``). jac_method="fd" (the API default -- it works
-everywhere; the GUI defaults to "ad" since 2026-08-09) is certified central
-finite differences: composition rows (lnZ, dlnCO) re-initialize the
-chemistry per FD point, lnKzz/T-P rows perturb theta on the baseline build,
-every row must pass the h-vs-2h consistency gate, lnR0 is RT-only.
-jac_method="ad" is one
-warm-started forward-mode jvp per row (photo-on required, ~1.7-4x faster;
-cross-validated vs FD to 0.07-1.6% on the then-default W39b configuration --
-method validation, not a per-row guarantee). Two stated AD caveats: the lnZ
-jvp is the fixed-structural-grid derivative, and the dlnCO jvp uses the
-fixed-O direction, refused near O-exhaustion (b_z bound); FD is valid
-everywhere. ``fisher.py`` turns the Jacobian + Pandeia noise into forecasts.
+Fisher machinery: with ``fisher_params`` set the runner computes the
+spectrum Jacobian row by row, method recorded per row in the npz
+(``jac_row_method``). jac_method="fd" (the API default) is certified
+central finite differences: composition rows (lnZ, dlnCO) re-initialize
+the chemistry per FD point, every row must pass the h-vs-2h consistency
+gate, lnR0 is RT-only. jac_method="ad" is one warm-started forward-mode
+jvp per row (photo-on required; the lnZ jvp is the fixed-structural-grid
+derivative and the dlnCO jvp is refused near O-exhaustion -- FD is valid
+everywhere). ``fisher.py`` turns the Jacobian + Pandeia noise into
+forecasts.
 
 Per-molecule "removed" spectra zero that molecule's VMR in the RT only --
 structure (T, mmw) is kept: the standard nested-model comparison.
@@ -87,40 +59,34 @@ from jwst_tool import planets   # installed package: works as module AND as a sc
 
 MOLECULES = ["H2O", "CO2", "CO", "CH4", "SO2"]   # always-on WIDE-profile set
 # RT additions beyond the base set. The SNCHO network already solves these;
-# extra_mols only exposes them to the RT and the detection scores. COMPLETE
-# since v34: every network species with a published ExoMolOP table on the
-# R1000 0.3-50um grid. What is absent cannot be added (reasons:
+# extra_mols only exposes them to the RT and the detection scores. Complete:
+# every network species with a published ExoMolOP table on the R1000
+# 0.3-50um grid; what is absent cannot be added (reasons:
 # vulcan_forward.constants.MOLECULES). CS2/C2H6 stay listed so selecting one
 # raises the explanatory refusal below rather than a bare KeyError.
 EXTRA_MOLECULES = ["C2", "C2H2", "C2H4", "C2H6", "CH", "CH3", "CN", "CS",
                    "CS2", "H2CO", "H2O2", "H2S", "HCN", "N2O", "NH", "NH3",
                    "NO", "NS", "OCS", "OH", "SH", "SO"]
 
-# Which of them the GUI preselects. MEASURED (2026-08-17), not assumed: max
-# |depth - depth_without| over the 2706 bands on the converged W39b and HD189
-# reference atmospheres, best of the two. Preselected: H2S 309, NH3 301,
-# HCN 241, OCS 60.5, SO 48.1, SH 10.0 ppm (C2H2 0.149 / C2H4 0.024 are held
-# over for the C/O ~ 1 case neither planet tests). Left off: CN 2.35, OH 0.46,
-# and 10 more at or below 0.08. Full table: notes.md, v34.
-# NEVER widen this without the ppm measurement behind it -- each default-on
-# molecule adds a leave-one-out spectrum (block ~ n(n+3)/2 folds).
+# Which of them the GUI preselects: MEASURED leave-one-out impact >= ~10 ppm
+# on the W39b/HD189 reference atmospheres (full table: notes.md; C2H2/C2H4
+# are held over for the C/O ~ 1 case neither planet tests). NEVER widen
+# without the ppm measurement behind it -- each default-on molecule adds a
+# leave-one-out spectrum.
 EXTRA_MOLECULES_DEFAULT = ["C2H2", "C2H4", "H2S", "HCN", "NH3", "OCS",
                            "SH", "SO"]
-# VULCAN kinetics network menu (v33). "sncho" is the shipped default; "ncho"
-# drops sulfur (69 vs 89 species) for a cheaper solve when no S species is
-# needed. Values: (VULCAN_JAX_NETWORK, VULCAN_JAX_ATOM_LIST) -- import-frozen
-# in the engine, so the solver subprocess sets both env vars from the
-# canonical parameter before the first engine import.
+# VULCAN kinetics network menu. "sncho" is the shipped default; "ncho" drops
+# sulfur (69 vs 89 species) for a cheaper solve. Values: (VULCAN_JAX_NETWORK,
+# VULCAN_JAX_ATOM_LIST) -- import-frozen in the engine, so the solver
+# subprocess sets both env vars before the first engine import.
 NETWORKS = {
     "sncho": ("thermo/SNCHO_photo_network.txt", "H,O,C,N,S"),
     "ncho": ("thermo/NCHO_photo_network.txt", "H,O,C,N"),
 }
-# Sulfur-bearing entries of the molecule lists above: absent from the NCHO
-# network, so network="ncho" refuses them rather than dropping them silently.
-# MUST list every S-bearing member of MOLECULES + EXTRA_MOLECULES -- a species
-# missing here would be offered under a network that cannot produce it, and
-# would then be modelled at whatever the elemental repair left behind rather
-# than refused. SO/SH/CS/NS joined at v34 with the species sweep.
+# Sulfur-bearing entries of the molecule lists above: network="ncho" refuses
+# them rather than dropping them silently. MUST list every S-bearing member
+# of MOLECULES + EXTRA_MOLECULES -- a species missing here would be modelled
+# at whatever the elemental repair left behind rather than refused.
 _S_MOLECULES = frozenset({"SO2", "H2S", "CS2", "OCS", "SO", "SH", "CS", "NS"})
 # Species ExoMolOP publishes no k-table for: refused EARLY under the default
 # opacity_mode (canonical_params), instead of failing minutes later inside
@@ -128,36 +94,29 @@ _S_MOLECULES = frozenset({"SO2", "H2S", "CS2", "OCS", "SO", "SH", "CS", "NS"})
 # data-gated test so this set cannot rot when ExoMolOP adds a species.
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
 _VERSION = 35  # model_cache buster: bump whenever the physics or the canonical
-               # key set changes. Per-version history lives in notes.md.
+               # key set changes. Version history: notes.md.
                # DELIBERATE (reviews keep re-finding it): the cache identity
                # is canonical params + this hand-bumped version, NOT content
-               # hashes or commit pins of vulcan-forward/vulcan-jax/exojax or
-               # the line lists. That trade (maintainer discipline over
-               # content addressing, for a single-maintainer research tool)
-               # is recorded as S2-05 in notes.md, Decision records section.
+               # hashes of the sibling repos or line lists (S2-05 in
+               # notes.md, Decision records).
 
 # Baseline C/O of the shipped network: the number ratio N_C/N_O (not
-# [C/H]/[O/H], not a log). Basis is the W39b cfg's elemental set
-# (C_H 2.95e-3, O_H 5.37e-3, Tsai et al. 2023 10x-solar) -- the ONLY valid
-# basis: the FastChem .dat set (0.458) only seeds the equilibrium initial
-# guess and never survives into the converged column. This constant is only
-# the GUI default co_ratio and display baseline; run_model cross-checks it
-# against the loaded cfg's C_H/O_H and refuses on drift.
+# [C/H]/[O/H], not a log). Basis is the W39b cfg's elemental set -- the ONLY
+# valid basis: the FastChem .dat set (0.458) only seeds the equilibrium
+# initial guess and never survives into the converged column. GUI default /
+# display baseline only; run_model cross-checks it against the loaded cfg's
+# C_H/O_H and refuses on drift.
 CO_BASELINE = 0.00295 / 0.00537   # = 0.54935, cfg C_H/O_H (Tsai 2023 10x-solar)
-# The GUI/API default co_ratio (v32): the baseline rounded onto the widgets'
-# 0.05 grid. Default runs SOLVE at this value; CO_BASELINE stays the display
-# baseline and the live-cfg cross-check constant.
+# The GUI/API default co_ratio: the baseline rounded onto the widgets' 0.05
+# grid. Default runs SOLVE at this value; CO_BASELINE stays the display
+# baseline and cross-check constant.
 CO_DEFAULT = 0.55
 
-# FD Fisher Jacobians: every composition/structure row is a CENTRAL difference
-# of fully re-initialized, longdy-certified cold solves (the upstream-VULCAN
-# workflow). Directions: lnZ scales O/C/N/S together (C/O preserved); dlnCO
-# scales C_H at fixed O; lnKzz/T-P rows perturb theta on the same build (Kzz/T
-# enter on-graph). Each row is evaluated at h AND 2h; disagreement beyond
-# FD_CONSISTENCY_TOL RAISES (a row dominated by convergence noise is never
-# reported); the reported row is the Richardson combination (4 J_h - J_2h)/3.
-# AD (jac_method="ad") is the warm-jvp opt-in, ~1.7-4x faster, photo-on only;
-# FD stays the default: certified, valid everywhere.
+# FD Fisher steps. Directions: lnZ scales O/C/N/S together (C/O preserved);
+# dlnCO scales C_H at fixed O; lnKzz/T-P rows perturb theta on the same
+# build. Each row is evaluated at h AND 2h; disagreement beyond
+# FD_CONSISTENCY_TOL RAISES; the reported row is the Richardson combination
+# (4 J_h - J_2h)/3.
 FD_STEPS = {"lnZ": 0.10, "dlnCO": 0.10, "lnKzz": 0.10,      # ln-space steps
             "Tirr": 10.0, "Tint": 10.0,                     # Kelvin
             "log_kappa": 0.05, "log_gamma": 0.05,           # dex
@@ -199,55 +158,41 @@ MIE_SIGMAG_RANGE = (1.15, 3.85)      # inset from [1.0001, 4.0] by > 2h (0.10)
 MIE_LOG_MMR_RANGE = (-12.0, -2.0)
 MIE_DATA_SUBDIR = "exojax_mie"       # under DATA_DIR (miegrids + virga archive)
 
-# Kzz profile modes (v16). "file" requires tp_mode="file" with a Kzz column
+# Kzz profile modes. "file" requires tp_mode="file" with a Kzz column
 # (the upstream constraint: the tabulated Kzz lives in the atm table).
 KZZ_MODES = ("const", "Pfunc", "JM16", "file")
 
-# Diffusion-limited-escape species choices (v16). Curated to the light species
-# the TOA escape formula is meant for AND guaranteed present in the SNCHO
-# network -- an arbitrary species would only fail deep inside the engine.
+# Diffusion-limited-escape species: curated to the light species the TOA
+# escape formula is meant for AND guaranteed present in the SNCHO network --
+# an arbitrary species would only fail deep inside the engine.
 DIFF_ESC_CHOICES = ("H", "H2", "He")
 
-# Boundary-condition flux sanity bounds (v16): generous physical envelopes so a
+# Boundary-condition flux sanity bounds: generous physical envelopes so a
 # typo (1e30) fails at the API instead of producing a silently absurd column.
 BC_FLUX_MAX = 1.0e15              # |flux| ceiling, molecules cm^-2 s^-1
 BC_VDEP_MAX = 1.0e3               # deposition-velocity ceiling, cm s^-1
 
-# tp_mode="file" profile sources (v16).
+# tp_mode="file" profile sources.
 TP_FILE_SHIPPED = "shipped"       # the cfg's own atm_file (W39b evening terminator)
 TP_FILE_UPLOAD = "upload"         # user-supplied table; content-addressed copy
                                   # under <output>/uploads/<sha1>.txt
 
-# Chemistry-grid pressure span (dyn/cm^2) of the shipped W39b cfg: (P_t, P_b)
-# = (0.1, 7.6e6), i.e. 1e-7 to 7.6 bar (vulcan_jax configs/W39b.yaml). The
-# engine re-grids a tabulated T-P onto this FIXED span with a constant-value
-# clamp outside the table, so an uploaded table that stops above P_b would
-# silently run the entire CO/CH4/NH3 quench region isothermal at its last
-# tabulated temperature -- _read_tp_table REFUSES that (v17). A clamped TOP is
-# the standard upstream convention (the shipped profile itself extends its
-# topmost T over ~1.7 decades) and is logged loudly, not refused. run_model
-# cross-checks these constants against the LIVE cfg, CO_BASELINE-style.
+# Chemistry-grid pressure span (dyn/cm^2) of the shipped W39b cfg. The engine
+# re-grids a tabulated T-P onto this FIXED span with a constant-value clamp
+# outside the table, so a table that stops above P_b would silently run the
+# CO/CH4/NH3 quench region isothermal -- _read_tp_table REFUSES that. A
+# clamped TOP is the standard upstream convention (logged, not refused).
+# run_model cross-checks these constants against the LIVE cfg.
 CHEM_P_SPAN_DYN = (0.1, 7.6e6)
 
-# The column bottom is a per-run parameter (v27) with STRUCTURE-AWARE defaults
-# (v32): a measured T-P table caps honest chemistry at its own bottom -- the
-# shipped tables end at 7.6 bar, and chemistry below a table's end is refused
-# (the quench-region clamp, v17) -- while the parametric profiles (Guillot /
-# isothermal) default to a round 10 bar, both geometries.
-#
-# Emission does NOT need a deeper default. It briefly defaulted to 100 bar,
-# retracted on measurement: on HD 189733 b at 7.6 bar the bottom optical depth
-# is 30-370 across the real instrument windows; the only tau < 3 sliver is a
-# 60 nm notch at 1.02-1.08 um where the modeled opacity set (lines + H2 CIA)
-# runs out and the real continuum there (H- bound-free/free-free, Na/K wings,
-# TiO/VO) is unmodeled. Deepening buys opacity the real planet does not get,
-# at 4x the chemistry cost, in the least-trusted opacity temperatures -- so
-# the tau-bottom gate is flux-weighted, not min() (see run_model).
-#
-# The RANGE stays open to 300 bar for a genuinely deep case. The ceiling is a
-# DATA limit, not a preference: every opacity here is built for T_WINDOW and
-# the shipped H2-H2 CIA table physically ends at 3000 K, so a column hotter
-# than that deeper down is refused rather than extrapolated.
+# Column bottom: STRUCTURE-AWARE defaults. A measured T-P table caps honest
+# chemistry at its own bottom (the shipped tables end at 7.6 bar); the
+# parametric profiles default to a round 10 bar, both geometries. Emission
+# does NOT need a deeper default -- the tau-bottom gate is flux-weighted, not
+# min(), because the only see-through sliver on a real planet was a blue-edge
+# notch with no modeled continuum (measurements: notes.md). The RANGE stays
+# open to 300 bar; the ceiling is a DATA limit (opacities are built for
+# T_WINDOW and the shipped H2-H2 CIA table ends near 3000 K).
 P_BTM_FILE_BAR = CHEM_P_SPAN_DYN[1] / 1.0e6    # 7.6 bar, the shipped tables' bottom
 P_BTM_PARAMETRIC_BAR = 10.0
 P_BTM_RANGE = (1.0, 300.0)
@@ -359,31 +304,19 @@ def chem_p_span_dyn(cp: dict) -> tuple:
     return (CHEM_P_SPAN_DYN[0],
             float(cp.get("p_btm_bar") or default_p_btm_bar(cp)) * 1.0e6)
 
-# Structure default (2026-08-11 maintainer decision, reversing the structure
-# half of the 2026-08-09 speed-first flip): where vulcan_jax bundles a
-# MEASURED T-P/Kzz table VERIFIED end-to-end for a planet, that table (and
-# its Kzz column) is the default structure; the analytic Guillot profile is
-# the default everywhere else. Rationale: the
-# default W39b run must be the literature-comparable SO2 state; on the Guillot
-# + constant-Kzz stand-in it read ~2 sigma (measured 2026-07-21: ~100 K hot
-# through the SO2 formation zone, Kzz 4-33x low). The table run measured 4.16
-# sigma against Alderson+2023 4.8 / Tsai+2023 4.5 -- but that was BEFORE the
-# v26 radius anchoring, whose 1.42x excess contrast inflated it. Re-measured
-# at v27: G395H SO2 sigma_detect 2.89, i.e. the tool now forecasts BELOW the
-# published detection. The table is still the right default (it beats Guillot
-# by the same margin); the absolute agreement is an OPEN gap, see README. The table also converges
-# FASTER (28 s vs ~8 min), so this costs no speed; the stated trade-off is
-# that file mode has no T-P Fisher row (Fisher forecasts are conditional on
-# the profile -- switch to Guillot when a temperature row is needed). The
-# AD-first GUI defaults of 2026-08-09 are kept and compatible (AD gates on
-# photo/conden, not on tp_mode). Which planets have a table is
-# data: planets.PLANETS[...]["tp_table"].
+# Structure default: where vulcan_jax bundles a MEASURED T-P/Kzz table
+# VERIFIED end-to-end for a planet, that table is the default structure
+# (the literature-comparable state, and faster to converge); Guillot is the
+# default everywhere else. Trade-off: file mode has no T-P Fisher row, so
+# switch to Guillot when a temperature row is needed. Which planets have a
+# table is data: planets.PLANETS[...]["tp_table"]. Measurements and the
+# decision history: notes.md.
 def _default_tp_mode(params: dict) -> str:
     """tp_mode default: the planet's measured table where a default run on it
     is VERIFIED, else the analytic Guillot profile. Having a table is not
     enough -- see shipped_tp_table_is_default.
 
-    EMISSION always defaults to Guillot (v27), whatever the planet ships. The
+    EMISSION always defaults to Guillot, whatever the planet ships. The
     bundled tables are TERMINATOR profiles -- WASP-39 b's is an exo-FMS GCM
     average over +/-10 deg about the eastern terminator -- and a terminator
     profile is the wrong structure for a dayside eclipse. Selecting a table
@@ -418,27 +351,17 @@ def active_molecules(cp: dict) -> list[str]:
 
 # Numerical-resolution knobs layered on the base RT profile in
 # engine_config.WIDE (1-15 um band unchanged). The RT layer count is locked
-# equal to nz in run_model, so there is no separate RT-layer knob.
-# Measured tier sensitivity (notes.md): near-IR modes move <= 6% low vs high
-# tier, but weak mid-IR SO2 bands nearly double, and the entire movement is
-# native sampling (nu_pts), not nz/yconv. Raise nu_pts for final mid-IR
-# numbers and treat MIRI-LRS weak-band sigmas as sampling-limited lower bounds.
+# equal to nz in run_model, so there is no separate RT-layer knob. These
+# knobs are LIVE only in lbl mode (canonical_params pins them under the
+# default correlated-k mode).
 #
-# The grid is ESLOG over 667-10000 cm^-1, so the resolving power is constant:
-# R = (nu_pts - 1) / ln(10000/667) = nu_pts / 2.708. The cap was 8000 (R 2954),
-# which was BELOW what the highest-R shipped mode needs -- NIRSpec G395H's
-# line-spread function is unresolvable by the model grid there, so the LSF
-# operator silently no-ops on it (detect.py now says so out loud). Resolving a
-# Gaussian kernel needs R_model >= 2.3548 * R_native, i.e. nu_pts >= ~12,300
-# for G395H. The cap is 32,000 so that convergence can at least be DEMONSTRATED
-# in range; it is not a claim that 32,000 converges. It does not: PreMODIT
-# renders any line narrower than a grid cell as a ~2-cell feature, and these
-# line cores are Doppler-limited at R = 3.4e5 to 6.7e5, which would need
-# nu_pts ~ 1e6 and ~127 GB of broadening arrays. This model cannot be
-# line-core converged as built; correlated-k (exojax.opacity.ckd) is the
-# durable answer. Cost measured on the way up: broadening arrays 0.267 GB at
-# 4000, 1.07 GB at 16,000, 2.14 GB at 32,000, with cross-section evaluation
-# ~8x slower at 16,000 than at 4000.
+# The lbl grid is ESLOG over 667-10000 cm^-1, so the resolving power is
+# constant: R = nu_pts / 2.708. Resolving an instrument LSF needs R_model >=
+# 2.3548 * R_native (nu_pts >= ~12,300 for G395H; detect.py discloses the
+# no-op below that). The 32,000 cap lets convergence be DEMONSTRATED in
+# range, not a claim that it converges: line cores are Doppler-limited at
+# R ~ 3e5-7e5, unreachable as built (measurements: notes.md); correlated-k
+# is the durable answer and the default.
 NZ_DEFAULT, NU_PTS_DEFAULT, YCONV_DEFAULT = 100, 4000, 1.0e-2
 NZ_RANGE = (60, 150)            # chemistry (= RT) layers
 NU_PTS_RANGE = (4000, 32000)    # native wavenumber points (R = nu_pts / 2.708)
@@ -514,12 +437,10 @@ def shipped_tp_table_is_default(planet: str) -> bool:
     """Whether ``planet``'s bundled table is its DEFAULT structure.
 
     Separate from merely having one: a table only becomes the default once a
-    default run on it has been verified end-to-end here (default-selecting
-    again since 2026-08-11; between 2026-08-09 and then this was a pure
-    verification record under the Guillot-everywhere default). HD 189733 b
-    ships a good profile the solver will not certify at default settings, so
-    it stays selectable-but-not-default rather than making that planet error
-    on arrival (planets.PLANETS[...]["tp_table_note"] carries the
+    default run on it has been verified end-to-end here. HD 189733 b ships a
+    good profile the solver will not certify at default settings, so it
+    stays selectable-but-not-default rather than making that planet error on
+    arrival (planets.PLANETS[...]["tp_table_note"] carries the
     measurement)."""
     entry = planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS)
     return bool(entry.get("tp_table") and entry.get("tp_table_default"))
@@ -701,7 +622,7 @@ def _tp_file_from_cp(cp: dict) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Boundary-condition helpers (v16)
+# Boundary-condition helpers
 # ---------------------------------------------------------------------------
 
 def _canon_bc_entries(raw, *, kind: str) -> list:
@@ -864,8 +785,7 @@ def canonical_params(params: dict) -> dict:
         raise ValueError(
             f"unknown tp_mode {tp_mode!r} (choose from {list(TP_PARAM_NAMES)}). "
             "The WASP-39b GCM 'baseline' and the isothermal profile were removed "
-            "-- use a Guillot profile, or tp_mode='file' with an explicit table "
-            "(v16).")
+            "-- use a Guillot profile, or tp_mode='file' with an explicit table.")
     provider = str(params.get("chem_provider", "vulcan"))
     if provider != "vulcan":
         raise ValueError(
@@ -935,9 +855,9 @@ def canonical_params(params: dict) -> dict:
     cp = {
         "planet": planet,
         "science_mode": science_mode,
-        # Star identity for the eclipse normalization Fp/Fs (v16 emission):
-        # part of the MODEL only in emission mode (zeroed in transmission --
-        # there the star lives purely on the noise side).
+        # Star identity for the eclipse normalization Fp/Fs: part of the
+        # MODEL only in emission mode (zeroed in transmission -- there the
+        # star lives purely on the noise side).
         "star_teff": _teff,
         "star_logg": round(float(params.get("star_logg", star_ref["log_g"])), 2),
         "star_feh": round(float(params.get("star_feh",
@@ -987,16 +907,13 @@ def canonical_params(params: dict) -> dict:
         "sl_angle_deg": round(float(params.get("sl_angle_deg", 83.0)), 1),
         "f_diurnal": round(float(params.get("f_diurnal", 1.0)), 3),
         "use_moldiff": bool(params.get("use_moldiff", True)),
-        # Upwind molecular-diffusion advection (Shami's vm_branch hybrid scheme).
-        # PINNED explicitly since v11: VULCAN-JAX flipped its own default to True
-        # on 2026-07-14 and the tool inherited it silently. Default False = the
-        # tool's validated pre-flip baseline; True = the upwind scheme, not yet
-        # re-baselined for this tool. Only meaningful with use_moldiff on
-        # (the engine gates use_vm on use_vm_mol AND use_moldiff).
+        # Upwind molecular-diffusion advection: PINNED explicitly, never
+        # inherited from the engine (whose own default flipped to True).
+        # False = this tool's validated baseline; True is not re-baselined
+        # here. Only meaningful with use_moldiff on.
         "use_vm_mol": bool(params.get("use_vm_mol", False)),
-        # RT physics: Rayleigh is known zero-parameter physics, ON by default
-        # (v3 and earlier ran without it -- that biased the <1.5 um slope);
-        # the cloud deck is the ExoJax power-law retrieval cloud, OFF by default.
+        # Rayleigh is known zero-parameter physics, ON by default (off it
+        # biases the <1.5 um slope); the power-law cloud deck is OFF by default.
         "use_rayleigh": bool(params.get("use_rayleigh", True)),
         # line-broadening perturber: "air" (HITRAN terrestrial widths, the
         # validated default) or "h2he" (planetary H2/He blend; downloads
@@ -1004,63 +921,51 @@ def canonical_params(params: dict) -> dict:
         # RAISES for a molecule with no H2/He coverage rather than silently
         # falling back)
         "broadening": str(params.get("broadening", "air")),
-        # ExoJAX RT knobs (v15). rt_ptop_bar: the RT column top; above
-        # VULCAN's chemistry top the topmost VMR/T are clamped constant
-        # (standard transmission convention). Too low a top saturates strong
-        # bands into a flat wall (W39b 4.2-5.2 um: ~4.8% of pixels saturated
-        # at 1e-6 bar vs 0.1% at the 1e-8 default -- the sibling repo's
-        # validation/top_pressure_ladder.py quantifies it). rt_integration:
-        # exojax ArtTransPure chord-integration scheme. rt_dit_res: PreMODIT
-        # broadening-grid spacing (1.0 = the validated default here, 0.2 =
-        # exojax's own default; smaller = finer line wings, slower build).
+        # ExoJAX RT knobs. rt_ptop_bar: the RT column top; above VULCAN's
+        # chemistry top the topmost VMR/T are clamped constant (standard
+        # transmission convention); too low a top saturates strong bands into
+        # a flat wall. rt_integration: exojax ArtTransPure chord-integration
+        # scheme. rt_dit_res: PreMODIT broadening-grid spacing (1.0 = the
+        # validated default here, 0.2 = exojax's own).
         "rt_ptop_bar": float(f"{float(params.get('rt_ptop_bar', 1.0e-8)):.6e}"),
         "rt_integration": str(params.get("rt_integration", "simpson")),
         "rt_dit_res": round(float(params.get("rt_dit_res", 1.0)), 3),
-        # opacity_mode (v28 transmission, v29 emission, v30/v31 ExoMolOP):
-        # "exomolop" = correlated-k over the published k-tables, "lbl" = the
-        # old direct sampling, kept only for the Mie deck. The sampled path
-        # was measurably biased in both observables -- the decision and every
-        # measured number live in the vulcan-forward README (Opacity
-        # sections); the history is in notes.md (2026-08-15 entry).
+        # "exomolop" = correlated-k over the published k-tables; "lbl" = direct
+        # sampling, kept only for the Mie deck (measurably biased in both
+        # observables -- vulcan-forward README, Opacity sections).
         "opacity_mode": str(params.get("opacity_mode",
                                        default_opacity_mode(params))),
-        # p_ref_bar (v26): the pressure at which rp_rjup and gs_cgs are taken to
-        # apply. A catalogue radius comes from a white-light TRANSIT fit, so it
-        # is the transit radius at roughly the terminator photosphere, NOT the
-        # radius at the bottom of the RT grid where exojax wants it. Before v26
-        # the literature pair was handed straight to exojax as its
-        # radius_btm/gravity_btm at 7 bar, which stacked the whole 7 bar -> mbar
-        # column on top of a radius that already was the photospheric one:
-        # WASP-39 b came out at 26,853 ppm against a measured 21,381, with 1.42x
-        # too much spectral contrast. 1e-3 bar is the validated default
-        # (re-anchored median 21,299 ppm, 0.4% from the JWST ERS spectrum).
+        # The pressure at which rp_rjup and gs_cgs apply. A catalogue radius
+        # is the transit radius at roughly the terminator photosphere, NOT
+        # the RT-grid bottom where exojax wants it; anchoring it at the
+        # bottom inflated every depth (1.42x excess contrast on W39b).
+        # 1e-3 bar is the validated default for a transit-derived radius.
         "p_ref_bar": float(f"{float(params.get('p_ref_bar', 1.0e-3)):.6e}"),
-        # chemistry + RT column bottom (v27; v32: structure-aware default --
-        # see the P_BTM_* block at module top)
+        # chemistry + RT column bottom (structure-aware default -- see the
+        # P_BTM_* block at module top)
         "p_btm_bar": round(p_btm_bar, 4),
         "cloud_on": bool(params.get("cloud_on", False)),
         "log_kappa_cloud": round(float(params.get("log_kappa_cloud", -1.0)), 3),
         "alpha_cloud": round(float(params.get("alpha_cloud", 0.0)), 2),
-        # Mie condensate deck (v16): "" = off. The three continuous knobs key
-        # the cache only when a condensate is set (zeroed below otherwise).
+        # Mie condensate deck: "" = off. The three continuous knobs key the
+        # cache only when a condensate is set (zeroed below otherwise).
         "mie_condensate": str(params.get("mie_condensate", "") or ""),
         "mie_log_rg": round(float(params.get("mie_log_rg", -5.0)), 3),
         "mie_sigmag": round(float(params.get("mie_sigmag", 2.0)), 3),
         "mie_log_mmr": round(float(params.get("mie_log_mmr", -6.0)), 3),
-        # Detection-only condensation (v14): the certified S8 forward recipe.
-        # The compatibility matrix below refuses it with ANY derivative.
+        # Detection-only condensation: the certified S8 forward recipe. The
+        # compatibility matrix below refuses it with ANY derivative.
         "use_condense": bool(params.get("use_condense", False)),
-        # Boundary conditions / transport (v16): all default OFF = the
-        # validated baseline; upstream VULCAN machinery via cfg_overrides.
+        # Boundary conditions / transport: all default OFF = the validated
+        # baseline; upstream VULCAN machinery via cfg_overrides.
         "use_settling": bool(params.get("use_settling", False)),
         "diff_esc": sorted(set(str(s) for s in (params.get("diff_esc") or []))),
         "top_flux": _canon_bc_entries(params.get("top_flux"), kind="top"),
         "bot_flux": _canon_bc_entries(params.get("bot_flux"), kind="bot"),
         "extra_mols": sorted(str(m) for m in (params.get("extra_mols") or [])),
-        # Leave-one-out spectrum set (v32): which molecules get a removed-
-        # molecule spectrum. None = every RT molecule (the detect default);
-        # [] skips the whole block (the constrain goal reads none of them).
-        # Canonicalized to fold order below, once the RT set is validated.
+        # Leave-one-out spectrum set: None = every RT molecule (the detect
+        # default); [] skips the whole block. Canonicalized to fold order
+        # below, once the RT set is validated.
         "wo_mols": (None if params.get("wo_mols") is None
                     else [str(m) for m in params.get("wo_mols")]),
         "fisher_params": sorted(str(p) for p in (params.get("fisher_params") or [])),
@@ -1096,8 +1001,7 @@ def canonical_params(params: dict) -> dict:
             "(correlated-k over the published ExoMolOP high-temperature "
             "tables -- the default and the only one whose line data suits a "
             "hot hydrogen atmosphere) or 'lbl' (direct sampling, kept for "
-            "the Mie deck and pre-v28 results). The interim 'ckd' mode was "
-            "removed with forward 0.8.0 (v31).")
+            "the Mie deck). The interim 'ckd' mode was removed.")
     if cp["opacity_mode"] == "exomolop" and cp["mie_condensate"]:
         raise ValueError(
             "a Mie condensate deck needs opacity_mode='lbl': Mie extinction "
@@ -1143,18 +1047,11 @@ def canonical_params(params: dict) -> dict:
                 "(Sulfur species are refused rather than dropped, so the "
                 "model computed is always the model asked for.)")
     if cp["opacity_mode"] == "exomolop":
-        # Fail HERE, not deep inside the RT build: ExoMolOP publishes no
-        # k-table for these species, so a run selecting them under the
-        # default mode would die minutes later in exomolop.load_tables.
-        # (After the molecule-universe checks above, so an unknown or
-        # provider-refused species keeps its more fundamental error.) The
-        # frozenset is cross-checked against exomolop.available() by a
-        # data-gated test, so it cannot rot silently. They stay in
-        # EXTRA_MOLECULES because opacity_mode="lbl" CAN run them; the GUI
-        # drops them from its options (v34) because it has no opacity_mode
-        # control and defaults to "exomolop", so a picker entry would be a
-        # dead end. (A Mie deck DERIVES "lbl", where they would run -- an
-        # accepted narrowing of the GUI, not of this API. See app.py.)
+        # Fail HERE, not minutes later inside exomolop.load_tables. (After
+        # the molecule-universe checks above, so an unknown species keeps its
+        # more fundamental error.) These species stay in EXTRA_MOLECULES
+        # because opacity_mode="lbl" CAN run them; the GUI drops them from
+        # its options because it has no opacity_mode control (see app.py).
         no_table = sorted(set(cp["extra_mols"]) & _NO_EXOMOLOP_TABLE)
         if no_table:
             raise ValueError(
@@ -1163,7 +1060,7 @@ def canonical_params(params: dict) -> dict:
                 "default). Drop them, or set opacity_mode='lbl' knowingly "
                 "(sampled line-by-line, measurably biased -- vulcan-forward "
                 "README, Opacity sections).")
-    # --- leave-one-out spectrum set (v32) -----------------------------------
+    # --- leave-one-out spectrum set -----------------------------------------
     # After the molecule-universe checks, so the RT set is final. Canonical
     # form: a subset of active_molecules(cp) in fold order (deduped), which
     # keeps the cache key and the stored depth_wo rows in one order.
@@ -1292,7 +1189,7 @@ def canonical_params(params: dict) -> dict:
                 "molecular-diffusion coefficient, so with it off every "
                 "condensation rate would silently be zero. Enable molecular "
                 "diffusion, or turn condensation off.")
-    # --- boundary conditions / transport (v16) -----------------------------
+    # --- boundary conditions / transport -----------------------------------
     bad_esc = set(cp["diff_esc"]) - set(DIFF_ESC_CHOICES)
     if bad_esc:
         raise ValueError(
@@ -1334,7 +1231,7 @@ def canonical_params(params: dict) -> dict:
     if not cp["cloud_on"]:             # cloud knobs are inert when the deck is off
         cp["log_kappa_cloud"] = 0.0
         cp["alpha_cloud"] = 0.0
-    # --- Mie condensate deck (v16) -----------------------------------------
+    # --- Mie condensate deck -----------------------------------------------
     if cp["mie_condensate"]:
         if cp["mie_condensate"] not in MIE_CONDENSATES:
             raise ValueError(
@@ -1370,7 +1267,7 @@ def canonical_params(params: dict) -> dict:
                 "power-law cloud for emission.")
     else:                              # deck off: zero the knobs (cache hygiene)
         cp["mie_log_rg"] = cp["mie_sigmag"] = cp["mie_log_mmr"] = 0.0
-    # --- science-mode hygiene + gating (v16 emission) ----------------------
+    # --- science-mode hygiene + gating --------------------------------------
     if science_mode == "emission":
         if not 3000.0 <= cp["star_teff"] <= 7000.0:
             raise ValueError(
@@ -1393,7 +1290,7 @@ def canonical_params(params: dict) -> dict:
     # drop fields inert for the chosen modes so they don't fragment the cache
     if tp_mode != "guillot":
         cp["Tirr"] = cp["Tint"] = cp["log_kappa"] = cp["log_gamma"] = 0.0
-    # --- Kzz profile mode (v16: const / Pfunc / JM16 / file) ----------------
+    # --- Kzz profile mode (const / Pfunc / JM16 / file) ---------------------
     if cp["kzz_mode"] not in KZZ_MODES:
         raise ValueError(
             f"unknown kzz_mode {cp['kzz_mode']!r}: choose from "
@@ -1517,12 +1414,9 @@ def _make_progress(cp: dict, log):
     if _emis:
         stages += [("emission model + stellar SED", 6.0)]
     stages += [("solving photochemistry", 35.0)]
-    # wo_mols (v32): the leave-one-out block is one engine batch, not one
-    # stage per molecule -- transmission folds it into the full-spectrum
-    # call. Each wo spectrum refolds from its molecule's position to the end
-    # of the active set, on average ~(n_active+1)/2 overlap folds at ~3 s
-    # (measured: 42 s at n=5 all-wo; the GUI asks for the TARGET only since
-    # 0.41.0, so K is usually 1).
+    # The leave-one-out block is one engine batch, not one stage per
+    # molecule; each wo spectrum refolds from its molecule's position to the
+    # end of the active set (~(n_active+1)/2 overlap folds on average).
     _n_wo = len(cp["wo_mols"])
     _n_active = len(active_molecules(cp))
     _wo_w = 1.5 * _n_wo * (_n_active + 1)
@@ -1568,10 +1462,8 @@ def _make_progress(cp: dict, log):
 
 
 def _rt_profile_common(cp: dict, config) -> dict:
-    """The RT-facing profile keys (exojax_rt / build_emis_model read
-    exactly these): extracted from _assemble_chem (v18 refactor) -- the
-    profile dict is bit-identical to the pre-refactor one, pinned by the
-    golden regression test."""
+    """The RT-facing profile keys (exojax_rt / build_emis_model read exactly
+    these); the dict is pinned by the golden regression test."""
     profile = dict(config.WIDE)
     # numerical resolution (was the fidelity tier): the ExoJax RT layer count is
     # LOCKED equal to the chemistry layer count -- chemistry and RT share one grid.
@@ -1579,10 +1471,10 @@ def _rt_profile_common(cp: dict, config) -> dict:
     profile["art_nlayer"] = cp["nz"]
     profile["nu_pts"] = cp["nu_pts"]
     profile["broadening"] = cp["broadening"]   # canonical (cache-keyed) knob
-    # ExoJAX RT knobs (v15, canonical): the engine validates and ECHOES them
-    # on the built rt namespace; run_model verifies the echo so an older
-    # engine that ignores unknown profile keys can never return a spectrum
-    # that differs from what the cache key claims.
+    # ExoJAX RT knobs: the engine validates and ECHOES them on the built rt
+    # namespace; run_model verifies the echo so an older engine that ignores
+    # unknown profile keys can never return a spectrum that differs from
+    # what the cache key claims.
     profile["art_ptop_bar"] = cp["rt_ptop_bar"]
     # RT bottom, just inside the chemistry bottom (interp_map refuses an ART
     # grid reaching below the chemistry). Emission is why this moves at all.
@@ -1591,12 +1483,11 @@ def _rt_profile_common(cp: dict, config) -> dict:
     profile["dit_grid_resolution"] = cp["rt_dit_res"]
     profile["p_ref_bar"] = cp["p_ref_bar"]
     profile["opacity_mode"] = cp["opacity_mode"]
-    # Mie condensate deck (v16): the engine builds the OpaMie deck from a
-    # pre-generated miegrid under DATA_DIR/exojax_mie and ECHOES mie_condensate
-    # on the rt namespace; run_model verifies that echo below (an engine too old
-    # to know the key would ignore it silently, caching a deck-less spectrum
-    # under a Mie key). The absolute data dir is pinned so exojax never scatters
-    # caches into the launch directory.
+    # Mie condensate deck: the engine builds the OpaMie deck from a
+    # pre-generated miegrid under DATA_DIR/exojax_mie and ECHOES
+    # mie_condensate on the rt namespace (echo-verified in run_model). The
+    # absolute data dir is pinned so exojax never scatters caches into the
+    # launch directory.
     if cp["mie_condensate"]:
         profile["mie_condensate"] = cp["mie_condensate"]
         profile["mie_data_dir"] = str(_ins.DATA_DIR / MIE_DATA_SUBDIR)
@@ -1623,7 +1514,7 @@ def _assemble_chem(cp: dict, log):
 
     from jwst_tool import engine_config as config
 
-    # Non-default kinetics network (v33): the engine freezes network/atom_list
+    # Non-default kinetics network: the engine freezes network/atom_list
     # at ITS first import (setdefault on the env vars), so the selection must
     # land before vulcan_chem arrives. In the run subprocess this IS the first
     # engine import; an in-process caller who already imported the engine on a
@@ -1638,10 +1529,9 @@ def _assemble_chem(cp: dict, log):
     from vulcan_forward import vulcan_chem
     import jax
 
-    # Persistent XLA compile cache (shared with the jax_paper adjoint
-    # campaign's artifacts): saves the ~40 s runner warm-up on repeat runs
-    # and is ESSENTIAL for adjoint_diag, whose step-VJP is a multi-hour
-    # cold compile on CPU (measured 2026-07-16).
+    # Persistent XLA compile cache: saves the ~40 s runner warm-up on repeat
+    # runs and is ESSENTIAL for adjoint_diag, whose step-VJP is a multi-hour
+    # cold compile on CPU.
     jax.config.update("jax_compilation_cache_dir",
                       str(Path.home() / ".cache" / "jax_vulcan"))
     jax.config.update("jax_persistent_cache_min_compile_time_secs", 1.0)
@@ -1711,7 +1601,7 @@ def _assemble_chem(cp: dict, log):
         ovr.update({"atm_type": "isothermal", "Tiso": float(T_struct)})
         log(f"[fwd] planet {cp['planet']}: isothermal structural baseline "
             f"{T_struct:.0f} K, UV = {cp['sflux']}")
-    # Kzz profile (v16 modes; lnKzz = theta[2] scales ANY of them on-graph).
+    # Kzz profile (lnKzz = theta[2] scales ANY of them on-graph).
     if cp["kzz_mode"] == "const":
         ovr.update({"Kzz_prof": "const", "const_Kzz": cp["kzz_const"]})
         log(f"[fwd] Kzz: const {cp['kzz_const']:.1e} cm2/s")
@@ -1727,7 +1617,7 @@ def _assemble_chem(cp: dict, log):
     else:                                # "file": gated to tp_mode="file"
         ovr.update({"Kzz_prof": "file"})
         log("[fwd] Kzz: tabulated column of the T-P table")
-    # Boundary conditions / transport (v16). canonical_params already refused
+    # Boundary conditions / transport. canonical_params already refused
     # the conflicting combos (settling+conden, settling w/o moldiff), so these
     # never fight the CONDEN_CFG overrides above.
     if cp["use_settling"]:
@@ -1901,7 +1791,7 @@ def run_model(params: dict, log=print) -> Path:
     log("[fwd] building ExoJax RT (opacities + CIA) ...")
     rt = exojax_rt.build_rt_model(profile)
     log(f"[fwd] RT ready in {time.time()-t0:.0f} s")
-    # Echo check on the v15 RT knobs: an engine too old to know these
+    # Echo check on the RT knobs: an engine too old to know these
     # profile keys ignores them silently -- refuse rather than cache a
     # spectrum under a key describing physics the engine did not apply.
     _echo = {"art_ptop_bar": cp["rt_ptop_bar"],
@@ -1917,7 +1807,7 @@ def run_model(params: dict, log=print) -> Path:
                 f"RT engine did not honor {k}={want!r} (echoed {got!r}). "
                 "The installed vulcan-forward engine predates the "
                 "profile-overridable RT knobs -- upgrade to >= 0.10.1.")
-    # Mie deck echo (v16): the engine echoes mie_condensate ("" when no deck).
+    # Mie deck echo: the engine echoes mie_condensate ("" when no deck).
     # A mismatch means the engine ignored the profile key (too old to know it),
     # so the spectrum would be cached under a Mie key without the Mie opacity.
     _mie_echo = getattr(rt, "mie_condensate", None)
@@ -1928,7 +1818,7 @@ def run_model(params: dict, log=print) -> Path:
             "vulcan-forward predates the Mie cloud deck -- upgrade to "
             ">= 0.11.0.")
 
-    # --- emission mode (v16): day-side model + stellar SED ------------------
+    # --- emission mode: day-side model + stellar SED ------------------------
     emis, fs_j = None, None
     # 1 / R_star^2 only. The PLANET radius for the eclipse prefactor comes from
     # emis.emission_radius(T, mmw) -- the radius at the emission anchor
@@ -1980,10 +1870,9 @@ def run_model(params: dict, log=print) -> Path:
         def art_T(th):
             return tp_eval(th[3:], p_art_j)
 
-    # ExoJax power-law retrieval cloud [log10 kappac0 (cm^2/g at 3.5 um), alphac]:
-    # the BASELINE deck. Since v16 it can be marginalized in the Fisher forecast
-    # via the cloud= override in depth_fn (RT-only Jacobian rows); this vector is
-    # the point the rows differentiate around (None when the deck is off).
+    # ExoJax power-law retrieval cloud [log10 kappac0 (cm^2/g at 3.5 um),
+    # alphac]: the BASELINE deck; the cloud= Fisher rows differentiate
+    # around this vector (None when the deck is off).
     cloud_vec = (jnp.asarray([cp["log_kappa_cloud"], cp["alpha_cloud"]])
                  if cp["cloud_on"] else None)
     # Mie condensate deck [log10 rg (cm), sigmag, log10 MMR]: same pattern -- the
@@ -2008,14 +1897,11 @@ def run_model(params: dict, log=print) -> Path:
         mol_cols = {k: chem_b.sidx[config.MOLECULES[k]["vulcan"]]
                     for k in rt.molecules}
         h2_b, he_b = chem_b.sidx["H2"], chem_b.sidx["He"]
-        # GAS-phase normalization (v17): condensed-phase reservoir species
-        # (the network's *_l_s columns, e.g. S8_l_s) are particles, not gas --
-        # counting them diluted every gas VMR and inflated the RT mean
-        # molecular weight as if the condensate were vapor (~0.5% of mmw at
-        # 10x solar with full sulfur rainout, growing with metallicity).
-        # Conden-off solves never populate *_l_s, so those spectra are
-        # bit-identical; the condensate's aerosol OPACITY stays deliberately
-        # excluded (use the cloud/Mie decks for that -- module docstring).
+        # GAS-phase normalization: condensed-phase reservoir species (the
+        # network's *_l_s columns) are particles, not gas -- counting them
+        # dilutes every gas VMR and inflates the RT mean molecular weight as
+        # if the condensate were vapor. The condensate's aerosol OPACITY
+        # stays deliberately excluded (use the cloud/Mie decks for that).
         _gas = np.ones(int(np.asarray(chem_b.species_masses).size))
         for _s, _i in chem_b.sidx.items():
             if _s.endswith("_l_s"):
@@ -2032,15 +1918,13 @@ def run_model(params: dict, log=print) -> Path:
                     to_art_b(ymix[:, he_b]))
 
         def depth_fn(y, th, lnR0=0.0, cloud=None, mie=None, wo_mols=None):
-            # cloud=/mie=None -> the baseline decks (cloud_vec/mie_vec; None
-            # when that deck is off). An explicit vector overrides it -- the
-            # v16 cloud and Mie Fisher rows differentiate the depth through
-            # these two arguments (one deck at a time).
-            # wo_mols (v32, transmission only): a list of molecules returns
-            # (depth, depth_wo) from the engine's leave-one-out batch instead
-            # of one solve per removed molecule; emission gets its batch via
+            # cloud=/mie=None -> the baseline decks; an explicit vector
+            # overrides it (the cloud/Mie Fisher rows differentiate through
+            # these arguments, one deck at a time). wo_mols (transmission
+            # only): a list returns (depth, depth_wo) from the engine's
+            # leave-one-out batch; emission gets its batch via
             # emis.emission_flux_tau in run_model (the tau-bottom gate needs
-            # the same optical depth, so the batch lives there).
+            # the same optical depth).
             vmr, vmr_h2, T_art, mmw_art, vmr_he = _art_profiles(y, th)
             cl = cloud_vec if cloud is None else cloud
             mi = mie_vec if mie is None else mie
@@ -2064,7 +1948,7 @@ def run_model(params: dict, log=print) -> Path:
 
     depth_from_y = make_depth_fn(chem)
 
-    # --- chemistry: certified cold solves (v13: no warm continuation) --------
+    # --- chemistry: certified cold solves (no warm continuation) ------------
     t0 = time.time()
     th0 = jnp.asarray(theta)
     conv_cert = []   # (stage, accept_count, longdy) for every PASSED gate
@@ -2113,14 +1997,12 @@ def run_model(params: dict, log=print) -> Path:
             "parameter set outside the modelable range")
     log(f"[fwd] chemistry solved in {time.time()-t0:.0f} s total")
 
-    # Emission bottom-boundary certification. Since engine v0.5.0 the solver
-    # DOES carry an interior source term (exojax ibased_linsap), so a
-    # see-through window is no longer silently zero -- but the term is a
-    # blackbody at the extrapolated bottom-boundary temperature, i.e. an
-    # ISOTHERMAL-INTERIOR ASSUMPTION standing in for everything below the grid.
-    # A column that leans on it is reporting an assumption, not a model. Keep
-    # refusing the thin case: the fix is a deeper column (p_btm_bar), which is
-    # cheap, not a wider tolerance.
+    # Emission bottom-boundary certification. The solver's interior source
+    # term is a blackbody at the extrapolated bottom-boundary temperature --
+    # an ISOTHERMAL-INTERIOR ASSUMPTION standing in for everything below the
+    # grid, so a column that leans on it is reporting an assumption, not a
+    # model. Keep refusing the thin case: the fix is a deeper column
+    # (p_btm_bar), not a wider tolerance.
     emis_tau_min = float("nan")
     _depth_norm_em0 = float("nan")
     wo_list = list(cp["wo_mols"])
@@ -2151,15 +2033,11 @@ def run_model(params: dict, log=print) -> Path:
         _tau_b = np.asarray(_tau_j)
         emis_tau_min = float(_tau_b.min())
         _wl_thin = float(rt.wl_um[int(np.argmin(_tau_b))])
-        # FLUX-WEIGHTED, not min() over the band. The column being transparent
-        # somewhere only matters to the extent the planet emits there. Measured
-        # on HD 189733 b at the shipped 7.6 bar bottom: min tau 96.7 at 2-3 um,
-        # 30.5 across NIRSpec, 140 across MIRI LRS, 370 beyond 12 um, and one
-        # 60 nm notch at 1.02-1.08 um below 3 -- the extreme blue edge, where
-        # the modeled opacity set runs out (no H- continuum, no Na/K wings, no
-        # TiO/VO). A min() let that notch veto the whole run, and the "obvious"
-        # fix of deepening the column would have bought opacity from pressure
-        # that the real planet does not get, while hiding the actual limitation.
+        # FLUX-WEIGHTED, not min() over the band: the column being
+        # transparent somewhere only matters to the extent the planet emits
+        # there. A min() let a blue-edge notch with no modeled continuum
+        # (H-, Na/K wings, TiO/VO) veto otherwise opaque columns
+        # (measurements: notes.md).
         _fp = np.asarray(_fp_j)
         emis_thin_frac = thin_flux_fraction(_tau_b, _fp)
         _report = _tau_bottom_breakdown(rt.wl_um, _tau_b, flux=_fp)
@@ -2335,7 +2213,7 @@ def run_model(params: dict, log=print) -> Path:
             rows take a SINGLE central difference -- which still carries the
             usual O(h^2) truncation error (~(h ln10)^2/6 ~ 0.2% at h=0.05 dex),
             just no h-vs-2h measurement of it, so fd_err is reported NaN
-            (unmeasured), never 0 (v17). The Mie rg/sigmag rows ride the
+            (unmeasured), never 0. The Mie rg/sigmag rows ride the
             piecewise-linear miegrid, so they carry the same h-vs-2h consistency
             gate the theta rows use (gated=True) and REFUSE a step straddling a
             grid knot. Returns (row, h, err, method)."""
@@ -2506,15 +2384,13 @@ def run_model(params: dict, log=print) -> Path:
         mols=np.array(mols_active, dtype="U8"),
         # the leave-one-out set depth_wo (and the emis_*_wo certificates) are
         # aligned with -- a subset of mols in fold order; readers must index
-        # by THIS array, never by mols (v32)
+        # by THIS array, never by mols
         wo_mols=np.array(wo_list, dtype="U8"),
         ymix=ymix_np, p_bar=np.asarray(chem.p_bar),
-        # THE COLUMN NAMES OF ymix. ymix is the FULL network state (89 species
-        # for SNCHO), while `mols` is the much shorter RT molecule list, and
-        # nothing recorded which was which. Every reader that zipped `mols`
-        # against ymix's columns positionally was therefore reading the wrong
-        # species: the GUI's mixing-ratio panel labelled H2 as CO2, and its CSV
-        # export carried the same wrong headers. Never infer these from `mols`.
+        # THE COLUMN NAMES OF ymix. ymix is the FULL network state, while
+        # `mols` is the much shorter RT molecule list; zipping `mols` against
+        # ymix's columns positionally reads the wrong species. Never infer
+        # these from `mols`.
         ymix_species=np.array(
             [s for s, _ in sorted(chem.sidx.items(), key=lambda kv: kv[1])],
             dtype="U16"),
@@ -2538,10 +2414,8 @@ def run_model(params: dict, log=print) -> Path:
         arrays["emis_tau_bottom_min"] = np.array([emis_tau_min])
         # per-removed-molecule bottom-tau certificate (aligned with wo_mols)
         arrays["emis_tau_bottom_min_wo"] = emis_tau_min_wo
-        # v27: the FLUX-WEIGHTED certificate, which is what the gates use.
-        # The min-tau arrays above are kept for provenance and for readers of
-        # older files; a min() over the band cannot tell a shallow column from
-        # a band edge with no modeled opacity (see the P_BTM_* block).
+        # The FLUX-WEIGHTED certificate is what the gates use; the min-tau
+        # arrays above are kept for provenance and readers of older files.
         arrays["emis_thin_flux_frac"] = np.array([emis_thin_frac])
         arrays["emis_thin_flux_frac_wo"] = emis_thin_wo
     if jac is not None:

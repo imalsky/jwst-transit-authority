@@ -57,7 +57,7 @@ SFLUX_CHOICES = {
 # Host Teff per shipped UV spectrum, powering a SUGGESTION caption on custom
 # planets only ("nearest-Teff shipped template: ..."). It is never applied:
 # neither the GUI nor the archive fill selects a UV spectrum for the user
-# (maintainer rule 2026-08-09; registry planets keep their curated sflux).
+# (standing rule; registry planets keep their curated sflux).
 # Values:
 # WASP-39 / HD 189733 = this registry; Sun = IAU nominal; eps Eri ~5084 K
 # (interferometric, Baines & Armstrong 2012); GJ 436 ~3416 K (von Braun 2012);
@@ -216,7 +216,7 @@ def default_tirr(planet: dict, system: dict | None = None,
     is DERIVED from it -- otherwise an untouched custom T_irr silently keeps
     WASP-39 b's temperature.
 
-    EMISSION takes the DAYSIDE value, T_eq * 2**0.25 (2026-08-14). A published
+    EMISSION takes the DAYSIDE value, T_eq * 2**0.25. A published
     equilibrium temperature assumes full redistribution, which is a
     planet-average profile: correct for a terminator, too cool for the dayside
     an eclipse actually sees. Measured on HD 189733 b against the published

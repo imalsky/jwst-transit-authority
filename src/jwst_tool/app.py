@@ -72,22 +72,19 @@ def _slug(s: str) -> str:
 
 # bbox_inches="tight" crops each figure to ITS OWN ink, so two figures built
 # on the same canvas come out different sizes whenever one carries a legend
-# the other lacks. The T-P and mixing-ratio panels must match exactly, so they
-# render UNCROPPED (tight=False) on the shared canvas plotting.py defines.
-# Everything else (the wide summary figure, standing alone) still crops.
-# Display label for the every-usable-mode combination (maintainer,
-# 2026-08-13: "ALL USABLE (combined)" replaced). A saturated mode is unusable
-# data and is excluded from every combination -- that exclusion is disclosed
-# in Mode details and per combo, not encoded in this label. Display only:
-# never a stored config key, so no share-config migration is involved.
-# On-screen width of every rendered figure, in CSS pixels. A FIXED width, not
-# "stretch" (st.pyplot's default): see _show_fig. 1100 px is inside the usual
-# Streamlit main-column range, so a normal window looks the same as before --
-# it simply stops rescaling as the window changes. Streamlit clamps this to the
-# container width on a narrower screen, so nothing overflows. Module level
-# because _show_fig runs long before the results-area constants are defined.
+# the other lacks. The T-P and mixing-ratio panels must match exactly, so
+# they render UNCROPPED (tight=False) on the shared canvas plotting.py
+# defines; everything else still crops.
+
+# On-screen width of every rendered figure, in CSS pixels: FIXED, not
+# "stretch", so figures stop rescaling as the window changes (see _show_fig).
+# Streamlit clamps it to the container width on a narrower screen.
 _FIG_DISPLAY_PX = 1100
 
+# Display label for the every-usable-mode combination. A saturated mode is
+# unusable data and is excluded from every combination -- that exclusion is
+# disclosed in Mode details and per combo, not encoded in this label.
+# Display only: never a stored config key.
 _ALL_USABLE = "All usable modes"
 
 # How many forecast-posterior panels the summary figure will draw. A LAYOUT
@@ -143,23 +140,16 @@ def _show_fig(fig, tight: bool = True) -> None:
     """Render a figure into the page under the render lock, then close it.
 
     st.pyplot rasterizes, so it enters the same shared mathtext parser as
-    layout does -- it belongs inside the lock like every other materialization
-    (plotting.py has the full argument). ``tight=False`` forwards the
-    figure's own bbox so the full canvas is shown at a fixed size.
+    layout does -- it belongs inside the lock like every other
+    materialization (plotting.py has the full argument). ``tight=False``
+    forwards the figure's own bbox so the full canvas is shown at a fixed
+    size.
 
-    FIXED DISPLAY WIDTH (maintainer, 2026-08-13: "the whole thing wiggles when
-    I change the size of the screen, if I make it too big").
-
-    st.pyplot's width DEFAULTS to "stretch", so the figure was re-scaled to the
-    container on every resize -- it grew without bound on a wide monitor, and
-    because each figure's text is baked in at fixed POINTS, the labels, ticks
-    and legend changed size relative to everything else around them as the
-    window moved. An explicit pixel width pins it: Streamlit caps the element
-    at the container width when the window is NARROWER, so the figure still
-    fits a small screen, but it stops growing once the window passes
-    _FIG_DISPLAY_PX. _FIG_DISPLAY_PX sits inside the usual main-column range,
-    so this is close to what a normal window already showed -- the change is
-    that it no longer moves.
+    FIXED DISPLAY WIDTH: st.pyplot's width defaults to "stretch", which
+    re-scales the figure on every window resize while its text stays at
+    fixed points -- everything wiggles. An explicit pixel width pins it;
+    Streamlit still caps the element at the container width on a narrower
+    screen.
     """
     with plotting.render_lock:
         if tight:
@@ -201,11 +191,27 @@ def _detection_metric(r: dict) -> tuple[float, bool]:
 
 
 def _mode_cfg(mode_key: str) -> str:
-    """The exact fixed detector configuration (subarray/readout) a registry
-    mode evaluates -- shown next to headline labels so a "mode" is never
-    mistaken for the whole instrument mode (2026-08-05 review)."""
-    det = ins.MODES[mode_key]["config"].get("detector", {})
-    return f"{det.get('subarray', '?')}/{det.get('readout_pattern', '?')}"
+    """The exact fixed configuration a registry mode evaluates -- shown next
+    to headline labels so a "mode" is never mistaken for the whole instrument
+    mode. Includes the pinned extraction strategy and background: the choice
+    (PandExo TSO conventions vs Pandeia's generic point-source defaults)
+    moves extracted flux by 8-20% (instruments.py), so it must be visible,
+    not only hardcoded."""
+    m = ins.MODES[mode_key]
+    det = m["config"].get("detector", {})
+    parts = [f"{det.get('subarray', '?')}/{det.get('readout_pattern', '?')}"]
+    strat = m.get("strategy", {})
+    if "aperture_size" in strat:
+        parts.append(f'extraction aperture {strat["aperture_size"]:g}"')
+    if "sky_annulus" in strat:
+        lo, hi = strat["sky_annulus"]
+        parts.append(f'sky annulus {lo:g}-{hi:g}"')
+    if "order" in strat:
+        parts.append(f'order {strat["order"]}')
+    if m.get("background"):
+        parts.append(f'{m["background"]} background '
+                     f'({m.get("background_level", "?")})')
+    return ", ".join(parts)
 
 
 def _op_status(r: dict) -> str:
@@ -241,6 +247,8 @@ st.set_page_config(page_title="JWST Exoplanet Observation Planner",
 # Header: short orientation, no acknowledgment gate
 # ---------------------------------------------------------------------------
 st.title("JWST exoplanet observation planner")
+st.subheader("Warning: This tool is in beta mode. That means if you find "
+             "a bug, you beta email isaacmalsky@gmail.com")
 st.markdown(
     "0. **Configuration**: load a shared configuration file, or start "
     "fresh.\n"
@@ -262,8 +270,7 @@ st.markdown(
 # filled once those values exist.
 _run_slot = st.container()
 
-# One link to the committed benchmark figures (maintainer, 2026-08-16):
-# short on purpose. A beta visitor should see that the physics was checked
+# One link to the committed benchmark figures; short on purpose. A beta visitor should see that the physics was checked
 # without reading an essay; nothing here runs.
 with st.expander("Validation"):
     st.markdown(
@@ -342,10 +349,8 @@ with st.expander("Data status: what this machine has installed"
               key="data_refresh_btn")
 
 # Measured AD Fisher-row wall time (WASP-39b defaults), threaded through the
-# GUI mention below so a re-measurement updates one place. The FD companions
-# were deleted 2026-08-14: the run-time estimator builds its own FD cost model
-# from `_solve_min` (see "Jacobian-row cost model" below), so the old
-# _FD_COMP_*/_FD_THETA_* literals had no reader and no longer tracked it.
+# GUI mention below so a re-measurement updates one place. (FD costs come
+# from the run-time estimator's own model -- "Jacobian-row cost model".)
 _AD_ROW_MIN, _AD_ROW_MAX = 1, 2        # minutes per AD row
 
 _PROG_RE = re.compile(r"\[fwd\] PROG ([0-9.]+) (.*)")
@@ -354,11 +359,9 @@ _PROG_RE = re.compile(r"\[fwd\] PROG ([0-9.]+) (.*)")
 def _fmt_clock(s: float) -> str:
     """Fixed-width duration, always 9 chars: ' HH:MM:SS'.
 
-    The ONLY duration formatter here. It replaced a variable-width `_fmt_dur`
-    ('42 s' / '3 m 05 s' / '1 h 12 m') that every readout used: crossing a
-    unit boundary changed the string LENGTH, which is what made the progress
-    row -- and every widget below it -- jitter on each tick. `.done()` uses
-    this too, so the final render does not resize the row one last time.
+    The ONLY duration formatter here: a variable-width format changes string
+    length at unit boundaries, which makes the progress row -- and every
+    widget below it -- jitter on each tick.
     """
     s = max(0, int(round(s)))
     h, rem = divmod(s, 3600)
@@ -381,7 +384,7 @@ class _TimedBar:
     totals -- blending totals cancels the measured pace and freezes the
     countdown for the whole stage.
 
-    LAYOUT STABILITY (2026-08-13): the label is built at a CONSTANT width so
+    LAYOUT STABILITY: the label is built at a CONSTANT width so
     the bar and everything under it stop shifting on every tick. Two rules
     make that hold: the clock is fixed-width ``HH:MM:SS`` (``_fmt_clock``, so
     59s -> 1m 00s never changes the string length), and the stage label is
@@ -562,7 +565,7 @@ def _axis_range(container, label: str, key: str, warn, *, unit: str = "",
                 step: float | None = None, help: str | None = None):
     """A plain min/max pair of number boxes for one plot axis.
 
-    Every axis control in this app is this widget (2026-08-14, maintainer):
+    Every axis control in this app is this widget:
     two typed numbers, no slider. Both boxes start BLANK, meaning "fit the
     data", rather than prefilled with the current automatic values -- the
     automatic fit tracks the run and the mode selection, so a prefilled number
@@ -645,8 +648,8 @@ def _apply_pending_archive_fill() -> None:
     just stashes the planet name (un-namespaced on purpose -- a reset's
     session_state.clear() must kill a queued fill) and this applies it at
     the top of the next run. Out-of-range/missing fields are never written
-    (Streamlit would crash at widget instantiation); archive.custom_fill
-    reports them by name instead."""
+    (Streamlit silently discards an out-of-range value, substituting the
+    default); archive.custom_fill reports them by name instead."""
     name = st.session_state.pop("_archive_fill_pending", None)
     if not name:
         return
@@ -724,7 +727,7 @@ with st.sidebar:
     # _apply_pending_config(); this is the widget plus the outcome messages.
     # -----------------------------------------------------------------------
     st.markdown("### 0 · Configuration")
-    # Every step's controls sit behind an expander (maintainer, 2026-08-15),
+    # Every step's controls sit behind an expander,
     # so the sidebar reads as a short list of titled sections. The
     # load-outcome messages stay OUTSIDE the expander: a failed restore must
     # be loud without opening anything.
@@ -829,9 +832,8 @@ with st.sidebar:
             key=_k("sflux"))
         if planet_key == "custom":
             # Suggestion only, NEVER applied anywhere: neither a typed Teff
-            # nor the archive fill moves this menu (maintainer rule
-            # 2026-08-09 -- no substitute UV spectrum is ever selected for
-            # the user).
+            # nor the archive fill moves this menu (standing rule: no
+            # substitute UV spectrum is ever selected for the user).
             _near = planets.nearest_sflux(teff)
             st.caption(
                 f"Nearest-Teff shipped UV template for Teff {teff:.0f} K: "
@@ -1035,10 +1037,8 @@ with st.sidebar:
     # fallback "ad" mirrors the method widget's default (index=1), so
     # the photo-lock is right on the FIRST constrain render, before the
     # selectbox has seeded session state.
-    # (No condensation term: the GUI has offered no condensation widget
-    # since 2026-08-13 and share_config REFUSES a condensing config
-    # rather than restoring one, so the old K("conden") guard could
-    # never be True.)
+    # (No condensation term: the GUI offers no condensation widget and
+    # share_config REFUSES a condensing config rather than restoring one.)
     _jac_hint = (st.session_state.get(K("jacm"), "ad")
                  if (_goal_ss == "constrain" or _dofish_ss)
                  else "fd")
@@ -1135,33 +1135,26 @@ with st.sidebar:
                    "(default R = 100).")
         st.caption(
             f"The base set **{' · '.join(_base_set)}** is always on.")
-        # Species with no published k-table are NOT offered (v34, maintainer
-        # request): the GUI has no opacity_mode control and the mode defaults
-        # to "exomolop", so a picker entry for one would be a dead end that
-        # only fails at run time. They stay in EXTRA_MOLECULES for API callers
-        # on opacity_mode="lbl", which can run them.
-        # KNOWN NARROWING, accepted: a Mie condensate deck DERIVES
-        # opacity_mode="lbl" (forward.default_opacity_mode), where these two
-        # would in fact run -- but that widget is instantiated below this one,
-        # so gating on it would mean reading its session state a render early.
-        # A Mie-deck user who wants CS2/C2H6 goes through the API.
+        # Species with no published k-table are NOT offered: the GUI has no
+        # opacity_mode control and the mode defaults to "exomolop", so a
+        # picker entry would be a dead end that only fails at run time. They
+        # stay in EXTRA_MOLECULES for API callers on opacity_mode="lbl"
+        # (which a Mie deck derives -- a Mie-deck user who wants CS2/C2H6
+        # goes through the API; the Mie widget instantiates below this one).
         _extra_set = [m for m in _extra_set
                       if m not in forward._NO_EXOMOLOP_TABLE]
-        # Preselect the MEASURED-relevant subset, not everything with a table
-        # (v34). The menu carries every species with a published k-table, most
-        # of which contribute under 1 ppm; defaulting all of them on would pay
-        # a leave-one-out spectrum each for signals nothing can see. The ppm
-        # measurements behind EXTRA_MOLECULES_DEFAULT are in forward.py.
-        # Bare molecule names: per-item data-status annotations moved to
-        # `jwst-tool data` and the status panel, which is where they belong.
+        # Preselect the MEASURED-relevant subset, not everything with a
+        # table: most species contribute under 1 ppm, and each default-on
+        # molecule pays a leave-one-out spectrum. The ppm measurements are
+        # in forward.py (EXTRA_MOLECULES_DEFAULT).
         extra_mols = st.multiselect(
             "Extra opacity molecules", list(_extra_set),
             default=[m for m in _extra_set
                      if m in forward.EXTRA_MOLECULES_DEFAULT],
             key=K(f"xmols_vulcan{_net_sfx}"))
         # The line-by-line-only widgets (broadening gas, native grid points,
-        # line-wing grid) moved to the Clouds expander 2026-08-16: they act
-        # only when a Mie deck forces line-by-line mode, and render only then.
+        # line-wing grid) live in the Clouds expander: they act only when a
+        # Mie deck forces line-by-line mode, and render only then.
 
     with st.expander("Clouds & scattering (ExoJAX)"):
         if science_mode == "emission":
@@ -1184,9 +1177,14 @@ with st.sidebar:
             log_kappa_cloud, alpha_cloud = -1.0, 0.0
         # Mie condensate deck: condensate optics from an exojax miegrid.
         _mie_opts = [""] + list(forward.MIE_CONDENSATES)
+        # non-empty options carry the experimental marker: a Mie deck
+        # switches the GAS opacity to the sampled line-by-line path, which
+        # has no resolution-convergence certificate yet
         mie_condensate = st.selectbox(
             "Mie condensate cloud", _mie_opts, index=0, key=K("miec"),
-            format_func=lambda c: "off" if not c else c)
+            format_func=lambda c: ("off" if not c else
+                                   f"{c} (experimental: gas opacity "
+                                   "switches to sampled line-by-line)"))
         mie_log_rg, mie_sigmag, mie_log_mmr = -5.0, 2.0, -6.0
         # The three line-by-line settings are pinned to their validated
         # defaults unless a Mie deck is selected -- the one case the engine
@@ -1304,9 +1302,9 @@ with st.sidebar:
                 # options.
                 fisher_extra = st.multiselect(
                     "Jointly free parameters", avail_free,
-                    # lnKzz dropped from the defaults 2026-08-09 (speed);
-                    # still selectable, and dropping it tightens the
-                    # remaining sigmas toward the conditional bound.
+                    # lnKzz is not in the defaults (speed); still
+                    # selectable, and dropping it tightens the remaining
+                    # sigmas toward the conditional bound.
                     default=[p for p in ("lnZ", "dlnCO")
                              if p in avail_free],
                     key=K(f"fx_vulcan_{tp_mode}_{int(cloud_on)}_"
@@ -1331,7 +1329,11 @@ with st.sidebar:
                 key=K("jacm"),
                 format_func={"fd": "Finite differences",
                              "ad": "Automatic differentiation "
-                                   "(forward-mode, default)"}.get)
+                                   "(forward-mode, default)"}.get,
+                help="Default here is AD (fast, photo-on only); the "
+                     "programmatic interface defaults to certified central "
+                     "finite differences, valid everywhere. Both are "
+                     "certified; the method used is recorded with the run.")
             # Loud slow-path flag: FD re-solves the chemistry per row, so
             # point the user at AD before a multi-hour run.
             if fisher_params and jac_method == "fd":
@@ -1383,7 +1385,7 @@ with st.sidebar:
                  "depend on the draw.")
         seed = st.number_input(
             "Seed", 0, 9999, 0, key=K("seed"), disabled=not show_noise)
-        # ONE knob for "more jitter" (maintainer, 2026-08-13). It scales the
+        # ONE knob for "more jitter". It scales the
         # NOISE MODEL, not the draw: posteriors.mock_realization deliberately
         # refuses a draw-only scale factor, because a 2x draw beside 1x error
         # bars is not a realization of the plotted model, and the S/N and
@@ -1431,15 +1433,11 @@ with st.sidebar:
 
     with st.expander("Noise model (Pandeia)"):
         st.markdown("**Minimum noise floor** (PandExo convention)")
-        # DEFAULTS TO CONSTANT (maintainer, 2026-08-13: "start with constant
-        # ppm noise on by default"), superseding the earlier no-preselection
-        # gate. The reason a default is acceptable in ONE direction only:
-        # preselecting "No floor" would claim undemonstrated precision on the
-        # user's behalf, but a constant floor at the per-mode suggested values
-        # claims LESS precision than the alternatives, so the default is the
-        # conservative side of the choice rather than a flattering one. The
-        # floor is still recorded with the run and still shown per mode below,
-        # so it is disclosed rather than hidden.
+        # DEFAULTS TO CONSTANT. A default is acceptable in ONE direction
+        # only: preselecting "No floor" would claim undemonstrated precision
+        # on the user's behalf, while a constant floor at the suggested
+        # values claims LESS precision -- the conservative side. The floor
+        # is recorded with the run and shown per mode below.
         floor_mode = st.radio(
             "Floor type", ["constant", "none", "file"], horizontal=True,
             index=0, key=K("floormode"),
@@ -1522,8 +1520,8 @@ with st.sidebar:
 
     # -----------------------------------------------------------------------
     # More settings: solver grid and advanced RT, behind one entry point.
-    # No help tooltips in here (maintainer, 2026-08-13): the labels stand on
-    # their own and the reference material lives in README.md.
+    # No help tooltips in here: the labels stand on their own and the
+    # reference material lives in README.md.
     # -----------------------------------------------------------------------
     st.divider()
     st.markdown("### More settings")
@@ -1540,10 +1538,8 @@ with st.sidebar:
             format="%.1e", key=K("yconv"))
 
     # Condensation, gravitational settling, diffusion-limited escape and the
-    # boundary-condition fluxes were REMOVED from the GUI 2026-08-13
-    # (maintainer): they stay canonical parameters in forward.py with their
-    # full compatibility matrix, reachable through the programmatic interface,
-    # but the interface pins them off. share_config REFUSES a loaded
+    # boundary-condition fluxes are API-only: canonical parameters in
+    # forward.py, but the GUI pins them off. share_config REFUSES a loaded
     # configuration that sets any of them non-default rather than silently
     # computing a different atmosphere than the file describes.
     use_condense = use_settling = False
@@ -1584,9 +1580,7 @@ with st.sidebar:
             format_func={"simpson": "Simpson (ExoJAX default)",
                          "trapezoid": "Trapezoid"}.get)
         # No help= here: the Advanced RT widgets are pinned tooltip-free
-        # (test_removed_gui_prose_sections_and_tooltips_stay_gone). The
-        # line-wing grid widget moved to the Clouds expander's Mie branch
-        # 2026-08-16 with the other line-by-line-only settings.
+        # (test_removed_gui_prose_sections_and_tooltips_stay_gone).
 
     # Reset sits behind a confirmation step: one click must not clear a long
     # configuration and the current results.
@@ -1627,11 +1621,10 @@ params = dict(planet=planet_key, science_mode=science_mode,
               mie_condensate=mie_condensate, mie_log_rg=mie_log_rg,
               mie_sigmag=mie_sigmag, mie_log_mmr=mie_log_mmr,
               # Detect computes the removed-molecule spectrum for the TARGET
-              # only (0.41.0, maintainer: the score reads exactly one row and
-              # the full block was the largest cost of a cold run). The trade,
-              # accepted knowingly: wo_mols is cache-keyed, so switching the
-              # detection target is now a real re-run, not a cache hit; API
-              # callers can pass wo_mols=None for the all-molecule block.
+              # only (the score reads exactly one row; the full block was the
+              # largest cost of a cold run). Accepted trade: wo_mols is
+              # cache-keyed, so switching the detection target is a real
+              # re-run; API callers can pass wo_mols=None for the full block.
               # Constrain reads none of them and skips the block entirely.
               wo_mols=([target_mol] if goal == "detect" else []),
               extra_mols=extra_mols, **tp_kwargs)
@@ -1664,9 +1657,8 @@ if yconv_cri <= 1.5e-3:              # strict convergence costs extra iterations
     base_min += 0.5
 base_min += 0.25 * len(extra_mols)   # k-table load + one more overlap fold
 # A finer broadening grid slows the premodit opacity builds -- but ONLY in
-# line-by-line mode. Under correlated-k the k-tables carry the line opacity
-# and _build_opa is skipped entirely, so charging for it here overstated the
-# estimate on every default run (2026-08-16).
+# line-by-line mode; under correlated-k the k-tables carry the line opacity
+# and _build_opa is skipped entirely.
 if rt_dit_res < 1.0 and _lbl_mode:
     base_min += 0.3 * (5 + len(extra_mols))
 # cool columns (<~900 K) converge much more slowly (a W107b run took ~5 min)
@@ -1690,21 +1682,16 @@ else:
     fd_min = (n_fd_comp * 4 * (_solve_min + 0.8)
               + n_fd_theta * 4 * _solve_min + 0.2 * n_cloud_rows)
 
-# The removed-molecule spectrum (0.41.0: TARGET ONLY on detect -- one extra
-# fold chain of up to n_mols overlap folds at ~3 s each, sharing the full
-# spectrum's prefix; constrain computes none). The old all-molecule block
-# scaled as n(n+3)/2 folds and dominated a cold run; API callers passing
-# wo_mols=None still pay it, but the GUI never asks for it. This term sits
-# OUTSIDE base_min on purpose: a Jacobian row computes ONE spectrum, not the
-# wo chain, so _solve_min must not inherit it.
+# The removed-molecule spectrum (TARGET ONLY on detect; constrain computes
+# none). This term sits OUTSIDE base_min on purpose: a Jacobian row computes
+# ONE spectrum, not the wo chain, so _solve_min must not inherit it.
 _n_mols_est = len(_base_set) + len(extra_mols)
 _wo_min = ((0.05 * _n_mols_est * (nz / forward.NZ_DEFAULT))
            if goal == "detect" else 0.0)
 
-# Report the resolving power the run will ACTUALLY use. Under correlated-k
+# Report the resolving power the run will ACTUALLY use: under correlated-k
 # (the default) that is the k-tables' own band grid, R=1000, and nu_pts is
-# inert; the nu_pts-derived number described the line-by-line path only and
-# read "native R≈1500" on every default run (2026-08-16).
+# inert.
 if _lbl_mode:
     grid_lbl = (f"{nz}-layer, line-by-line R≈"
                 f"{int(round(nu_pts * 2950 / 8000 / 50) * 50)}")
@@ -1735,16 +1722,9 @@ with _run_slot:
 # ONE description of everything a run consumes OUTSIDE the canonical model
 # parameters: the science goal and the observation setup. Built once and used
 # three times -- the shareable config, the stored run meta, and the staleness
-# guard -- so a new setting joins all three at once.
-#
-# The staleness guard used to compare a HAND-PICKED subset, and the fields it
-# missed reached the page silently: a reviewer switched the detection molecule
-# from SO2 to CO2, never pressed Run, and the curve, the legend and the CSV
-# column all kept the previous target. He reported it as a caching bug. It was
-# not one -- the canonical set deliberately excludes the target, because one
-# run already computes the removed-molecule curve for every RT molecule -- but
-# the display had no way to know it was showing something else. Comparing this
-# whole block closes the class, not just that one field.
+# guard -- so a new setting joins all three at once. The guard must compare
+# this WHOLE block, never a hand-picked subset: a field it misses reaches the
+# page silently as stale results.
 _goal_meta = dict(goal=goal, target_mol=target_mol,
                   target_sig=float(target_sig),
                   goal_param=goal_param,
@@ -1756,6 +1736,10 @@ _goal_meta = dict(goal=goal, target_mol=target_mol,
                   jac_method=jac_method)
 _obs_meta = dict(
     ks_mag=float(ks_mag), t14=float(t14), t_base=float(t_base),
+    # the Pandeia star, recorded HERE for both science modes: the canonical
+    # block zeroes star_teff/logg/feh in transmission (cache hygiene), so a
+    # share file without these could not reproduce the noise simulation
+    star_teff=float(teff), star_logg=float(logg), star_feh=float(feh),
     sat_limit=float(sat_limit), modes=list(mode_keys),
     n_transits=int(n_transits), r_bin=int(r_bin),
     floor_mode=floor_mode,
@@ -1895,10 +1879,8 @@ def _compute_locked():
                      "file. Re-run; if this repeats, report it as a bug.")
             return None
 
-    # ETC: ONLY the selected modes, cached per mode (0.27.0) -- a later
-    # selection change computes exactly the newly added modes. The old
-    # always-all-seven design made every first run ~2.5x slower than a
-    # three-mode selection required.
+    # ETC: ONLY the selected modes, cached per mode -- a later selection
+    # change computes exactly the newly added modes.
     etc_missing = noise_mod.missing_modes(star, list(mode_keys),
                                           sat_limit=sat_limit)
     if not etc_missing:
@@ -2049,9 +2031,9 @@ for k, err in out["failed"]:
     with st.expander(f"{ins.MODES[k]['label']}: technical details"):
         st.code(str(err)[-2500:])
 for k, reason in out["unusable"]:
-    # Since 0.25.0 ngroup_min equals pandeia's permitted minimum ramp for the
-    # mode (the same floor PandExo searches to), so "saturated at the shortest
-    # ramp" is a real brightness limit, not a tool policy bound.
+    # ngroup_min equals pandeia's permitted minimum ramp for the mode (the
+    # same floor PandExo searches to), so "saturated at the shortest ramp"
+    # is a real brightness limit, not a tool policy bound.
     st.warning(
         f"**{ins.MODES[k]['label']}: unusable on this star**, {reason}. "
         f"The shortest ramp tried ({ins.MODES[k]['ngroup_min']} "
@@ -2104,12 +2086,12 @@ if goal_r == "detect":
         ranked = sorted(ok, key=lambda r: -_detection_metric(r)[0])
         best = ranked[0]
         bsig, _best_projected = _detection_metric(best)
-        verdict = (f"**{best['label']}**: {bsig:.1f}σ in {ntr} "
+        verdict = (f"**{best['label']}**: template S/N {bsig:.1f}σ in {ntr} "
                    f"{_ev}{'s' if ntr > 1 else ''} (target {tsig:g}σ; "
                    + ("local physical nuisances profiled)."
                       if _best_projected else "calibration offsets profiled)."))
         if bsig >= tsig:
-            # No banner when the target is met (maintainer, 2026-08-13): the
+            # No banner when the target is met: the
             # figure and the mode table already carry the number, and a green
             # bar restating it is the redundant UI prose the house policy
             # forbids. A SHORTFALL still gets a bar -- the transit count it
@@ -2205,7 +2187,7 @@ else:
 # The ranking compares science information only. It does not check APT
 # feasibility (data volume, schedulability, calibration warnings), so the
 # verdict must carry that caveat -- an operationally unsupportable
-# configuration can otherwise be presented as "Best" (2026-08-05 review).
+# configuration can otherwise be presented as "Best".
 
 # --- spectrum data (rendered ONCE, on the summary figure below) -------------
 wl = model["wl_um"]
@@ -2234,7 +2216,7 @@ def _display_smooth(y_ppm):
 d_plot = _display_smooth(d_s)
 d_wo_s = None
 if goal_r == "detect":
-    # depth_wo rows align with the model's wo_mols set, not mols (v32)
+    # depth_wo rows align with the model's wo_mols set, not mols
     wo_mols_r = [str(x) for x in model["wo_mols"]]
     d_wo_s = model["depth_wo"][wo_mols_r.index(meta["target"])][order] * 1e6
 # Mock-observation layer: one seeded N(0, sigma_i) draw per
@@ -2341,12 +2323,10 @@ with st.expander("Physical structure (T-P profile, mixing ratios)"):
                     f"ymix has {_ymix.shape[1]} columns but "
                     f"{len(_ysp)} species names: the stored model is "
                     "inconsistent")
-            # Select the RT molecules BY NAME. ymix is the full network state
-            # (89 species for SNCHO) while model["mols"] is the RT subset, so
-            # zipping them positionally read the wrong species entirely -- this
-            # panel used to label H2 as CO2, and the CSV below exported the same
-            # wrong headers. Ordered by peak abundance so the legend reads
-            # top-down.
+            # Select the RT molecules BY NAME: ymix is the full network state
+            # while model["mols"] is the RT subset, so zipping them
+            # positionally reads the wrong species entirely. Ordered by peak
+            # abundance so the legend reads top-down.
             # engine_config.MOLECULES maps the RT token to the VULCAN species
             # name; they differ (the tool's OCS is VULCAN's COS)
             from jwst_tool import engine_config as _ec
@@ -2400,7 +2380,10 @@ with st.expander("Mode details"):
         if n_part:
             notes.append(f"partial saturation in {n_part} bins")
         if r["warnings"]:
-            notes.append("; ".join(list(r["warnings"])[:2]))
+            # ALL of them: truncating to the first two silently hid e.g. the
+            # native-R LSF disclosure on high-R gratings whenever Pandeia
+            # emitted two warnings of its own
+            notes.append("; ".join(list(r["warnings"])))
         row = {"mode": r["label"],
                "band (µm)": f"{r['wl'].min():.2f}-{r['wl'].max():.2f}"}
         # NOTE: this column must stay all-string -- mixing int and str values makes
@@ -2411,8 +2394,9 @@ with st.expander("Mode details"):
             notes.append(f"{r['n_segments']} detector segments (offset per segment)")
         if goal_r == "detect":
             _score, _is_projected = _detection_metric(r)
-            row["σ_detect (nuisance-profiled)"] = round(_score, 1)
-            row["σ_detect (calibration-only)"] = round(r["sigma_detect"], 1)
+            row["template S/N, σ (nuisance-profiled)"] = round(_score, 1)
+            row["template S/N, σ (calibration-only)"] = \
+                round(r["sigma_detect"], 1)
             _t = float(meta.get("target_sig") or 3.0)
             if _score > 0:
                 _tt = detect.transits_to_target(
@@ -2518,7 +2502,7 @@ with st.expander("Add a custom mode set"):
                                  for m in _rec["usable_modes"])) + ".")
 
 
-with st.expander("Parameter constraint forecast (Fisher)"):
+with st.expander("Parameter constraint forecast (local Fisher)"):
     # --- parameter constraint forecast (Fisher) --------------------------------
     # authoritative parameter order = the Jacobian rows as cached (canonical/sorted),
     # NOT the multiselect order
@@ -2572,7 +2556,6 @@ with st.expander("Parameter constraint forecast (Fisher)"):
                 _sc = tsig_f * float(_rec["sigma_conditional_display"][n])
                 frows.append({
                     # the user's own name for the set, unprefixed
-                    # (maintainer, 2026-08-13)
                     "mode": str(_rec["name"]),
                     "parameter": forward.PARAM_LABELS[n],
                     _marg_col: ("unconstrained"
@@ -2583,16 +2566,13 @@ with st.expander("Parameter constraint forecast (Fisher)"):
                                 else f"{_sc:.3g}"),
                     "unit": forward.PARAM_UNITS[n] or (
                         "C/O ratio" if n == "dlnCO" else "dimensionless")})
-        # Custom combinations FIRST (maintainer, 2026-08-13): they are what
-        # the user built, so they lead the table instead of trailing the
-        # per-mode rows. Order within each group is preserved.
+        # Custom combinations FIRST: they are what the user built, so they
+        # lead the table. Order within each group is preserved.
         _combo_names = {str(_rec["name"]) for _rec in combo_recs}
         frows = ([_r for _r in frows if _r["mode"] in _combo_names]
                  + [_r for _r in frows if _r["mode"] not in _combo_names])
 
-        # Repeated mode names blanked for READING only (maintainer,
-        # 2026-08-13): each mode spans one row per free parameter, and the
-        # repetition made the mode boundaries hard to see. The CSV below is
+        # Repeated mode names blanked for READING only; the CSV below is
         # built from the UNBLANKED rows -- a machine-readable file must carry
         # the mode on every row. _is_combo rides along for the highlight and
         # is dropped before display.
@@ -2607,28 +2587,15 @@ with st.expander("Parameter constraint forecast (Fisher)"):
             _disp.append(_r2)
         _disp_df = pd.DataFrame(_disp)
         _combo_mask = _disp_df.pop("_is_combo")
-        # st.table, NOT st.dataframe (maintainer, 2026-08-13: "if you sort by
-        # something else you can't see which mode does what. I just don't want
-        # to allow that reordering").
-        #
-        # st.dataframe is an INTERACTIVE table -- clicking a column header
-        # re-sorts it -- and this table cannot survive that, because the mode
-        # column is blanked on repeat rows for readability (above). Half the
-        # rows therefore carry no mode name, and they only mean anything in
-        # their emitted order: re-sort by the marginalized column and every
-        # blank row detaches from the mode it belongs to, silently attributing
-        # numbers to the wrong instrument. st.table is static by definition
-        # ("without sorting or scrolling", its own docs), which removes the
-        # interaction rather than trying to make the blanks survive it.
-        #
-        # It renders every row with no scroll region, which is fine here: the
-        # worst case is 8 modes + combined + custom sets at 3 parameters = 33
-        # rows, and the whole table sits inside a collapsed expander.
+        # st.table, NOT st.dataframe: st.dataframe is interactive (a column-
+        # header click re-sorts), and this table cannot survive that -- the
+        # mode column is blanked on repeat rows, so a re-sort detaches every
+        # blank row from its mode and silently attributes numbers to the
+        # wrong instrument. st.table is static by definition.
         if _combo_mask.any():
             # tint the custom-set rows so they read as a group distinct from
-            # the per-mode rows. TEXT color, not a background tint (maintainer,
-            # 2026-08-13): a filled row reads as a highlight/alert. Colored
-            # text marks the group without shouting. #5b3a8e is the combo
+            # the per-mode rows. TEXT color, not a background tint (a filled
+            # row reads as a highlight/alert); #5b3a8e is the combo
             # palette's purple, dark enough for body text on white.
             st.table(
                 _disp_df.style.apply(
@@ -2641,6 +2608,19 @@ with st.expander("Parameter constraint forecast (Fisher)"):
                            _csv_bytes(pd.DataFrame(frows)),
                            f"{_fname_base}_fisher_forecast.csv", "text/csv",
                            key=K("dl_fisher_csv"))
+        # what each chemistry parameter's ± is precision ALONG: these are
+        # specific elemental perturbation directions (vulcan_chem contract),
+        # not every physical way of changing Z or C/O
+        _param_defs = {
+            "lnZ": "lnZ scales O/C/N/S together (He/H fixed, C/O preserved)",
+            "dlnCO": "dlnCO scales carbon at fixed oxygen",
+            "lnKzz": "lnKzz scales the whole Kzz profile",
+        }
+        _defs = [_param_defs[n] for n in fisher_names if n in _param_defs]
+        if _defs:
+            st.caption("Parameter directions: " + "; ".join(_defs)
+                       + ". Each ± is local precision along that direction "
+                         "under this atmosphere.")
         if fdiag:
             rank, dim = fdiag["fisher_rank"], fdiag["fisher_dimension"]
             st.caption(
@@ -2648,13 +2628,8 @@ with st.expander("Parameter constraint forecast (Fisher)"):
                 f"number {fdiag['condition_number']:.2g}."
                 + (" **Rank-deficient: degenerate directions are reported as "
                    "unconstrained, not as fake finite numbers.**" if rank < dim else ""))
-        # The "How to read this table" expander was REMOVED (maintainer,
-        # 2026-08-13). Its four bullets -- the 3-sigma convention, what
-        # "unconstrained" means, the dex/ratio units, and why sigma does not
-        # scale as 1/sqrt(N) once the floor dominates -- are in README.md
-        # under the Fisher table section. The units are also in the column
-        # headers, and the "transits to target" column is what the scaling
-        # bullet pointed at.
+        # No "How to read this table" expander here: that reference material
+        # lives in README.md (Fisher table section); do not re-add it.
     elif out.get("fisher_names"):
         st.info("A constraint forecast was requested but the cached model has "
                 "no Jacobian. Press Run to compute it.")
@@ -2693,16 +2668,15 @@ _post_panels: list[dict] = []       # summary_figure-compatible panel dicts
 _post_sel: list[str] = []
 _have_fisher = bool(fisher_names) and "jac" in model
 if _have_fisher:
-    # An EXPANDER, matching every other results section (maintainer,
-    # 2026-08-13) -- it was the only st.subheader among them.
-    _post_box = st.expander("Marginalized forecast posteriors")
+    # An EXPANDER, matching every other results section.
+    # "Fisher forecasts", never "posteriors": these curves are Gaussian
+    # slices of the local Fisher ellipse, not retrieval posteriors
+    _post_box = st.expander("Marginalized Fisher forecasts")
 
-    # ONE color per series, shared by the spectrum and the forecast panels
-    # (maintainer, 2026-08-13). A mode keeps instruments.MODE_COLOR so its
-    # points and its posterior match; a custom set draws from _COMBO_COLORS,
-    # which never collides with a member mode's color; the all-usable row gets
-    # a neutral gray, since it is every mode at once and no single mode's hue
-    # would be honest.
+    # ONE color per series, shared by the spectrum and the forecast panels.
+    # A mode keeps instruments.MODE_COLOR so its points and its posterior
+    # match; a custom set draws from _COMBO_COLORS, which never collides
+    # with a member mode's color; the all-usable row gets a neutral gray.
     _ALL_USABLE_COLOR = "#444444"
 
     def _series_color(label: str) -> str:
@@ -2757,12 +2731,10 @@ if _have_fisher:
                 _rl, fisher_names, _centers,
                 params=_curve_params, co_eval=co_eval)
 
-        # ONE curve per parameter (maintainer, 2026-08-13). This box used to
-        # SOURCES FOLLOW THE SPECTRUM SERIES (maintainer, 2026-08-13: "I want
-        # them to match the ones I'm showing for the series on the spectrum").
-        # There is no separate "Forecast source" control any more: the figure's
-        # series multiselect drives both halves of the figure, so the panels
-        # can never show a mode the spectrum is not displaying.
+        # SOURCES FOLLOW THE SPECTRUM SERIES: there is no separate "Forecast
+        # source" control -- the figure's series multiselect drives both
+        # halves of the figure, so the panels can never show a mode the
+        # spectrum is not displaying.
         #
         # That multiselect renders LATER in the script (it belongs beside the
         # figure), so read its committed state here -- the same cross-section
@@ -2820,21 +2792,17 @@ if _have_fisher:
                     _mr = _mock_rec.get(_lbl)
                     if _mr is not None and _mr["recovered"].get(_p):
                         # THE JITTERED CURVE is the one drawn: same width as
-                        # the forecast (it is the forecast, recentered on what
-                        # this realization recovers), so no width information
-                        # is lost by dropping the unshifted twin. The dotted
-                        # center line marks the input value, so the offset
-                        # stays legible. The label is the SOURCE NAME only
-                        # (maintainer, 2026-08-13): "fit to this jitter draw"
-                        # described the mechanism, not the series.
+                        # the forecast (it is the forecast, recentered on
+                        # what this realization recovers), so no width
+                        # information is lost by dropping the unshifted twin.
+                        # The dotted center line marks the input value.
                         _d = float(_mr["delta_display"][_p])
                         _mc = posteriors.gaussian_curve(
                             _pr["center"] + _d, _pr["sigma_display"])
                         _curves.append(dict(
                             # says it is a FIT to one draw, not a forecast:
                             # its center moved off the input value, and a
-                            # forecast's center cannot (external review,
-                            # 2026-08-14)
+                            # forecast's center cannot
                             label=f"{_lbl} (one draw)",
                             theta=_mc["theta"], pdf=_mc["pdf"],
                             # mu/sigma make the figure REPORT the width: the
@@ -2855,15 +2823,12 @@ if _have_fisher:
                                   "direction carries no information in "
                                   "the fitted band (no curve, by design)")
             # A panel whose curves are FITS to the jitter draw is not a
-            # forecast: its centers move with the realization, and a forecast's
-            # center is the input value by construction. External review
-            # (2026-08-14) read curves sitting 2.7 sigma off the injected value
-            # under a "forecast density" axis as a likely bug -- correctly, had
-            # they been forecasts. Verified it is not: the recovery shift is
-            # linear in the noise, so over realizations its mean is 0 and its
-            # spread is exactly the Fisher sigma (measured 1.01x and 1.00x over
-            # 4000 draws). One draw at 2.7 sigma is ~0.7% likely, not wrong.
-            # The axis now names which of the two the reader is looking at.
+            # forecast: its centers move with the realization, and a
+            # forecast's center is the input value by construction. VERIFIED
+            # not a bug (reviews re-find it): the recovery shift is linear
+            # in the noise -- over realizations its mean is 0 and its spread
+            # is exactly the Fisher sigma (measured over 4000 draws). The
+            # axis names which of the two the reader is looking at.
             _fitted = any(c.get("kind") == posteriors.MOCK_RECOVERY_KIND
                           for c in _curves)
             _post_panels.append(dict(
@@ -2881,15 +2846,17 @@ if _have_fisher:
 # --- the results figure (spectrum + forecast posteriors, rendered once) -----
 # one target significance for every number on this page
 _target_sig = float(meta.get("target_sig") or 3.0)
-# An EXPANDER like every other results section (maintainer, 2026-08-13) --
-# the last st.subheader on the results page. Expanded by DEFAULT: it holds the
-# figure the whole page builds toward, so it should be visible on arrival,
-# unlike the supporting sections above it.
+# An EXPANDER like every other results section. Expanded by DEFAULT: it
+# holds the figure the whole page builds toward, so it should be visible on
+# arrival, unlike the supporting sections above it.
 _fig_box = st.expander(
     "Simulated eclipse emission spectrum & forecast summary"
     if str(_cpj.get("science_mode", "transmission")) == "emission"
     else "Simulated transmission spectrum & forecast summary",
     expanded=True)
+if str(_cpj.get("science_mode", "transmission")) == "emission":
+    _fig_box.caption("1-D dayside approximation (parameterized T-P, no "
+                     "longitudinal structure).")
 
 # Per-mode expected performance, rendered IN the legend label of each
 # point series (replaces the retired right-hand ranking panel): the
@@ -2902,7 +2869,7 @@ if goal_r == "detect":
     for r in results:
         _score, _ = _detection_metric(r)
         if not r["saturated"] and np.isfinite(_score):
-            _leg_num[r["mode_key"]] = f"{_score:.1f}σ"
+            _leg_num[r["mode_key"]] = f"S/N {_score:.1f}σ"
 elif _have_fisher:
     _rk_key = K("sum_rank_param_" + "_".join(fisher_names))
     if st.session_state.get(_rk_key) not in fisher_names:
@@ -2910,7 +2877,7 @@ elif _have_fisher:
     _gp_default = meta.get("goal_param")
     with _fig_box:
         _rk_param = st.selectbox(
-            "Legend parameter (per-mode expected ±)", fisher_names,
+            "Legend parameter (per-mode Fisher ±)", fisher_names,
             index=(fisher_names.index(_gp_default)
                    if _gp_default in fisher_names else 0),
             key=_rk_key, format_func=lambda n: forward.PARAM_LABELS[n])
@@ -2922,7 +2889,7 @@ elif _have_fisher:
         if np.isfinite(_v):
             _leg_num[r["mode_key"]] = f"±{_v:.3g}"
 
-# --- figure controls (maintainer, 2026-08-13) -------------------------------
+# --- figure controls ---------------------------------------------------------
 # The figure re-renders from the CACHED run: which series are drawn and what
 # wavelength window is shown are display choices, so none of this recomputes
 # a spectrum or an ETC job. forward.params_key excludes the mode selection
@@ -2979,8 +2946,8 @@ if _cov:
 else:
     _fit = (_grid_lo, _grid_hi)
 
-# Figure settings (2026-08-14 ranges + 2026-08-15 layout). These move the
-# WINDOW and the SCALES the figure is drawn with and never the data, so
+# Figure settings. These move the WINDOW and the SCALES the figure is drawn
+# with and never the data, so
 # nothing downstream reads them -- the scores, the CSVs and the forecast are
 # unchanged by anything in here. One row per axis: typed min and max, blank
 # for automatic (see _axis_range), with that axis's log toggle on the same
@@ -3027,11 +2994,9 @@ for r in results:
     _sum_points.append(dict(
         label=_lbl,
         color=ins.MODE_COLOR[r["mode_key"]],
-        # Uniform TRIANGLE for every mode (maintainer, 2026-08-13): the
-        # per-mode marker shapes (o/s/D/^/v/P/X/*) are indistinguishable at
-        # the ~3.6 pt size these points render at -- they read as noise, not
-        # as an encoding. Modes are distinguished by color plus the legend
-        # entry, which names each mode explicitly.
+        # Uniform marker for every mode: distinct shapes are
+        # indistinguishable at the ~3.6 pt size these points render at.
+        # Modes are distinguished by color plus the legend entry.
         marker=ins.MODE_MARKER.get(r["mode_key"], "o"),
         wl_um=np.asarray(r.get("wl_eff", r["wl"]), float),
         depth_ppm=_y,
@@ -3042,10 +3007,10 @@ if _leg_num:
     # model label, which made that entry multi-line and broke the legend's
     # row spacing). Says what the per-mode numbers are, nothing more.
     _leg_note = (
-        f"{meta['target']} S/N per mode, {meta['n_transits']} {_ev}"
+        f"{meta['target']} template S/N per mode, {meta['n_transits']} {_ev}"
         f"{'s' if meta['n_transits'] > 1 else ''}"
         if goal_r == "detect" else
-        f"expected ±{forward.param_axis(_rk_param)} per mode "
+        f"Fisher ±{forward.param_axis(_rk_param)} per mode "
         f"at {_target_sig:g}σ")
 for _ci, (_cname, _members) in enumerate(_combo_members.items()):
     if f"combo:{_cname}" not in _sel_series:
@@ -3088,9 +3053,8 @@ _sum_foot = None
 
 
 def _compose(spec):
-    # No in-figure title (maintainer, 2026-08-13): the section subheader
-    # above already names the figure, so it was a duplicate. The exported
-    # PNG/PDF carry the planet name in their FILENAME.
+    # No in-figure title: the section header above already names the figure;
+    # the exported PNG/PDF carry the planet name in their FILENAME.
     return summary_figure.compose_summary_figure(
         spec, posterior_panels=_post_panels or None,
         footnote=_sum_foot, panel_xlims=_post_xlims)

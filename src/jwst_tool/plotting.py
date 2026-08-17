@@ -3,32 +3,18 @@
 Importable WITHOUT streamlit: every figure the GUI shows is built here from
 plain arrays, so the same code the app renders is the code the tests render.
 
-WHY THE LOCK (2026-08-13, the ParseException crash on the Space)
----------------------------------------------------------------
-Matplotlib's mathtext parser is process-global state. Matplotlib 3.10 guards
-it with a class-level ``Figure._render_lock`` held for the duration of
-``Figure.draw()`` -- but ``Figure.tight_layout()`` runs the layout engine
-directly, OUTSIDE that lock, and the layout engine measures every tick label.
-On a log axis those labels are mathtext (``$\\mathdefault{10^{-8}}$``), so two
-Streamlit sessions laying out figures at the same time can be inside the
-shared parser concurrently. Streamlit runs each session in its own
-script-runner thread, so this is reachable with two users on one instance:
-the loser raises ``ValueError: ParseException: exception raised in parse
-action`` out of ``tight_layout``.
-
-VERIFIED on the deployed pin, matplotlib 3.10.0 + pyparsing 3.2.1
-(deploy/requirements-app-lock.txt): ``Figure._render_lock`` exists and
-``Figure.draw`` takes it, while ``Figure.tight_layout`` does not. Eight
-threads running the OLD inline T-P code (subplots -> tight_layout -> savefig)
-raise in 7/8; the same load through these locked builders raises in 0/8.
-Locally on matplotlib 3.11.0 it is 8/8 versus 0/8. Dropping pyplot for bare
-``Figure`` objects does NOT help (also 8/8) -- the race is in the shared
-parser reached through layout/measurement, not in pyplot's figure registry.
-
-``ParserElement.reset_cache()`` in ``_mathtext.Parser.parse`` plausibly
-participates (it clears a global packrat cache mid-parse), but it is not
-claimed as the proven mechanism; upstream describes mathtext as generally
-thread-unsafe through its shared singleton parser.
+WHY THE LOCK (the ParseException crash on the Space)
+----------------------------------------------------
+Matplotlib's mathtext parser is process-global state. ``Figure.draw()``
+holds matplotlib's own ``Figure._render_lock``, but ``Figure.tight_layout()``
+runs the layout engine OUTSIDE it, and layout measures every tick label --
+mathtext on a log axis. Two Streamlit sessions (each its own script-runner
+thread) laying out figures at once can therefore be inside the shared parser
+concurrently; the loser raises ``ValueError: ParseException`` out of
+``tight_layout``. VERIFIED on the deployed pin with a threaded stress test
+(the unlocked path raises in 7-8 of 8 threads, the locked builders in 0;
+measurements: notes.md); bare ``Figure`` objects do NOT help -- the race is
+in the shared parser, not pyplot's figure registry.
 
 RULE: every figure lifecycle -- construct, lay out, draw, export, close --
 happens inside ``render_lock``. Do not lay out, save, or draw a figure
@@ -55,32 +41,18 @@ from matplotlib.ticker import (LogLocator, MaxNLocator, NullFormatter,
 # block does not deadlock.
 render_lock = threading.RLock()
 
-# IDENTICAL GEOMETRY for the T-P and mixing-ratio figures (2026-08-13): same
-# canvas, same axes rectangle, so the two render at exactly the same size
-# side by side. The canvas is WIDER than the square plot box on purpose --
-# the surplus on the right is the mixing-ratio legend strip, and the T-P
-# figure simply leaves it blank rather than growing its plot box to fill it.
+# IDENTICAL GEOMETRY for the T-P and mixing-ratio figures: same canvas, same
+# axes rectangle, so the two render at exactly the same size side by side.
+# The canvas is deliberately NOT square -- only the axes box is; the surplus
+# width on the right is the mixing-ratio legend strip, which the T-P figure
+# leaves blank. Do not "restore" a square canvas.
 #
 # The rect below is chosen so the allocated box is EXACTLY square
-# (0.6135 * 7.4 in = 4.54 in wide, 0.8566 * 5.3 in = 4.54 in tall), which means
-# set_box_aspect(1.0) is satisfied with no shrink-to-fit -- if these numbers
-# drift apart, matplotlib silently shrinks the axes and the two figures stop
-# matching. Recompute BOTH if you change the canvas: the margins are held at
-# their original inch sizes so the labels keep the same physical room.
-#
-# NOTE the figure CANVAS is deliberately NOT square here (5.6 x 4.0); only
-# the axes box is. An earlier revision made the whole canvas square, so do
-# not "restore" that -- the surplus width is the legend strip, and equal
-# canvases are what make the two panels the same on-page size.
+# (0.6135 * 7.4 in = 4.54 in wide, 0.8566 * 5.3 in = 4.54 in tall), which
+# means set_box_aspect(1.0) is satisfied with no shrink-to-fit -- if these
+# numbers drift apart, matplotlib silently shrinks the axes and the two
+# figures stop matching. Recompute BOTH if you change the canvas.
 # test_plotting.py::test_tp_and_vmr_panels_share_one_geometry pins it.
-# Canvas enlarged 5.6x4.0 -> 7.4x5.3 in (maintainer, 2026-08-13: "make the
-# figure size larger for the physical structure figures, i.e. make the text
-# smaller relative to the figures"). Font sizes are UNCHANGED house-style
-# points, so growing the canvas is exactly what shrinks the text relative to
-# the plot: the square plot box goes 3.24 -> 4.54 in on a side (1.40x linear,
-# 1.96x area) while a tick label stays the same number of points. Streamlit
-# stretches both panels to the column width, so they still render at equal
-# on-page size -- and the PNG/PDF downloads gain the detail.
 FIG_W_IN = 7.4
 FIG_H_IN = 5.3
 FIG_DPI = 200
@@ -230,7 +202,7 @@ def build_vmr_figure(p_bar, columns, ylim=None, xlim=None):
         ax.set_xlabel("volume mixing ratio")
         ax.set_ylabel("pressure (bar)")
         ax.grid(alpha=0.25)
-        # Legend to the RIGHT of the axes (maintainer, 2026-08-13), in the
+        # Legend to the RIGHT of the axes in the
         # strip AXES_RECT leaves free. Species read top-down in the same
         # peak-abundance order the caller sorted them into, which a single
         # column preserves and a multi-column block does not. Anchored just

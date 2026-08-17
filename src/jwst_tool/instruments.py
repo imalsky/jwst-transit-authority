@@ -183,7 +183,7 @@ def engine_mode(instrument: str, mode: str) -> str:
 # MODE_MARKER is the secondary, color-independent encoding.
 _COLORS = ["#2a78d6", "#199e70", "#a35a00", "#007a00",
            "#4a3aa7", "#d43f3e", "#a83a9e", "#006c8e"]
-# The 8th slot (nirspec_g395m) was re-chosen 2026-08-12 while still unused:
+# The 8th slot (nirspec_g395m) was re-chosen while still unused:
 # the original "#c2571f" sat at deltaE(Lab) ~16 from the G235H orange and ~24
 # from wavelength-neighbor F444W; "#006c8e" holds 5.94:1 on white and
 # deltaE >= 38 to every existing color (the palette's own internal minimum
@@ -237,10 +237,9 @@ PANDEXO_UNBOUNDED_NGROUP = 65535
 # 2026-08-09: NIRSpec/NIRISS warn at 1 group; NIRCam TSO guidance says avoid
 # data saturating in fewer than 4 groups, to limit reliance on the linearity
 # correction; MIRI guidance calls 2-5 group ramps very difficult to
-# calibrate accurately, 5+ recommended). History: through 0.24.0 the tool
-# floored NIR at 2 / MIRI at 5 and reported bright targets "saturated at the
-# shortest ramp" where PandExo passed at 1 group (closed 2026-08-09; see
-# notes.md, Decision records section).
+# calibrate accurately, 5+ recommended). Do not restore floors above
+# pandeia's mingroups: that wrongly reported bright targets "saturated at
+# the shortest ramp" where PandExo passed (notes.md, Decision records).
 # Instrument-specific reason a short ramp is cautioned (composed into the
 # detect warning). Sources: jwst-docs, verified 2026-08-09 -- NIRSpec
 # Detector Recommended Strategies; NIRISS SOSS Recommended Strategies;
@@ -351,7 +350,7 @@ MODES = {
         floor_ppm_suggested=40.0, noise_infl=1.0, ngroup_min=2,
         ngroup_warn_below=6, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
-    # Appended LAST on purpose (2026-08-12): MODE_COLOR/MODE_MARKER key by
+    # Appended LAST on purpose: MODE_COLOR/MODE_MARKER key by
     # enumeration order, and per-mode colors are never re-assigned, so a new
     # mode may only be appended, never inserted mid-registry. Same band as
     # G395H at ~4x lower R; the medium-resolution grating trades resolving
@@ -403,7 +402,7 @@ for _key, _m in MODES.items():
             f"mode {_key!r} sets ngroup_max={_m['ngroup_max']}, above the "
             f"PandExo-compatible maximum {_cap} for {_m['instrument']}; the "
             "optimizer would select an unsupported group count on faint "
-            "targets (2026-07-12 audit item 5).")
+            "targets.")
     if not (1 <= _m["ngroup_min"] <= _m["ngroup_warn_below"]
             <= _m["ngroup_max"]):
         raise RuntimeError(
@@ -415,7 +414,7 @@ for _key, _m in MODES.items():
 MODE_COLOR = {key: _COLORS[i % len(_COLORS)] for i, key in enumerate(MODES)}
 MODE_MARKER = {key: _MARKERS[i % len(_MARKERS)] for i, key in enumerate(MODES)}
 
-# GUI default selection (speed-first trio, 2026-08-10 maintainer decision):
+# GUI default selection (speed-first trio):
 # PRISM + G395H cover 0.6-5.25 um including the 4.05 um SO2 band (G395H is
 # the default detect-SO2 goal's workhorse), MIRI LRS keeps the mid-IR
 # 7-8.5 um SO2 band. All registry modes stay selectable. Since 0.27.0 the ETC

@@ -142,7 +142,7 @@ def _validate_spectrum(spectrum: dict) -> dict:
 def _validate_panels(posterior_panels) -> list[dict]:
     panels = list(posterior_panels or [])
     if len(panels) > 3:
-        # 3, not 2 (2026-08-13): the GUI's _MAX_POST_PANELS was raised to 3 and
+        # 3, not 2: the GUI's _MAX_POST_PANELS was raised to 3 and
         # this guard was not, so a three-parameter selection would have raised
         # here instead of rendering.
         raise ValueError("compose_summary_figure: at most three posterior "
@@ -233,7 +233,7 @@ def _visible_ylim(spec: dict, lo: float, hi: float):
     renders as a flat line in the middle of mostly empty axes.
 
     The DEFAULT window fits the MODEL curves only, padded 10% of their span
-    on each side (maintainer, 2026-08-17). The simulated observation points
+    on each side. The simulated observation points
     are deliberately excluded: a low-S/N MIRI point's whisker can span
     several times the spectrum's own range and compressed the curve to a
     near-flat line. Points still set the limits when no model sample is
@@ -295,7 +295,7 @@ def _visible_ylim(spec: dict, lo: float, hi: float):
     if allv.size == 0:
         return None
     y0, y1 = float(np.min(allv)), float(np.max(allv))
-    # ASYMMETRIC padding (maintainer, 2026-08-13: "make the y scale fit a
+    # ASYMMETRIC padding ("make the y scale fit a
     # little better by auto"). The old symmetric 6% left the data filling only
     # 76% of the axis -- 4.6% dead space below and 19.6% above, and the top
     # gap is separately reserved for the in-axes legend anyway. 2% below is
@@ -331,7 +331,7 @@ def _plot_spectrum(ax, spec: dict) -> None:
         # swallows the fill -- every mode's marker rendered black and the
         # per-mode color was invisible. That color is now the series identity
         # shared with the forecast panels, so it has to read.
-        # ms 3.6, down from 5.0 (maintainer, 2026-08-13: the points were
+        # ms 3.6, down from 5.0 (the points were
         # blocking the model). Two changes address that, and the size is the
         # smaller of them: the model line is also raised ABOVE the points
         # (zorder 4, see _plot_spectrum) so it can no longer be chopped into
@@ -372,7 +372,7 @@ def _plot_spectrum(ax, spec: dict) -> None:
     ylim = spec["depth_range"] or _visible_ylim(spec, lo, hi)
     if ylim is not None:
         if spec["depth_range"] is None and spec["points"]:
-            # Headroom for the IN-AXES legend (maintainer, 2026-08-13).
+            # Headroom for the IN-AXES legend.
             # Unlike the old y-limit inflation this replaces, it is applied
             # to the VISIBLE data range and sized from the legend's actual
             # row count, so it scales with what is drawn instead of being a
@@ -420,14 +420,14 @@ def _plot_spectrum(ax, spec: dict) -> None:
     ax.tick_params(labelsize=_TICK)
     ax.grid(alpha=0.25)
     if spec["points"]:
-        # Legend INSIDE the axes (maintainer, 2026-08-13), superseding the
+        # Legend INSIDE the axes superseding the
         # below-the-axes placement. loc="best" lets matplotlib score the
         # candidate corners against the plotted artists, so it lands where
         # the data is not -- there is NO y-limit inflation to make room (that
         # padding distorted the visible depth range purely for the legend's
         # benefit, and is what the outside placement originally fixed).
         # A translucent frame keeps it readable if it must sit over gridlines.
-        # TWO COLUMNS BY GROUP (maintainer, 2026-08-13): model curves in the
+        # TWO COLUMNS BY GROUP: model curves in the
         # first, instrument modes in the second. matplotlib fills a legend
         # COLUMN-MAJOR (verified: with ncol=2 and 6 entries, entries 0-2 land
         # in column 1), so the handle list is ordered models-then-modes and the
@@ -449,7 +449,7 @@ def _plot_spectrum(ax, spec: dict) -> None:
             _ncol = 1
         # "upper left" into the reserved headroom, not "best": with a wide
         # spectrum every corner touches data at some wavelength.
-        # No legend TITLE (maintainer, 2026-08-13): the entries carry their own
+        # No legend TITLE: the entries carry their own
         # numbers, so the title was a second caption inside the legend.
         _leg = ax.legend(_h, _l, loc="upper left", frameon=True,
                          framealpha=0.82,
@@ -498,7 +498,7 @@ def _plot_posterior_panel(axp, pan: dict, color: str,
     """One marginalized forecast posterior: curve, shaded 1-sigma band, and
     the width QUOTED in the panel title.
 
-    2026-08-13: this replaces a single merged box with twin x-axes. That merge
+    This replaces a single merged box with twin x-axes. That merge
     was geometrically self-defeating -- ``gaussian_curve`` builds its grid as
     center +/- 5 sigma, so each parameter's axis auto-scales to its own width;
     peak-normalizing then leaves exactly ONE possible outline. Measured: FWHM
@@ -523,7 +523,7 @@ def _plot_posterior_panel(axp, pan: dict, color: str,
         # ``color`` (the per-parameter fallback) applies only when there is one
         # unlabelled curve and no caller color.
         _c = c.get("color") or color
-        # No shaded 1-sigma band (maintainer, 2026-08-13): with one curve per
+        # No shaded 1-sigma band: with one curve per
         # selected series the overlapping fills muddied the panel, and every
         # entry already quotes its sigma as a number.
         # With several sources the title cannot quote one width without
@@ -548,7 +548,7 @@ def _plot_posterior_panel(axp, pan: dict, color: str,
             if _mu is not None
             else f"{pan['axis_label']}: ± {_fmt_val(_q['sigma'])}",
             fontsize=_AX_LBL)
-    # NARROWER x bounds (maintainer, 2026-08-13: "hard to read right now").
+    # NARROWER x bounds ("hard to read right now").
     # posteriors.gaussian_curve builds its grid as center +/- 5 sigma, and at
     # +/-5 sigma the curve is visually zero across most of the axis, which
     # squeezes the informative part into the middle fifth. The automatic
@@ -577,7 +577,7 @@ def _plot_posterior_panel(axp, pan: dict, color: str,
     axp.tick_params(labelsize=_TICK)
     # The y label distinguishes a FORECAST (centered on the input by
     # construction) from a RETRIEVAL on one noise draw (whose center moves).
-    # External review, 2026-08-14: with jitter on, curves sat 2.7 sigma off the
+    # Reviews re-find this: with jitter on, curves sit off the
     # injected value while the axis still read "forecast density" -- and a
     # forecast centered anywhere but the input would be a bug, so the label
     # invited exactly that reading. The caller passes density_label; the
@@ -660,12 +660,12 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
     # argument). Reentrant, so a caller holding it already is fine.
     with plotting.render_lock, \
             plt.style.context([str(_STYLE_FILE), _STYLE_OVERRIDES]):
-        # Spectrum at 2x width (maintainer), then ONE PANEL PER PARAMETER.
+        # Spectrum at 2x width, then ONE PANEL PER PARAMETER.
         # The single merged twin-axis box this replaces could not work: see
         # _plot_posterior_panel for the measurement. A 2:1 wavelength panel is
         # the right shape for a spectrum and matches how these appear in
         # papers; the posterior panels stay square.
-        # ASPECT RATIOS (maintainer, 2026-08-13): the spectrum is golden
+        # ASPECT RATIOS: the spectrum is golden
         # ratio (PHI:1 wide) and every forecast panel is SQUARE. Both are
         # enforced twice over -- the figure size is SOLVED so each gridspec
         # cell already has the target shape, and set_box_aspect pins the axes
@@ -675,7 +675,7 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
         _npan = max(1, len(panels))
         _top = 0.965 if title is None else 0.905
         _bottom = 0.165 if footnote else 0.135
-        # wspace 0.16, was 0.24 (maintainer, 2026-08-13): a narrower gap. The
+        # wspace 0.16, was 0.24: a narrower gap. The
         # y tick labels on each posterior panel are what set the floor here --
         # below ~0.13 they start colliding with the panel to their left.
         _left, _right, _wspace = 0.055, 0.988, 0.16
@@ -702,7 +702,7 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
         # -- RIGHT: one square panel per marginalized forecast posterior ----
         for i in range(_npan):
             axp = fig.add_subplot(gs[0, i + 1])
-            # SQUARE (maintainer, 2026-08-13). The equal-height rule this
+            # SQUARE. The equal-height rule this
             # replaces is preserved anyway: the figure height is solved so a
             # square panel exactly fills the row, so square and
             # same-height-as-the-spectrum are the same thing here -- which is

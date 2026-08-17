@@ -12,8 +12,12 @@ collaborator can compare them before claiming an exact reproduction.
 
 `widget_state` is the inverse: it maps such a file (or a bare canonical-params
 dict from an older download) onto Streamlit session-state widget keys. It
-validates through `forward.canonical_params` first and raises ValueError on
-anything invalid -- the caller applies either the whole mapping or nothing.
+validates through `forward.canonical_params` first, then checks every numeric
+value against its widget's range, and raises ValueError on anything invalid --
+the caller applies either the whole mapping or nothing. The range check is
+load-bearing: Streamlit does not reject an out-of-range session-state value,
+it silently discards it and the widget falls back to its default, so an
+unchecked restore would run a different model than the file describes.
 
 This lives outside app.py so the mapping is importable and unit-testable
 without running Streamlit.
@@ -27,6 +31,67 @@ import os
 from jwst_tool import forward, planets, provenance
 
 SHARE_FORMAT = 1
+
+# Widget ranges mirrored from app.py, cross-checked by
+# tests/unit/test_share_config.py so they cannot drift. Session-global keys;
+# forward.* constants are shared with the widgets themselves.
+_GLOBAL_BOUNDS = {
+    "met": (0.1, 100.0), "co": (0.10, 2.00),
+    "sza": (0.0, 89.0), "fdiur": (0.1, 1.0),
+    "yconv": (1.0e-4, 1.0e-2),
+    "ck": (-4.0, 2.0), "ca": (0.0, 4.0),
+    "mierg": forward.MIE_LOG_RG_RANGE, "miesg": forward.MIE_SIGMAG_RANGE,
+    "miemmr": forward.MIE_LOG_MMR_RANGE,
+    "nupts": forward.NU_PTS_RANGE, "nz": forward.NZ_RANGE,
+    "rtptop": (1.0e-9, 1.0e-6), "rtdit": (0.1, 1.0),
+    "pref": (1.0e-6, 7.0),
+    "tsig": (1.0, 10.0),
+    "ntr": (1, 10), "sat": (0.5, 0.95), "rbin": (25, 500),
+    "seed": (0, 9999), "noisescale": (0.5, 3.0),
+}
+# Per-planet keys (app.py's _k). The system/star fields share
+# planets.CUSTOM_FIELD_RANGES with the widgets; the rest are widget literals.
+_PLANET_BOUNDS = {
+    **planets.CUSTOM_FIELD_RANGES,
+    "tbase": (0.5, 10.0),
+    "tirr": (800.0, 2500.0), "tint": (50.0, 500.0),
+    "lk": (-4.0, 0.0), "lg": (-2.0, 0.3),
+    "kzz": (6.0, 12.0), "kzkmax": (4.0, 11.0), "kzplev": (-5.0, 2.0),
+    "kzkdeep": (4.0, 11.0), "kzzx": (-1.0, 1.0),
+}
+_FLOOR_BOUNDS = (0.0, 200.0)
+_INFL_BOUNDS = (1.0, 3.0)
+_TGT_BOUNDS_K = (5.0, 500.0)      # target-uncertainty widget, Kelvin params
+_TGT_BOUNDS = (0.01, 3.0)         # target-uncertainty widget, dex/ratio params
+
+
+def _check_widget_ranges(state: dict, key, pk, science_mode: str) -> None:
+    """Refuse any restored numeric outside its widget's range.
+
+    Streamlit does not reject an out-of-range session-state value: it
+    silently discards it and the widget falls back to its default, which
+    would run a different model than the file describes."""
+    from jwst_tool import instruments as ins
+    checks = {key(w): (w, b) for w, b in _GLOBAL_BOUNDS.items()}
+    checks.update({pk(w): (w, b) for w, b in _PLANET_BOUNDS.items()})
+    for m in ins.MODES:
+        checks[key(f"floor_{m}")] = (f"floor for {m}", _FLOOR_BOUNDS)
+        checks[key(f"infl_{m}")] = (f"noise multiplier for {m}", _INFL_BOUNDS)
+    checks[key(f"pbtm_{science_mode}")] = ("p_btm_bar", forward.P_BTM_RANGE)
+    for p, unit in forward.PARAM_UNITS.items():
+        checks[key(f"tgt_{p}")] = (
+            f"target uncertainty for {p}",
+            _TGT_BOUNDS_K if unit == "K" else _TGT_BOUNDS)
+    bad = []
+    for k, (name, (lo, hi)) in checks.items():
+        if k in state and not lo <= float(state[k]) <= hi:
+            bad.append(f"{name}={float(state[k]):g} outside [{lo:g}, {hi:g}]")
+    if bad:
+        raise ValueError(
+            "configuration value(s) outside the interface's supported "
+            "range: " + "; ".join(bad) + ". Out-of-range values are refused "
+            "rather than replaced, so the run is always the run the file "
+            "describes.")
 
 
 def build_share(canon: dict, goal: dict, observation: dict,
@@ -151,10 +216,18 @@ def _restore_goal(state: dict, cp: dict, goal: dict, key,
         avail += list(forward.CLOUD_FISHER_PARAMS)
     if mie_i:
         avail += list(forward.MIE_FISHER_PARAMS)
-    fisher = [p for p in (goal.get("fisher_params")
-                          or cp.get("fisher_params") or []) if p in avail]
+    requested = [str(p) for p in (goal.get("fisher_params")
+                                  or cp.get("fisher_params") or [])]
+    fisher = [p for p in requested if p in avail]
+    dropped_fp = [p for p in requested if p not in avail]
+    if dropped_fp:
+        notes.append(f"free parameter(s) {dropped_fp} are not available "
+                     "under the restored settings and were dropped")
     selected_goal = str(goal.get("goal", "") or "")
     if selected_goal not in ("detect", "constrain"):
+        if goal:
+            notes.append(f"unknown science goal {selected_goal!r}; the goal "
+                         "settings keep their current values")
         return
     state[key("goal")] = selected_goal
     if goal.get("target_sig") is not None:
@@ -162,6 +235,8 @@ def _restore_goal(state: dict, cp: dict, goal: dict, key,
     method = str(goal.get("jac_method", cp.get("jac_method", "fd")))
     if method in ("fd", "ad"):
         state[key("jacm")] = method
+    else:
+        notes.append(f"unknown Jacobian method {method!r} was not restored")
     if selected_goal == "detect":
         net_sfx = _network_suffix(cp)
         extras = state[key(f"xmols_vulcan{net_sfx}")]
@@ -225,7 +300,8 @@ def _restore_observation(state: dict, obs: dict, cfg: dict, key, pk,
     from jwst_tool import instruments as ins
     for source, widget, cast in (
             ("ks_mag", "ks", float), ("t14", "t14", float),
-            ("t_base", "tbase", float)):
+            ("t_base", "tbase", float), ("star_teff", "teff", float),
+            ("star_logg", "logg", float), ("star_feh", "feh", float)):
         if obs.get(source) is not None:
             state[pk(widget)] = cast(obs[source])
     modes = [m for m in (obs.get("modes") or []) if m in ins.MODES]
@@ -241,12 +317,21 @@ def _restore_observation(state: dict, obs: dict, cfg: dict, key, pk,
         if obs.get(source) is not None:
             state[key(widget)] = cast(obs[source])
     floor_mode = obs.get("floor_mode")
-    if floor_mode in ("constant", "none", "file"):
+    if floor_mode not in ("constant", "none", "file"):
+        if floor_mode is not None:
+            notes.append(f"unknown noise-floor type {floor_mode!r}; the "
+                         "floor settings keep their current values")
+    else:
         state[key("floormode")] = floor_mode
         if floor_mode == "constant":
             for mode, value in (obs.get("floors") or {}).items():
-                if mode in ins.MODES and isinstance(value, (int, float)):
+                if mode not in ins.MODES:
+                    continue
+                if isinstance(value, (int, float)):
                     state[key(f"floor_{mode}")] = float(value)
+                else:
+                    notes.append(f"the constant noise floor for {mode} is "
+                                 "not numeric and was not restored")
         elif floor_mode == "file":
             table = cfg.get("floor_table")
             if table:
@@ -256,11 +341,20 @@ def _restore_observation(state: dict, obs: dict, cfg: dict, key, pk,
                 notes.append("the wavelength-table noise floor is not embedded "
                              "in this file; upload it again")
     for mode, value in (obs.get("noise_infl") or {}).items():
-        if mode in ins.MODES and isinstance(value, (int, float)):
+        if mode not in ins.MODES:
+            continue
+        if isinstance(value, (int, float)):
             state[key(f"infl_{mode}")] = float(value)
+        else:
+            notes.append(f"the noise multiplier for {mode} is not numeric "
+                         "and was not restored")
     scale = obs.get("noise_scale")
-    if isinstance(scale, (int, float)) and float(scale) > 0.0:
+    if isinstance(scale, (int, float)):
+        # range-checked by _check_widget_ranges, never silently dropped
         state[key("noisescale")] = float(scale)
+    elif scale is not None:
+        notes.append("the global noise multiplier is not numeric and was "
+                     "not restored")
     if obs.get("scenario") not in (None, "random"):
         notes.append(
             f"this configuration selected the removed experimental noise "
@@ -277,15 +371,22 @@ def _restore_system_profile(cp: dict, key, pk, planet: str,
     state = {
         key("planet"): planet,
         key("scimode"): str(cp.get("science_mode", "transmission")),
-        pk("teff"): float(cp["star_teff"]),
-        pk("logg"): float(cp["star_logg"]),
-        pk("feh"): float(cp["star_feh"]),
         pk("rp"): float(cp["rp_rjup"]),
         pk("g"): float(cp["gs_cgs"]) / 100.0,
         pk("rstar"): float(cp["rstar_rsun"]),
         pk("a"): float(cp["orbit_au"]),
         pk("tp"): tp_mode,
     }
+    # The Pandeia star. canonical_params zeroes star_teff/logg/feh in
+    # transmission mode (the star lives only on the noise side there), so
+    # the canonical block carries the real star only in emission mode. The
+    # observation block records it for both modes; _restore_observation
+    # overwrites these keys from it when present. The zero sentinel must
+    # never reach the widgets: Teff=0 is outside every widget range.
+    if float(cp["star_teff"]) != 0.0:
+        state[pk("teff")] = float(cp["star_teff"])
+        state[pk("logg")] = float(cp["star_logg"])
+        state[pk("feh")] = float(cp["star_feh"])
     if str(cp.get("sflux", "")) in planets.SFLUX_CHOICES:
         state[pk("sflux")] = str(cp["sflux"])
     else:
@@ -420,4 +521,15 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
     _restore_goal(state, cp, goal, key, tp_mode, notes)
     _restore_observation(state, obs, cfg, key, pk, notes)
 
+    # A transmission-mode file that predates the observation block's star
+    # record: the Pandeia noise simulation still needs Teff/log g/[Fe/H],
+    # so the fields keeping their current values must be said, not silent.
+    if obs and pk("teff") not in state:
+        notes.append(
+            "this file does not record the stellar parameters used for the "
+            "noise simulation (Teff, log g, [Fe/H]); those fields keep "
+            "their current values")
+
+    _check_widget_ranges(state, key, pk,
+                         str(cp.get("science_mode", "transmission")))
     return state, notes

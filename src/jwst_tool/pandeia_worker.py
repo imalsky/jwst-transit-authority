@@ -124,7 +124,7 @@ def _native_r(refdata, m, wl):
         # The LW grism dispersion file carries NO disperser token in its name
         # (jwst_nircam_disp_*.fits, 2.4-5.0 um; the dhs0-ord* files are the
         # short-wave DHS), so the token pattern above matches nothing and
-        # NIRCam ran without a native-R export until worker v12 (2026-08-16).
+        # NIRCam ran without a native-R export until worker v12.
         # The exact prefix is required: a bare *disp*.fits glob sorts the
         # dhs0 files first.
         pat = os.path.join(refdata, "jwst", "nircam", "dispersion",
@@ -190,7 +190,7 @@ def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
     # measured floor is unsafe.)
     saturated = sat_probe > sat_limit
     ng_best, rpt = ng_min, probe
-    # Maximality is PROVEN, not extrapolated (2026-08-09 review round 2: the
+    # Maximality is PROVEN, not extrapolated (the
     # earlier predictor-stall exit could stop one integer below the true
     # optimum on ramps with a per-integration time offset). Bracket
     # invariant: ng_best is the largest MEASURED-safe count, hi the smallest

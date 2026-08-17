@@ -346,6 +346,22 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
     order = np.argsort(wl_model)
     wl_model = wl_model[order]
     depth = model["depth"][order]
+    # The model's own resolving power, measured from its grid (the two
+    # opacity modes set it differently: correlated-k is fixed at the
+    # published k-tables' R = 1000, line-by-line scales with nu_pts).
+    _lnw = np.log(wl_model)
+    r_model = (1.0 / float(np.median(np.diff(_lnw)))
+               if _lnw.size > 2 else float("inf"))
+    if float(R_bin) > r_model:
+        raise ValueError(
+            f"{mode_key}: analysis resolving power R_bin={float(R_bin):g} is "
+            f"finer than the model spectrum's own resolving power "
+            f"(R = {r_model:.0f}). Bins narrower than the model grid would "
+            "report interpolated structure the model does not contain. Lower "
+            "R_bin to at most the model resolving power; under the default "
+            "correlated-k opacity the grid is the published k-tables' "
+            "R = 1000 band grid and cannot be raised, in line-by-line mode "
+            "nu_pts can raise it.")
     mols = [str(x) for x in model["mols"]]
     depth_wo = _removed_spectrum(model, mols, target_mol, order)
 
@@ -401,18 +417,13 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
             # A Gaussian kernel needs R_model >= 2.3548 * R_native to be
             # resolved at all, and the binding R_native is the SMALLEST in
             # band (the widest kernel), matching smooth_to_native_r's test.
-            # Measure R_model from the model grid itself rather than naming a
-            # setting: the two opacity modes set it differently (correlated-k
-            # is fixed at the published k-tables' R = 1000, line-by-line
-            # scales with nu_pts), so "raise nu_pts" was advice that does
-            # nothing under the default mode (2026-08-16).
+            # r_model is measured from the model grid itself rather than a
+            # named setting, because "raise nu_pts" is advice that does
+            # nothing under the default correlated-k mode.
             _rn = float(np.nanmin(r_nat)) if np.isfinite(r_nat).any() else 0.0
-            _lnw = np.log(wl_model)
-            _r_model = (1.0 / float(np.median(np.diff(_lnw)))
-                        if _lnw.size > 2 else float("nan"))
             _lsf_skip_note = (
                 f"native-R LSF is a NO-OP here: the model spectrum's own "
-                f"resolving power (R = {_r_model:.0f}) cannot resolve this "
+                f"resolving power (R = {r_model:.0f}) cannot resolve this "
                 f"mode's line-spread function (native R down to {_rn:.0f}, "
                 "which needs about 2.35x that in model resolving power). The "
                 "model's own opacity sampling sets the effective width "
