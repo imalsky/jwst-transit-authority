@@ -1288,7 +1288,10 @@ def canonical_params(params: dict) -> dict:
         # (After the molecule-universe checks above, so an unknown or
         # provider-refused species keeps its more fundamental error.) The
         # frozenset is cross-checked against exomolop.available() by a
-        # data-gated test, so it cannot rot silently.
+        # data-gated test, so it cannot rot silently. They stay in
+        # EXTRA_MOLECULES because opacity_mode="lbl" CAN run them; the GUI
+        # drops them from its options (v34) since that mode is not offered
+        # there, so a picker entry would be a dead end.
         no_table = sorted(set(cp["extra_mols"]) & _NO_EXOMOLOP_TABLE)
         if no_table:
             raise ValueError(

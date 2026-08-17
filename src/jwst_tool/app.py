@@ -1225,74 +1225,40 @@ with st.sidebar:
                          if m not in forward._S_MOLECULES]
             _extra_set = [m for m in _extra_set
                           if m not in forward._S_MOLECULES]
-        _no_table = [m for m in _extra_set if m in forward._NO_EXOMOLOP_TABLE]
         st.caption(
             f"The base set **{' · '.join(_base_set)}** is always on."
             + (" No SO2 here: in equilibrium, sulfur sits in H2S and "
                "OCS. Making SO2 needs the VULCAN engine." if _pic else ""))
-        # Which data the annotations must describe depends on the opacity
-        # path this run will take, and that is DERIVED (a Mie deck forces
-        # line-by-line -- forward.default_opacity_mode). Under the default
-        # correlated-k mode the engine reads ExoMolOP k-tables and never
-        # touches a HITRAN line list, so reporting line-list status there
-        # annotated every molecule with a file the run does not open.
-        _opac_lbl = bool(st.session_state.get(K("miec"), ""))
-        if _opac_lbl:
-            _mol_status = datacheck.molecule_linelist_status(
-                list(_extra_set),
-                broadening=st.session_state.get(K("broad"), "air"))
-            _MOL_NOTE = {datacheck.OK: "line list cached",
-                         datacheck.AUTO: "downloads on first use",
-                         datacheck.MISSING: "engine data missing"}
-        else:
-            _mol_status = datacheck.exomolop_table_status(
-                [m for m in _extra_set if m not in forward._NO_EXOMOLOP_TABLE])
-            _MOL_NOTE = {datacheck.OK: "k-table ready",
-                         datacheck.AUTO: "downloads on first use",
-                         datacheck.MISSING: "k-table missing"}
-        # Extras default ON (a complete detection report is worth more than a
-        # faster first run) EXCEPT the species with no published ExoMolOP
-        # k-table: under the default opacity_mode canonical_params refuses
-        # them loudly (v31), so preselecting them would make the default
-        # configuration invalid. They stay selectable -- never auto-dropped.
+        # Species with no published k-table are NOT offered (v34): the GUI has
+        # no opacity_mode control, so a picker entry for one would be a dead
+        # end that only fails at run time. They stay in EXTRA_MOLECULES for API
+        # callers on opacity_mode="lbl", which can run them.
+        _extra_set = [m for m in _extra_set
+                      if m not in forward._NO_EXOMOLOP_TABLE]
         # Preselect the MEASURED-relevant subset, not everything with a table
-        # (v34). The menu now carries every species with a published k-table,
-        # most of which contribute under 1 ppm; defaulting all of them on would
-        # pay a leave-one-out spectrum each for signals nothing can see. The
-        # ppm measurements behind EXTRA_MOLECULES_DEFAULT are in forward.py.
+        # (v34). The menu carries every species with a published k-table, most
+        # of which contribute under 1 ppm; defaulting all of them on would pay
+        # a leave-one-out spectrum each for signals nothing can see. The ppm
+        # measurements behind EXTRA_MOLECULES_DEFAULT are in forward.py.
+        # Bare molecule names: per-item data-status annotations moved to
+        # `jwst-tool data` and the status panel, which is where they belong.
         extra_mols = st.multiselect(
             "Extra opacity molecules", list(_extra_set),
             default=[m for m in _extra_set
-                     if m in forward.EXTRA_MOLECULES_DEFAULT
-                     and m not in forward._NO_EXOMOLOP_TABLE],
-            key=K(f"xmols_{chem_provider}{_net_sfx}"),
-            format_func=lambda m: (
-                f"{m}  (no ExoMolOP table -- needs a Mie/line-by-line run)"
-                if m in forward._NO_EXOMOLOP_TABLE
-                else f"{m}  ({_MOL_NOTE[_mol_status[m]]})"))
-        # h2he has per-molecule caches; CO is cached ExoMol and ignores the
-        # broadening choice
-        _h2he_mols = [m for m in list(_base_set) + extra_mols if m != "CO"]
-        _h2he_cached = sum(
-            1 for v in datacheck.molecule_linelist_status(
-                _h2he_mols, broadening="h2he").values() if v == datacheck.OK)
+                     if m in forward.EXTRA_MOLECULES_DEFAULT],
+            key=K(f"xmols_{chem_provider}{_net_sfx}"))
+        # Both of these are INERT under the default correlated-k mode (the
+        # k-tables carry their own grid and H2/He broadening). The label says
+        # so; the tooltips that repeated it went 2026-08-17.
         broadening = st.selectbox(
             "Pressure-broadening gas (line-by-line mode only)",
             ["air", "h2he"], index=0, key=K("broad"),
-            format_func=lambda b: (
-                "air (HITRAN terrestrial widths, default)"
-                if b == "air" else
-                f"H2/He blend (planetary, {_h2he_cached}/{len(_h2he_mols)} "
-                "line-list caches present)"),
-            help="Line-width perturber, line-by-line mode only; the default "
-                 "correlated-k tables already carry H2/He broadening.")
+            format_func={"air": "air (HITRAN terrestrial widths, default)",
+                         "h2he": "H2/He blend (planetary)"}.get)
         nu_pts = st.number_input(
             "Native spectral grid points (line-by-line mode only)",
             *forward.NU_PTS_RANGE,
-            forward.NU_PTS_DEFAULT, 500, key=K("nupts"),
-            help="Model wavelength sampling (R about nu_pts/2.7), line-by-line "
-                 "mode only; the default correlated-k grid comes from the "
-                 "published k-tables at R=1000.")
+            forward.NU_PTS_DEFAULT, 500, key=K("nupts"))
 
     with st.expander("Clouds & scattering (ExoJAX)"):
         if science_mode == "emission":
@@ -1529,8 +1495,7 @@ with st.sidebar:
         sat_limit = st.number_input(
             "Saturation limit (full-well fraction)",
             0.5, 0.95, 0.80, 0.05, key=K("sat"),
-            help="Group selection keeps the brightest pixel below this "
-                 "full-well fraction.")
+)
         r_bin = st.number_input(
             "Analysis resolving power, R", 25, 500, 100, 25, key=K("rbin"))
 
@@ -2399,9 +2364,7 @@ with st.expander("Physical structure (T-P profile, mixing ratios)"):
                              unit="K", step=10.0)
         _pr_r = _axis_range(st, "Pressure", K("struct_p"), _st_box.warning,
                             unit="bar", positive=True, step=0.001,
-                            fmt="%.3g",
-                            help="Applies to both panels, which share this "
-                                 "axis.")
+                            fmt="%.3g")
         _vmr_xr = _axis_range(st, "Mixing ratio", K("struct_vmr"),
                               _st_box.warning, positive=True, step=1e-6,
                               fmt="%.1e")
@@ -3116,22 +3079,19 @@ with _fig_ctx.expander("Figure settings"):
     _wx, _wlg = st.columns([2.6, 0.9], vertical_alignment="bottom")
     _wl_range = _axis_range(
         _wx, "Wavelength", K("sum_x"), _fig_box.warning, unit="um", step=0.1,
-        positive=True,
-        help="Blank fits the selected modes' span; set both to zoom "
-             "(for example 3.0 to 5.5 for G395H).")
+        positive=True)
     _x_log = _wlg.checkbox("Log x", value=True, key=K("sum_xlog"))
     _dx, _dlg = st.columns([2.6, 0.9], vertical_alignment="bottom")
     _depth_range = _axis_range(
         _dx, "Depth", K("sum_y"), _fig_box.warning, unit="ppm", step=1.0,
-        help="Blank fits the data; setting both also turns off the automatic "
-             "legend headroom.")
+)
     _y_log = _dlg.checkbox("Log y", value=False, key=K("sum_ylog"))
     # no unit= here: forward.param_axis already carries it inside the label
     # ("[M/H] [dex]"), so passing one again reads "[M/H] [dex] min (dex)"
     _post_xlims = [
         _axis_range(st, p["axis_label"], K("sum_post_" + p["param"]),
                     _fig_box.warning,
-                    help="Blank fits the drawn posterior.")
+            )
         for p in _post_panels]
 # Blank wavelength boxes fall back to the span the SELECTED modes cover, so
 # choosing modes remains a wavelength control on its own.

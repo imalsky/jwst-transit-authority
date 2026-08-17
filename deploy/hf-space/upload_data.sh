@@ -93,7 +93,24 @@ PYEOF
         # Hardlink (instant, no extra disk); the tables are immutable products.
         [ -e "$dst" ] || ln "$src" "$dst" 2>/dev/null || cp -c "$src" "$dst"
     done
-    cp -f "$KTABLE_SRC/provenance.json" "$STAGE/retrieval-data/exomolop/"
+    # Provenance must describe what was STAGED, not the maintainer's whole
+    # local tree. Copying it wholesale (until 2026-08-17) made the dataset
+    # repo claim 17 tables when 11 were uploaded, and a check that trusted it
+    # concluded SH/SO were present when they had never been staged -- the
+    # Space then failed at run time on the default molecule set.
+    KTABLE_MOLS="$KTABLE_MOLS" python3 - "$KTABLE_SRC/provenance.json" \
+            "$STAGE/retrieval-data/exomolop/provenance.json" <<'PYEOF'
+import json, os, sys
+src, dst = sys.argv[1], sys.argv[2]
+staged = set(os.environ["KTABLE_MOLS"].split())
+full = json.load(open(src))
+json.dump({k: v for k, v in full.items() if k in staged},
+          open(dst, "w"), indent=1, sort_keys=True)
+missing = sorted(staged - set(full))
+if missing:
+    print(f"WARNING: staged tables with no provenance entry: {missing}",
+          file=sys.stderr)
+PYEOF
     echo "exomolop: staged $(echo "$KTABLE_MOLS" | wc -w | tr -d ' ') tables."
 else
     echo "NOTE: no exomolop/ tree at $KTABLE_SRC -- skipping the k-tables."
