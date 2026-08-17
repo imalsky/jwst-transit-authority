@@ -1040,6 +1040,38 @@ with st.sidebar:
                     st.warning("Upload a table to run in file mode.")
                     tp_file_ok = False
 
+    # The column's pressure boundaries and the radius anchor: physics-defining
+    # inputs, so they live here in step 2 (moved out of "More settings",
+    # maintainer request). Widget keys are unchanged (shipped key contract).
+    with st.expander("Pressure limits & reference radius"):
+        rt_ptop_bar = st.number_input(
+            "RT top pressure (bar)",
+            1.0e-9, 1.0e-6, 1.0e-8, 1.0e-9,
+            format="%.1e", key=K("rtptop"))
+        p_ref_bar = st.number_input(
+            "Reference pressure for the planet radius (bar)",
+            1.0e-6, 7.0, 1.0e-3, format="%.1e", key=K("pref"),
+            help="The pressure level the planet radius Rp refers to; it "
+                 "sets the absolute depth level of the transmission "
+                 "spectrum.")
+        # keyed PER GEOMETRY (shipped key contract). The DEFAULT follows the
+        # structure mode -- a measured T-P table caps the honest column at its
+        # own bottom (7.6 bar for the shipped tables), parametric profiles get
+        # a round 10 bar -- and tracks that mode until the user edits the box
+        # (same seed pattern as the Kzz mode below; an untouched default must
+        # never survive a structure switch and refuse the run).
+        _pbtm_key = K(f"pbtm_{science_mode}")
+        _pbtm_default = forward.default_p_btm_bar(dict(tp_mode=tp_mode))
+        _pbtm_now = st.session_state.get(_pbtm_key)
+        if (_pbtm_now in (forward.P_BTM_FILE_BAR, forward.P_BTM_PARAMETRIC_BAR)
+                and _pbtm_now != _pbtm_default):
+            st.session_state[_pbtm_key] = _pbtm_default
+        p_btm_bar = st.number_input(
+            "Column bottom pressure (bar)",
+            *forward.P_BTM_RANGE,
+            value=_pbtm_default,
+            step=1.0, format="%.4g", key=_pbtm_key)
+
     with st.expander("Composition"):
         # Composition is STRUCTURAL, one path for every value:
         # metallicity scales O/C/N/S together, C/O sets C_H = co * O_H,
@@ -1589,30 +1621,9 @@ with st.sidebar:
     diff_esc, top_flux, bot_flux = [], [], []
 
     with st.expander("Advanced radiative transfer (ExoJAX)"):
-        rt_ptop_bar = st.number_input(
-            "RT top pressure (bar)",
-            1.0e-9, 1.0e-6, 1.0e-8, 1.0e-9,
-            format="%.1e", key=K("rtptop"))
-        p_ref_bar = st.number_input(
-            "Reference pressure for the planet radius (bar)",
-            1.0e-6, 7.0, 1.0e-3, format="%.1e", key=K("pref"))
-        # keyed PER GEOMETRY (shipped key contract). The DEFAULT follows the
-        # structure mode -- a measured T-P table caps the honest column at its
-        # own bottom (7.6 bar for the shipped tables), parametric profiles get
-        # a round 10 bar -- and tracks that mode until the user edits the box
-        # (same seed pattern as the Kzz mode above; an untouched default must
-        # never survive a structure switch and refuse the run).
-        _pbtm_key = K(f"pbtm_{science_mode}")
-        _pbtm_default = forward.default_p_btm_bar(dict(tp_mode=tp_mode))
-        _pbtm_now = st.session_state.get(_pbtm_key)
-        if (_pbtm_now in (forward.P_BTM_FILE_BAR, forward.P_BTM_PARAMETRIC_BAR)
-                and _pbtm_now != _pbtm_default):
-            st.session_state[_pbtm_key] = _pbtm_default
-        p_btm_bar = st.number_input(
-            "Column bottom pressure (bar)",
-            *forward.P_BTM_RANGE,
-            value=_pbtm_default,
-            step=1.0, format="%.4g", key=_pbtm_key)
+        # the pressure boundaries and the radius anchor moved to step 2
+        # ("Pressure limits & reference radius"); only the chord
+        # integration choice stays advanced
         if science_mode == "emission":
             # canonical_params pins simpson in emission (no transit chord);
             # show the pinned state, not a silently ignored choice
