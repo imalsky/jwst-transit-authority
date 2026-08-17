@@ -1290,8 +1290,10 @@ def canonical_params(params: dict) -> dict:
         # frozenset is cross-checked against exomolop.available() by a
         # data-gated test, so it cannot rot silently. They stay in
         # EXTRA_MOLECULES because opacity_mode="lbl" CAN run them; the GUI
-        # drops them from its options (v34) since that mode is not offered
-        # there, so a picker entry would be a dead end.
+        # drops them from its options (v34) because it has no opacity_mode
+        # control and defaults to "exomolop", so a picker entry would be a
+        # dead end. (A Mie deck DERIVES "lbl", where they would run -- an
+        # accepted narrowing of the GUI, not of this API. See app.py.)
         no_table = sorted(set(cp["extra_mols"]) & _NO_EXOMOLOP_TABLE)
         if no_table:
             raise ValueError(

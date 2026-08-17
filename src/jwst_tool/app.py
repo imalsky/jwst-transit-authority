@@ -1229,10 +1229,16 @@ with st.sidebar:
             f"The base set **{' · '.join(_base_set)}** is always on."
             + (" No SO2 here: in equilibrium, sulfur sits in H2S and "
                "OCS. Making SO2 needs the VULCAN engine." if _pic else ""))
-        # Species with no published k-table are NOT offered (v34): the GUI has
-        # no opacity_mode control, so a picker entry for one would be a dead
-        # end that only fails at run time. They stay in EXTRA_MOLECULES for API
-        # callers on opacity_mode="lbl", which can run them.
+        # Species with no published k-table are NOT offered (v34, maintainer
+        # request): the GUI has no opacity_mode control and the mode defaults
+        # to "exomolop", so a picker entry for one would be a dead end that
+        # only fails at run time. They stay in EXTRA_MOLECULES for API callers
+        # on opacity_mode="lbl", which can run them.
+        # KNOWN NARROWING, accepted: a Mie condensate deck DERIVES
+        # opacity_mode="lbl" (forward.default_opacity_mode), where these two
+        # would in fact run -- but that widget is instantiated below this one,
+        # so gating on it would mean reading its session state a render early.
+        # A Mie-deck user who wants CS2/C2H6 goes through the API.
         _extra_set = [m for m in _extra_set
                       if m not in forward._NO_EXOMOLOP_TABLE]
         # Preselect the MEASURED-relevant subset, not everything with a table

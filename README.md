@@ -99,14 +99,16 @@ them every model step stops with an error naming the missing species.
 The menu holds more than this. Since 0.39.0 it lists **every** species the
 SNCHO network solves for which ExoMolOP publishes a table on the engine's
 R = 1000, 0.3-50 um grid, which adds `C2, CH, CH3, CN, CS, H2CO, H2O2, N2O,
-NH, NO, NS, OH`. Those are selectable but not preselected, because each
-contributes under 1 ppm on both reference atmospheres and every extra
-molecule costs a leave-one-out spectrum. Fetch them the same way if you want
-them.
+NH, NO, NS, OH`. Those are selectable but not preselected: the largest of
+them moves the binned depth by 2.35 ppm (CN, on HD 189733 b) and the rest by
+under 0.5 ppm, while every extra molecule costs a leave-one-out spectrum.
+Fetch them the same way if you want them.
 
-CS2 and C2H6 have no published table anywhere and cannot be selected under
-the default opacity mode. O2 is published only at R = 15000 on a different
-band grid, which cannot be mixed with the rest.
+C2H6 has no published k-table. CS2 has one, but it is HITRAN at 296 K on
+different pressure/temperature nodes, so taking it would reintroduce the
+room-temperature data this opacity source exists to replace; it is refused by
+choice, not by absence. Neither is offered in the app. O2 is published only
+at R = 15000 on a different band grid, which cannot be mixed with the rest.
 
 Run `jwst-tool data` at any time for a live status report with a remedy per item.
 
