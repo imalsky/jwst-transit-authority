@@ -1,6 +1,6 @@
 # PandExo numerical parity report
 
-Generated 2026-08-16 by `run_parity.py` + `make_report.py` in this directory. This file is a SUMMARY. The method, scope, known intended differences, and what may be claimed live in README.md ("Parity testing"). The full per-mode rows, the noise-model attribution, and the raw PandExo warnings live in `parity_summary.json` beside this file. Figures live in `../figs/`.
+Generated 2026-08-17 by `run_parity.py` + `make_report.py` in this directory. This file is a SUMMARY. The method, scope, and known intended differences live in the harness docstrings (`../scripts/run_parity.py`). The full per-mode rows, the noise-model attribution, and the raw PandExo warnings live in `parity_summary.json` beside this file. Figures live in `../figs/`.
 
 **GATE: PASS** (re-validated by `make_report.py`, not read from the artifact). Worker v12, Pandeia 2026.7 on both sides, the full 3-star x 8-mode matrix present, every declared threshold met.
 

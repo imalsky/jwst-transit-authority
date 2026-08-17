@@ -142,7 +142,7 @@ def test_fresh_boot_pre_run_contract():
     # (the molecule_linelist_status contract itself is pinned in
     # test_datacheck.py; here only the annotated widget's presence matters)
     sld = at.number_input(key="n0_noisescale")
-    assert sld.value == 1.0 and sld.label == "Noise multiplier", \
+    assert sld.value == 1.0 and sld.label == "Global noise multiplier", \
         (sld.label, sld.value)
     assert at.checkbox(key="n0_shownoise").value is True   # ON by default
     assert at.number_input(key="n0_seed").value == 0

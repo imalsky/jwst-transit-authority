@@ -248,22 +248,25 @@ st.set_page_config(page_title="JWST Exoplanet Observation Planner",
 # Header: short orientation, no acknowledgment gate
 # ---------------------------------------------------------------------------
 st.title("JWST exoplanet observation planner")
-st.subheader("Warning: This tool is in beta mode. That means if you find "
-             "a bug, you beta email isaacmalsky@gmail.com")
+st.subheader("Warning: This tool is in beta mode. If you find a bug, "
+             "please email isaacmalsky@gmail.com")
 st.markdown(
     "0. **Configuration**: load a shared configuration file, or start "
     "fresh.\n"
     "1. **Target**: select the system and the observation type.\n"
-    "2. **Atmosphere**: set up the atmosphere model. The model spectrum "
-    "is computed at R = 1000 (correlated-k) and scored on the analysis "
-    "bins (default R = 100).\n"
+    "2. **Atmosphere**: set up the atmosphere model. By default the model "
+    "spectrum is computed at R = 1000 (correlated-k) and scored on the "
+    "analysis bins (default R = 100).\n"
     "3. **Science goal**: detect a molecule, or constrain a parameter.\n"
     "4. **Observation**: select instrument modes and noise assumptions. "
     "The model is smoothed to the instrument resolution where that is "
     "coarser than the model, then binned to the analysis res.\n\n"
     "The tool computes a forward "
     "spectrum and a Pandeia noise forecast, ranks the selected modes, and "
-    "reports how many transits or eclipses reach your target.")
+    "reports how many transits or eclipses reach your target.\n\n"
+    "This is a planning tool. Detection values are conditional template "
+    "S/N estimates, and parameter constraints are local Fisher estimates "
+    "under the assumed atmosphere and noise model.")
 
 # The Run row renders HERE (above the explainers). Its widgets depend on
 # sidebar state that is read further down, so the slot is reserved now and
@@ -275,17 +278,16 @@ with st.expander("Validation"):
     st.markdown(
         "This tool includes test suites, as well as other validation checks. "
         "The suites run in CI for each repository: "
-        "<https://github.com/imalsky/jax-vulcan>, "
-        "<https://github.com/imalsky/vulcan-forward>, "
-        "<https://github.com/imalsky/vulcan-jwst-tool>, and "
-        "<https://github.com/imalsky/vulcan-retrieval>. "
+        "[jax-vulcan](https://github.com/imalsky/jax-vulcan), "
+        "[vulcan-forward](https://github.com/imalsky/vulcan-forward), "
+        "[vulcan-jwst-tool](https://github.com/imalsky/vulcan-jwst-tool), and "
+        "[vulcan-retrieval](https://github.com/imalsky/vulcan-retrieval). "
         "For end-to-end tests, see the set of validation figures that I've "
-        "created here: "
-        "<https://github.com/imalsky/vulcan-forward/tree/main/validation/figures>. "
-        "This includes trying to recreate the results of Tsai et al. 2023 "
-        "(<https://doi.org/10.5281/zenodo.7542781>), the JWST ERS carbon "
-        "dioxide paper (<https://doi.org/10.5281/zenodo.6959427>), and "
-        "VULCAN 2.0 and petitRADTRANS on identical inputs.")
+        "created [here](https://github.com/imalsky/vulcan-forward/tree/main/"
+        "validation/figures). This includes trying to recreate the results "
+        "of [Tsai et al. 2023](https://doi.org/10.5281/zenodo.7542781), the "
+        "[JWST ERS carbon dioxide paper](https://doi.org/10.5281/zenodo."
+        "6959427), and VULCAN 2.0 and petitRADTRANS on identical inputs.")
 
 # ---------------------------------------------------------------------------
 # Data availability -- detected live; the display adapts to what is installed
@@ -329,9 +331,14 @@ if _missing_req:
         "silently):\n\n"
         + "\n".join(f"- **{it.label}** -- {it.detail}. How to get it: "
                     f"{it.remedy}" for it in _missing_req)
-        + "\n\nInstall commands are in the README's *Install* section. "
-          "Console commands: `jwst-tool data` (status report) and "
-          "`jwst-tool fetch` (download).")
+        # on the hosted Space the visitor cannot install anything; the CLI
+        # remedies are for local installs (SPACE_ID is set by Hugging Face)
+        + ("\n\nThis hosted deployment is missing data it should ship "
+           "with; please report it to isaacmalsky@gmail.com."
+           if os.environ.get("SPACE_ID") else
+           "\n\nInstall commands are in the README's *Install* section. "
+           "Console commands: `jwst-tool data` (status report) and "
+           "`jwst-tool fetch` (download)."))
 with st.expander("Data status: what this machine has installed"
                  + (f"  ({len(_missing_req)} required item(s) missing)"
                     if _missing_req else "")):
@@ -797,7 +804,10 @@ with st.sidebar:
                 st.caption(
                     "Values come from a NASA Exoplanet Archive PSCompPars "
                     f"snapshot fetched {_snap.fetched_utc[:10]}, shipped "
-                    "with this tool release (not a live query).")
+                    "with this tool release (not a live query). They are "
+                    "nominal catalog values; review them before "
+                    "forecasting. Catalog uncertainties are not "
+                    "propagated.")
             for _kind, _msg in st.session_state.get(
                     "_archive_fill_notes") or []:
                 getattr(st, _kind)(_msg)
@@ -826,7 +836,8 @@ with st.sidebar:
             "Semi-major axis (AU)", *_R["a"],
             pdef["orbit_au"], 0.001, key=_k("a"), format="%.4f")
         t14 = st.number_input(
-            "Event duration, T14 (hours)", *_R["t14"],
+            ("Transit duration, T14 (hours)" if _evw == "transit"
+             else "Eclipse duration (hours)"), *_R["t14"],
             pdef["t14_hr"], 0.1, key=_k("t14"))
         _uv_ok = datacheck.uv_spectra_status()
         sflux = st.selectbox(
@@ -941,6 +952,11 @@ with st.sidebar:
                     f"{pdef['label'] if planet_key in planets.PLANETS else 'this planet'}: "
                     + (pdef.get("tp_table_note") or "none is bundled.")
                     + " Upload a table, or switch to the Guillot profile.")
+            elif (tp_file == forward.TP_FILE_SHIPPED
+                  and pdef.get("tp_table_note")):
+                # the note carries the reason in both directions (planets.py):
+                # show it when the shipped table is CHOSEN, not only missing
+                st.warning(pdef["tp_table_note"])
             if tp_file == forward.TP_FILE_UPLOAD:
                 _tp_example = (
                     "#(dyne/cm2) (K) (cm2/s)\n"
@@ -962,7 +978,7 @@ with st.sidebar:
                         "bottom of the atmosphere first or top first. "
                         "Column 2: temperature in K. Column 3 (optional): "
                         "Kzz in cm^2 s^-1, used when the vertical-mixing "
-                        "profile is set to 'Tabulated'. Any number of "
+                        "profile is set to 'Tabulated'. At least 4 data "
                         "rows. The two header lines are required.")
                     # deferred: clicking a download cancels a run in flight
                     _deferred_download(
@@ -1298,7 +1314,7 @@ with st.sidebar:
                                               _TARGET_DEFAULT[goal_param], 0.01,
                                               key=K(f"tgt_{goal_param}"))
             target_sig = st.number_input(
-                "Report bounds at significance (σ)", 1.0, 10.0, 3.0, 0.5,
+                "Report Fisher half-width at Nσ", 1.0, 10.0, 3.0, 0.5,
                 key=K("tsig"))
 
     # Free-parameter settings render only when the run computes derivatives.
@@ -1366,6 +1382,15 @@ with st.sidebar:
     # -----------------------------------------------------------------------
     st.divider()
     st.markdown("### 4 · Observation")
+    # Display-only band strings: the modelled band (registry envelope
+    # intersected with the forward-model span), with the NRS detector gap
+    # shown for the H gratings. Gap edges measured from this tool's own
+    # Pandeia 2026.7 wavelength grids (largest grid step); scoring always
+    # uses the worker's actual pixels, so the gap never enters the math.
+    _MODE_BAND_DISPLAY = {
+        "nirspec_g235h": "1.66-2.20 + 2.27-3.07 µm",
+        "nirspec_g395h": "2.87-3.72 + 3.82-5.18 µm",
+    }
     with st.expander(f"Instrument modes & {_evw}s", expanded=True):
         mode_keys = st.multiselect(
             "Instrument modes",
@@ -1373,11 +1398,15 @@ with st.sidebar:
             default=ins.DEFAULT_MODES, key=K("modes"),
             help="One fixed detector configuration per mode (see the mode "
                  "details table); noise is computed once per star, so adding "
-                 "modes later is instant.",
-            format_func=lambda k: (f"{ins.MODES[k]['label']}  "
-                                   f"({ins.MODES[k]['wl_min']:g}-"
-                                   f"{ins.MODES[k]['wl_max']:g} µm, "
-                                   f"R ~ {ins.MODES[k]['r_native_med']})"))
+                 "modes later is instant. Ranges are the modelled bands, not "
+                 "the full instrument coverage; R is the median native "
+                 "resolving power from the Pandeia reference data.",
+            format_func=lambda k: (
+                f"{ins.MODES[k]['label']}  "
+                "(" + _MODE_BAND_DISPLAY.get(
+                    k, f"{ins.MODES[k]['wl_min']:g}-"
+                       f"{ins.MODES[k]['wl_max']:g} µm")
+                + f", R ~ {ins.MODES[k]['r_native_med']})"))
         n_transits = st.number_input(f"Number of {_evw}s", 1, 10, 1, 1,
                                      key=K("ntr"))
 
@@ -1387,12 +1416,12 @@ with st.sidebar:
     # from it -- so this is not a cosmetic layer. What it may never touch:
     # the FORECAST (detection/Fisher scores, caches, result CSVs), which
     # stays realization-independent by construction.
-    with st.expander("Jitter & noise multiplier"):
+    with st.expander("Mock noise draw & noise multiplier"):
         show_noise = st.checkbox(
-            "Jitter", value=True, key=K("shownoise"),
-            help="One Gaussian draw per point at its own error bar, fitted "
-                 "in the posterior panels; the forecast numbers do not "
-                 "depend on the draw.")
+            "Mock noise draw", value=True, key=K("shownoise"),
+            help="One seeded Gaussian draw per point at its own error bar, "
+                 "fitted in the forecast panels; the forecast numbers do "
+                 "not depend on the draw.")
         seed = st.number_input(
             "Seed", 0, 9999, 0, key=K("seed"), disabled=not show_noise)
         # ONE knob for "more jitter". It scales the
@@ -1406,9 +1435,11 @@ with st.sidebar:
         # (multiplies) the per-mode multipliers in the Noise model expander,
         # which stay for mode-specific tuning.
         noise_scale = st.number_input(
-            "Noise multiplier", 0.5, 3.0, 1.0, 0.05, key=K("noisescale"),
+            "Global noise multiplier", 0.5, 3.0, 1.0, 0.05,
+            key=K("noisescale"),
             help="Scales every mode's noise (1.0 = the Pandeia prediction): "
-                 "error bars, S/N, forecast widths and jitter draw together.")
+                 "error bars, S/N, forecast widths and the mock draw "
+                 "together. Composes with the per-mode multipliers.")
 
     with st.expander("Timing, saturation & binning (Pandeia)"):
         t_base = st.number_input(
@@ -1442,7 +1473,9 @@ with st.sidebar:
                            "instrument but absent from the model.")
 
     with st.expander("Noise model (Pandeia)"):
-        st.markdown("**Minimum noise floor** (PandExo convention)")
+        st.markdown("**Minimum noise floor** (PandExo convention; the "
+                    "suggested values are planning assumptions, not measured "
+                    "instrument calibrations)")
         # DEFAULTS TO CONSTANT. A default is acceptable in ONE direction
         # only: preselecting "No floor" would claim undemonstrated precision
         # on the user's behalf, while a constant floor at the suggested
@@ -1804,7 +1837,9 @@ with st.expander("Run summary & configuration"):
             "application/json", key=K("dl_config"),
             help="The full setup of this run, uploaded tables included; "
                  "load it in step 0, here or on another machine, to "
-                 "reproduce the run.")
+                 "reproduce the run. Exact numerical reproduction also "
+                 "needs the same tool version; the software versions are "
+                 "recorded in the file.")
     else:
         st.caption("Configuration download is unavailable while the "
                    "settings do not validate (see the message above).")
@@ -1847,8 +1882,7 @@ def _compute_locked():
 
     model = forward.load_result(params)
     if model is None:
-        with st.status("Running VULCAN-JAX + ExoJAX forward model "
-                       "locally …",
+        with st.status("Running VULCAN-JAX + ExoJAX forward model …",
                        expanded=True) as status:
             # prior = the same rough pre-run estimate shown next to the Run
             # button; the bar's remaining time converges to the measured pace
@@ -2131,8 +2165,9 @@ if goal_r == "detect":
                 st.warning(
                     verdict + "  The target was "
                     + _not_reached_reason(_lim, _fl, _ev) + ". "
-                    + ("Lower the floor, choose other modes, or relax the "
-                       "target." if _fl else
+                    + ("If independent evidence supports a lower noise "
+                       "floor, test that case; otherwise choose other "
+                       "modes or relax the target." if _fl else
                        "Choose other modes or relax the target."))
         else:
             st.warning(verdict + "  No signal in the selected bands; try "
@@ -2199,13 +2234,16 @@ else:
             st.warning(
                 verdict + "  The target was "
                 + _not_reached_reason(_lim, _fl, _ev) + ". "
-                + ("Lower the floor, combine modes, or relax the target."
-                   if _fl else "Combine modes or relax the target."))
+                + ("If independent evidence supports a lower noise floor, "
+                   "test that case; otherwise combine modes or relax the "
+                   "target." if _fl else
+                   "Combine modes or relax the target."))
 
 # The ranking compares science information only. It does not check APT
-# feasibility (data volume, schedulability, calibration warnings), so the
-# verdict must carry that caveat -- an operationally unsupportable
-# configuration can otherwise be presented as "Best".
+# feasibility (data volume, schedulability, calibration warnings), so that
+# caveat renders as a caption under the mode-details table below -- an
+# operationally unsupportable configuration can otherwise be presented as
+# "Best".
 
 # --- spectrum data (rendered ONCE, on the summary figure below) -------------
 wl = model["wl_um"]
@@ -2442,6 +2480,14 @@ with st.expander("Mode details"):
         # the exact fixed detector configuration this row evaluated (each MODES
         # entry is one subarray + readout pattern, never the whole instrument
         # mode) plus its honest operational status
+        # detector gap, measured from the row's own wavelength grid (never
+        # hard-coded): a grid step far above the median step is the gap
+        _wls = np.unique(np.asarray(r["wl"], float))
+        _dw = np.diff(_wls)
+        if _dw.size and _dw.max() > 20.0 * np.median(_dw):
+            _i = int(np.argmax(_dw))
+            notes.append(f"detector gap {_wls[_i]:.2f}-{_wls[_i + 1]:.2f} "
+                         "µm inside the band")
         row.update({"configuration": _mode_cfg(r["mode_key"]),
                     "operational status": _op_status(r),
                     "median σ (ppm)": round(r["median_sigma_ppm"]),
@@ -2453,6 +2499,16 @@ with st.expander("Mode details"):
     st.download_button("Mode details (CSV)", _csv_bytes(pd.DataFrame(rows)),
                        f"{_fname_base}_mode_details.csv", "text/csv",
                        key=K("dl_modes_csv"))
+    if goal_r == "detect":
+        st.caption(
+            "Nuisance-profiled: per-segment depth offsets plus the local "
+            "T-P, reference-radius and cloud Jacobian directions (when "
+            "available) are profiled out. Calibration-only: per-segment "
+            "depth offsets alone.")
+    st.caption(
+        "Mode ranking reflects forecasted science information only; check "
+        "target acquisition, schedulability, data volume and program-level "
+        "feasibility in APT.")
 
 
 with st.expander("Add a custom mode set"):
@@ -2647,7 +2703,7 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
                 + (" **Rank-deficient: degenerate directions are reported as "
                    "unconstrained, not as fake finite numbers.**" if rank < dim else ""))
         # No "How to read this table" expander here: that reference material
-        # lives in README.md (Fisher table section); do not re-add it.
+        # lives in README.md ("Scope and limits"); do not re-add it.
     elif out.get("fisher_names"):
         st.info("A constraint forecast was requested but the cached model has "
                 "no Jacobian. Press Run to compute it.")
@@ -2775,9 +2831,9 @@ if _have_fisher:
         if not _sources:
             with _post_box:
                 st.info("No selected series carries a Jacobian, so there is "
-                        "no forecast curve to draw. Widen 'Series on the "
-                        "spectrum' below, or read the widths from the table "
-                        "above.")
+                        "no forecast curve to draw. Widen 'Spectrum & "
+                        "forecast series' below, or read the widths from "
+                        "the table above.")
         _src_labels_drawn = list(_sources)
 
         _mock_rec = {}
@@ -2935,7 +2991,7 @@ _series_lbl = {f"{kind}:{key}": lbl for kind, key, lbl in _series_opts}
 _fig_ctx = _fig_box.container()
 with _fig_ctx:
     _sel_series = st.multiselect(
-        "Modes", _series_ids,
+        "Spectrum & forecast series", _series_ids,
         default=[i for i in _series_ids if i.startswith("mode:")],
         format_func=lambda i: _series_lbl[i], key=K("sum_series"))
 

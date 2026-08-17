@@ -325,8 +325,9 @@ def _usable_pixels(mode_key: str, mode_result: dict) -> tuple:
         raise ValueError(
             f"{mode_key}: no usable pixels -- all {wl.size} are fully "
             f"saturated ({int((full > 0).sum())}) or wavelength-degenerate "
-            f"({int(degenerate.sum())}). Reduce ngroup / pick a fainter-star "
-            "configuration, or check the worker's wavelength grid")
+            f"({int(degenerate.sum())}). Choose a mode with a larger "
+            "saturation margin or a different target, or check the "
+            "worker's wavelength grid")
     return wl, flux, full, partial, degenerate, usable
 
 

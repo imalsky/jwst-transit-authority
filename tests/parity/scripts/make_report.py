@@ -1,13 +1,12 @@
 """Render the short REPORT.md from parity_summary.json (after run_parity.py).
 
-The report is a SUMMARY, kept deliberately short (2026-08-16): gate banner,
-provenance, and the measured envelope against each declared threshold. The
-durable narrative -- method, scope, known intended differences, the
-noise-model mechanism, and what may be claimed -- lives in README.md
-("Parity testing"), and the full per-mode rows, noise-model attribution, and
-raw PandExo warnings stay in `parity_summary.json`, which is committed beside
-it. Do not grow this renderer back into a per-mode table dump; the JSON is
-already the record.
+The report is a SUMMARY, kept deliberately short: gate banner, provenance,
+and the measured envelope against each declared threshold. The durable
+narrative -- method, scope, and known intended differences -- lives in the
+harness docstrings (`run_parity.py` in this directory), and the full
+per-mode rows, noise-model attribution, and raw PandExo warnings stay in
+`parity_summary.json`, which is committed beside it. Do not grow this
+renderer back into a per-mode table dump; the JSON is already the record.
 
 The report is generated from RE-VALIDATED JSON only: it imports the shared
 gate (`parity_gate.py`) and re-runs `validate_artifact()` on the summary
@@ -177,8 +176,8 @@ def main(require_pass: bool = False):
     w("")
     w(f"Generated {date.today().isoformat()} by `run_parity.py` + "
       "`make_report.py` in this directory. This file is a SUMMARY. The "
-      "method, scope, known intended differences, and what may be claimed "
-      "live in README.md (\"Parity testing\"). The full per-mode rows, the "
+      "method, scope, and known intended differences live in the harness "
+      "docstrings (`../scripts/run_parity.py`). The full per-mode rows, the "
       "noise-model attribution, and the raw PandExo warnings live in "
       "`parity_summary.json` beside this file. Figures live in `../figs/`.")
     w("")
