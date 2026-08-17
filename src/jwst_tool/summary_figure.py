@@ -230,22 +230,43 @@ def _visible_ylim(spec: dict, lo: float, hi: float):
     """Depth range of the data actually INSIDE the wavelength window.
 
     Without this a zoom keeps the full-range y limits, so a narrow window
-    renders as a flat line in the middle of mostly empty axes. Error bars are
-    included so a point's whisker is never clipped.
+    renders as a flat line in the middle of mostly empty axes.
 
-    The padding is MULTIPLICATIVE when the axis is logarithmic. Additive
-    padding is 6% of the linear range, which over a wide span reaches below
-    zero (measured: a 300-75000 ppm emission range padded to -4224 ppm) and
-    then trips the positive-range guard on data that is entirely positive.
+    The DEFAULT window fits the MODEL curves only, padded 10% of their span
+    on each side (maintainer, 2026-08-17). The simulated observation points
+    are deliberately excluded: a low-S/N MIRI point's whisker can span
+    several times the spectrum's own range and compressed the curve to a
+    near-flat line. Points still set the limits when no model sample is
+    visible, and an explicit depth_range always wins upstream. The padding
+    is MULTIPLICATIVE when the axis is logarithmic (additive padding over a
+    wide span reaches below zero and trips the positive-range guard).
     """
-    # CENTERS (model curves and point depths) and WHISKERS are kept apart,
-    # because a log axis treats them differently -- see below.
-    centers, whiskers = [], []
     m = (spec["wl_um"] >= lo) & (spec["wl_um"] <= hi)
+    model = []
     if m.any():
-        centers.append(spec["depth_ppm"][m])
+        model.append(spec["depth_ppm"][m])
         if spec["depth2_ppm"] is not None:
-            centers.append(spec["depth2_ppm"][m])
+            model.append(spec["depth2_ppm"][m])
+    if model:
+        allv = np.concatenate(model)
+        y0, y1 = float(np.min(allv)), float(np.max(allv))
+        if spec["y_log"]:
+            # A log axis silently DROPS a non-positive point center (a
+            # whisker merely clips). Poison y0 so the caller's existing
+            # positive-range guard refuses the axis, exactly as before;
+            # positive centers stay excluded from the model-only fit.
+            for p in spec["points"]:
+                pm = (p["wl_um"] >= lo) & (p["wl_um"] <= hi)
+                if pm.any() and float(np.min(p["depth_ppm"][pm])) <= 0.0:
+                    y0 = min(y0, float(np.min(p["depth_ppm"][pm])))
+        if spec["y_log"] and y0 > 0.0:
+            f = (y1 / y0) ** 0.10 if y1 > y0 else 1.10
+            return (y0 / f, y1 * f)
+        pad = 0.10 * (y1 - y0) if y1 > y0 else max(1.0, abs(y0) * 0.01)
+        return (y0 - pad, y1 + pad)
+    # Fallback (no model inside the window): the old points-inclusive fit,
+    # whiskers included so a point's whisker is never clipped.
+    centers, whiskers = [], []
     for p in spec["points"]:
         pm = (p["wl_um"] >= lo) & (p["wl_um"] <= hi)
         if pm.any():
