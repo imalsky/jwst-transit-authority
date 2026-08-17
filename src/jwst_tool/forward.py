@@ -1829,9 +1829,13 @@ def _make_progress(cp: dict, log):
                else ("solving photochemistry", 35.0)]
     # wo_mols (v32): the leave-one-out block is one engine batch, not one
     # stage per molecule -- transmission folds it into the full-spectrum
-    # call. Cost ~ n(n+3)/2 overlap folds at ~3 s (measured: 42 s at n=5).
+    # call. Each wo spectrum refolds from its molecule's position to the end
+    # of the active set, on average ~(n_active+1)/2 overlap folds at ~3 s
+    # (measured: 42 s at n=5 all-wo; the GUI asks for the TARGET only since
+    # 0.41.0, so K is usually 1).
     _n_wo = len(cp["wo_mols"])
-    _wo_w = 1.5 * _n_wo * (_n_wo + 3)
+    _n_active = len(active_molecules(cp))
+    _wo_w = 1.5 * _n_wo * (_n_active + 1)
     if _emis:
         stages += [("full eclipse spectrum", 8.0)]
         if _n_wo:

@@ -449,6 +449,10 @@ def test_wo_mols_end_to_end_semantics():
         molecule stage for [], exactly one batch stage otherwise.
     (d) consumers index depth_wo by the model's wo_mols, never by mols, and
         refuse loudly when the target has no removed spectrum.
+    (e) the GUI asks for the TARGET only on detect and [] on constrain
+        (0.41.0: the score reads one row and the all-molecule block
+        dominated a cold run) -- the all-molecule batch stays reachable
+        through the API's wo_mols=None default.
     """
     # (a) canonicalization
     cp = forward.canonical_params(_p())
@@ -500,6 +504,12 @@ def test_wo_mols_end_to_end_semantics():
     with pytest.raises(KeyError):
         detect._removed_spectrum({"depth_wo": model["depth_wo"]},
                                  mols, "CO2", order)     # malformed payload
+    # (e) the GUI wiring: target-only on detect, [] on constrain
+    from pathlib import Path
+    app_src = (Path(__file__).resolve().parents[2] / "src" / "jwst_tool"
+               / "app.py").read_text()
+    assert 'wo_mols=([target_mol] if goal == "detect" else [])' in app_src, \
+        "the GUI must ask for the target-only removed spectrum on detect"
 
 
 def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():

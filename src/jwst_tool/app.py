@@ -1727,10 +1727,14 @@ params = dict(planet=planet_key, science_mode=science_mode,
               log_kappa_cloud=log_kappa_cloud, alpha_cloud=alpha_cloud,
               mie_condensate=mie_condensate, mie_log_rg=mie_log_rg,
               mie_sigmag=mie_sigmag, mie_log_mmr=mie_log_mmr,
-              # v32: detect computes the removed-molecule spectrum for every
-              # RT molecule (None = all, so switching targets stays a cache
-              # hit); constrain reads none of them and skips the whole block
-              wo_mols=(None if goal == "detect" else []),
+              # Detect computes the removed-molecule spectrum for the TARGET
+              # only (0.41.0, maintainer: the score reads exactly one row and
+              # the full block was the largest cost of a cold run). The trade,
+              # accepted knowingly: wo_mols is cache-keyed, so switching the
+              # detection target is now a real re-run, not a cache hit; API
+              # callers can pass wo_mols=None for the all-molecule block.
+              # Constrain reads none of them and skips the block entirely.
+              wo_mols=([target_mol] if goal == "detect" else []),
               extra_mols=extra_mols, **tp_kwargs)
 star = dict(teff=teff, log_g=logg, metallicity=feh, ks_mag=ks_mag)
 planet_label = (planets.PLANETS[planet_key]["label"]
@@ -1799,17 +1803,16 @@ else:
               + n_fd_theta * 4 * _solve_min + 0.2 * n_cloud_rows)
 fd_min += _tint_min
 
-# The removed-molecule block (v32: one engine batch reusing the shared
-# correlated-k fold prefix, DETECT GOAL ONLY -- constrain reads none of these
-# spectra and skips the block). Scaling is QUADRATIC-ish in the molecule
-# count: wo spectrum i still folds molecules i..n, so the block costs about
-# n(n+3)/2 overlap folds at ~3 s each (measured 2026-08-16: 42 s at n=5,
-# both geometries, nz=100). This term sits OUTSIDE base_min on purpose: a
-# Jacobian row computes ONE spectrum, not the whole block, so _solve_min
-# must not inherit it.
-_n_wo_est = (len(_base_set) + len(extra_mols)) if goal == "detect" else 0
-_wo_min = (0.05 * _n_wo_est * (_n_wo_est + 3) / 2.0
-           * (nz / forward.NZ_DEFAULT))
+# The removed-molecule spectrum (0.41.0: TARGET ONLY on detect -- one extra
+# fold chain of up to n_mols overlap folds at ~3 s each, sharing the full
+# spectrum's prefix; constrain computes none). The old all-molecule block
+# scaled as n(n+3)/2 folds and dominated a cold run; API callers passing
+# wo_mols=None still pay it, but the GUI never asks for it. This term sits
+# OUTSIDE base_min on purpose: a Jacobian row computes ONE spectrum, not the
+# wo chain, so _solve_min must not inherit it.
+_n_mols_est = len(_base_set) + len(extra_mols)
+_wo_min = ((0.05 * _n_mols_est * (nz / forward.NZ_DEFAULT))
+           if goal == "detect" else 0.0)
 
 # Report the resolving power the run will ACTUALLY use. Under correlated-k
 # (the default) that is the k-tables' own band grid, R=1000, and nu_pts is

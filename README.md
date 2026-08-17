@@ -170,13 +170,17 @@ derivatives and reports local Cramer-Rao lower bounds. Those are not posterior
 widths: they are local, likelihood-based approximations, and informative priors
 or external data can make a real posterior narrower.
 
-The goals cache differently (v32, the `wo_mols` canonical parameter): a detect
-run computes one removed-molecule spectrum per RT molecule in a single engine
-batch that reuses the shared correlated-k fold prefix, so switching detection
-targets is a cache hit; a constrain run reads none of those spectra and skips
-the whole block, which makes it the faster goal and gives it its own cache
-entry. Scoring a detection against a constrain-cached model stops with an
-error naming the fix.
+The goals cache differently (the `wo_mols` canonical parameter, v32; scoped
+to the target in 0.41.0): a detect run computes the removed-molecule spectrum
+for the selected target only, sharing the full spectrum's correlated-k fold
+prefix -- the detection score reads exactly that one spectrum, and computing
+one per molecule was the largest block of a cold run. The trade: `wo_mols`
+is cache-keyed, so switching the detection target is a fresh solve, not a
+cache hit. API callers can pass `wo_mols=None` for the all-molecule batch
+(cost about n(n+3)/2 opacity folds), which makes later target switches
+instant against one cached model. A constrain run reads none of those
+spectra and skips the block. Scoring a detection against a model whose
+cached set lacks the target stops with an error naming the fix.
 
 ### How the Fisher bounds are computed
 
@@ -577,8 +581,9 @@ JWST's per-bin precision, and was previously not offered at all; SH is
 
 Two things worth knowing. A small number means "cannot move *these* models",
 not "never matters" -- HCN is 5 ppm on WASP-39 b and 241 ppm on
-HD 189733 b. And selecting more molecules costs time: the removed-molecule
-block grows roughly as n(n+3)/2 opacity folds.
+HD 189733 b. And selecting more molecules still costs time: each one adds a
+k-table load and lengthens every opacity fold chain (and the API's
+all-molecule `wo_mols=None` block grows as n(n+3)/2 folds).
 
 ### Chemical network, and the two measured ways to run faster
 
