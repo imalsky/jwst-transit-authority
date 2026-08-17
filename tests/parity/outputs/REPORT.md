@@ -2,17 +2,17 @@
 
 Generated 2026-08-16 by `run_parity.py` + `make_report.py` in this directory. This file is a SUMMARY. The method, scope, known intended differences, and what may be claimed live in README.md ("Parity testing"). The full per-mode rows, the noise-model attribution, and the raw PandExo warnings live in `parity_summary.json` beside this file. Figures live in `../figs/`.
 
-**GATE: PASS** (re-validated by `make_report.py`, not read from the artifact). Worker v11, Pandeia 2026.7 on both sides, the full 3-star x 8-mode matrix present, every declared threshold met.
+**GATE: PASS** (re-validated by `make_report.py`, not read from the artifact). Worker v12, Pandeia 2026.7 on both sides, the full 3-star x 8-mode matrix present, every declared threshold met.
 
 ## Provenance
 
 | star | side | engine | refdata | PSFs | worker / PandExo |
 |---|---|---|---|---|---|
-| w39_like | this tool | 2026.7 | 2026.7 | 2026.7 | worker v11 |
+| w39_like | this tool | 2026.7 | 2026.7 | 2026.7 | worker v12 |
 | w39_like | PandExo | 2026.7 | 2026.7 | 2026.7 | 2026.7 @ 34e42d81f782 |
-| bright_hot | this tool | 2026.7 | 2026.7 | 2026.7 | worker v11 |
+| bright_hot | this tool | 2026.7 | 2026.7 | 2026.7 | worker v12 |
 | bright_hot | PandExo | 2026.7 | 2026.7 | 2026.7 | 2026.7 @ 34e42d81f782 |
-| faint_k | this tool | 2026.7 | 2026.7 | 2026.7 | worker v11 |
+| faint_k | this tool | 2026.7 | 2026.7 | 2026.7 | worker v12 |
 | faint_k | PandExo | 2026.7 | 2026.7 | 2026.7 | 2026.7 @ 34e42d81f782 |
 
 Configuration: constant transit depth 0.01, transit duration 2.8036 h, equal out-of-transit baseline, saturation limit 80%, no noise floor, native (R=None) grids. Both sides run the SAME Pandeia release named above, so every difference below is an estimator or policy difference, never an engine calibration difference.

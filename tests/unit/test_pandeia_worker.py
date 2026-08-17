@@ -12,6 +12,40 @@ from jwst_tool import instruments as ins
 from jwst_tool import pandeia_worker as pw
 
 
+# --- native-R dispersion lookup ----------------------------------------------
+
+def test_native_r_finds_the_tokenless_nircam_grism_file(tmp_path):
+    """Worker v12: the NIRCam LW grism dispersion file carries NO disperser
+    token in its name (jwst_nircam_disp_*.fits), so the *grismr* token
+    pattern matched nothing and NIRCam ran without a native-R export. The
+    lookup must pick that file and never the alphabetically-earlier
+    short-wave dhs0-ord* files."""
+    fits = pytest.importorskip("astropy.io.fits")
+    import numpy as np
+
+    ddir = tmp_path / "jwst" / "nircam" / "dispersion"
+    ddir.mkdir(parents=True)
+
+    def _disp_fits(path, r_value):
+        cols = fits.ColDefs([
+            fits.Column(name="WAVELENGTH", format="D",
+                        array=np.array([2.4, 5.0])),
+            fits.Column(name="R", format="D",
+                        array=np.array([r_value, r_value], float)),
+        ])
+        fits.HDUList([fits.PrimaryHDU(),
+                      fits.BinTableHDU.from_columns(cols)]).writeto(path)
+
+    # decoy sorts BEFORE the grism file; a bare *disp*.fits glob would pick it
+    _disp_fits(ddir / "jwst_nircam_dhs0-ord1_disp_20240607150902.fits", 300.0)
+    _disp_fits(ddir / "jwst_nircam_disp_20170901102005.fits", 1400.0)
+
+    for key in ("nircam_f322w2", "nircam_f444w"):
+        r, src = pw._native_r(str(tmp_path), ins.MODES[key], [4.0])
+        assert src == "jwst_nircam_disp_20170901102005.fits", (key, src)
+        assert r == [1400.0], (key, r)
+
+
 # --- ngroup limits (PandExo compatibility) -----------------------------------
 
 def test_group_caps_and_optimizer_clamp():

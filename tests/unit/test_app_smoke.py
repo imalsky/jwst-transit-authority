@@ -375,10 +375,52 @@ def test_removed_gui_prose_sections_and_tooltips_stay_gone():
               if i > lo and 'st.markdown("### 4 · Observation")' in l)
     offenders = [i + 1 for i in range(lo, hi) if "help=" in lines[i]]
     assert not offenders, f"step 3 regained tooltips at lines {offenders}"
+    # 2026-08-16 resolution notes (maintainer request): the landing list and
+    # the analysis-R caption state the resolution chain, and the three
+    # line-by-line-only widgets stay OUT of a default (no-Mie-deck) boot --
+    # they render only when a Mie deck forces line-by-line mode (companion
+    # test below).
+    assert "computed at R = 1000" in page, "the step-2 resolution note is gone"
+    assert "blurred to each mode's native resolution" in page, \
+        "the step-4 resolution note is gone"
+    assert "not change the instrument's native resolution" in caps, \
+        "the analysis-R caption is gone"
+    _widget_keys = {w.key for w in at.get("number_input")} | {
+        w.key for w in at.get("selectbox")}
+    for key in ("n0_broad", "n0_nupts", "n0_rtdit"):
+        assert key not in _widget_keys, \
+            f"{key} renders without a Mie deck (line-by-line widgets are " \
+            "Mie-branch only)"
     readme = (APP.parent.parent.parent / "README.md").read_text()
     assert "Analysis resolving power (the R control)" in readme
     assert "not the instrument's resolving power" in readme
     assert "PHOENIX" in readme, "the stellar model is now disclosed nowhere"
+
+
+def test_lbl_widgets_render_only_with_mie_deck():
+    """The broadening gas, native grid points, and line-wing grid widgets act
+    only when a Mie deck forces line-by-line mode, so they render only then
+    (2026-08-16); the default-boot absence is pinned in the removals test
+    above. Keys are the shipped contract and must not change. Also pins the
+    mode picker's measured native-R labels (r_native_med: display metadata
+    measured from the 2026.7 refdata dispersion files -- re-measure on any
+    refdata change, never edit the numbers freehand)."""
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["n0_miec"] = "MgSiO3"
+    at.run()
+    assert not at.exception, at.exception
+    keys = {w.key for w in at.get("number_input")} | {
+        w.key for w in at.get("selectbox")}
+    for key in ("n0_broad", "n0_nupts", "n0_rtdit"):
+        assert key in keys, f"{key} missing with a Mie deck selected"
+    caps = " ".join(c.value for c in at.get("caption"))
+    assert "line-by-line" in caps, "the Mie line-by-line caption is gone"
+
+    from jwst_tool import instruments as ins
+    for k, m in ins.MODES.items():
+        assert int(m["r_native_med"]) > 0, f"{k} lacks r_native_med"
+    assert ins.MODES["nirspec_prism"]["r_native_med"] == 100
+    assert ins.MODES["nirspec_g395h"]["r_native_med"] == 2700
 
 
 def test_results_render_and_below_target_is_warning_not_error():

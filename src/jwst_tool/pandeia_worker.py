@@ -120,6 +120,15 @@ def _native_r(refdata, m, wl):
         return None, "no disperser token for this mode"
     pat = os.path.join(refdata, "jwst", m["instrument"], "dispersion",
                        f"*{disp}*disp*.fits")
+    if m["instrument"] == "nircam" and m["mode"] == "lw_tsgrism":
+        # The LW grism dispersion file carries NO disperser token in its name
+        # (jwst_nircam_disp_*.fits, 2.4-5.0 um; the dhs0-ord* files are the
+        # short-wave DHS), so the token pattern above matches nothing and
+        # NIRCam ran without a native-R export until worker v12 (2026-08-16).
+        # The exact prefix is required: a bare *disp*.fits glob sorts the
+        # dhs0 files first.
+        pat = os.path.join(refdata, "jwst", "nircam", "dispersion",
+                           "jwst_nircam_disp_*.fits")
     hits = sorted(glob.glob(pat))
     if not hits:
         return None, f"no dispersion file matching {pat}"

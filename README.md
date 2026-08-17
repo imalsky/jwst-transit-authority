@@ -1276,19 +1276,24 @@ maintainer's `vulcan_validation` bundle).
   0.35.0, so this now describes only the `lbl` mode, which runs solely under
   a Mie condensate deck. The `nu_pts` cap of 32,000 stays so convergence can
   be measured in range there.
-- **The line-spread-function operator is a no-op on the four modes whose
+- **The line-spread-function operator is a no-op on the six modes whose
   native R the model grid cannot resolve.** A Gaussian kernel needs the model
   to resolve it: model R >= 2.35 x the SMALLEST native R in the band. The
   correlated-k default puts the model on the k-tables' R = 1000 band grid, so
   the operator runs on PRISM (needs 126) and MIRI LRS (needs 99) and no-ops on
-  NIRISS SOSS (needs 1277), NIRSpec G395M (1708), G395H (4546) and G235H
-  (4417); the model's own opacity resolution sets the effective width there
-  instead of the instrument. Measured from the cached ETC dispersion curves,
-  2026-08-16. **SOSS and G395M lost the blur in the 0.35.0 switch**: the old
-  line-by-line default sat at R ~ 2954 (`nu_pts` 8000) and resolved both.
-  Every affected mode says so in its warning channel rather than staying
-  silent. Closing it needs higher-resolution k-tables, not a setting: the
-  correlated-k band grid is fixed by the published files.
+  NIRISS SOSS (needs 1277), NIRSpec G395M (1708), G395H (4546), G235H
+  (4417), NIRCam F322W2 (2762) and F444W (3749); the model's own opacity
+  resolution sets the effective width there instead of the instrument.
+  Measured from the cached ETC dispersion curves, 2026-08-16 (the NIRCam
+  pair from the refdata dispersion file directly, since NIRCam first
+  exports a native-R curve with noise worker v12). **SOSS and
+  G395M lost the blur in the 0.35.0 switch**: the old line-by-line default
+  sat at R ~ 2954 (`nu_pts` 8000) and resolved both. NIRCam's dispersion
+  file was not even found before noise worker v12 (its refdata filename
+  carries no disperser token), so NIRCam warned of a missing file instead of
+  the honest no-op. Every affected mode says so in its warning channel
+  rather than staying silent. Closing it needs higher-resolution k-tables,
+  not a setting: the correlated-k band grid is fixed by the published files.
 - **Emission is validated only as far as "it runs".** v27 switched the solver
   to one that carries an interior source term, which is what made emission
   produce a spectrum at all. The

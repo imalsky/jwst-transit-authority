@@ -247,9 +247,11 @@ st.markdown(
     "fresh.\n"
     "1. **Target**: select the system and the observation type.\n"
     "2. **Atmosphere**: select the chemistry engine and the atmosphere "
-    "model.\n"
+    "model. The model spectrum is computed at R = 1000.\n"
     "3. **Science goal**: detect a molecule, or constrain a parameter.\n"
-    "4. **Observation**: select instrument modes and noise assumptions.\n\n"
+    "4. **Observation**: select instrument modes and noise assumptions. "
+    "The model is blurred to each mode's native resolution, then binned "
+    "to the analysis R (default 100).\n\n"
     "The tool computes a forward "
     "spectrum and a Pandeia noise forecast, ranks the selected modes, and "
     "reports how many transits or eclipses reach your target.")
@@ -1225,6 +1227,8 @@ with st.sidebar:
                          if m not in forward._S_MOLECULES]
             _extra_set = [m for m in _extra_set
                           if m not in forward._S_MOLECULES]
+        st.caption("The model spectrum is computed at R = 1000 on the "
+                   "published ExoMolOP k-tables (1-15 µm).")
         st.caption(
             f"The base set **{' · '.join(_base_set)}** is always on."
             + (" No SO2 here: in equilibrium, sulfur sits in H2S and "
@@ -1253,18 +1257,9 @@ with st.sidebar:
             default=[m for m in _extra_set
                      if m in forward.EXTRA_MOLECULES_DEFAULT],
             key=K(f"xmols_{chem_provider}{_net_sfx}"))
-        # Both of these are INERT under the default correlated-k mode (the
-        # k-tables carry their own grid and H2/He broadening). The label says
-        # so; the tooltips that repeated it went 2026-08-17.
-        broadening = st.selectbox(
-            "Pressure-broadening gas (line-by-line mode only)",
-            ["air", "h2he"], index=0, key=K("broad"),
-            format_func={"air": "air (HITRAN terrestrial widths, default)",
-                         "h2he": "H2/He blend (planetary)"}.get)
-        nu_pts = st.number_input(
-            "Native spectral grid points (line-by-line mode only)",
-            *forward.NU_PTS_RANGE,
-            forward.NU_PTS_DEFAULT, 500, key=K("nupts"))
+        # The line-by-line-only widgets (broadening gas, native grid points,
+        # line-wing grid) moved to the Clouds expander 2026-08-16: they act
+        # only when a Mie deck forces line-by-line mode, and render only then.
 
     with st.expander("Clouds & scattering (ExoJAX)"):
         if science_mode == "emission":
@@ -1291,6 +1286,12 @@ with st.sidebar:
             "Mie condensate cloud", _mie_opts, index=0, key=K("miec"),
             format_func=lambda c: "off" if not c else c)
         mie_log_rg, mie_sigmag, mie_log_mmr = -5.0, 2.0, -6.0
+        # The three line-by-line settings are pinned to their validated
+        # defaults unless a Mie deck is selected -- the one case the engine
+        # runs line-by-line (forward.default_opacity_mode) and they act.
+        # Under the default correlated-k mode canonical_params normalizes
+        # them out of the cache key, so hiding them changes nothing.
+        broadening, nu_pts, rt_dit_res = "air", forward.NU_PTS_DEFAULT, 1.0
         if mie_condensate:
             if datacheck.miegrid_status([mie_condensate])[mie_condensate] \
                     != datacheck.OK:
@@ -1308,6 +1309,21 @@ with st.sidebar:
                 "log10 condensate mass mixing ratio",
                 float(forward.MIE_LOG_MMR_RANGE[0]),
                 float(forward.MIE_LOG_MMR_RANGE[1]), -6.0, 0.25, key=K("miemmr"))
+            st.caption("A Mie deck computes opacity line-by-line, not on "
+                       "the R = 1000 k-tables; the native R is about the "
+                       "grid points below divided by 2.7.")
+            broadening = st.selectbox(
+                "Pressure-broadening gas",
+                ["air", "h2he"], index=0, key=K("broad"),
+                format_func={"air": "air (HITRAN terrestrial widths, default)",
+                             "h2he": "H2/He blend (planetary)"}.get)
+            nu_pts = st.number_input(
+                "Native spectral grid points",
+                *forward.NU_PTS_RANGE,
+                forward.NU_PTS_DEFAULT, 500, key=K("nupts"))
+            rt_dit_res = st.number_input(
+                "Line-wing (broadening) grid resolution",
+                0.1, 1.0, 1.0, 0.1, format="%.1f", key=K("rtdit"))
 
     # -----------------------------------------------------------------------
     # Step 3: Science goal (only the controls the selected goal needs)
@@ -1459,7 +1475,8 @@ with st.sidebar:
                  "modes later is instant.",
             format_func=lambda k: (f"{ins.MODES[k]['label']}  "
                                    f"({ins.MODES[k]['wl_min']:g}-"
-                                   f"{ins.MODES[k]['wl_max']:g} µm)"))
+                                   f"{ins.MODES[k]['wl_max']:g} µm, "
+                                   f"R ~ {ins.MODES[k]['r_native_med']})"))
         n_transits = st.number_input(f"Number of {_evw}s", 1, 10, 1, 1,
                                      key=K("ntr"))
 
@@ -1504,6 +1521,8 @@ with st.sidebar:
 )
         r_bin = st.number_input(
             "Analysis resolving power, R", 25, 500, 100, 25, key=K("rbin"))
+        st.caption("Sets the final bins for every score and figure; it does "
+                   "not change the instrument's native resolution.")
 
     with st.expander("Noise model (Pandeia)"):
         st.markdown("**Minimum noise floor** (PandExo convention)")
@@ -1667,11 +1686,8 @@ with st.sidebar:
                          "trapezoid": "Trapezoid"}.get)
         # No help= here: the Advanced RT widgets are pinned tooltip-free
         # (test_removed_gui_prose_sections_and_tooltips_stay_gone). The
-        # label carries the one thing a user needs -- the setting is inert
-        # under the default correlated-k mode, which reads the k-tables.
-        rt_dit_res = st.number_input(
-            "Line-wing (broadening) grid resolution (line-by-line mode only)",
-            0.1, 1.0, 1.0, 0.1, format="%.1f", key=K("rtdit"))
+        # line-wing grid widget moved to the Clouds expander's Mie branch
+        # 2026-08-16 with the other line-by-line-only settings.
 
     # Reset sits behind a confirmation step: one click must not clear a long
     # configuration and the current results.

@@ -3,29 +3,29 @@
   "w39_like": {
    "provenance_ours": {
     "engine_version": "2026.7",
-    "refdata_path": "../audit-data/jwst/pandeia_data-2026.7-jwst",
+    "refdata_path": "pandeia_data-2026.7-jwst",
     "refdata_name": "pandeia_data-2026.7-jwst",
-    "psf_path": "../audit-data/jwst/pandeia_psfs-2026.7-jwst",
+    "psf_path": "pandeia_psfs-2026.7-jwst",
     "psf_name": "pandeia_psfs-2026.7-jwst",
     "refdata_version": "2026.7",
     "refdata_version_source": "VERSION_DATA",
     "psf_version": "2026.7",
     "psf_version_source": "VERSION_PSF",
-    "python": "3.12.0",
-    "numpy": "2.5.2",
-    "worker_version": 11
+    "python": "3.12.13",
+    "numpy": "2.5.1",
+    "worker_version": 12
    },
    "provenance_pandexo": {
     "pandeia_engine_version": "2026.7",
     "pandexo_version": "2026.7",
     "pandexo_commit": "34e42d81f782c8358bb30fc6e8cdf4b87e488263",
     "pandexo_path": "pandexo",
-    "refdata": "../audit-data/jwst/pandeia_data-2026.7-jwst",
+    "refdata": "pandeia_data-2026.7-jwst",
     "refdata_version": "2026.7",
-    "psf_dir": "../audit-data/jwst/pandeia_psfs-2026.7-jwst",
+    "psf_dir": "pandeia_psfs-2026.7-jwst",
     "psf_version": "2026.7",
-    "python": "3.12.0",
-    "numpy": "2.5.2"
+    "python": "3.12.13",
+    "numpy": "2.5.1"
    },
    "modes": [
     {
@@ -241,7 +241,7 @@
       "p95": 1.1217786943859136,
       "max_abs_dev": 0.13074242567324412
      },
-     "var_excess_ours": 1.1993553053270396,
+     "var_excess_ours": 1.1993553053270398,
      "var_excess_pandexo": 1.0132617840169715,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
@@ -316,7 +316,7 @@
       "p95": 1.0960584703452547,
       "max_abs_dev": 0.09892695964887976
      },
-     "var_excess_ours": 1.1895288280890584,
+     "var_excess_ours": 1.1895288280890588,
      "var_excess_pandexo": 1.0132553419966084,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
@@ -637,29 +637,29 @@
   "bright_hot": {
    "provenance_ours": {
     "engine_version": "2026.7",
-    "refdata_path": "../audit-data/jwst/pandeia_data-2026.7-jwst",
+    "refdata_path": "pandeia_data-2026.7-jwst",
     "refdata_name": "pandeia_data-2026.7-jwst",
-    "psf_path": "../audit-data/jwst/pandeia_psfs-2026.7-jwst",
+    "psf_path": "pandeia_psfs-2026.7-jwst",
     "psf_name": "pandeia_psfs-2026.7-jwst",
     "refdata_version": "2026.7",
     "refdata_version_source": "VERSION_DATA",
     "psf_version": "2026.7",
     "psf_version_source": "VERSION_PSF",
-    "python": "3.12.0",
-    "numpy": "2.5.2",
-    "worker_version": 11
+    "python": "3.12.13",
+    "numpy": "2.5.1",
+    "worker_version": 12
    },
    "provenance_pandexo": {
     "pandeia_engine_version": "2026.7",
     "pandexo_version": "2026.7",
     "pandexo_commit": "34e42d81f782c8358bb30fc6e8cdf4b87e488263",
     "pandexo_path": "pandexo",
-    "refdata": "../audit-data/jwst/pandeia_data-2026.7-jwst",
+    "refdata": "pandeia_data-2026.7-jwst",
     "refdata_version": "2026.7",
-    "psf_dir": "../audit-data/jwst/pandeia_psfs-2026.7-jwst",
+    "psf_dir": "pandeia_psfs-2026.7-jwst",
     "psf_version": "2026.7",
-    "python": "3.12.0",
-    "numpy": "2.5.2"
+    "python": "3.12.13",
+    "numpy": "2.5.1"
    },
    "modes": [
     {
@@ -720,7 +720,7 @@
      },
      "sigma_ratio_policy": {
       "n": 306,
-      "median": 1.1139647649128206,
+      "median": 1.1139647649128204,
       "p05": 1.0455877534838809,
       "p95": 1.2653557367419446,
       "max_abs_dev": 0.28912729436622664
@@ -791,14 +791,14 @@
       "median": 1.075746275317126,
       "p05": 1.074171240809866,
       "p95": 1.0762290042210436,
-      "max_abs_dev": 0.07964627440553551
+      "max_abs_dev": 0.07964627440553529
      },
      "sigma_ratio_policy": {
       "n": 3330,
       "median": 1.0774799529533152,
       "p05": 1.0759023801132122,
       "p95": 1.0779634598253505,
-      "max_abs_dev": 0.08138623729816086
+      "max_abs_dev": 0.08138623729816064
      },
      "var_excess_ours": 1.1572926696629362,
      "var_excess_pandexo": 1.015130211985984,
@@ -875,7 +875,7 @@
       "p95": 1.0748444782768327,
       "max_abs_dev": 0.08255163755597383
      },
-     "var_excess_ours": 1.129606452729422,
+     "var_excess_ours": 1.1296064527294218,
      "var_excess_pandexo": 1.0167369697809099,
      "pandexo_warnings": {
       "Group Number Too Low?": "All good",
@@ -946,7 +946,7 @@
      "sigma_ratio_policy": {
       "n": 1286,
       "median": 1.0517714257181026,
-      "p05": 1.046994131992422,
+      "p05": 1.0469941319924219,
       "p95": 1.0710272785621706,
       "max_abs_dev": 0.07875609572150055
      },
@@ -1271,29 +1271,29 @@
   "faint_k": {
    "provenance_ours": {
     "engine_version": "2026.7",
-    "refdata_path": "../audit-data/jwst/pandeia_data-2026.7-jwst",
+    "refdata_path": "pandeia_data-2026.7-jwst",
     "refdata_name": "pandeia_data-2026.7-jwst",
-    "psf_path": "../audit-data/jwst/pandeia_psfs-2026.7-jwst",
+    "psf_path": "pandeia_psfs-2026.7-jwst",
     "psf_name": "pandeia_psfs-2026.7-jwst",
     "refdata_version": "2026.7",
     "refdata_version_source": "VERSION_DATA",
     "psf_version": "2026.7",
     "psf_version_source": "VERSION_PSF",
-    "python": "3.12.0",
-    "numpy": "2.5.2",
-    "worker_version": 11
+    "python": "3.12.13",
+    "numpy": "2.5.1",
+    "worker_version": 12
    },
    "provenance_pandexo": {
     "pandeia_engine_version": "2026.7",
     "pandexo_version": "2026.7",
     "pandexo_commit": "34e42d81f782c8358bb30fc6e8cdf4b87e488263",
     "pandexo_path": "pandexo",
-    "refdata": "../audit-data/jwst/pandeia_data-2026.7-jwst",
+    "refdata": "pandeia_data-2026.7-jwst",
     "refdata_version": "2026.7",
-    "psf_dir": "../audit-data/jwst/pandeia_psfs-2026.7-jwst",
+    "psf_dir": "pandeia_psfs-2026.7-jwst",
     "psf_version": "2026.7",
-    "python": "3.12.0",
-    "numpy": "2.5.2"
+    "python": "3.12.13",
+    "numpy": "2.5.1"
    },
    "modes": [
     {
@@ -1422,14 +1422,14 @@
      },
      "sigma_ratio_matched": {
       "n": 3330,
-      "median": 1.1673556141423915,
+      "median": 1.1673556141423913,
       "p05": 1.1650866102896178,
       "p95": 1.1687499810644506,
       "max_abs_dev": 0.1720765470476151
      },
      "sigma_ratio_policy": {
       "n": 3330,
-      "median": 1.2243328970736416,
+      "median": 1.2243328970736413,
       "p05": 1.2219531457563202,
       "p95": 1.2257953214390926,
       "max_abs_dev": 0.22928425327625734
@@ -1498,7 +1498,7 @@
      "sigma_ratio_matched": {
       "n": 3424,
       "median": 1.127600747659366,
-      "p05": 1.1208371548683131,
+      "p05": 1.1208371548683134,
       "p95": 1.154222023120321,
       "max_abs_dev": 0.16349397959509648
      },
@@ -1931,7 +1931,7 @@
  "gate": {
   "passed": true,
   "problems": [],
-  "required_worker_version": 11,
+  "required_worker_version": 12,
   "required_pandeia_release": "2026.7",
   "thresholds": {
    "min_matched_pixel_frac": 0.99,

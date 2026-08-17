@@ -15,12 +15,12 @@ enters via cfg_overrides (chemistry) and profile rp_cm/gs_cgs/rstar_cm (RT).
 A GCM profile is never silently substituted.
 
 Resolution knobs: nz (chemistry layers; the RT grid is locked equal in
-run_model), nu_pts (native wavenumber points over 1-15 um, native
-R ~ nu_pts/2.7 -- LINE-BY-LINE mode only; the default correlated-k mode
-takes its grid from the published k-tables at R = 1000 and ignores it),
-yconv_cri (steady-state convergence tolerance). Defaults are
-the old "fast" tier; the validated ceiling is the old "high" tier
-(nz=150, nu_pts=8000, yconv 1e-3).
+run_model) and yconv_cri (steady-state convergence tolerance). nu_pts
+(native wavenumber points over 1-15 um, native R ~ nu_pts/2.7) is
+LINE-BY-LINE mode only; the default correlated-k mode takes its grid from
+the published k-tables at R = 1000 and ignores it, and canonical_params
+normalizes it (and rt_dit_res) to the defaults there so the cache key
+never varies with an inert setting.
 
 Structure and physics knobs: tp_mode ("guillot"; "file" = explicit tabulated
 T(P) [+ Kzz(P)], cache-keyed by content hash, no T-P Fisher rows -- file-mode

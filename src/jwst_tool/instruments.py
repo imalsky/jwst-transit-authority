@@ -256,6 +256,13 @@ NGROUP_WARN_REASON = {
              "calibrate accurately; 5+ groups recommended"),
 }
 
+# r_native_med: the mode's typical native resolving power, shown in the GUI
+# mode picker. Median of R(lambda) from the mode's 2026.7 refdata dispersion
+# file over the registry band, rounded (measured 2026-08-16: PRISM 96,
+# G395H 2757, G235H 2722, SOSS ord1 929, F322W2 1431, F444W 1654, LRS 150,
+# G395M 1009; NIRCam from jwst_nircam_disp_*.fits, the LW grism file, which
+# carries no disperser token in its name). Display metadata only -- the LSF
+# operator reads the full R(lambda) curve from the worker, never this number.
 MODES = {
     "nirspec_prism": dict(
         label="NIRSpec PRISM",
@@ -266,6 +273,7 @@ MODES = {
         strategy=dict(aperture_size=0.7, sky_annulus=[0.75, 1.5]),
         background="ecliptic", background_level="medium",
         wl_min=0.6, wl_max=5.25,
+        r_native_med=100,
         floor_ppm_suggested=20.0, noise_infl=1.0, ngroup_min=1,
         ngroup_warn_below=2, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
@@ -278,6 +286,7 @@ MODES = {
         strategy=dict(aperture_size=0.7, sky_annulus=[0.75, 1.5]),
         background="ecliptic", background_level="medium",
         wl_min=2.87, wl_max=5.18,
+        r_native_med=2700,
         floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=1,
         ngroup_warn_below=2, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
@@ -290,6 +299,7 @@ MODES = {
         strategy=dict(aperture_size=0.7, sky_annulus=[0.75, 1.5]),
         background="ecliptic", background_level="medium",
         wl_min=1.66, wl_max=3.07,
+        r_native_med=2700,
         floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=1,
         ngroup_warn_below=2, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
@@ -302,6 +312,7 @@ MODES = {
         strategy=dict(order=1),
         background="ecliptic", background_level="medium",
         wl_min=0.85, wl_max=2.8,
+        r_native_med=900,
         floor_ppm_suggested=20.0, noise_infl=1.0, ngroup_min=1,
         ngroup_warn_below=2, ngroup_max=30,
     ),
@@ -313,6 +324,7 @@ MODES = {
         strategy=dict(aperture_size=0.4, sky_annulus=[0.5, 1.5]),
         background="ecliptic", background_level="medium",
         wl_min=2.45, wl_max=3.95,
+        r_native_med=1400,
         floor_ppm_suggested=25.0, noise_infl=1.0, ngroup_min=1,
         ngroup_warn_below=4, ngroup_max=100,
     ),
@@ -324,6 +336,7 @@ MODES = {
         strategy=dict(aperture_size=0.4, sky_annulus=[0.5, 1.5]),
         background="ecliptic", background_level="medium",
         wl_min=3.9, wl_max=4.95,
+        r_native_med=1700,
         floor_ppm_suggested=25.0, noise_infl=1.0, ngroup_min=1,
         ngroup_warn_below=4, ngroup_max=100,
     ),
@@ -335,6 +348,7 @@ MODES = {
         strategy=dict(aperture_size=0.6, sky_annulus=[1.0, 2.8]),
         background="ecliptic", background_level="medium",
         wl_min=5.0, wl_max=12.0,
+        r_native_med=150,
         floor_ppm_suggested=40.0, noise_infl=1.0, ngroup_min=2,
         ngroup_warn_below=6, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
@@ -359,6 +373,7 @@ MODES = {
         strategy=dict(aperture_size=0.7, sky_annulus=[0.75, 1.5]),
         background="ecliptic", background_level="medium",
         wl_min=2.87, wl_max=5.10,
+        r_native_med=1000,
         floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=1,
         ngroup_warn_below=2, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),

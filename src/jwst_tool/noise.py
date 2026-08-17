@@ -75,7 +75,11 @@ _BACKEND_FINGERPRINT = None
 # partial/full saturation curves before the finite-noise filter.  The parity
 # gate now compares those masks pixel by pixel; aggregate counts alone could
 # hide an alignment or report-key error.
-WORKER_VERSION = 11
+# v12 (2026-08-16 resolution audit): _native_r finds the NIRCam LW grism
+# dispersion file (jwst_nircam_disp_*.fits carries no disperser token, so
+# the *grismr* pattern matched nothing). NIRCam results now export r_native
+# instead of a "no dispersion file" note that read as a refdata error.
+WORKER_VERSION = 12
 
 
 def backend_fingerprint() -> dict:
