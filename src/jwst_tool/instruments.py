@@ -256,11 +256,10 @@ NGROUP_WARN_REASON = {
 
 # r_native_med: the mode's typical native resolving power, shown in the GUI
 # mode picker. Median of R(lambda) from the mode's 2026.7 refdata dispersion
-# file over the registry band, rounded (measured 2026-08-16: PRISM 96,
-# G395H 2757, G235H 2722, SOSS ord1 929, F322W2 1431, F444W 1654, LRS 150,
-# G395M 1009; NIRCam from jwst_nircam_disp_*.fits, the LW grism file, which
-# carries no disperser token in its name). Display metadata only -- the LSF
-# operator reads the full R(lambda) curve from the worker, never this number.
+# file over the registry band, rounded (measured values: notes.md; NIRCam
+# from jwst_nircam_disp_*.fits, the LW grism file, which carries no
+# disperser token in its name). Display metadata only -- the LSF operator
+# reads the full R(lambda) curve from the worker, never this number.
 MODES = {
     "nirspec_prism": dict(
         label="NIRSpec PRISM",
@@ -270,8 +269,10 @@ MODES = {
                                   readout_pattern="nrsrapid")),
         strategy=dict(aperture_size=0.7, sky_annulus=[0.75, 1.5]),
         background="ecliptic", background_level="medium",
-        wl_min=0.6, wl_max=5.25,
-        r_native_med=100,
+        # instrument band starts at 0.6 um; 1.0 is the model's short edge
+        # (the wl_min/wl_max contract above: intersected with the model)
+        wl_min=1.0, wl_max=5.25,
+        r_native_med=110,
         floor_ppm_suggested=20.0, noise_infl=1.0, ngroup_min=1,
         ngroup_warn_below=2, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
@@ -309,8 +310,10 @@ MODES = {
                                   readout_pattern="nisrapid")),
         strategy=dict(order=1),
         background="ecliptic", background_level="medium",
-        wl_min=0.85, wl_max=2.8,
-        r_native_med=900,
+        # instrument order-1 band starts at 0.85 um; 1.0 is the model's
+        # short edge (same intersection contract as PRISM)
+        wl_min=1.0, wl_max=2.8,
+        r_native_med=970,
         floor_ppm_suggested=20.0, noise_infl=1.0, ngroup_min=1,
         ngroup_warn_below=2, ngroup_max=30,
     ),
@@ -415,7 +418,7 @@ MODE_COLOR = {key: _COLORS[i % len(_COLORS)] for i, key in enumerate(MODES)}
 MODE_MARKER = {key: _MARKERS[i % len(_MARKERS)] for i, key in enumerate(MODES)}
 
 # GUI default selection (speed-first trio):
-# PRISM + G395H cover 0.6-5.25 um including the 4.05 um SO2 band (G395H is
+# PRISM + G395H cover 1.0-5.25 um including the 4.05 um SO2 band (G395H is
 # the default detect-SO2 goal's workhorse), MIRI LRS keeps the mid-IR
 # 7-8.5 um SO2 band. All registry modes stay selectable. Since 0.27.0 the ETC
 # computes ONLY the selected modes and caches each mode separately, so the

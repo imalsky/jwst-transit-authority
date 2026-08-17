@@ -325,7 +325,9 @@ def test_lbl_widgets_render_only_with_mie_deck():
     from jwst_tool import instruments as ins
     for k, m in ins.MODES.items():
         assert int(m["r_native_med"]) > 0, f"{k} lacks r_native_med"
-    assert ins.MODES["nirspec_prism"]["r_native_med"] == 100
+    # PRISM's median is taken over its registry band, which starts at the
+    # model's 1.0 um short edge (not the instrument's 0.6 um)
+    assert ins.MODES["nirspec_prism"]["r_native_med"] == 110
     assert ins.MODES["nirspec_g395h"]["r_native_med"] == 2700
 
 

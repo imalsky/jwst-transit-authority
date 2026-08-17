@@ -259,8 +259,7 @@ st.markdown(
     "3. **Science goal**: detect a molecule, or constrain a parameter.\n"
     "4. **Observation**: select instrument modes and noise assumptions. "
     "The model is smoothed to the instrument resolution where that is "
-    "coarser than the model (PRISM and MIRI LRS), then binned to the "
-    "analysis R (default 100).\n\n"
+    "coarser than the model, then binned to the analysis res.\n\n"
     "The tool computes a forward "
     "spectrum and a Pandeia noise forecast, ranks the selected modes, and "
     "reports how many transits or eclipses reach your target.")
