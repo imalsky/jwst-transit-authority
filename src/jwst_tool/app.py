@@ -28,6 +28,7 @@ import json
 import os
 import re
 import select
+import uuid
 import subprocess
 import sys
 import time
@@ -269,15 +270,22 @@ st.markdown(
 # filled once those values exist.
 _run_slot = st.container()
 
-# One link to the committed benchmark figures; short on purpose. A beta visitor should see that the physics was checked
-# without reading an essay; nothing here runs.
+# Mirrors the README "Tests and validation" section; nothing here runs.
 with st.expander("Validation"):
     st.markdown(
-        "The radiative transfer is checked against petitRADTRANS and a "
-        "closed-form limit, and the chemistry against the original VULCAN "
-        "code. Benchmark figures: "
-        "[vulcan-forward/validation/figures]"
-        "(https://github.com/imalsky/vulcan-forward/tree/main/validation/figures).")
+        "This tool includes test suites, as well as other validation checks. "
+        "The suites run in CI for each repository: "
+        "<https://github.com/imalsky/jax-vulcan>, "
+        "<https://github.com/imalsky/vulcan-forward>, "
+        "<https://github.com/imalsky/vulcan-jwst-tool>, and "
+        "<https://github.com/imalsky/vulcan-retrieval>. "
+        "For end-to-end tests, see the set of validation figures that I've "
+        "created here: "
+        "<https://github.com/imalsky/vulcan-forward/tree/main/validation/figures>. "
+        "This includes trying to recreate the results of Tsai et al. 2023 "
+        "(<https://doi.org/10.5281/zenodo.7542781>), the JWST ERS carbon "
+        "dioxide paper (<https://doi.org/10.5281/zenodo.6959427>), and "
+        "VULCAN 2.0 and petitRADTRANS on identical inputs.")
 
 # ---------------------------------------------------------------------------
 # Data availability -- detected live; the display adapts to what is installed
@@ -991,7 +999,10 @@ with st.sidebar:
                     _dst_tp = forward._uploads_dir() / f"{_sha_tp}.txt"
                     _dst_tp.parent.mkdir(parents=True, exist_ok=True)
                     if not _dst_tp.exists():
-                        _dst_tp.write_bytes(_raw_tp)
+                        # atomic: the exists() guard makes a torn copy
+                        # permanent (the sha1 check would refuse it forever)
+                        ins.atomic_write(_dst_tp,
+                                         lambda fh: fh.write(_raw_tp))
                     try:                       # loud validation, immediate
                         _tab_tp = forward._read_tp_table(_dst_tp)
                         tp_file_path = str(_dst_tp)
@@ -1843,7 +1854,12 @@ def _compute_locked():
             # button; the bar's remaining time converges to the measured pace
             bar = _TimedBar(prior_total_s=(base_min + _wo_min + fd_min) * 60.0,
                             text="starting …")
-            pfile = forward.MODEL_CACHE / f"{forward.params_key(params)}.params.json"
+            # unique per launch: a key-only name is SHARED between two
+            # same-key runs, and one visitor's rewrite can truncate the file
+            # under the other's subprocess mid-read
+            pfile = forward.MODEL_CACHE / (
+                f"{forward.params_key(params)}.params."
+                f"{uuid.uuid4().hex[:8]}.json")
             forward.MODEL_CACHE.mkdir(parents=True, exist_ok=True)
             pfile.write_text(json.dumps(forward.canonical_params(params)))
             box = st.empty()
@@ -1860,11 +1876,14 @@ def _compute_locked():
                     box.code("\n".join(lines[-10:]), height=_LOG_BOX_PX)
                     bar.tick()
 
-            with _managed_proc(
-                    [sys.executable, str(TOOL_DIR / "forward.py"),
-                     str(pfile)]) as proc:
-                _watch_proc(proc, _fwd_line, bar.tick)
-                proc.wait()
+            try:
+                with _managed_proc(
+                        [sys.executable, str(TOOL_DIR / "forward.py"),
+                         str(pfile)]) as proc:
+                    _watch_proc(proc, _fwd_line, bar.tick)
+                    proc.wait()
+            finally:
+                pfile.unlink(missing_ok=True)
             if proc.returncode != 0:
                 status.update(label="Forward model failed", state="error")
                 st.error("The forward model failed. Last output:\n\n```\n"
