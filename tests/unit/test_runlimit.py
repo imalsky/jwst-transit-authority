@@ -34,3 +34,22 @@ def test_slot_files_persist_and_carry_metadata():
     # flock'd path is the two-inode double-lock race)
     assert p.is_file()
     s.release()                                    # idempotent
+
+
+def test_refusal_logged_and_alert_throttled(monkeypatch):
+    sent = []
+    monkeypatch.setattr(runlimit, "_send_alert", lambda topic: (
+        sent.append(topic), True)[1])
+    held = [runlimit.acquire(f"h{i}") for i in range(runlimit.MAX_CONCURRENT)]
+    try:
+        # alerts disabled without the env var, but the refusal still logs
+        assert runlimit.acquire("r0") is None
+        assert runlimit.refusals_last_24h() == 1 and sent == []
+        # enabled: first refusal alerts, the next is inside the throttle
+        monkeypatch.setenv("JWST_TOOL_ALERT_NTFY_TOPIC", "t-test")
+        assert runlimit.acquire("r1") is None
+        assert runlimit.acquire("r2") is None
+        assert runlimit.refusals_last_24h() == 3 and sent == ["t-test"]
+    finally:
+        for s in held:
+            s.release()
