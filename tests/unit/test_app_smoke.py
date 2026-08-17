@@ -341,11 +341,19 @@ def test_removed_gui_prose_sections_and_tooltips_stay_gone():
                  "Beta", "full retrieval",
                  "numerical quality checks", "uncertified spectrum"):
         assert gone not in page, f"long-form intro phrase survived: {gone!r}"
-    # PHOENIX left the intro 2026-08-13; it must stay disclosed in README.md
-    for kept in ("VULCAN", "PICASO", "ExoJAX", "Pandeia", "PandExo"):
-        assert kept in page, f"engine name lost: {kept!r}"
-    assert re.search(r"Pandeia \d{4}\.\d", page), \
-        "the live Pandeia version is no longer interpolated"
+    # The "How the model works" expander went 2026-08-17 (maintainer), and it
+    # carried the engine names and the interpolated Pandeia version. Both are
+    # still disclosed -- the backend label on the run status line, the engine
+    # list in README.md -- so what this now pins is that the BLOCK stays gone
+    # and that no one hardcodes a release number in its place.
+    assert "Each run computes a spectrum for the atmosphere you configure" \
+        not in page, "the 'How the model works' block is back"
+    assert not re.search(r"Pandeia \d{4}\.\d", page), \
+        "a Pandeia release is hardcoded into the landing page"
+    assert re.search(r"Pandeia \d{4}\.\d",
+                     "\n".join(l for l in APP.read_text().splitlines()
+                               if "BACKEND_STATUS" in l)) is None, \
+        "the backend label must interpolate ins.BACKEND_STATUS, never a literal"
 
     # Strip comment lines first: the removals left comments NAMING what was
     # removed, and matching those would make this test unfixable.
@@ -676,8 +684,9 @@ def test_every_axis_control_is_a_typed_min_max_pair():
     "widget,value,field",
     # the molecule selectbox keys on the extra-molecule selection, so the key
     # carries the default extra set (jwst_tool.app: K("mol_<provider>_<mols>"));
-    # CS2/C2H6 left the default at v31 (no ExoMolOP table)
-    [("n0_mol_vulcan_C2H2_C2H4_H2S_HCN_NH3_OCS", "CO2",
+    # CS2/C2H6 left the default at v31 (no ExoMolOP table), SH+SO JOINED it at
+    # v34 (measured 10.0 and 48.1 ppm on W39b -- forward.EXTRA_MOLECULES_DEFAULT)
+    [("n0_mol_vulcan_C2H2_C2H4_H2S_HCN_NH3_OCS_SH_SO", "CO2",
       "target_mol"),                                # the reported bug
      ("n0_noisescale", 2.0, "noise_scale")])        # an observation-block field
 def test_changing_any_run_input_marks_the_result_stale(widget, value, field,

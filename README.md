@@ -90,13 +90,23 @@ else fetches itself on first use.
    deliberately explicit rather than automatic.
 
 ```bash
-python -m vulcan_forward.fetch_exomolop --molecules H2O,CO2,CO,CH4,SO2,C2H2,C2H4,H2S,HCN,NH3,OCS
+python -m vulcan_forward.fetch_exomolop --molecules H2O,CO2,CO,CH4,SO2,C2H2,C2H4,H2S,HCN,NH3,OCS,SO,SH
 ```
 
-The first five are required; the rest are the selectable extras. Without them
-every model step stops with an error naming the missing species. CS2 and C2H6
-have no published table, so they cannot be selected under the default opacity
-mode.
+The first five are required; the rest are the set the app preselects. Without
+them every model step stops with an error naming the missing species.
+
+The menu holds more than this. Since 0.39.0 it lists **every** species the
+SNCHO network solves for which ExoMolOP publishes a table on the engine's
+R = 1000, 0.3-50 um grid, which adds `C2, CH, CH3, CN, CS, H2CO, H2O2, N2O,
+NH, NO, NS, OH`. Those are selectable but not preselected, because each
+contributes under 1 ppm on both reference atmospheres and every extra
+molecule costs a leave-one-out spectrum. Fetch them the same way if you want
+them.
+
+CS2 and C2H6 have no published table anywhere and cannot be selected under
+the default opacity mode. O2 is published only at R = 15000 on a different
+band grid, which cannot be mixed with the rest.
 
 Run `jwst-tool data` at any time for a live status report with a remedy per item.
 
@@ -550,6 +560,23 @@ CO2 in the oxygen-varied codes (where CO carries no signal at all). The
 conventions agree exactly at solar C/O and diverge first-order in ln(C/O) — by
 C/O = 0.7, only 27% above solar, the two differ by ~28% in both C and O, a
 ~0.1 dex metallicity offset.
+
+### Which molecules carry opacity
+
+Always on: H2O, CO2, CO, CH4, SO2. Preselected extras: H2S, NH3, HCN, OCS,
+and since 0.39.0 **SO and SH**. The menu holds twelve more, selectable but
+off by default.
+
+Which extras start selected is measured, not assumed: each species' max
+change in transit depth when it is removed, on the converged WASP-39 b and
+HD 189733 b models. SO contributes 48 ppm at 9.36 um on WASP-39 b, inside
+JWST's per-bin precision, and was previously not offered at all; SH is
+10 ppm. The twelve left off are all under 2.4 ppm.
+
+Two things worth knowing. A small number means "cannot move *these* models",
+not "never matters" -- HCN is 5 ppm on WASP-39 b and 241 ppm on
+HD 189733 b. And selecting more molecules costs time: the removed-molecule
+block grows roughly as n(n+3)/2 opacity folds.
 
 ### Chemical network, and the two measured ways to run faster
 
@@ -1112,6 +1139,18 @@ deferred in this tool. Keep it current: close items here when they land, add
 new ones as they are found. The reasoning behind every decision lives in
 notes.md, Decision records; scope and conventions live in
 [Physics and conventions](#physics-and-conventions).
+
+* **The preselected molecule set was measured on two atmospheres, not a
+  grid.** WASP-39 b and HD 189733 b, both at C/O well below 1, so the regime
+  C2H2 and C2H4 exist for is untested (they stay preselected on chemistry
+  grounds despite measuring under 0.15 ppm). Closing this means repeating the
+  measurement on a C/O ~ 1 case and a cool sub-Neptune.
+
+* **Three species a WASP-39 b model wants have no usable line list.** HSO
+  (1.2e-04) and S2 (9.7e-05) are both more abundant than SO2 in the
+  transmission photosphere and appear in no opacity database; S2 is
+  homonuclear so it cannot absorb in the IR, HSO is a genuine unquantified
+  omission. CS2 is blocked on ExoMol not having published a list.
 
 * **Both observables moved to correlated-k over the published ExoMolOP
   opacities in 0.35.0.** The old sampled line-by-line path ran far below

@@ -505,9 +505,15 @@ def test_wo_mols_end_to_end_semantics():
 def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # The key hashes every canonical parameter: if ANY default feeding the
     # reference run changes, this trips even when the pins above still pass.
-    # RE-PINNED at v33 (history: 57c662c1be8b0776 v32, c20582509e215eb0 v31,
-    # acba771e80c772a1 v30, 9b30d6d526e2a78a v29, ead8394cf913ff67 v28,
-    # ba52447cad5b40c5 v27, de55467c4a459b4e v26, f14f4d10512552ea first).
+    # RE-PINNED at v34 (history: 92ac1d4902dc7c39 v33, 57c662c1be8b0776 v32,
+    # c20582509e215eb0 v31, acba771e80c772a1 v30, 9b30d6d526e2a78a v29,
+    # ead8394cf913ff67 v28, ba52447cad5b40c5 v27, de55467c4a459b4e v26,
+    # f14f4d10512552ea first).
+    # v34 completed the opacity menu: EXTRA_MOLECULES now lists every network
+    # species with a published ExoMolOP k-table (22 entries), and the GUI
+    # preselection moved to the MEASURED subset EXTRA_MOLECULES_DEFAULT, which
+    # ADDS SO and SH. That is a real spectrum change at the default, not a
+    # relabelling: SO alone contributes 48 ppm at 9.36 um on this atmosphere.
     # v33 added the network parameter (sncho default / ncho sulfur-free);
     # the spectrum at the default is bit-identical to v32's. v32 added the
     # wo_mols leave-one-out set to the canonical params, rounded the default
@@ -529,10 +535,10 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # published 4.5-4.8 -- that gap is real and open). Both need a full
     # run; SO2 also needs the pandeia backend. Full history: notes.md.
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b", tp_mode="file"))) == "92ac1d4902dc7c39"
+        dict(planet="wasp39b", tp_mode="file"))) == "9348c09f2b133a0a"
     # ... and since 2026-08-11 the bare DEFAULT run is that same atmosphere
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "92ac1d4902dc7c39"
+        dict(planet="wasp39b"))) == "9348c09f2b133a0a"
     # the sha1 pin is only meaningful re-derived from the file the run
     # actually reads -- this catches the table itself being swapped
     path = forward._shipped_tp_file("wasp39b")
@@ -892,6 +898,24 @@ def test_species_without_an_exomolop_table_refuse_early_under_the_default():
         cp = forward.canonical_params(_p(extra_mols=[mol],
                                          opacity_mode="lbl"))
         assert mol in cp["extra_mols"]
+
+
+def test_molecule_list_invariants():
+    """v34 menu/default consistency, none of it enforced by the code itself."""
+    import re
+    # the preselected set must be a selectable subset with tables
+    assert set(forward.EXTRA_MOLECULES_DEFAULT) <= set(forward.EXTRA_MOLECULES)
+    assert not (set(forward.EXTRA_MOLECULES_DEFAULT)
+                & forward._NO_EXOMOLOP_TABLE)
+    # _S_MOLECULES must catch EVERY sulfur-bearing species in either list, or
+    # network="ncho" offers one the sulfur-free network cannot produce.
+    # `S(?![a-z])` so SiO-style names never read as sulfur.
+    s_bearing = {m for m in list(forward.MOLECULES) + forward.EXTRA_MOLECULES
+                 if re.search(r"S(?![a-z])", m)}
+    assert s_bearing == set(forward._S_MOLECULES), (
+        f"_S_MOLECULES misses {sorted(s_bearing - set(forward._S_MOLECULES))} "
+        f"/ over-lists {sorted(set(forward._S_MOLECULES) - s_bearing)}")
+    assert not (set(forward.MOLECULES) & set(forward.EXTRA_MOLECULES))
 
 
 def test_no_exomolop_table_set_matches_the_installed_tables():

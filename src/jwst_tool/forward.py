@@ -86,10 +86,26 @@ MODEL_CACHE = _ins.MODEL_CACHE
 from jwst_tool import planets   # installed package: works as module AND as a script
 
 MOLECULES = ["H2O", "CO2", "CO", "CH4", "SO2"]   # always-on WIDE-profile set
-# RT additions beyond the base set (GUI default: all on; ~7 s each). The SNCHO
-# network already solves these; extra_mols only exposes them to the RT and the
-# detection scores.
-EXTRA_MOLECULES = ["C2H2", "C2H4", "C2H6", "CS2", "H2S", "HCN", "NH3", "OCS"]
+# RT additions beyond the base set. The SNCHO network already solves these;
+# extra_mols only exposes them to the RT and the detection scores. COMPLETE
+# since v34: every network species with a published ExoMolOP table on the
+# R1000 0.3-50um grid. What is absent cannot be added (reasons:
+# vulcan_forward.constants.MOLECULES). CS2/C2H6 stay listed so selecting one
+# raises the explanatory refusal below rather than a bare KeyError.
+EXTRA_MOLECULES = ["C2", "C2H2", "C2H4", "C2H6", "CH", "CH3", "CN", "CS",
+                   "CS2", "H2CO", "H2O2", "H2S", "HCN", "N2O", "NH", "NH3",
+                   "NO", "NS", "OCS", "OH", "SH", "SO"]
+
+# Which of them the GUI preselects. MEASURED (2026-08-17), not assumed: max
+# |depth - depth_without| over the 2706 bands on the converged W39b and HD189
+# reference atmospheres, best of the two. Preselected: H2S 309, NH3 301,
+# HCN 241, OCS 60.5, SO 48.1, SH 10.0 ppm (C2H2 0.149 / C2H4 0.024 are held
+# over for the C/O ~ 1 case neither planet tests). Left off: CN 2.35, OH 0.46,
+# and 10 more at or below 0.08. Full table: notes.md, v34.
+# NEVER widen this without the ppm measurement behind it -- each default-on
+# molecule adds a leave-one-out spectrum (block ~ n(n+3)/2 folds).
+EXTRA_MOLECULES_DEFAULT = ["C2H2", "C2H4", "H2S", "HCN", "NH3", "OCS",
+                           "SH", "SO"]
 # VULCAN kinetics network menu (v33). "sncho" is the shipped default; "ncho"
 # drops sulfur (69 vs 89 species) for a cheaper solve when no S species is
 # needed. Values: (VULCAN_JAX_NETWORK, VULCAN_JAX_ATOM_LIST) -- import-frozen
@@ -101,13 +117,17 @@ NETWORKS = {
 }
 # Sulfur-bearing entries of the molecule lists above: absent from the NCHO
 # network, so network="ncho" refuses them rather than dropping them silently.
-_S_MOLECULES = frozenset({"SO2", "H2S", "CS2", "OCS"})
+# MUST list every S-bearing member of MOLECULES + EXTRA_MOLECULES -- a species
+# missing here would be offered under a network that cannot produce it, and
+# would then be modelled at whatever the elemental repair left behind rather
+# than refused. SO/SH/CS/NS joined at v34 with the species sweep.
+_S_MOLECULES = frozenset({"SO2", "H2S", "CS2", "OCS", "SO", "SH", "CS", "NS"})
 # Species ExoMolOP publishes no k-table for: refused EARLY under the default
 # opacity_mode (canonical_params), instead of failing minutes later inside
 # exomolop.load_tables. Cross-checked against exomolop.available() by a
 # data-gated test so this set cannot rot when ExoMolOP adds a species.
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
-_VERSION = 33  # model_cache buster: bump whenever the physics or the canonical
+_VERSION = 34  # model_cache buster: bump whenever the physics or the canonical
                # key set changes. Per-version history lives in notes.md.
                # DELIBERATE (reviews keep re-finding it): the cache identity
                # is canonical params + this hand-bumped version, NOT content

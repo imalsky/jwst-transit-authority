@@ -259,25 +259,6 @@ st.markdown(
 # filled once those values exist.
 _run_slot = st.container()
 
-with st.expander("How the model works"):
-    # STE (house WRITING rules): active voice, present tense, one idea per
-    # sentence, <= 25 words. Engine names and the live Pandeia version stay;
-    # the parenthetical asides and restatements are cut.
-    st.markdown(
-        f"""
-Each run computes a spectrum for the atmosphere you configure.
-
-1. **Chemistry**: run a forward model with PICASO or VULCAN.
-2. **Temperature profile**: select a fixed P-T profile, or run a climate model
-   in PICASO.
-3. **Spectrum**: compute a spectrum using ExoJAX.
-4. **Noise**: use Pandeia ({ins.BACKEND_STATUS.split(' /')[0]}) to get the
-   uncertainty per mode and a PandExo-like noise floor.
-5. **Scores**: get the observational S/N, Fisher parameter forecasts, and the
-   number of transits or eclipses that reaches your target.
-
-        """)
-
 # One link to the committed benchmark figures (maintainer, 2026-08-16):
 # short on purpose. A beta visitor should see that the physics was checked
 # without reading an essay; nothing here runs.
@@ -1084,9 +1065,6 @@ with st.sidebar:
                 else:
                     st.warning("Upload a table to run in file mode.")
                     tp_file_ok = False
-            st.caption(
-                "File mode has no temperature parameter, so constraint "
-                "forecasts assume this profile is exact (optimistic bounds).")
 
     with st.expander("Composition"):
         if tp_mode == "picaso_climate":
@@ -1249,10 +1227,7 @@ with st.sidebar:
                           if m not in forward._S_MOLECULES]
         _no_table = [m for m in _extra_set if m in forward._NO_EXOMOLOP_TABLE]
         st.caption(
-            f"The base set **{' · '.join(_base_set)}** is always on"
-            + (f"; {' and '.join(_no_table)} have no published ExoMolOP "
-               "k-table and need a Mie/line-by-line run." if _no_table
-               else ".")
+            f"The base set **{' · '.join(_base_set)}** is always on."
             + (" No SO2 here: in equilibrium, sulfur sits in H2S and "
                "OCS. Making SO2 needs the VULCAN engine." if _pic else ""))
         # Which data the annotations must describe depends on the opacity
@@ -1280,10 +1255,16 @@ with st.sidebar:
         # k-table: under the default opacity_mode canonical_params refuses
         # them loudly (v31), so preselecting them would make the default
         # configuration invalid. They stay selectable -- never auto-dropped.
+        # Preselect the MEASURED-relevant subset, not everything with a table
+        # (v34). The menu now carries every species with a published k-table,
+        # most of which contribute under 1 ppm; defaulting all of them on would
+        # pay a leave-one-out spectrum each for signals nothing can see. The
+        # ppm measurements behind EXTRA_MOLECULES_DEFAULT are in forward.py.
         extra_mols = st.multiselect(
             "Extra opacity molecules", list(_extra_set),
             default=[m for m in _extra_set
-                     if m not in forward._NO_EXOMOLOP_TABLE],
+                     if m in forward.EXTRA_MOLECULES_DEFAULT
+                     and m not in forward._NO_EXOMOLOP_TABLE],
             key=K(f"xmols_{chem_provider}{_net_sfx}"),
             format_func=lambda m: (
                 f"{m}  (no ExoMolOP table -- needs a Mie/line-by-line run)"
@@ -1431,11 +1412,11 @@ with st.sidebar:
                 "Report bounds at significance (σ)", 1.0, 10.0, 3.0, 0.5,
                 key=K("tsig"))
 
-    # Constraint settings render only when the run will compute derivatives.
+    # Free-parameter settings render only when the run computes derivatives.
     fisher_params: list = []
     jac_method = "fd"
     if goal == "constrain" or do_fisher:
-        with st.expander("Constraint settings", expanded=(goal == "constrain")):
+        with st.expander("Free parameters", expanded=(goal == "constrain")):
             if goal == "constrain" and marginalize:
                 # Defaults FILTERED by the live menu, key carries the
                 # provider: Streamlit hard-raises on a default outside the
@@ -1686,10 +1667,7 @@ with st.sidebar:
             format="%.1e", key=K("rtptop"))
         p_ref_bar = st.number_input(
             "Reference pressure for the planet radius (bar)",
-            1.0e-6, 7.0, 1.0e-3, format="%.1e", key=K("pref"),
-            help="Where the catalogue radius and gravity apply; the 1e-3 bar "
-                 "default is the transit photosphere and reproduces the "
-                 "published WASP-39 b depth to 0.6%.")
+            1.0e-6, 7.0, 1.0e-3, format="%.1e", key=K("pref"))
         # keyed PER GEOMETRY (shipped key contract). The DEFAULT follows the
         # structure mode -- a measured T-P table caps the honest column at its
         # own bottom (7.6 bar for the shipped tables), parametric profiles get
@@ -1706,10 +1684,7 @@ with st.sidebar:
             "Column bottom pressure (bar)",
             *forward.P_BTM_RANGE,
             value=_pbtm_default,
-            step=1.0, format="%.4g", key=_pbtm_key,
-            help="How deep the chemistry and radiative-transfer column runs; "
-                 "an eclipse needs the bottom optically thick, and a measured "
-                 "T-P table caps it at the table's own bottom.")
+            step=1.0, format="%.4g", key=_pbtm_key)
         if science_mode == "emission":
             # canonical_params pins simpson in emission (no transit chord);
             # show the pinned state, not a silently ignored choice
