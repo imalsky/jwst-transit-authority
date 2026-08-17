@@ -22,6 +22,7 @@ DATASET_REPO = os.environ.get("DATASET_REPO", "imalsky/vulcan-jwst-tool-data")
 # from before the archival backend was removed; boot then failed closed on
 # 4.33 GB nothing could reach. They may still sit in the dataset repo, which
 # is harmless -- an unlisted tree is simply downloaded and ignored.
+# The per-molecule k-table markers are DERIVED, in ktable_markers() below.
 MARKERS = [
     DATA / "jwst-data" / "cdbs" / "grid" / "phoenix" / "catalog.fits",
     DATA / "jwst-data" / "pandeia_data-2026.7-jwst" / "VERSION_DATA",
@@ -29,16 +30,27 @@ MARKERS = [
     DATA / "retrieval-data" / "cm24_wasp39b",
     DATA / "retrieval-data" / "exojax_linelists",
     DATA / "retrieval-data" / "opacity_cache",
-    # The default opacity_mode ("exomolop", since _VERSION 31) reads these,
-    # so a seed without them leaves every model step failing. One real table
-    # stands for the tree, for the same reason the Pandeia markers are
-    # VERSION files: an empty directory must not count as seeded.
-    DATA / "retrieval-data" / "exomolop" / "H2O.ktable.h5",
 ]
 
 
+def ktable_markers() -> list[Path]:
+    """One marker per k-table the INSTALLED tool can select.
+
+    DERIVED, never hardcoded: until 2026-08-17 a single H2O.ktable.h5 stood
+    for the whole tree, so a seeded /data satisfied the check forever. Adding
+    SH and SO to the default molecule set then left the persistent volume one
+    boot behind the dataset repo with no way to catch up -- markers present,
+    download skipped, every default run stopping on a missing table. A
+    per-molecule list makes a widened menu re-seed on the next boot.
+    """
+    from jwst_tool import forward
+    return [DATA / "retrieval-data" / "exomolop" / f"{m}.ktable.h5"
+            for m in forward.MOLECULES + forward.EXTRA_MOLECULES
+            if m not in forward._NO_EXOMOLOP_TABLE]
+
+
 def missing() -> list[Path]:
-    return [m for m in MARKERS if not m.exists()]
+    return [m for m in MARKERS + ktable_markers() if not m.exists()]
 
 
 def main() -> int:
@@ -47,8 +59,9 @@ def main() -> int:
         print("[bootstrap] /data already seeded, skipping download")
         return 0
 
+    n_all = len(MARKERS) + len(ktable_markers())
     print(f"[bootstrap] seeding /data from {DATASET_REPO} "
-          f"({len(gone)}/{len(MARKERS)} markers absent) ...")
+          f"({len(gone)}/{n_all} markers absent) ...")
     token = os.environ.get("HF_TOKEN")
     if not token:
         print("[bootstrap] WARNING: no HF_TOKEN secret set -- this only "
