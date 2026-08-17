@@ -45,11 +45,13 @@ import json
 import os
 import sys
 import time
+import zipfile
+import zlib
 from pathlib import Path
 
 import numpy as np
 
-# instruments is import-light (os + pathlib only, safe on the GUI's light path)
+# instruments is import-light (stdlib only, safe on the GUI's light path)
 # and owns the data/output root resolution (env-overridable, loud on failure)
 from jwst_tool import instruments as _ins
 
@@ -690,7 +692,10 @@ def _write_bc_file(kind: str, entries: list) -> Path:
     bc_dir.mkdir(parents=True, exist_ok=True)
     path = bc_dir / f"{kind}_{tag}.txt"
     if not path.exists():
-        path.write_text(text)
+        # atomic: a torn BC file would silently drop boundary conditions
+        # (upstream's reader skips unparseable rows) and the exists() guard
+        # would then keep the damage forever
+        _ins.atomic_write(path, lambda fh: fh.write(text.encode()))
     return path
 
 
@@ -1348,6 +1353,30 @@ def cache_path(params: dict) -> Path:
     return MODEL_CACHE / f"{params_key(params)}.npz"
 
 
+def _load_cached_npz(p: Path):
+    """Cached npz as a dict, or None when absent. A file that exists but
+    does not read back as a complete npz (torn write from a killed writer,
+    damaged disk) is quarantined to ``<name>.corrupt-<t>`` and treated as a
+    miss: the entry recomputes instead of raising for every later caller,
+    and the damaged bytes stay on disk for inspection. Also serves
+    adjoint_diag's cache."""
+    if not p.exists():
+        return None
+    try:
+        with np.load(p, allow_pickle=False) as z:
+            return {k: z[k] for k in z.files}
+    except (zipfile.BadZipFile, zlib.error, OSError, EOFError,
+            ValueError) as e:
+        quarantine = p.with_name(f"{p.name}.corrupt-{int(time.time())}")
+        try:
+            p.rename(quarantine)
+        except OSError:
+            pass                # a concurrent reader already moved it
+        print(f"[cache] {p.name} unreadable ({e!r}); quarantined -> "
+              f"{quarantine.name}, treating as a cache miss", flush=True)
+        return None
+
+
 def load_result(params: dict):
     """Cached spectrum dict or None.
 
@@ -1359,11 +1388,7 @@ def load_result(params: dict):
     With Fisher requested: jac (n_par, n_nu), jac_names, jac_row_method,
     fd_h, fd_err.
     """
-    p = cache_path(params)
-    if not p.exists():
-        return None
-    with np.load(p, allow_pickle=False) as z:
-        return {k: z[k] for k in z.files}
+    return _load_cached_npz(cache_path(params))
 
 
 # ---------------------------------------------------------------------------
@@ -1749,7 +1774,10 @@ def run_model(params: dict, log=print) -> Path:
         dst = _uploads_dir() / f"{sha1}.txt"
         if not dst.exists():
             _uploads_dir().mkdir(parents=True, exist_ok=True)
-            dst.write_bytes(src_path.read_bytes())
+            # atomic: the exists() guard makes a torn copy permanent, and
+            # _tp_file_from_cp would then refuse this sha1 forever
+            _ins.atomic_write(dst,
+                              lambda fh: fh.write(src_path.read_bytes()))
             log(f"[fwd] uploaded T-P table archived -> {dst}")
     advance, finish = _make_progress(cp, log)
     A = _assemble_chem(cp, log)
@@ -2427,7 +2455,10 @@ def run_model(params: dict, log=print) -> Path:
         arrays["jac_row_method"] = np.array(row_method, dtype="U16")
         arrays["fd_h"] = np.array(fd_h, dtype=np.float64)
         arrays["fd_err"] = np.array(fd_err, dtype=np.float64)
-    np.savez_compressed(out, **arrays)
+    # atomic: this path is read by every session (load_result) and can be
+    # written by two same-key runs at once; a direct savez lets a reader see
+    # a partial zip, and a kill/OOM mid-write poisons the key permanently
+    _ins.atomic_write(out, lambda fh: np.savez_compressed(fh, **arrays))
     finish()
     log(f"[fwd] cached -> {out.name}")
     return out

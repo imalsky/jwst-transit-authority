@@ -10,16 +10,16 @@ def _tmp_slots(tmp_path, monkeypatch):
 
 
 def test_slots_cap_and_release():
-    s1 = runlimit.acquire("a")
-    s2 = runlimit.acquire("b")
-    assert s1 is not None and s2 is not None
-    assert runlimit.acquire("c") is None          # cap reached
-    assert runlimit.busy_count() == 2
-    s1.release()
-    s3 = runlimit.acquire("d")                    # freed slot reusable
-    assert s3 is not None
-    s2.release()
-    s3.release()
+    n = runlimit.MAX_CONCURRENT
+    held = [runlimit.acquire(f"a{i}") for i in range(n)]
+    assert all(s is not None for s in held)
+    assert runlimit.acquire("over") is None       # cap reached
+    assert runlimit.busy_count() == n
+    held[0].release()
+    reused = runlimit.acquire("d")                # freed slot reusable
+    assert reused is not None
+    for s in held[1:] + [reused]:
+        s.release()
     assert runlimit.busy_count() == 0
 
 

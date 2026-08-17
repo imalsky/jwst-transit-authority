@@ -42,6 +42,8 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import time
+import uuid
 from pathlib import Path
 
 import numpy as np
@@ -169,12 +171,36 @@ def _mode_key(star: dict, mode_key: str, sat_limit: float) -> str:
     return job_key(noise_job(star, [mode_key], sat_limit=sat_limit))
 
 
+def _read_cached_json(path: Path):
+    """Parsed cache entry, or None when absent. An entry that exists but
+    does not parse (torn write from a killed writer) is quarantined to
+    ``<name>.corrupt-<t>`` and treated as a miss, so one damaged file
+    cannot poison its key for every later run."""
+    try:
+        return json.loads(path.read_text())
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as e:
+        quarantine = path.with_name(f"{path.name}.corrupt-{int(time.time())}")
+        try:
+            path.rename(quarantine)
+        except OSError:
+            pass                # a concurrent reader already moved it
+        print(f"[cache] {path.name} unreadable ({e!r}); quarantined -> "
+              f"{quarantine.name}, treating as a cache miss", flush=True)
+        return None
+
+
 def missing_modes(star: dict, mode_keys: list[str],
                   sat_limit: float = 0.80) -> list[str]:
-    """The subset of ``mode_keys`` with no per-mode cache entry (in order)."""
+    """The subset of ``mode_keys`` with no READABLE per-mode cache entry
+    (in order). Probes readability, not bare existence, quarantining
+    unreadable entries -- so this and ``run_modes`` agree on what is
+    missing."""
     return [k for k in mode_keys
-            if not (ins.NOISE_CACHE
-                    / f"{_mode_key(star, k, sat_limit)}.json").exists()]
+            if _read_cached_json(
+                ins.NOISE_CACHE
+                / f"{_mode_key(star, k, sat_limit)}.json") is None]
 
 
 def run_modes(star: dict, mode_keys: list[str], sat_limit: float = 0.80,
@@ -192,14 +218,13 @@ def run_modes(star: dict, mode_keys: list[str], sat_limit: float = 0.80,
     """
     ins.NOISE_CACHE.mkdir(parents=True, exist_ok=True)
     out: dict = {}
-    todo = list(mode_keys) if force else missing_modes(star, mode_keys,
-                                                       sat_limit)
+    todo = []
     for k in mode_keys:
-        if k in todo:
+        cached = None if force else _read_cached_json(
+            ins.NOISE_CACHE / f"{_mode_key(star, k, sat_limit)}.json")
+        if cached is None:
+            todo.append(k)
             continue
-        cached = json.loads(
-            (ins.NOISE_CACHE
-             / f"{_mode_key(star, k, sat_limit)}.json").read_text())
         out[k] = cached[k]
         out.setdefault("__provenance__", cached.get("__provenance__"))
     if todo:
@@ -208,9 +233,9 @@ def run_modes(star: dict, mode_keys: list[str], sat_limit: float = 0.80,
         prov = result.get("__provenance__")
         for k in todo:
             single = {k: result[k], "__provenance__": prov}
-            (ins.NOISE_CACHE
-             / f"{_mode_key(star, k, sat_limit)}.json").write_text(
-                json.dumps(single))
+            ins.atomic_write(
+                ins.NOISE_CACHE / f"{_mode_key(star, k, sat_limit)}.json",
+                lambda fh, s=single: fh.write(json.dumps(s).encode()))
             out[k] = result[k]
         out["__provenance__"] = prov
     return out
@@ -227,10 +252,13 @@ def run_pandeia(job: dict, progress=None, force: bool = False) -> dict:
     """
     ins.NOISE_CACHE.mkdir(parents=True, exist_ok=True)
     cache = ins.NOISE_CACHE / f"{job_key(job)}.json"
-    if cache.exists() and not force:
-        return json.loads(cache.read_text())
+    if not force:
+        cached = _read_cached_json(cache)
+        if cached is not None:
+            return cached
     result = _run_worker(job, progress)
-    cache.write_text(json.dumps(result))
+    ins.atomic_write(cache,
+                     lambda fh: fh.write(json.dumps(result).encode()))
     return result
 
 
@@ -244,34 +272,42 @@ def _run_worker(job: dict, progress=None) -> dict:
             f"backend: {ins.BACKEND_STATUS}). The noise model cannot run without it; "
             "set JWST_TOOL_PANDEIA_PYTHON to a python with the matching pandeia.engine.")
 
-    in_json = ins.NOISE_CACHE / f"{job_key(job)}.job.json"
-    out_json = ins.NOISE_CACHE / f"{job_key(job)}.out.json"
+    # unique per invocation: job-keyed names are SHARED between concurrent
+    # identical jobs -- one parent would read the out file while the other's
+    # worker is still writing it
+    token = uuid.uuid4().hex[:8]
+    in_json = ins.NOISE_CACHE / f"{job_key(job)}.{token}.job.json"
+    out_json = ins.NOISE_CACHE / f"{job_key(job)}.{token}.out.json"
     in_json.write_text(json.dumps(job))
     worker = ins.TOOL_DIR / "pandeia_worker.py"
 
-    proc = subprocess.Popen([str(py), str(worker), str(in_json), str(out_json)],
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    # drain stderr on a thread while streaming stdout: reading only stdout
-    # deadlocks once the worker fills the ~64 KB stderr pipe buffer
-    import io
-    import threading
-    err_buf = io.StringIO()
-    t_err = threading.Thread(target=lambda: err_buf.write(proc.stderr.read()),
-                             daemon=True)
-    t_err.start()
-    # ``progress`` can raise Streamlit's cancel exception (a BaseException);
-    # the worker must not outlive the run that started it
-    with proc_mod.terminating(proc):
-        for line in proc.stdout:
-            if progress:
-                progress(line.rstrip())
-        proc.wait()
-    t_err.join(timeout=30)
-    if proc.returncode != 0 or not out_json.exists():
-        err = err_buf.getvalue()
-        raise RuntimeError(f"pandeia worker failed (rc={proc.returncode}):\n{err[-3000:]}")
+    try:
+        proc = subprocess.Popen([str(py), str(worker), str(in_json), str(out_json)],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # drain stderr on a thread while streaming stdout: reading only stdout
+        # deadlocks once the worker fills the ~64 KB stderr pipe buffer
+        import io
+        import threading
+        err_buf = io.StringIO()
+        t_err = threading.Thread(target=lambda: err_buf.write(proc.stderr.read()),
+                                 daemon=True)
+        t_err.start()
+        # ``progress`` can raise Streamlit's cancel exception (a BaseException);
+        # the worker must not outlive the run that started it
+        with proc_mod.terminating(proc):
+            for line in proc.stdout:
+                if progress:
+                    progress(line.rstrip())
+            proc.wait()
+        t_err.join(timeout=30)
+        if proc.returncode != 0 or not out_json.exists():
+            err = err_buf.getvalue()
+            raise RuntimeError(f"pandeia worker failed (rc={proc.returncode}):\n{err[-3000:]}")
 
-    return json.loads(out_json.read_text())
+        return json.loads(out_json.read_text())
+    finally:
+        in_json.unlink(missing_ok=True)
+        out_json.unlink(missing_ok=True)
 
 
 def make_bins(wl_lo: float, wl_hi: float, R: float) -> np.ndarray:

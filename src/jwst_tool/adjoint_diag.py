@@ -87,12 +87,9 @@ def cache_path(params: dict, species: str) -> Path:
 
 
 def load_result(params: dict, species: str):
-    """Cached adjoint diagnostics dict or None."""
-    p = cache_path(params, species)
-    if not p.exists():
-        return None
-    with np.load(p, allow_pickle=False) as z:
-        return {k: z[k] for k in z.files}
+    """Cached adjoint diagnostics dict or None (unreadable entries are
+    quarantined and recompute, same policy as forward.load_result)."""
+    return forward._load_cached_npz(cache_path(params, species))
 
 
 # ---------------------------------------------------------------------------
@@ -373,8 +370,10 @@ def run_adjoint(params: dict, species: str, log=print) -> Path:
     ADJOINT_CACHE.mkdir(parents=True, exist_ok=True)
     out = cache_path(params, species)
     n_top = min(25, len(phys))
-    np.savez_compressed(
-        out,
+    # atomic (via the temp+rename helper): a kill mid-write must not leave a
+    # torn npz that poisons this key for every later load_result
+    _ins.atomic_write(out, lambda fh: np.savez_compressed(
+        fh,
         species=np.array(species, dtype="U8"),
         vulcan_species=np.array(vulcan_sp, dtype="U16"),
         loss_layer=np.int64(Lz),
@@ -414,7 +413,7 @@ def run_adjoint(params: dict, species: str, log=print) -> Path:
         conv_gate=np.float64(chem.yconv_min),
         params_json=np.array(json.dumps(cp)),
         adjoint_version=np.int64(_ADJ_VERSION),
-    )
+    ))
     log("[adj] PROG 1.000 done")
     log(f"[adj] cached -> {out.name}")
     return out

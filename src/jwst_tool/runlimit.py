@@ -22,8 +22,10 @@ from pathlib import Path
 from jwst_tool import instruments as _ins
 
 #: concurrent heavy subprocesses per instance (forward model, Pandeia ETC
-#: batch, adjoint diagnostics each hold ONE slot for their full duration)
-MAX_CONCURRENT = 2
+#: batch, adjoint diagnostics each hold ONE slot for their full duration).
+#: Sized to cpu-upgrade (8 vCPU / 32 GB): one default solve measures ~1.7
+#: cores and ~6.3 GB peak, so four fit with headroom and eight do not.
+MAX_CONCURRENT = 4
 SLOT_DIR = Path(_ins.OUTPUT_DIR) / "run_slots"
 
 

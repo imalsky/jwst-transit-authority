@@ -30,6 +30,7 @@ applied by default. Unlike the floor, it averages down with transits.
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 
 TOOL_DIR = Path(__file__).resolve().parent        # pandeia_worker.py lives here
@@ -64,6 +65,33 @@ else:
         "install cannot infer it), or run from an editable checkout of vulcan-jwst-tool.")
 MODEL_CACHE = OUTPUT_DIR / "model_cache"
 NOISE_CACHE = OUTPUT_DIR / "noise_cache"
+
+
+def atomic_write(path: Path, writer) -> None:
+    """Write ``writer(fh)`` to ``path`` atomically (temp file in the same
+    directory, fsync, ``os.replace``).
+
+    The caches under OUTPUT_DIR are shared by concurrent sessions and
+    subprocesses; a direct write to the final path lets a reader (or a
+    second same-key writer) see a partial file, and a killed writer leaves
+    one behind permanently. With the rename, a reader sees the old content
+    or the complete new content, never a torn file. ``fh`` is binary.
+    """
+    path = Path(path)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent),
+                               prefix=path.name + ".tmp.")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            writer(fh)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 # Pandeia backend environment (the real STScI ETC engine, PandExo's core).
 # The worker runs in its own conda env; noise.run_pandeia refuses loudly if
