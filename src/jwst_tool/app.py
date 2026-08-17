@@ -248,8 +248,8 @@ st.set_page_config(page_title="JWST Exoplanet Observation Planner",
 # Header: short orientation, no acknowledgment gate
 # ---------------------------------------------------------------------------
 st.title("JWST exoplanet observation planner")
-st.subheader("Warning: This tool is in beta mode. If you find a bug, "
-             "please email isaacmalsky@gmail.com")
+st.subheader("Warning: This tool is in beta mode. That means if you find "
+             "a bug, you beta email isaacmalsky@gmail.com")
 st.markdown(
     "0. **Configuration**: load a shared configuration file, or start "
     "fresh.\n"
