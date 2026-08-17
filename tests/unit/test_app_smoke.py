@@ -380,11 +380,35 @@ def test_removed_gui_prose_sections_and_tooltips_stay_gone():
     # line-by-line-only widgets stay OUT of a default (no-Mie-deck) boot --
     # they render only when a Mie deck forces line-by-line mode (companion
     # test below).
-    assert "computed at R = 1000" in page, "the step-2 resolution note is gone"
-    assert "blurred to each mode's native resolution" in page, \
-        "the step-4 resolution note is gone"
+    assert "computed at R = 1000 (correlated-k)" in page, \
+        "the step-2 resolution note is gone or lost its opacity-mode qualifier"
+    assert "scored on the analysis bins" in page, \
+        "the step-2 scored-on-bins clause is gone"
+    assert "coarser than the model (PRISM and MIRI LRS)" in page, \
+        "the step-4 resolution note is gone or overclaims the LSF again"
+    # 2026-08-17 corrections (external review, maintainer-approved): the
+    # landing list must not promise the maintainer-gated engine choice, nor
+    # claim the blur runs on every mode (it runs on PRISM and MIRI LRS only).
+    assert "chemistry engine" not in page, \
+        "the landing list promises an engine choice the shipped build hides"
+    assert "blurred to each mode's native resolution" not in page, \
+        "the overclaiming step-4 blur wording is back"
     assert "not change the instrument's native resolution" in caps, \
         "the analysis-R caption is gone"
+    # The bin-edge caption is CONDITIONAL: absent at the default R = 100,
+    # present at R >= 250 when a selected mode's LSF outresolves the model
+    # (G395H is in DEFAULT_MODES). The Mie-boot companion test pins the
+    # line-by-line exclusion.
+    assert "opacity resolution on" not in caps, \
+        "the bin-edge caption shows on a default R = 100 boot"
+    at_fine = AppTest.from_file(str(APP), default_timeout=60)
+    at_fine.session_state["n0_rbin"] = 300
+    at_fine.run()
+    assert not at_fine.exception, at_fine.exception
+    caps_fine = " ".join(c.value for c in at_fine.get("caption"))
+    assert "approach the model's R = 1000 opacity resolution" in caps_fine \
+        and "G395H" in caps_fine, \
+        "the bin-edge caption is missing at R = 300 on an affected mode"
     _widget_keys = {w.key for w in at.get("number_input")} | {
         w.key for w in at.get("selectbox")}
     for key in ("n0_broad", "n0_nupts", "n0_rtdit"):
@@ -407,6 +431,7 @@ def test_lbl_widgets_render_only_with_mie_deck():
     refdata change, never edit the numbers freehand)."""
     at = AppTest.from_file(str(APP), default_timeout=60)
     at.session_state["n0_miec"] = "MgSiO3"
+    at.session_state["n0_rbin"] = 300
     at.run()
     assert not at.exception, at.exception
     keys = {w.key for w in at.get("number_input")} | {
@@ -415,6 +440,10 @@ def test_lbl_widgets_render_only_with_mie_deck():
         assert key in keys, f"{key} missing with a Mie deck selected"
     caps = " ".join(c.value for c in at.get("caption"))
     assert "line-by-line" in caps, "the Mie line-by-line caption is gone"
+    # The R = 1000 bin-edge caption is about the k-table grid, so it must
+    # stay OFF in line-by-line mode even at a fine analysis R.
+    assert "opacity resolution on" not in caps, \
+        "the R = 1000 bin-edge caption fired on a line-by-line (Mie) boot"
 
     from jwst_tool import instruments as ins
     for k, m in ins.MODES.items():

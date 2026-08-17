@@ -246,12 +246,14 @@ st.markdown(
     "0. **Configuration**: load a shared configuration file, or start "
     "fresh.\n"
     "1. **Target**: select the system and the observation type.\n"
-    "2. **Atmosphere**: select the chemistry engine and the atmosphere "
-    "model. The model spectrum is computed at R = 1000.\n"
+    "2. **Atmosphere**: set up the atmosphere model. The model spectrum "
+    "is computed at R = 1000 (correlated-k) and scored on the analysis "
+    "bins (default R = 100).\n"
     "3. **Science goal**: detect a molecule, or constrain a parameter.\n"
     "4. **Observation**: select instrument modes and noise assumptions. "
-    "The model is blurred to each mode's native resolution, then binned "
-    "to the analysis R (default 100).\n\n"
+    "The model is smoothed to the instrument resolution where that is "
+    "coarser than the model (PRISM and MIRI LRS), then binned to the "
+    "analysis R (default 100).\n\n"
     "The tool computes a forward "
     "spectrum and a Pandeia noise forecast, ranks the selected modes, and "
     "reports how many transits or eclipses reach your target.")
@@ -1227,8 +1229,10 @@ with st.sidebar:
                          if m not in forward._S_MOLECULES]
             _extra_set = [m for m in _extra_set
                           if m not in forward._S_MOLECULES]
-        st.caption("The model spectrum is computed at R = 1000 on the "
-                   "published ExoMolOP k-tables (1-15 µm).")
+        st.caption("The model spectrum is computed at R = 1000 "
+                   "(correlated-k) on the published ExoMolOP k-tables "
+                   "(1-15 µm) and scored on the analysis bins "
+                   "(default R = 100).")
         st.caption(
             f"The base set **{' · '.join(_base_set)}** is always on."
             + (" No SO2 here: in equilibrium, sulfur sits in H2S and "
@@ -1523,6 +1527,22 @@ with st.sidebar:
             "Analysis resolving power, R", 25, 500, 100, 25, key=K("rbin"))
         st.caption("Sets the final bins for every score and figure; it does "
                    "not change the instrument's native resolution.")
+        # Past R ~ 250 the analysis bins are four or fewer of the model's
+        # R = 1000 k-table bands wide, so sub-band structure the high-R
+        # gratings record starts to matter at bin edges. Affected = the mode's
+        # LSF outresolves the model (2.3548 x native R > 1000); tested on the
+        # MEDIAN native R, which classifies all eight shipped modes the same
+        # as the README's measured min-native-R numbers. Line-by-line (Mie)
+        # runs are excluded: nu_pts moves the model R there, and the
+        # run-level LSF warning discloses per mode either way.
+        if int(r_bin) >= 250 and not mie_condensate:
+            _coarse = [ins.MODES[k]["label"] for k in mode_keys
+                       if 2.3548 * ins.MODES[k]["r_native_med"] > 1000.0]
+            if _coarse:
+                st.caption(f"Bins this fine approach the model's R = 1000 "
+                           f"opacity resolution on {', '.join(_coarse)}: "
+                           "structure finer than R = 1000 is real to the "
+                           "instrument but absent from the model.")
 
     with st.expander("Noise model (Pandeia)"):
         st.markdown("**Minimum noise floor** (PandExo convention)")

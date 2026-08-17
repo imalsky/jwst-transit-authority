@@ -1289,6 +1289,10 @@ maintainer's `vulcan_validation` bundle).
   NIRISS SOSS (needs 1277), NIRSpec G395M (1708), G395H (4546), G235H
   (4417), NIRCam F322W2 (2762) and F444W (3749); the model's own opacity
   resolution sets the effective width there instead of the instrument.
+  Binned scores stay sound anyway: every analysis bin (R <= 500) is wider
+  than the R = 1000 bands and correlated-k gives correct band means, so the
+  gap is sub-bin structure, felt only at bin edges and growing toward the
+  R = 500 cap (the GUI warns there).
   Measured from the cached ETC dispersion curves, 2026-08-16 (the NIRCam
   pair from the refdata dispersion file directly, since NIRCam first
   exports a native-R curve with noise worker v12). **SOSS and
@@ -1297,8 +1301,13 @@ maintainer's `vulcan_validation` bundle).
   file was not even found before noise worker v12 (its refdata filename
   carries no disperser token), so NIRCam warned of a missing file instead of
   the honest no-op. Every affected mode says so in its warning channel
-  rather than staying silent. Closing it needs higher-resolution k-tables,
-  not a setting: the correlated-k band grid is fixed by the published files.
+  rather than staying silent. Under correlated-k, closing it needs
+  higher-resolution published k-tables, not a setting: the band grid is
+  fixed by the files. The line-by-line path does apply the LSF once
+  `nu_pts` >= ~13,000 (model R ~ 4,800; the 32,000 cap reaches ~11,800),
+  but its sampled grid carries its own documented bias, so it trades
+  band-mean accuracy for LSF fidelity rather than strictly improving on
+  correlated-k.
 - **Emission is validated only as far as "it runs".** v27 switched the solver
   to one that carries an interior source term, which is what made emission
   produce a spectrum at all. The
