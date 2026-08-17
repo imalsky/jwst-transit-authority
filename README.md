@@ -58,6 +58,20 @@ pandeia-extracted, benchmarked against PandExo (`tests/parity/`), and
 conservative by roughly 2-56 percent depending on mode and star. Fisher
 constraints use certified finite differences or forward-mode AD.
 
+## Tests and validation
+
+This tool includes test suites, as well as other validation checks. The suites
+run in CI for each repository: https://github.com/imalsky/jax-vulcan,
+https://github.com/imalsky/vulcan-forward,
+https://github.com/imalsky/vulcan-jwst-tool, and
+https://github.com/imalsky/vulcan-retrieval. For end-to-end tests, see the set
+of validation figures that I've created here:
+https://github.com/imalsky/vulcan-forward/tree/main/validation/figures. This
+includes trying to recreate the results of Tsai et al. 2023
+(https://doi.org/10.5281/zenodo.7542781), the JWST ERS carbon dioxide paper
+(https://doi.org/10.5281/zenodo.6959427), and VULCAN 2.0 and petitRADTRANS on
+identical inputs.
+
 ## Deployment
 
 The public instance runs as a Hugging Face Space; the recipe is in `deploy/`.
