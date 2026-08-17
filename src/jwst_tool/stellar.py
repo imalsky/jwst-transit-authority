@@ -56,7 +56,7 @@ def phoenix_surface_flux(nu_grid: np.ndarray, teff: float, logg: float,
             "dataset the noise side uses -- run 'jwst-tool data' for status "
             "and the data README for the download.")
     # Pin the tool's OWN cdbs root unconditionally: an inherited shell
-    # PYSYN_CDBS (e.g. a stale picaso setup) must never redirect the grid.
+    # PYSYN_CDBS set elsewhere must never redirect the grid.
     os.environ["PYSYN_CDBS"] = ins.PYSYN_CDBS
     # local CALSPEC Vega so stsynphot never phones home (same file the
     # pandeia worker pins)

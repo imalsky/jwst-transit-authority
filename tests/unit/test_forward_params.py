@@ -1,7 +1,7 @@
 """Pure-Python validation of forward.canonical_params (no chemistry stack).
 
 The contract: structure is a Guillot profile, an explicit content-hash-keyed
-table, or a PICASO climate solve; no profile is ever silently substituted and
+table; no profile is ever silently substituted and
 unknown parameter keys refuse. Condensation is detection-only. The WASP-39 b
 reference state and its cache key are pinned below; re-measure against the
 literature before moving either.
@@ -138,11 +138,6 @@ def test_shipped_tables_gate_defaults_and_are_never_substituted():
     assert forward.shipped_tp_table_name("hd189733b")
     cp = forward.canonical_params(dict(planet="hd189733b", tp_mode="file"))
     assert cp["tp_mode"] == "file" and cp["kzz_mode"] == "file"
-    # the verified table is the default under the vulcan provider only
-    # (pure resolver: a canonical_params call under chem_provider="picaso"
-    # would demand the PICASO refdata tree)
-    assert forward._default_tp_mode(
-        dict(planet="wasp39b", chem_provider="picaso")) == "guillot"
     assert forward._default_tp_mode(dict(planet="wasp39b")) == "file"
 
 
@@ -407,8 +402,8 @@ def test_network_semantics():
     (b) ncho removes exactly the sulfur species from the RT sets: SO2 from
         the base set, H2S/CS2/OCS from the extras; an explicit sulfur extra
         or wo entry is refused, never dropped.
-    (c) compatibility: refused with the picaso provider (no kinetics
-        network) and with use_condense (the certified recipe condenses S8).
+    (c) compatibility: refused with use_condense (the certified recipe
+        condenses S8).
     (d) cache honesty: sncho and ncho are different keys.
     """
     # (a)
@@ -429,8 +424,6 @@ def test_network_semantics():
     with pytest.raises(ValueError, match="not in this run's RT molecule set"):
         forward.canonical_params(_p(network="ncho", wo_mols=["SO2"]))
     # (c)
-    with pytest.raises(ValueError, match="no meaning under"):
-        forward.canonical_params(_p(network="ncho", chem_provider="picaso"))
     with pytest.raises(ValueError, match="condenses S8"):
         forward.canonical_params(_p(network="ncho", use_condense=True))
     # (d)
@@ -545,10 +538,10 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # published 4.5-4.8 -- that gap is real and open). Both need a full
     # run; SO2 also needs the pandeia backend. Full history: notes.md.
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b", tp_mode="file"))) == "9348c09f2b133a0a"
+        dict(planet="wasp39b", tp_mode="file"))) == "874d580abb25e870"
     # ... and since 2026-08-11 the bare DEFAULT run is that same atmosphere
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "9348c09f2b133a0a"
+        dict(planet="wasp39b"))) == "874d580abb25e870"
     # the sha1 pin is only meaningful re-derived from the file the run
     # actually reads -- this catches the table itself being swapped
     path = forward._shipped_tp_file("wasp39b")

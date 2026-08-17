@@ -80,12 +80,6 @@ def main() -> int:
               "Run `jwst-tool data` for the full data-availability report.",
               file=sys.stderr)
 
-    if os.environ.get("JWST_TOOL_ENABLE_UNCERTIFIED_PICASO") == "1":
-        print("jwst-tool: WARNING: the uncertified PICASO research path is "
-              "enabled. Its dependency stack conflicts with the validated "
-              "ExoJAX environment and its native-RT gate is failing; do not "
-              "use PICASO output in collaborator results.", file=sys.stderr)
-
     app = Path(__file__).parent / "app.py"
     cmd = [sys.executable, "-m", "streamlit", "run", str(app)] + sys.argv[1:]
     return subprocess.call(cmd, env=os.environ.copy())

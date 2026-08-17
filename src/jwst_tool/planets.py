@@ -16,7 +16,7 @@ injected through the existing hooks:
 T-P and Kzz are explicit modes, never silently substituted. Under Guillot the
 structural baseline is isothermal at a representative temperature (it sets
 only the hydrostatic grid + EQ init; tp_eval supplies T(P) for chemistry and
-RT); ``file`` / ``picaso_climate`` make the tabulated profile the structure.
+RT); ``file`` makes the tabulated profile the structure.
 Kzz is const / Pfunc / JM16 / the table's own column.
 
 Values are literature defaults for PLANNING (all editable in the GUI):
@@ -194,8 +194,7 @@ AU_CM = 1.496e13
 def system_teq(star_teff: float, rstar_rsun: float, orbit_au: float) -> float:
     """Zero-albedo full-redistribution equilibrium temperature:
     T_eq = T_eff * sqrt(R_star / (2 a)). The sqrt(2) * T_eq irradiation
-    temperature this implies equals T_eff * sqrt(R_star / a), the same
-    expression the PICASO climate solve uses for its guess (picaso_climate)."""
+    temperature this implies equals T_eff * sqrt(R_star / a)."""
     return float(star_teff) * math.sqrt(
         float(rstar_rsun) * R_SUN_CM / (2.0 * float(orbit_au) * AU_CM))
 

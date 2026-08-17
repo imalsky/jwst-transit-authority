@@ -72,7 +72,7 @@ def _repo_identity(workspace: Path, directories: tuple) -> dict:
 def _versions() -> dict:
     out = {}
     for name in ("vulcan-jwst-tool", "vulcan-forward", "vulcan-jax",
-                 "exojax", "jax", "numpy", "picaso"):
+                 "exojax", "jax", "numpy"):
         try:
             out[name] = metadata.version(name)
         except metadata.PackageNotFoundError:

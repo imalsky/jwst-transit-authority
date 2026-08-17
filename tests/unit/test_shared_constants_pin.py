@@ -57,54 +57,25 @@ def _vulcan_jax_constant(name: str) -> float:
         f"re-point this pin rather than deleting the check.")
 
 
-def test_gravitational_constant_matches_vulcan_jax_exactly():
-    """G must be bit-identical on both sides of the gs <-> Mp round-trip."""
-    theirs = _vulcan_jax_constant("G_grav")
-    assert planets.G_CGS == theirs, (
-        f"planets.G_CGS={planets.G_CGS!r} but vulcan_jax.phy_const.G_grav="
-        f"{theirs!r}. forward.py divides by the first and VULCAN-JAX "
-        f"multiplies by the second, so any difference rescales every "
-        f"submitted atmosphere silently. Both are CODATA 2018; change them "
-        f"together or not at all."
-    )
-
-
-def test_solar_radius_matches_vulcan_jax_exactly():
-    """R_sun converts rstar_rsun on both sides; same argument as G."""
-    theirs = _vulcan_jax_constant("r_sun")
-    assert planets.R_SUN_CM == theirs, (
-        f"planets.R_SUN_CM={planets.R_SUN_CM!r} but vulcan_jax r_sun="
-        f"{theirs!r} (IAU 2015 Resolution B3 nominal value on both sides)."
-    )
-
-
-def test_astronomical_unit_agrees_to_the_documented_tolerance():
-    """AU is the one constant that legitimately differs, and by how much.
-
-    This tool rounds to 1.496e13 while VULCAN-JAX carries 1.49597871e13. The
-    two are used on OPPOSITE sides of a boundary that no value crosses -- AU
-    here only converts `orbit_au` into the local irradiation geometry, and is
-    never handed to the chemistry -- so this is a rounding choice, not a
-    coupling. The test exists so that stays true: a future edit that widens
-    the gap, or that starts passing an AU-derived quantity across the
-    boundary, has to come here and say so.
-    """
-    theirs = _vulcan_jax_constant("au")
-    for name, ours in (("planets.AU_CM", planets.AU_CM),):
+@pytest.mark.parametrize("name,ours,exact", [
+    # G must be bit-identical: forward.py divides by it and VULCAN-JAX
+    # multiplies by it, so any difference silently rescales every atmosphere.
+    ("G_grav", planets.G_CGS, True),
+    # R_sun converts rstar_rsun on both sides; same argument as G.
+    ("r_sun", planets.R_SUN_CM, True),
+    # AU legitimately differs by rounding (1.496e13 vs 1.49597871e13): it
+    # only converts orbit_au into local irradiation geometry and never
+    # crosses into the chemistry. The tolerance keeps that true.
+    ("au", planets.AU_CM, False),
+])
+def test_constants_match_vulcan_jax(name, ours, exact):
+    theirs = _vulcan_jax_constant(name)
+    if exact:
+        assert ours == theirs, (
+            f"{name}: {ours!r} here vs {theirs!r} in vulcan_jax.phy_const. "
+            "Change both together or not at all.")
+    else:
         rel = abs(ours - theirs) / theirs
         assert rel < 2e-5, (
-            f"{name}={ours!r} vs vulcan_jax au={theirs!r}: relative "
-            f"difference {rel:.2e} exceeds the documented 2e-5 rounding "
-            f"tolerance.")
-
-
-def test_picaso_climate_reuses_the_registry_constants():
-    """picaso_climate must not carry a third copy of R_sun / AU.
-
-    It declared its own `_RSUN_CM` / `_AU_CM` until 2026-08-14. Two modules in
-    ONE package disagreeing about a unit conversion is the failure this whole
-    file exists to prevent.
-    """
-    from jwst_tool import picaso_climate
-    assert picaso_climate._RSUN_CM == planets.R_SUN_CM
-    assert picaso_climate._AU_CM == planets.AU_CM
+            f"{name}: {ours!r} vs {theirs!r}, relative difference {rel:.2e} "
+            "exceeds the documented 2e-5 rounding tolerance.")

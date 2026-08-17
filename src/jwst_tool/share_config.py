@@ -40,8 +40,8 @@ def build_share(canon: dict, goal: dict, observation: dict,
         "observation": dict(observation),
         # Which software wrote this file is recorded ONCE, inside the
         # provenance block ("software"): provenance._versions() is a superset
-        # of the top-level copy this key used to carry (it adds jax, numpy and
-        # picaso). Informational only -- a configuration must load on any tool
+        # of the top-level copy this key used to carry (it adds jax and
+        # numpy). Informational only -- a configuration must load on any tool
         # version, and widget_state never reads it.
         "provenance": provenance.snapshot(observation.get("seed")),
     }
@@ -141,17 +141,12 @@ def _resolve_embedded_tp(cp: dict, cfg: dict, tp_mode: str) -> str | None:
     return restored
 
 
-def _restore_goal(state: dict, cp: dict, goal: dict, key, provider: str,
+def _restore_goal(state: dict, cp: dict, goal: dict, key,
                   tp_mode: str, notes: list[str]) -> None:
     cloud_i = int(bool(cp["cloud_on"]))
     mie_i = int(bool(state[key("miec")]))
-    suffix = f"{provider}_{tp_mode}_{cloud_i}_{mie_i}"
-    if provider == "picaso":
-        chem_free = (["lnZ"] if tp_mode == "picaso_climate"
-                     else ["lnZ", "dlnCO"])
-    else:
-        chem_free = list(forward.CHEM_PARAM_NAMES)
-    avail = chem_free + list(forward.TP_PARAM_NAMES[tp_mode])
+    suffix = f"vulcan_{tp_mode}_{cloud_i}_{mie_i}"
+    avail = list(forward.CHEM_PARAM_NAMES) + list(forward.TP_PARAM_NAMES[tp_mode])
     if cp["cloud_on"]:
         avail += list(forward.CLOUD_FISHER_PARAMS)
     if mie_i:
@@ -169,14 +164,13 @@ def _restore_goal(state: dict, cp: dict, goal: dict, key, provider: str,
         state[key("jacm")] = method
     if selected_goal == "detect":
         net_sfx = _network_suffix(cp)
-        extras = state[key(f"xmols_{provider}{net_sfx}")]
+        extras = state[key(f"xmols_vulcan{net_sfx}")]
         mol_opts = forward.active_molecules(
-            {"chem_provider": provider,
-             "network": str(cp.get("network", "sncho")),
+            {"network": str(cp.get("network", "sncho")),
              "extra_mols": extras})
         target = goal.get("target_mol")
         if target in mol_opts:
-            state[key(f"mol_{provider}{net_sfx}_"
+            state[key(f"mol_vulcan{net_sfx}_"
                       + "_".join(sorted(extras)))] = target
         elif target:
             notes.append(f"detection target {target} is not in the restored "
@@ -277,13 +271,12 @@ def _restore_observation(state: dict, obs: dict, cfg: dict, key, pk,
         state[key("combos")] = combos
 
 
-def _restore_system_profile(cp: dict, key, pk, planet: str, provider: str,
+def _restore_system_profile(cp: dict, key, pk, planet: str,
                             tp_mode: str, restored_tp: str | None,
                             notes: list[str]) -> dict:
     state = {
         key("planet"): planet,
         key("scimode"): str(cp.get("science_mode", "transmission")),
-        key("provider"): provider,
         pk("teff"): float(cp["star_teff"]),
         pk("logg"): float(cp["star_logg"]),
         pk("feh"): float(cp["star_feh"]),
@@ -304,35 +297,12 @@ def _restore_system_profile(cp: dict, key, pk, planet: str, provider: str,
             pk("tint"): float(cp["Tint"]), pk("lk"): float(cp["log_kappa"]),
             pk("lg"): float(cp["log_gamma"]),
         })
-    elif tp_mode == "picaso_climate":
-        state.update({
-            pk("tintcl"): float(cp["tint_cl"]),
-            pk("rfacv"): float(cp["rfacv"]),
-            pk("tiovo"): bool(cp["tio_vo"]),
-            pk("rcb"): int(cp["climate_rcb"]),
-        })
     elif tp_mode == "file":
         state[pk("tpsrc")] = str(cp.get("tp_file", forward.TP_FILE_SHIPPED))
         if restored_tp:
             state["restored_tp_path"] = restored_tp
-    metallicity = float(cp["met_x_solar"])
-    co_ratio = float(cp["co_ratio"])
-    if tp_mode == "picaso_climate":
-        from jwst_tool import picaso_chem as pchem
-        feh = round(math.log10(metallicity), 1)
-        if feh in [x for x in pchem.FEH_NODES if -1.0 <= x <= 2.0]:
-            state[key("metnode")] = feh
-            if co_ratio in pchem.CO_NODES:
-                state[key(f"conode_{feh:.1f}")] = co_ratio
-        else:
-            notes.append(f"climate metallicity {metallicity:g}x solar is not "
-                         "a selectable node and was not restored")
-    elif provider == "picaso":
-        state[key("met_pic")] = metallicity
-        state[key("co_pic")] = co_ratio
-    else:
-        state[key("met")] = metallicity
-        state[key("co")] = co_ratio
+    state[key("met")] = float(cp["met_x_solar"])
+    state[key("co")] = float(cp["co_ratio"])
     return state
 
 
@@ -388,7 +358,7 @@ def _restore_vulcan_physics(state: dict, cp: dict, key, pk) -> None:
     _reject_removed_physics(cp)
 
 
-def _restore_rt_state(state: dict, cp: dict, key, provider: str) -> None:
+def _restore_rt_state(state: dict, cp: dict, key) -> None:
     state[key("rayl")] = bool(cp["use_rayleigh"])
     state[key("cloud")] = bool(cp["cloud_on"])
     if cp["cloud_on"]:
@@ -400,18 +370,14 @@ def _restore_rt_state(state: dict, cp: dict, key, provider: str) -> None:
         state[key("mierg")] = float(cp["mie_log_rg"])
         state[key("miesg")] = float(cp["mie_sigmag"])
         state[key("miemmr")] = float(cp["mie_log_mmr"])
-    if provider == "picaso":
-        from jwst_tool import picaso_chem as pchem
-        extras_all = list(pchem.PICASO_EXTRA_MOLECULES)
-    else:
-        extras_all = list(forward.EXTRA_MOLECULES)
-    state[key(f"xmols_{provider}{_network_suffix(cp)}")] = [
+    extras_all = list(forward.EXTRA_MOLECULES)
+    state[key(f"xmols_vulcan{_network_suffix(cp)}")] = [
         molecule for molecule in (cp.get("extra_mols") or [])
         if molecule in extras_all]
     state.update({
         key("broad"): str(cp.get("broadening", "air")),
         key("nupts"): int(cp["nu_pts"]),
-        key("nz_pic" if provider == "picaso" else "nz"): int(cp["nz"]),
+        key("nz"): int(cp["nz"]),
         key("rtptop"): float(cp["rt_ptop_bar"]),
         key("rtint"): str(cp["rt_integration"]),
         key("rtdit"): float(cp["rt_dit_res"]),
@@ -433,6 +399,12 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
     planet = str(cp["planet"])
     provider = str(cp.get("chem_provider", "vulcan"))
     tp_mode = str(cp.get("tp_mode", "guillot"))
+    if provider == "picaso" or tp_mode == "picaso_climate":
+        raise ValueError(
+            "this configuration uses the removed PICASO engine "
+            "(chem_provider='picaso' or tp_mode='picaso_climate'); the "
+            "subsystem was removed in 0.43.0 because it was disabled and "
+            "uncertified. Re-create the run with the VULCAN engine.")
 
     def pk(name: str) -> str:            # per-planet widget keys
         return key(f"{planet}_{name}")
@@ -440,13 +412,12 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
     restored_tp = _resolve_embedded_tp(cp, cfg, tp_mode)
 
     state = _restore_system_profile(
-        cp, key, pk, planet, provider, tp_mode, restored_tp, notes)
+        cp, key, pk, planet, tp_mode, restored_tp, notes)
 
-    if provider == "vulcan":
-        _restore_vulcan_physics(state, cp, key, pk)
+    _restore_vulcan_physics(state, cp, key, pk)
 
-    _restore_rt_state(state, cp, key, provider)
-    _restore_goal(state, cp, goal, key, provider, tp_mode, notes)
+    _restore_rt_state(state, cp, key)
+    _restore_goal(state, cp, goal, key, tp_mode, notes)
     _restore_observation(state, obs, cfg, key, pk, notes)
 
     return state, notes

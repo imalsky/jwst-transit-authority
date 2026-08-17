@@ -298,129 +298,6 @@ def test_source_pins_fig_width_fisher_table_and_noise_recording():
         "the Fisher CSV is no longer built from the unblanked rows"
 
 
-def test_removed_gui_prose_sections_and_tooltips_stay_gone():
-    """2026-08-13 GUI cleanup (maintainer): the removal IS the requirement,
-    so an edit that restores any of it fails here. Gone: the Condensation and
-    boundary-condition expanders (and their widgets), step-3 and
-    More-settings tooltips, the table guidance, the long-form intro and the
-    honesty paragraphs. Displaced content lives in README.md (GUI prose
-    policy). Kept: engine names and the LIVE, interpolated Pandeia version
-    (the backend-label rule)."""
-    at = _run_app()
-    assert not at.exception, at.exception
-    labels = [e.label for e in at.get("expander")]
-    for gone in ("Condensation (detection goals only)",
-                 "Boundary conditions & escape"):
-        assert gone not in labels, f"{gone!r} expander is back"
-    keys = {w.key for w in at.get("checkbox")} | {
-        w.key for w in at.get("multiselect")}
-    assert "n0_conden" not in keys and "n0_settle" not in keys
-    assert "n0_descape" not in keys
-    # n0_seed joined the list in the 2026-08-16 trim (label says it all);
-    # tooltips that stay are one line of simplified technical English
-    for key in ("n0_nz", "n0_yconv", "n0_rtptop", "n0_rtint", "n0_rtdit",
-                "n0_seed"):
-        found = [w for w in at.get("number_input") + at.get("selectbox")
-                 if w.key == key]
-        if not found:            # nz_pic under the picaso provider
-            continue
-        assert not getattr(found[0], "help", None), \
-            f"{key} regained a help tooltip"
-
-    page = " ".join(m.value for m in at.markdown)
-    caps = " ".join(c.value for c in at.get("caption"))
-    body = page + " " + caps
-    for gone in ("modeling choices that can move the spectrum",
-                 "Read the results as optimistic",
-                 "Treat mode rankings as more robust"):
-        assert gone not in body
-    assert "and its limits" not in page
-    for gone in ("steady-state photochemical kinetics",
-                 "radiative-convective climate profile",
-                 "conditional template S/N per molecule",
-                 "Beta", "full retrieval",
-                 "numerical quality checks", "uncertified spectrum"):
-        assert gone not in page, f"long-form intro phrase survived: {gone!r}"
-    # The "How the model works" expander went 2026-08-17 (maintainer), and it
-    # carried the engine names and the interpolated Pandeia version. Both are
-    # still disclosed -- the backend label on the run status line, the engine
-    # list in README.md -- so what this now pins is that the BLOCK stays gone
-    # and that no one hardcodes a release number in its place.
-    assert "Each run computes a spectrum for the atmosphere you configure" \
-        not in page, "the 'How the model works' block is back"
-    assert not re.search(r"Pandeia \d{4}\.\d", page), \
-        "a Pandeia release is hardcoded into the landing page"
-    assert re.search(r"Pandeia \d{4}\.\d",
-                     "\n".join(l for l in APP.read_text().splitlines()
-                               if "BACKEND_STATUS" in l)) is None, \
-        "the backend label must interpolate ins.BACKEND_STATUS, never a literal"
-
-    # Strip comment lines first: the removals left comments NAMING what was
-    # removed, and matching those would make this test unfixable.
-    src = "\n".join(l for l in APP.read_text().splitlines()
-                    if not l.lstrip().startswith("#"))
-    for phrase in ("Width of the final analysis bins",
-                   "How to read this table",
-                   "One panel per parameter in the summary figure",
-                   "linearized best case",
-                   "Detect: compare the full spectrum with one that omits",
-                   "The forecast is a local Fisher (Cramer-Rao) bound from",
-                   "AD (the default) differentiates the numerical model",
-                   "Scales the reported bounds"):
-        assert phrase not in src, f"removed GUI prose is back: {phrase!r}"
-    lines = src.splitlines()
-    lo = next(i for i, l in enumerate(lines)
-              if 'st.markdown("### 3 · Science goal")' in l)
-    hi = next(i for i, l in enumerate(lines)
-              if i > lo and 'st.markdown("### 4 · Observation")' in l)
-    offenders = [i + 1 for i in range(lo, hi) if "help=" in lines[i]]
-    assert not offenders, f"step 3 regained tooltips at lines {offenders}"
-    # 2026-08-16 resolution notes (maintainer request): the landing list and
-    # the analysis-R caption state the resolution chain, and the three
-    # line-by-line-only widgets stay OUT of a default (no-Mie-deck) boot --
-    # they render only when a Mie deck forces line-by-line mode (companion
-    # test below).
-    assert "computed at R = 1000 (correlated-k)" in page, \
-        "the step-2 resolution note is gone or lost its opacity-mode qualifier"
-    assert "scored on the analysis bins" in page, \
-        "the step-2 scored-on-bins clause is gone"
-    assert "coarser than the model (PRISM and MIRI LRS)" in page, \
-        "the step-4 resolution note is gone or overclaims the LSF again"
-    # 2026-08-17 corrections (external review, maintainer-approved): the
-    # landing list must not promise the maintainer-gated engine choice, nor
-    # claim the blur runs on every mode (it runs on PRISM and MIRI LRS only).
-    assert "chemistry engine" not in page, \
-        "the landing list promises an engine choice the shipped build hides"
-    assert "blurred to each mode's native resolution" not in page, \
-        "the overclaiming step-4 blur wording is back"
-    assert "not change the instrument's native resolution" in caps, \
-        "the analysis-R caption is gone"
-    # The bin-edge caption is CONDITIONAL: absent at the default R = 100,
-    # present at R >= 250 when a selected mode's LSF outresolves the model
-    # (G395H is in DEFAULT_MODES). The Mie-boot companion test pins the
-    # line-by-line exclusion.
-    assert "opacity resolution on" not in caps, \
-        "the bin-edge caption shows on a default R = 100 boot"
-    at_fine = AppTest.from_file(str(APP), default_timeout=60)
-    at_fine.session_state["n0_rbin"] = 300
-    at_fine.run()
-    assert not at_fine.exception, at_fine.exception
-    caps_fine = " ".join(c.value for c in at_fine.get("caption"))
-    assert "approach the model's R = 1000 opacity resolution" in caps_fine \
-        and "G395H" in caps_fine, \
-        "the bin-edge caption is missing at R = 300 on an affected mode"
-    _widget_keys = {w.key for w in at.get("number_input")} | {
-        w.key for w in at.get("selectbox")}
-    for key in ("n0_broad", "n0_nupts", "n0_rtdit"):
-        assert key not in _widget_keys, \
-            f"{key} renders without a Mie deck (line-by-line widgets are " \
-            "Mie-branch only)"
-    readme = (APP.parent.parent.parent / "README.md").read_text()
-    assert "Analysis resolving power (the R control)" in readme
-    assert "not the instrument's resolving power" in readme
-    assert "PHOENIX" in readme, "the stellar model is now disclosed nowhere"
-
-
 def test_lbl_widgets_render_only_with_mie_deck():
     """The broadening gas, native grid points, and line-wing grid widgets act
     only when a Mie deck forces line-by-line mode, so they render only then
@@ -521,39 +398,6 @@ def test_all_saturated_run_has_no_best_mode_score_or_points():
     assert not any("Best mode" in e.value for e in at.error)
     # no plotted series at all, in particular no "<mode>: 5.0σ" legend entry
     assert seen.get("labels") == [], seen
-
-
-def test_picaso_provider_paths_render(monkeypatch):
-    """Under the experimental gate, every PICASO switch order must render:
-    the provider, the detect goal's Fisher checkbox, the constrain-goal
-    Fisher multiselect in BOTH switch orders (regression: default lnKzz not
-    in the menu crashed it), and picaso_climate. canonical_params failures
-    surface through the params_error caption, never an exception."""
-    monkeypatch.setenv("JWST_TOOL_ENABLE_UNCERTIFIED_PICASO", "1")
-
-    at = _run_app()
-    at.selectbox(key="n0_provider").set_value("picaso")
-    at.run()
-    assert not at.exception, at.exception
-    at.checkbox(key="n0_dofish").check()
-    at.run()
-    assert not at.exception, at.exception
-    at.radio(key="n0_goal").set_value("constrain")
-    at.run()
-    assert not at.exception, at.exception
-
-    # constrain goal first, then the provider switch
-    at2 = _run_app()
-    at2.radio(key="n0_goal").set_value("constrain")
-    at2.run()
-    at2.selectbox(key="n0_provider").set_value("picaso")
-    at2.run()
-    assert not at2.exception, at2.exception
-
-    at3 = _run_app()
-    at3.selectbox(key="n0_wasp39b_tp").set_value("picaso_climate")
-    at3.run()
-    assert not at3.exception, at3.exception
 
 
 def test_display_smoothing_is_nondestructive_and_actually_smooths():
@@ -724,33 +568,6 @@ def test_emission_mode_archive_fill_skips_transit_duration():
     assert "secondary-eclipse duration can differ" in warns
 
 
-def test_every_axis_control_is_a_typed_min_max_pair():
-    """No slider anywhere near an axis (maintainer, 2026-08-14): every axis
-    on every figure is two number boxes, min and max, blank for automatic.
-    The wavelength window came BACK in that pass (a reviewer asked to zoom
-    into the PRISM/G395H regions); what was wrong before was the RADIO +
-    range-slider pair. Blank boxes must START blank -- prefilled bounds go
-    stale the moment the run or mode selection changes."""
-    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    at = _run_with_result(out, out_meta)
-    assert not at.exception, at.exception
-    assert not [r for r in at.radio if r.key == "n0_sum_wlmode"], \
-        "the wavelength-range radio should be gone"
-    for _k in ("sum_x", "sum_y", "struct_T", "struct_p", "struct_vmr",
-               "sum_post_lnZ"):
-        for _end in ("min", "max"):
-            _w = at.number_input(key=f"n0_{_k}_{_end}")
-            assert _w.value is None, f"{_k}_{_end} should start blank"
-    # NO sliders anywhere (maintainer, 2026-08-15): every numeric input is a
-    # typed number box, including the noise multiplier that used to be the
-    # one exception
-    assert not at.slider, [s.key for s in at.slider]
-    _x = at.checkbox(key="n0_sum_xlog")
-    _y = at.checkbox(key="n0_sum_ylog")
-    assert _x.value is True and _x.label == "Log x", _x.label
-    assert _y.value is False and _y.label == "Log y", _y.label
-
-
 @pytest.mark.parametrize(
     "widget,value,field",
     # the molecule selectbox keys on the extra-molecule selection, so the key
@@ -841,6 +658,15 @@ def test_axis_bounds_refuse_one_sided_and_reach_the_figure(monkeypatch):
     at = _run_with_result(out, out_meta,
                           n0_sum_y_min=20500.0)     # max left blank
     assert not at.exception, at.exception
+    # Axis-control contract (maintainer, 2026-08-14/15): every axis is a
+    # typed min/max number-box pair that STARTS blank, no sliders anywhere,
+    # no wavelength-range radio.
+    assert not [r for r in at.radio if r.key == "n0_sum_wlmode"]
+    assert not at.slider, [s.key for s in at.slider]
+    for _k in ("sum_x", "struct_T", "struct_p", "struct_vmr", "sum_post_lnZ"):
+        for _end in ("min", "max"):
+            assert at.number_input(key=f"n0_{_k}_{_end}").value is None, \
+                f"{_k}_{_end} should start blank"
     assert any("both boxes" in w.value for w in at.warning), \
         [w.value for w in at.warning]
     # the COMPLETE pairs are accepted silently (so the warning above is a

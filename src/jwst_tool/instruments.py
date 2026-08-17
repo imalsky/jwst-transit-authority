@@ -110,8 +110,7 @@ BACKEND_RELEASE = _BE["release"]
 
 # The PANDEIA backend interpreter (machine-specific, no portable default;
 # require_pandeia_python() turns a missing setting into one actionable
-# message). Named PICASO_PYTHON until 2026-08-05, from before the repo had a
-# real PICASO provider; the PICASO env is JWST_TOOL_PICASO_REFDATA.
+# message).
 PANDEIA_PYTHON = os.environ.get("JWST_TOOL_PANDEIA_PYTHON", _BE["python"])
 
 

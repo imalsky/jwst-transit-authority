@@ -48,20 +48,15 @@ def test_native_r_finds_the_tokenless_nircam_grism_file(tmp_path):
 
 # --- ngroup limits (PandExo compatibility) -----------------------------------
 
-def test_group_caps_and_optimizer_clamp():
+def test_group_caps():
     """NIRCam grism must not permit more than PandExo's hard 100-group max,
-    no mode exceeds its instrument's cap (the import-time guard mirror),
-    and _clamp_ngroup bounds any candidate into [ngroup_min, ngroup_max]."""
+    and no mode exceeds its instrument's cap (the import-time guard mirror)."""
     assert ins.PANDEXO_NGROUP_MAX["nircam"] == 100
     assert any(m["instrument"] == "nircam" for m in ins.MODES.values())
     for key, m in ins.MODES.items():
         cap = ins.PANDEXO_NGROUP_MAX.get(m["instrument"])
         if cap is not None:
             assert m["ngroup_max"] <= cap, key
-        lo, hi = m["ngroup_min"], m["ngroup_max"]
-        for cand in (-5, 0, lo, hi, hi + 50, 10_000):
-            got = pw._clamp_ngroup(cand, lo, hi)
-            assert lo <= got <= hi, (key, cand, got)
 
 
 def test_ramp_floors_equal_pandeia_mingroups():
@@ -368,99 +363,54 @@ def test_sat_curve_is_loud_on_missing_or_misaligned_keys():
 _CLEAN = dict(wl=[1.0, 2.0], flux=[1.0e6, 5.0e5], noise=[1.0e3, 2.0e3],
               n_full=[0.0, 0.0], n_part=[0.0, 0.0])
 
+# One case per group-search invariant; each is a synthetic saturation curve.
+# Fields: sat_by_ngroup, sat_ngroups, expected (ngroup, saturated,
+# ramp_search_complete or None = not asserted), in_log (ngroups that must
+# have been MEASURED, i.e. appear in the nint=1 call log).
+_GROUP_SEARCH_CASES = {
+    # committed bright_hot/niriss_soss regression: the largest measured-safe
+    # count (2, PandExo's choice), not the conservative predictor seed (1)
+    "soss_two_groups": (lambda ng: 0.392 * ng, 2.04, (2, False, None), [2]),
+    # a predictor below the floor does not prove the floor saturated
+    "predictor_below_safe_floor": (lambda ng: 0.79 * ng, 0.9,
+                                   (1, False, None), []),
+    # nonlinear curve: an overshooting seed comes back down to the largest
+    # measured-safe count
+    "overshoot_converges": (lambda ng: {1: 0.10, 7: 0.79}.get(ng, 0.90),
+                            None, (7, False, None), []),
+    # everything above the floor unsafe -> the measured-safe floor, never a
+    # saturation flag
+    "bracket_collapse": (lambda ng: 0.40 if ng == 1 else 0.90, None,
+                         (1, False, None), []),
+    # saturation is a MEASUREMENT of the shortest permitted ramp
+    "saturated_floor": (lambda ng: 0.85 * ng, None, (1, True, None), []),
+    # the upward search stops at the APT/PandExo cap
+    "cap_respected": (lambda ng: 0.005 * ng, None, (30, False, None), []),
+    # review round 2 counterexample f(n)=0.1n+0.1: the v9 predictor stalled
+    # at 6; the bracket search must PROVE 7 by measuring 8 unsafe
+    "affine_offset_maximum": (lambda ng: 0.1 * ng + 0.1, None,
+                              (7, False, True), []),
+    # completeness = the boundary neighbor was measured (3 in the call log)
+    "maximality_proven": (lambda ng: 0.392 * ng, 2.04, (2, False, True), [3]),
+}
 
-def test_soss_regression_selects_two_groups_not_one():
-    """The committed bright_hot/niriss_soss regression: measured sat is 0.392
-    at 1 group and 0.784 at 2 (both safe at the 0.80 limit; 3 is not), while
-    pandeia's sat_ngroups estimate (2.04) seeds a conservative 1-group
-    candidate. The old min-then-verify-down search returned 1 group (~7x the
-    noise); the fixed search must return the largest measured-safe count, 2,
-    which is also PandExo's choice on this star."""
+
+@pytest.mark.parametrize("case", list(_GROUP_SEARCH_CASES),
+                         ids=list(_GROUP_SEARCH_CASES))
+def test_group_search_selects_largest_measured_safe(case):
+    sat_by_ngroup, sat_ngroups, want, in_log = _GROUP_SEARCH_CASES[case]
     log = []
-    out = _run_one_mode(**_CLEAN, sat_by_ngroup=lambda ng: 0.392 * ng,
-                        sat_ngroups=2.04, ngroup_min=1, ngroup_max=30,
-                        call_log=log)
-    assert out["ngroup"] == 2
-    assert out["saturated"] is False
-    assert 2 in log                          # the choice was MEASURED
-
-
-def test_predictor_below_floor_with_safe_measured_floor_is_not_saturated():
-    """A predictor falling below ngroup_min does not prove the floor is
-    saturated: with the floor MEASURED at 0.79 (safe), a sat_ngroups of 0.9
-    (candidate 0) must not flag saturation. The old code did."""
-    out = _run_one_mode(**_CLEAN, sat_by_ngroup=lambda ng: 0.79 * ng,
-                        sat_ngroups=0.9, ngroup_min=1, ngroup_max=30)
-    assert out["saturated"] is False
-    assert out["ngroup"] == 1
-
-
-def test_overshooting_seed_converges_to_largest_measured_safe():
-    """A nonlinear saturation curve where the linear seed overshoots: probe
-    0.10 at 1 group predicts 8, which measures unsafe (0.90); the search must
-    come back down and land on the largest measured-safe count (7)."""
-    frac = {1: 0.10, 7: 0.79, 8: 0.90}
-    out = _run_one_mode(**_CLEAN,
-                        sat_by_ngroup=lambda ng: frac.get(ng, 0.90),
-                        sat_ngroups=None, ngroup_min=1, ngroup_max=30)
-    assert out["ngroup"] == 7
-    assert out["saturated"] is False
-
-
-def test_bracket_collapse_falls_back_to_measured_safe_floor():
-    """Everything above the floor measures unsafe: the search must fall back
-    to the measured-safe floor, never declare saturation (the old verifier
-    marked the mode saturated on exhaustion even with a safe measured
-    minimum)."""
-    out = _run_one_mode(**_CLEAN,
-                        sat_by_ngroup=lambda ng: 0.40 if ng == 1 else 0.90,
-                        sat_ngroups=None, ngroup_min=1, ngroup_max=30)
-    assert out["ngroup"] == 1
-    assert out["saturated"] is False
-
-
-def test_saturated_only_when_the_measured_floor_exceeds_the_limit():
-    """Saturation is a measurement of the shortest permitted ramp."""
-    out = _run_one_mode(**_CLEAN, sat_by_ngroup=lambda ng: 0.85 * ng,
-                        sat_ngroups=None, ngroup_min=1, ngroup_max=30)
-    assert out["saturated"] is True
-    assert out["ngroup"] == 1
-
-
-def test_group_cap_is_respected_by_the_upward_search():
-    """An upward search on a barely-saturating star must stop at ngroup_max
-    (the APT/PandExo cap), not run past it."""
-    log = []
-    out = _run_one_mode(**_CLEAN, sat_by_ngroup=lambda ng: 0.005 * ng,
-                        sat_ngroups=None, ngroup_min=1, ngroup_max=30,
-                        call_log=log)
-    assert out["ngroup"] == 30
-    assert out["saturated"] is False
-    assert max(log) <= 30
-
-
-def test_affine_offset_curve_reaches_the_true_maximum():
-    """Review round 2 counterexample: f(n) = 0.1n + 0.1 with limit 0.8. The
-    v9 predictor stalled at 6 (floor(6*0.8/0.7) == 6) although 7 is safe;
-    the bracket search must PROVE 7 by measuring 8 unsafe."""
-    out = _run_one_mode(**_CLEAN, sat_by_ngroup=lambda ng: 0.1 * ng + 0.1,
-                        sat_ngroups=None, ngroup_min=1, ngroup_max=30)
-    assert out["ngroup"] == 7
-    assert out["saturated"] is False
-    assert out["ramp_search_complete"] is True
-
-
-def test_maximality_is_proven_by_measuring_the_next_integer():
-    """A complete search must have measured either ngroup_max or
-    ngroup+1-unsafe; here the boundary neighbor (3) must appear in the
-    call log even though the predictor already sits at 2."""
-    log = []
-    out = _run_one_mode(**_CLEAN, sat_by_ngroup=lambda ng: 0.392 * ng,
-                        sat_ngroups=2.04, ngroup_min=1, ngroup_max=30,
-                        call_log=log)
-    assert out["ngroup"] == 2
-    assert out["ramp_search_complete"] is True
-    assert 3 in log                     # the disproof measurement happened
+    out = _run_one_mode(**_CLEAN, sat_by_ngroup=sat_by_ngroup,
+                        sat_ngroups=sat_ngroups, ngroup_min=1,
+                        ngroup_max=30, call_log=log)
+    ngroup, saturated, complete = want
+    assert out["ngroup"] == ngroup
+    assert out["saturated"] is saturated
+    if complete is not None:
+        assert out["ramp_search_complete"] is complete
+    for ng in in_log:
+        assert ng in log            # the choice/disproof was MEASURED
+    assert not log or max(log) <= 30
 
 
 def test_budget_exhaustion_is_reported_not_hidden():

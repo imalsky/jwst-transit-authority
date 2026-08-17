@@ -144,13 +144,6 @@ def _native_r(refdata, m, wl):
     return r_i.tolist(), os.path.basename(hits[0])
 
 
-def _clamp_ngroup(ng, ng_min, ng_max):
-    """Clamp a candidate group count to the mode's [ng_min, ng_max] -- the
-    ONE place the group optimizer's output is bounded
-    (instruments.PANDEXO_NGROUP_MAX)."""
-    return max(int(ng_min), min(int(ng_max), int(ng)))
-
-
 def _run(perform_calculation, calc, ngroup, nint=1):
     c = copy.deepcopy(calc)
     c["configuration"]["detector"]["ngroup"] = int(ngroup)
