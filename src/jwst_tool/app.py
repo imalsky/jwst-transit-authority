@@ -166,18 +166,6 @@ def _csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode()
 
 
-def _not_reached_reason(val: str, floored: bool, evw: str) -> str:
-    """Honest phrasing for a target the transit scan did not reach.
-
-    With a floor, sig_inf is an exact ceiling. With NO floor nothing caps
-    the score: say the scan reached its limit, never "never"."""
-    if not floored:
-        return (f"not reached within the scan limit of "
-                f"{detect.N_TRANSITS_CAP} {evw}s; with no noise floor set, a "
-                "larger count could still reach the target")
-    return f"the noise floor caps the score at {val}"
-
-
 def _has_floor(r: dict) -> bool:
     """Does this evaluated mode carry a noise floor anywhere? (floor_spec=None
     gives an all-zero array, and then no N-to-infinity limit exists.)"""
@@ -229,17 +217,16 @@ def _op_status(r: dict) -> str:
     return "verify in APT"
 
 
-def _transits_cell(tt: dict, val_never: str, floored: bool,
-                   evw: str) -> str:
+def _transits_cell(tt: dict, val_never: str, floored: bool) -> str:
     """'events to target' table cell.
 
-    "unreachable" is reserved for a floor-proven result; a scan that only ran
-    out of events reads ">N (scan limit)"."""
+    "unreachable" is reserved for a floor-proven result (sig_inf is an exact
+    ceiling there); a scan that only ran out of events reads ">N (scan
+    limit)", never "never"."""
     if not tt["reachable"]:
         if not floored:
             return f">{detect.N_TRANSITS_CAP} (scan limit; no floor set)"
-        return (f"unreachable "
-                f"({_not_reached_reason(val_never, floored, evw)})")
+        return f"unreachable (noise floor caps it at {val_never})"
     return str(tt["n"])
 
 st.set_page_config(page_title="JWST Exoplanet Observation Planner",
@@ -261,7 +248,10 @@ st.markdown(
     "3. **Science goal**: detect a molecule, or constrain a parameter.\n"
     "4. **Observation**: select instrument modes and noise assumptions. "
     "The model is smoothed to the instrument resolution where that is "
-    "coarser than the model, then binned to the analysis res.\n\n"
+    "coarser than the model, then binned to the analysis res. For an "
+    "observation that uses more than one mode, add the modes as a set in "
+    "'Add a custom mode set' (in the results), then select that set in "
+    "'Spectrum & forecast series' under the figure.\n\n"
     "The tool computes a forward "
     "spectrum and a Pandeia noise forecast, ranks the selected modes, and "
     "reports how many transits or eclipses reach your target.\n\n"
@@ -2095,17 +2085,11 @@ try:
 except (ValueError, RuntimeError):
     _shown_stale = True   # the current sidebar settings do not even validate
 if _shown_stale:
-    _shown_sci = str(_cpj.get("science_mode", "transmission"))
-    _geom = (f" The sidebar observation type is now **{science_mode}**, but "
-             f"this spectrum is **{_shown_sci}**."
-             if science_mode != _shown_sci else "")
-    _chg = ((" Changed settings: " + ", ".join(f"`{c}`" for c in _changed[:8])
+    _chg = ((" Changed: " + ", ".join(f"`{c}`" for c in _changed[:8])
              + (", …" if len(_changed) > 8 else "") + ".")
             if _changed else "")
-    st.warning(
-        "These results are from your previous run; the sidebar has changed "
-        "since (or that run failed)." + _chg + _geom
-        + " Press **Run** at the top to recompute with the current settings.")
+    st.warning("Showing your previous run." + _chg
+               + " Press **Run** to recompute.")
 
 for k, err in out["failed"]:
     first = str(err).strip().splitlines()[-1] if "Traceback" in str(err) else \
@@ -2117,11 +2101,7 @@ for k, reason in out["unusable"]:
     # ngroup_min equals pandeia's permitted minimum ramp for the mode (the
     # same floor PandExo searches to), so "saturated at the shortest ramp"
     # is a real brightness limit, not a tool policy bound.
-    st.warning(
-        f"**{ins.MODES[k]['label']}: unusable on this star**, {reason}. "
-        f"The shortest ramp tried ({ins.MODES[k]['ngroup_min']} "
-        "group(s)/integration) is the shortest the instrument supports for "
-        "this mode.")
+    st.warning(f"**{ins.MODES[k]['label']}**: unusable, {reason}.")
 
 if not results:
     st.stop()
@@ -2160,19 +2140,16 @@ if goal_r == "detect":
     ntr = meta["n_transits"]
     if not ok:
         # every selected mode saturates: never rank saturated results
-        st.warning(
-            f"**No selected mode is usable: all selected modes saturate "
-            f"for this star** (Ks = {star['ks_mag']:g}). Select other "
-            "modes or a different target; only raise the saturation limit "
-            "(step 4) if that is scientifically justified.")
+        st.warning(f"**No usable mode**: all selected modes saturate "
+                   f"(Ks = {star['ks_mag']:g}).")
     else:
         ranked = sorted(ok, key=lambda r: -_detection_metric(r)[0])
         best = ranked[0]
         bsig, _best_projected = _detection_metric(best)
+        # "template S/N" stays: a bare sigma reads as a retrieval claim.
+        # The profiled-vs-calibration disclosure lives in the mode table.
         verdict = (f"**{best['label']}**: template S/N {bsig:.1f}σ in {ntr} "
-                   f"{_ev}{'s' if ntr > 1 else ''} (target {tsig:g}σ; "
-                   + ("local physical nuisances profiled)."
-                      if _best_projected else "calibration offsets profiled)."))
+                   f"{_ev}{'s' if ntr > 1 else ''} (target {tsig:g}σ).")
         if bsig >= tsig:
             # No banner when the target is met: the
             # figure and the mode table already carry the number, and a green
@@ -2187,22 +2164,15 @@ if goal_r == "detect":
             tt = detect.transits_to_target(
                 best, tsig, projected=_best_projected)
             if tt["reachable"]:
-                st.warning(verdict + f"  Below the target; {tt['n']} {_ev}s "
-                           f"of {best['label']} would reach it (floor-aware "
-                           "estimate).")
+                st.warning(verdict + f"  {tt['n']} {_ev}s reach it.")
+            elif _has_floor(best):
+                st.warning(verdict
+                           + f"  Floor caps it at {tt['sig_inf']:.1f}σ.")
             else:
-                _fl = _has_floor(best)
-                _lim = f"{tt['sig_inf']:.1f}σ" if _fl else ""
-                st.warning(
-                    verdict + "  The target was "
-                    + _not_reached_reason(_lim, _fl, _ev) + ". "
-                    + ("If independent evidence supports a lower noise "
-                       "floor, test that case; otherwise choose other "
-                       "modes or relax the target." if _fl else
-                       "Choose other modes or relax the target."))
+                st.warning(verdict + f"  >{detect.N_TRANSITS_CAP} {_ev}s "
+                           "(scan limit).")
         else:
-            st.warning(verdict + "  No signal in the selected bands; try "
-                       "other modes or a different goal.")
+            st.warning(verdict + "  No signal.")
 else:
     gp = meta["goal_param"]
     unit = forward.PARAM_UNITS[gp]
@@ -2225,17 +2195,11 @@ else:
         if len(usable_jac) >= 2 else np.inf)
     # distinguish "all modes saturated" from "no spectral response"
     if with_jac and not usable_jac:
-        st.warning(
-            f"**No selected mode is usable: all selected modes saturate "
-            f"for this star** (Ks = {star['ks_mag']:g}), so no constraint "
-            f"on {glabel} can be forecast. Select other modes or a "
-            "different target; only raise the saturation limit (step 4) "
-            "if that is scientifically justified.")
+        st.warning(f"**No usable mode**: all selected modes saturate "
+                   f"(Ks = {star['ks_mag']:g}).")
         st.stop()
     if not per_mode:
-        st.warning(f"No usable selected mode constrains {glabel}: its "
-                   "Jacobian has no signal in these bands. Try other modes "
-                   "or a different goal.")
+        st.warning(f"No selected mode constrains {glabel}.")
         st.stop()
     bk = min(per_mode, key=per_mode.get)
     bs = per_mode[bk]
@@ -2246,29 +2210,20 @@ else:
     if bs <= target:
         pass                      # see the detect-goal note: no banner on success
     elif np.isfinite(comb) and comb <= target:
-        st.warning(verdict + f"  No single mode reaches the target, but the "
-                   f"combination of all usable selected modes does "
-                   f"(±{comb:.3g}{usp} at {tsig:g}σ).")
+        st.warning(verdict + f"  Combined modes: ±{comb:.3g}{usp}.")
     else:
         best_r = next(r for r in usable_jac if r["mode_key"] == bk)
         tt = fisher_mod.transits_to_target(best_r, fisher_names, gp,
                                            target / tsig, detect.sigma_at_transits,
                                            co_eval=co_eval)
         if tt["reachable"]:
-            st.warning(verdict + f"  Below the target; {tt['n']} {_ev}s of "
-                       f"{ins.MODES[bk]['label']} would reach it (floor-aware "
-                       "estimate).")
+            st.warning(verdict + f"  {tt['n']} {_ev}s reach it.")
+        elif _has_floor(best_r):
+            st.warning(verdict + "  Floor caps it at "
+                       f"±{tsig * tt['sig_inf']:.3g}{usp}.")
         else:
-            _fl = _has_floor(best_r)
-            _lim = (f"±{tsig * tt['sig_inf']:.3g}{usp} at {tsig:g}σ" if _fl
-                    else "")
-            st.warning(
-                verdict + "  The target was "
-                + _not_reached_reason(_lim, _fl, _ev) + ". "
-                + ("If independent evidence supports a lower noise floor, "
-                   "test that case; otherwise combine modes or relax the "
-                   "target." if _fl else
-                   "Combine modes or relax the target."))
+            st.warning(verdict + f"  >{detect.N_TRANSITS_CAP} {_ev}s "
+                       "(scan limit).")
 
 # The ranking compares science information only. It does not check APT
 # feasibility (data volume, schedulability, calibration warnings), so that
@@ -2365,23 +2320,15 @@ with st.expander("Physical structure (T-P profile, mixing ratios)"):
         if _cpj.get("science_mode") == "emission":
             if float(_T_arr.max()) > 2000.0:
                 st.warning(
-                    f"Layers hotter than 2000 K are present (deepest "
-                    f"{_T_arr.max():.0f} K). Eclipse spectra can probe them "
-                    "through opacity windows, and the ultra-hot opacity "
-                    "sources (H- continuum, Na/K/Fe atomic lines, TiO/VO/FeH) "
-                    "are not modeled, so fluxes and forecasts in those "
-                    "windows are uncertain.")
+                    f"Layers exceed 2000 K (max {_T_arr.max():.0f} K); "
+                    "ultra-hot opacities not modeled.")
         else:
             # transmission probes p <~ 0.1 bar; a hot deep adiabat below that is
             # invisible to the chord geometry and must not trip the warning
             _probe = _p_arr <= 0.1
             if _probe.any() and float(_T_arr[_probe].max()) > 2000.0:
-                st.warning(
-                    "The transmission photosphere (p <= 0.1 bar) exceeds "
-                    "2000 K. Ultra-hot opacity sources are not modeled (no "
-                    "H- continuum, no Na/K/Fe atomic lines, no TiO/VO/FeH), "
-                    "so spectra and forecasts up here overstate molecular "
-                    "detectability.")
+                st.warning("Photosphere >2000 K; ultra-hot opacities not "
+                           "modeled.")
         _tp_df = pd.DataFrame({"p_bar": np.asarray(model["p_bar"], dtype=float),
                                "T_K": np.asarray(model["T"], dtype=float)})
         _t1, _t2 = st.columns(2)
@@ -2490,7 +2437,7 @@ with st.expander("Mode details"):
                     r, _t, projected=_is_projected)
                 _fl = _has_floor(r)
                 row[_tt_col] = _transits_cell(
-                    _tt, f"{_tt['sig_inf']:.1f}σ" if _fl else "", _fl, _ev)
+                    _tt, f"{_tt['sig_inf']:.1f}σ" if _fl else "", _fl)
             else:
                 row[_tt_col] = ""
         else:
@@ -2505,7 +2452,7 @@ with st.expander("Mode details"):
                                                     co_eval=co_eval)
                 _fl = _has_floor(r)
                 row[_tt_col] = _transits_cell(
-                    _tt, f"±{tsig * _tt['sig_inf']:.3g}" if _fl else "", _fl, _ev)
+                    _tt, f"±{tsig * _tt['sig_inf']:.3g}" if _fl else "", _fl)
             else:
                 row[_tt_col] = ""
         # the exact fixed detector configuration this row evaluated (each MODES
@@ -2532,14 +2479,13 @@ with st.expander("Mode details"):
                        key=K("dl_modes_csv"))
     if goal_r == "detect":
         st.caption(
-            "Nuisance-profiled: the score lets the per-segment depth "
-            "offsets float, and also the local T-P, reference-radius and "
-            "cloud directions when they are available. Calibration-only: "
-            "only the depth offsets float.")
+            "Nuisance-profiled: the per-segment depth offsets float, plus "
+            "the local T-P, reference-radius and cloud directions when "
+            "available. Calibration-only: only the depth offsets float.")
     st.caption(
-        "The ranking uses the forecast science information only. It does "
-        "not check target acquisition, scheduling, data volume, or other "
-        "program limits. Check those in APT.")
+        "The ranking compares science information only. It does not check "
+        "target acquisition, scheduling, data volume, or other program "
+        "limits. Check those in APT.")
 
 
 with st.expander("Add a custom mode set"):
@@ -2548,10 +2494,6 @@ with st.expander("Add a custom mode set"):
     # posteriors.combo_forecast (the same combination math as
     # the all-usable-modes row). They add rows to the Fisher table below
     # and bars to the comparison chart above.
-    st.caption(
-        "For an observation that uses more than one mode: add the modes "
-        "as a set here, then select that set in 'Spectrum & forecast "
-        "series' under the figure.")
     if fisher_names and "jac" in model:
         _cb_opts = [r["mode_key"] for r in results
                     if r.get("jac_bins") is not None]
@@ -2609,10 +2551,10 @@ with st.expander("Add a custom mode set"):
                     + ", ".join(ins.MODES[e["mode_key"]]["label"]
                                 if e["mode_key"] in ins.MODES else e["mode_key"]
                                 for e in _rec["excluded"])
-                    + " excluded (saturated at the shortest ramp tried -- "
-                      "unusable data). The forecast uses "
-                    + (", ".join(ins.MODES[m]["label"]
-                                 for m in _rec["usable_modes"])) + ".")
+                    + (" saturate; uses " if len(_rec["excluded"]) > 1
+                       else " saturates; uses ")
+                    + " + ".join(ins.MODES[m]["label"]
+                                 for m in _rec["usable_modes"]) + ".")
 
 
 with st.expander("Parameter constraint forecast (local Fisher)"):
@@ -2721,28 +2663,14 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
                            _csv_bytes(pd.DataFrame(frows)),
                            f"{_fname_base}_fisher_forecast.csv", "text/csv",
                            key=K("dl_fisher_csv"))
-        # what each chemistry parameter's ± is precision ALONG: these are
-        # specific elemental perturbation directions (vulcan_chem contract),
-        # not every physical way of changing Z or C/O
-        _param_defs = {
-            "lnZ": "lnZ raises or lowers O, C, N and S together; He and H "
-                   "stay fixed and C/O does not change",
-            "dlnCO": "dlnCO changes carbon while oxygen stays fixed",
-            "lnKzz": "lnKzz scales the whole Kzz profile",
-        }
-        _defs = [_param_defs[n] for n in fisher_names if n in _param_defs]
-        if _defs:
-            st.caption("What each parameter changes: " + "; ".join(_defs)
-                       + ". Each ± is the local precision along that "
-                         "direction, for this atmosphere.")
-        if fdiag:
-            rank, dim = fdiag["fisher_rank"], fdiag["fisher_dimension"]
+        # full-rank numerical-health prose was cut (maintainer copy pass);
+        # a rank DEFICIENCY is still disclosed -- degenerate directions
+        # would otherwise read as silently missing rows
+        if fdiag and fdiag["fisher_rank"] < fdiag["fisher_dimension"]:
             st.caption(
-                f"Numerical health of the combined forecast: the Fisher "
-                f"matrix has rank {rank} of {dim} and condition number "
-                f"{fdiag['condition_number']:.2g}."
-                + (" **Rank-deficient: degenerate directions are reported as "
-                   "unconstrained, not as fake finite numbers.**" if rank < dim else ""))
+                f"**Fisher matrix is rank-deficient ({fdiag['fisher_rank']} "
+                f"of {fdiag['fisher_dimension']}): degenerate directions "
+                "read as unconstrained.**")
         # No "How to read this table" expander here: that reference material
         # lives in README.md ("Scope and limits"); do not re-add it.
     elif out.get("fisher_names"):
@@ -2984,9 +2912,6 @@ _fig_box = st.expander(
     if str(_cpj.get("science_mode", "transmission")) == "emission"
     else "Simulated transmission spectrum & forecast summary",
     expanded=True)
-if str(_cpj.get("science_mode", "transmission")) == "emission":
-    _fig_box.caption("1-D dayside approximation (parameterized T-P, no "
-                     "longitudinal structure).")
 
 # Per-mode expected performance, rendered IN the legend label of each
 # point series (replaces the retired right-hand ranking panel): the
@@ -3205,8 +3130,7 @@ except ValueError as _e:
     # Any other ValueError is a real defect and must not be swallowed.
     if "y_log=True" not in str(_e):
         raise
-    _fig_box.warning(f"Log depth axis unavailable: {_e} Showing a linear depth "
-               "axis instead.")
+    _fig_box.warning("Log axis unavailable; linear shown.")
     _sum_spectrum["y_log"] = False
     fig_sum = _compose(_sum_spectrum)
 _sum_png = _fig_png(fig_sum)
