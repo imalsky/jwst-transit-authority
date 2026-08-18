@@ -1713,8 +1713,9 @@ if tp_mode == "file" and not tp_file_ok and params_error is None:
 _lbl_mode = (str((_canon or {}).get("opacity_mode")
                  or forward.default_opacity_mode(params)) == "lbl")
 
-# rough runtime hint keyed off the resolution settings
-base_min = 0.8 + 0.010 * nz
+# rough runtime hint keyed off the resolution settings (0.47.0: the engine
+# build no longer runs a warm-up solve, ~0.7 min less than the old model)
+base_min = 0.1 + 0.010 * nz
 if _lbl_mode:                        # nu_pts sets the grid only on this path
     base_min += 0.00005 * (nu_pts - forward.NU_PTS_DEFAULT)
 if yconv_cri <= 1.5e-3:              # strict convergence costs extra iterations
@@ -1733,13 +1734,15 @@ if t_char < 900.0:
 # condensing solves carry the window + pin + stricter gate overhead
 
 # Jacobian-row cost model: fd = 4 solves per row; cloud and Mie rows are
-# RT-only (~seconds); ad = ~1 warm jvp
+# RT-only (~seconds); ad = ONE shared warm primal plus a batched tangent
+# per row (measured 80 s for 2 rows on the default case)
 _solve_min = max(1.0, base_min * 0.5)
 _rt_only = set(forward.CLOUD_FISHER_PARAMS) | set(forward.MIE_FISHER_PARAMS)
 n_cloud_rows = sum(1 for n in fisher_params if n in _rt_only)
 _solve_rows = [n for n in fisher_params if n not in _rt_only]
 if jac_method == "ad":
-    fd_min = len(_solve_rows) * 1.7 * _solve_min + 0.2 * n_cloud_rows
+    fd_min = (((0.9 + 0.35 * len(_solve_rows)) * _solve_min
+               if _solve_rows else 0.0) + 0.2 * n_cloud_rows)
 else:
     n_fd_comp = sum(1 for n in _solve_rows if n in forward.FD_COMP_PARAMS)
     n_fd_theta = len(_solve_rows) - n_fd_comp

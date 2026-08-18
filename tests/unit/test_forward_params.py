@@ -358,6 +358,28 @@ def test_rt_knobs_defaults_validation_and_cache_key():
     assert forward.params_key(_p(opacity_mode="lbl", nu_pts=8000)) != kl
 
 
+def test_chem_key_separates_chemistry_from_rt_only_edits():
+    """The chemistry-level cache key is invariant under every stripped
+    RT/observable-only key (an RT edit must reuse the solved column) and
+    moves with chemistry-relevant parameters (a wrong hit would corrupt
+    every downstream product). Every stripped key is a canonical key."""
+    cp = forward.canonical_params(_p())
+    assert set(forward.CHEM_IRRELEVANT_PARAMS) <= set(cp)
+    k0 = forward.chem_key(_p())
+    for kw in (dict(cloud_on=True, log_kappa_cloud=-1.0),
+               dict(p_ref_bar=0.05),
+               dict(wo_mols=["H2O"]),
+               dict(fisher_params=["lnZ"], jac_method="ad"),
+               dict(star_teff=5300.0),
+               dict(rt_ptop_bar=1.0e-7)):
+        assert forward.chem_key(_p(**kw)) == k0, kw
+        # the flat key must still see live RT knobs (pinned above); the
+        # chem key must not
+    for kw in (dict(met_x_solar=5.0), dict(co_ratio=0.3),
+               dict(p_btm_bar=50.0), dict(nz=110)):
+        assert forward.chem_key(_p(**kw)) != k0, kw
+
+
 # --- WASP-39 b reference state: DO NOT let this drift ------------------------
 # The REFERENCE configuration (tp_mode="file", the shipped evening-terminator
 # table) is the one measured against the published JWST detection, and since

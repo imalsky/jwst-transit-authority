@@ -142,6 +142,11 @@ CO_BZ_MIN_AD = 2.0 * FD_STEPS["dlnCO"]   # = 0.2
 # gate). Only available with cloud_on.
 CLOUD_FISHER_PARAMS = ("log_kappa_cloud", "alpha_cloud")
 
+# Memory fallback for the AD Jacobian: the chemistry-theta rows normally
+# share ONE warm primal (vmap over basis tangents); set this env var to
+# restore the per-row jvp loop if the batched tangent carry does not fit.
+_AD_ROW_LOOP = bool(os.environ.get("JWST_TOOL_AD_ROW_LOOP"))
+
 # Mie cloud deck: condensate cloud from the exojax PdbCloud/OpaMie miegrid,
 # an alternative (or addition) to the analytic power-law deck. mie_condensate
 # selects the species ("" = off); the three knobs are one column-uniform
@@ -1353,6 +1358,37 @@ def cache_path(params: dict) -> Path:
     return MODEL_CACHE / f"{params_key(params)}.npz"
 
 
+# Canonical keys that change the SPECTRUM but never the converged chemistry
+# column. chem_key strips them, so an edit that only touches the radiative
+# transfer or the observation (cloud deck, reference radius, star, resolution,
+# Fisher setup, leave-one-out set) reuses the solved column instead of
+# re-running the chemistry. Superset of adjoint_diag.adjoint_key's proven
+# strip list: p_ref_bar is also RT-only (it reaches only the RT geometry /
+# profile["p_ref_bar"], never a cfg override). Dual-use keys (nz, p_btm_bar,
+# rp_rjup, gs_cgs, T-P, composition, Kzz, ...) stay in the key. "version"
+# (forward._VERSION) rides inside canonical_params, so a version bump busts
+# this cache too.
+CHEM_IRRELEVANT_PARAMS = (
+    "fisher_params", "jac_method", "nu_pts", "use_rayleigh", "broadening",
+    "cloud_on", "log_kappa_cloud", "alpha_cloud", "extra_mols", "wo_mols",
+    "rt_ptop_bar", "rt_integration", "rt_dit_res", "opacity_mode",
+    "mie_condensate", "mie_log_rg", "mie_sigmag", "mie_log_mmr",
+    "science_mode", "star_teff", "star_logg", "star_feh", "p_ref_bar",
+)
+
+
+def chem_key(params: dict) -> str:
+    cp = canonical_params(params)
+    payload = {k: v for k, v in cp.items()
+               if k not in CHEM_IRRELEVANT_PARAMS}
+    s = json.dumps(payload, sort_keys=True)
+    return hashlib.sha1(s.encode()).hexdigest()[:16]
+
+
+def chem_cache_path(params: dict) -> Path:
+    return MODEL_CACHE / f"chem-{chem_key(params)}.npz"
+
+
 def _load_cached_npz(p: Path):
     """Cached npz as a dict, or None when absent. A file that exists but
     does not read back as a complete npz (torn write from a killed writer,
@@ -1433,7 +1469,7 @@ def _make_progress(cp: dict, log):
     honestly. advance() is called at the START of each stage.
     """
     _emis = cp.get("science_mode") == "emission"
-    stages = [("building chemistry model (compile + warm-up)", 45.0)]
+    stages = [("building chemistry model", 5.0)]
     stages += [("building radiative transfer (opacities + CIA)",
                 10.0 + 3.0 * len(cp["extra_mols"]))]
     if _emis:
@@ -1446,10 +1482,13 @@ def _make_progress(cp: dict, log):
     _n_active = len(active_molecules(cp))
     _wo_w = 1.5 * _n_wo * (_n_active + 1)
     if _emis:
-        stages += [("full eclipse spectrum", 8.0)]
+        # one stage: the baseline and removed-molecule optical depths come
+        # out of ONE engine batch (mirrors the transmission branch)
         if _n_wo:
-            stages += [(f"removed-molecule spectra ({_n_wo} molecules)",
-                        _wo_w)]
+            stages += [(f"full + removed-molecule spectra ({_n_wo} "
+                        "molecules)", 8.0 + _wo_w)]
+        else:
+            stages += [("full eclipse spectrum", 8.0)]
     elif _n_wo:
         stages += [(f"full + removed-molecule spectra ({_n_wo} molecules)",
                     8.0 + _wo_w)]
@@ -1466,9 +1505,21 @@ def _make_progress(cp: dict, log):
         if _ad:
             return (f"AD Jacobian d/d({n})", 110.0)
         return (f"FD Jacobian d/d({n})",
-                420.0 if n in FD_COMP_PARAMS else 260.0)
+                280.0 if n in FD_COMP_PARAMS else 260.0)
 
-    stages += [_row_stage(n) for n in cp["fisher_params"]]
+    if _ad and not _AD_ROW_LOOP:
+        # chemistry-theta rows share one warm primal (single stage); the
+        # RT-only deck rows keep their own per-row stages
+        _chem_rows = [n for n in cp["fisher_params"]
+                      if n not in CLOUD_FISHER_PARAMS
+                      and n not in MIE_FISHER_PARAMS]
+        if _chem_rows:
+            stages += [(f"AD Jacobian ({len(_chem_rows)} rows, shared "
+                        "primal)", 110.0 + 30.0 * (len(_chem_rows) - 1))]
+        stages += [_row_stage(n) for n in cp["fisher_params"]
+                   if n in CLOUD_FISHER_PARAMS or n in MIE_FISHER_PARAMS]
+    else:
+        stages += [_row_stage(n) for n in cp["fisher_params"]]
     if cp["fisher_params"]:
         stages += [(("AD" if _ad else "FD") + " Jacobian d/d(lnR0)", 8.0)]
     total = sum(w for _, w in stages)
@@ -1726,6 +1777,12 @@ def _assemble_chem(cp: dict, log):
     def _build_chem(extra_abun: dict | None = None, tag: str = "baseline"):
         prof = dict(profile)
         prof["cfg_overrides"] = ({**ovr, **extra_abun} if extra_abun else ovr)
+        # skip the engine's build-time warm-up SOLVE (runner closure only):
+        # this tool never reads baseline_conv_normal -- it certifies its own
+        # solves -- and the skip is proven bitwise on the shipped defaults.
+        # Saves ~40 s per build, x5 in FD composition mode (4 more builds
+        # per lnZ/dlnCO row). Requires vulcan-forward >= 0.10.0.
+        prof["skip_warmup"] = True
         t_b = time.time()
         chem_b = vulcan_chem.build_chem_model(prof, tp_eval=tp_eval,
                                               n_tp_params=n_tp)
@@ -1795,7 +1852,7 @@ def run_model(params: dict, log=print) -> Path:
 
     t0 = time.time()
     advance()
-    log("[fwd] building chemistry model (VULCAN-JAX warm-up ~40 s) ...")
+    log("[fwd] building chemistry model ...")
     chem = _build_chem()
 
     # BC flux species must exist in the solved network: the upstream
@@ -2011,19 +2068,73 @@ def run_model(params: dict, log=print) -> Path:
                 "rather than trusting an unconverged spectrum.")
         conv_cert.append((stage, ac, longdy))
 
-    # Single certified cold solve, always: composition is baked into the
-    # build (structural), so there is no composition continuation and no
-    # stage 2.
+    # Single certified cold solve, always -- unless an identical
+    # chemistry-relevant parameter set already solved: the chem-level cache
+    # (chem_key strips the RT/observable-only keys) stores the RAW converged
+    # column, so an RT-only edit re-renders the spectrum from the same bits
+    # a fresh solve would produce. Composition is baked into the build
+    # (structural), so there is no composition continuation and no stage 2.
     advance()
-    log("[fwd] solving photochemistry (cold, certified) ...")
-    y_sol, _cdiag = chem.converged_y(th0, return_conv_diag=True)
-    _check_converged(_cdiag, "baseline solve")
-    y_np = np.asarray(y_sol)
-    if not np.all(np.isfinite(y_np)):
-        raise RuntimeError(
-            "chemistry solve returned non-finite abundances -- "
-            "parameter set outside the modelable range")
-    log(f"[fwd] chemistry solved in {time.time()-t0:.0f} s total")
+    _species_now = [s for s, _ in sorted(chem.sidx.items(),
+                                         key=lambda kv: kv[1])]
+    _chem_out = chem_cache_path(params)
+    _chem_art = _load_cached_npz(_chem_out)
+    if _chem_art is not None:
+        # validate loudly -- a mismatched entry raises, never silently
+        # re-solves (a wrong hit here would corrupt every downstream product)
+        if [str(s) for s in _chem_art["species"]] != _species_now:
+            raise RuntimeError(
+                f"chem-cache {_chem_out.name}: species set does not match "
+                "the built network -- the cache key failed to separate two "
+                "different chemistry configurations. Delete the entry and "
+                "report this; do not ignore it.")
+        if not np.array_equal(np.asarray(_chem_art["theta"]), theta):
+            raise RuntimeError(
+                f"chem-cache {_chem_out.name}: stored theta differs from "
+                "this run's theta under an equal chem_key -- the key is "
+                "missing a chemistry-relevant parameter. Delete the entry "
+                "and report this; do not ignore it.")
+        y_np = np.asarray(_chem_art["y_raw"], dtype=np.float64)
+        if not np.all(np.isfinite(y_np)):
+            raise RuntimeError(
+                f"chem-cache {_chem_out.name}: non-finite stored column")
+        _ac = int(_chem_art["conv_accept"][0])
+        _ld = float(_chem_art["conv_longdy"][0])
+        if not _ld < float(chem.yconv_min):
+            raise RuntimeError(
+                f"chem-cache {_chem_out.name}: stored certificate "
+                f"(longdy={_ld:.3g}) fails the current gate "
+                f"yconv_min={float(chem.yconv_min):g}")
+        conv_cert.append(("baseline solve (chem-cache)", _ac, _ld))
+        y_sol = jnp.asarray(y_np)
+        log(f"[fwd] chemistry column from chem-cache ({_chem_out.name}, "
+            f"{_ac} accepted steps at write); solve skipped")
+    else:
+        log("[fwd] solving photochemistry (cold, certified) ...")
+        y_sol, _cdiag = chem.converged_y(th0, return_conv_diag=True)
+        _check_converged(_cdiag, "baseline solve")
+        y_np = np.asarray(y_sol)
+        if not np.all(np.isfinite(y_np)):
+            raise RuntimeError(
+                "chemistry solve returned non-finite abundances -- "
+                "parameter set outside the modelable range")
+        log(f"[fwd] chemistry solved in {time.time()-t0:.0f} s total")
+        # persist the certified RAW column (atomic: same torn-write
+        # rationale as the flat cache below)
+        _stage, _ac, _ld = conv_cert[-1]
+        _chem_arrays = dict(
+            y_raw=y_np,
+            species=np.array(_species_now, dtype="U16"),
+            theta=theta,
+            theta_names=np.array(theta_names, dtype="U16"),
+            p_bar=np.asarray(chem.p_bar),
+            conv_accept=np.array([_ac], dtype=np.int64),
+            conv_longdy=np.array([_ld], dtype=np.float64),
+        )
+        MODEL_CACHE.mkdir(parents=True, exist_ok=True)
+        _ins.atomic_write(
+            _chem_out, lambda fh: np.savez_compressed(fh, **_chem_arrays))
+        log(f"[fwd] chem column cached -> {_chem_out.name}")
 
     # Emission bottom-boundary certification. The solver's interior source
     # term is a blackbody at the extrapolated bottom-boundary temperature --
@@ -2039,7 +2150,7 @@ def run_model(params: dict, log=print) -> Path:
     emis_thin_wo = np.full(len(wo_list), np.nan)
     if emis is not None:
         t0 = time.time()
-        advance()                    # full eclipse spectrum
+        advance()          # full (+ removed-molecule) eclipse spectra
         _prof0 = depth_from_y._art_profiles(y_sol, th0)
         # the SAME (R_p/R_star)^2 the baseline depth was built with, so the
         # stored Fp inverts the stored depth exactly. Recomputing it from the
@@ -2053,11 +2164,19 @@ def run_model(params: dict, log=print) -> Path:
             f"R_Jup at {getattr(emis, 'p_ref_emission_bar', float('nan')):g} "
             f"bar (catalogue transit radius {cp['rp_rjup']:.4f} R_Jup at "
             f"{cp['p_ref_bar']:g} bar)")
-        # ONE optical-depth build feeds the flux, the tau-bottom gate, and the
-        # stored depth (emission_flux_tau is bitwise the separate calls; the
-        # old path built the same dtau three times)
-        _fp_j, _tau_j = emis.emission_flux_tau(*_prof0, cloud=cloud_vec,
-                                               mie=mie_vec)
+        # ONE optical-depth build feeds the flux, the tau-bottom gate, the
+        # stored depth AND the removed-molecule spectra (the batch's full
+        # total is bitwise the standalone call -- same left fold plus
+        # continuum -- so merging costs nothing in fidelity). Trade-off: a
+        # tau-bottom refusal below now fires after the removed-molecule
+        # work is paid; refusals are exceptional, the ~n_wo overlap folds
+        # saved on every healthy run are not.
+        if wo_list:
+            _fp_j, _tau_j, _fp_wo_j, _tau_wo_j = emis.emission_flux_tau(
+                *_prof0, cloud=cloud_vec, mie=mie_vec, wo_mols=wo_list)
+        else:
+            _fp_j, _tau_j = emis.emission_flux_tau(*_prof0, cloud=cloud_vec,
+                                                   mie=mie_vec)
         _tau_b = np.asarray(_tau_j)
         emis_tau_min = float(_tau_b.min())
         _wl_thin = float(rt.wl_um[int(np.argmin(_tau_b))])
@@ -2103,19 +2222,18 @@ def run_model(params: dict, log=print) -> Path:
         _rp_em = emis.emission_radius(_prof0[2], _prof0[3])
         depth = np.asarray((_fp_j / fs_j) * (_rp_em ** 2 / _rstar_cm_sq)
                            * jnp.exp(2.0 * jnp.asarray(0.0)))
-        log(f"[fwd] full spectrum in {time.time()-t0:.0f} s")
+        if not wo_list:
+            log(f"[fwd] full spectrum in {time.time()-t0:.0f} s")
 
         depth_wo = np.zeros((len(wo_list), depth.shape[0]))
         if wo_list:
-            t0 = time.time()
-            advance()
-            # ONE engine batch: each removed-molecule optical depth is built
-            # once and feeds the spectrum AND the tau-bottom certification,
-            # which must cover EVERY emission spectrum the results consume --
-            # zeroing a dominant absorber can open see-through windows that
-            # inflate the full-minus-removed contrast.
-            _, _, _fp_wo, _tau_wo = emis.emission_flux_tau(
-                *_prof0, cloud=cloud_vec, mie=mie_vec, wo_mols=wo_list)
+            # already computed in the single engine batch above; each
+            # removed-molecule optical depth feeds the spectrum AND the
+            # tau-bottom certification, which must cover EVERY emission
+            # spectrum the results consume -- zeroing a dominant absorber
+            # can open see-through windows that inflate the
+            # full-minus-removed contrast.
+            _fp_wo, _tau_wo = _fp_wo_j, _tau_wo_j
             for i, mol in enumerate(wo_list):
                 depth_wo[i] = np.asarray(
                     (_fp_wo[i] / fs_j) * (_rp_em ** 2 / _rstar_cm_sq)
@@ -2144,7 +2262,7 @@ def run_model(params: dict, log=print) -> Path:
                         f"{emis_tau_min_wo[i]:.1f} at {_wl_i:.2f} um (< 10) "
                         f"with {mol} removed: its detection contrast leans on "
                         "the deepest layers -- treat with care.")
-            log(f"[fwd] {len(wo_list)} removed-molecule spectra in "
+            log(f"[fwd] full + {len(wo_list)} removed-molecule spectra in "
                 f"{time.time()-t0:.0f} s")
     else:
         # --- RT: transmission full spectrum (+ leave-one-out batch) ----------
@@ -2198,10 +2316,20 @@ def run_model(params: dict, log=print) -> Path:
 
         def _ad_theta_depth(th):
             # warm continuation from the converged column: the primal is a
-            # no-op re-converge, the jvp is the validated steady-state
-            # tangent (photo ON -- gated in canonical_params)
+            # warm re-converge (count_min accepted steps plus the full
+            # spectrum -- real cost, hence the shared-primal batch below),
+            # the jvp is the validated steady-state tangent (photo ON --
+            # gated in canonical_params)
             y_w = chem.converged_y(th, warm_y=y_sol, lnZ_ref=0.0, c_o_ref=0.0)
             return depth_from_y(y_w, th)
+
+        def _ad_theta_depth_diag(th):
+            # same map, with the primal's convergence certificate as a
+            # second output so the shared-primal batch certifies the
+            # linearization point from the SAME solve it differentiates
+            y_w, diag = chem.converged_y(th, warm_y=y_sol, lnZ_ref=0.0,
+                                         c_o_ref=0.0, return_conv_diag=True)
+            return depth_from_y(y_w, th), diag
 
         if cp["jac_method"] == "ad" and "dlnCO" in jac_names:
             # Refuse the AD dlnCO row within one FD stencil of O-exhaustion
@@ -2225,10 +2353,39 @@ def run_model(params: dict, log=print) -> Path:
                     "jac_method='fd' -- the certified FD row re-initializes "
                     "the chemistry and is valid at any composition.")
 
-        if cp["jac_method"] == "ad":
-            # Certify the AD rows' shared warm primal: one cheap warm solve
-            # verifies the linearization point actually certifies (asserting
-            # it without checking let stall exits pass silently).
+        _ad_chem_rows = ([n for n in jac_names
+                          if n not in CLOUD_FISHER_PARAMS
+                          and n not in MIE_FISHER_PARAMS]
+                         if cp["jac_method"] == "ad" else [])
+        _ad_cols = {}
+        if _ad_chem_rows and not _AD_ROW_LOOP:
+            # ONE warm primal for every chemistry-theta AD row: vmap over
+            # the basis tangents traces the primal unbatched (th0 carries
+            # no batch axis), so the warm re-converge and the full spectrum
+            # run once and only the tangent carry is batched. The
+            # convergence certificate rides the same solve -- certified
+            # from the exact primal the rows differentiate.
+            # JWST_TOOL_AD_ROW_LOOP=1 restores the per-row loop (memory
+            # fallback: the tangent carry is n_rows-fold through the
+            # chemistry state and the CKD tensors).
+            t1 = time.time()
+            advance()
+            _E = np.zeros((len(_ad_chem_rows), theta.size))
+            for _i, _n in enumerate(_ad_chem_rows):
+                _E[_i, theta_names.index(_n)] = 1.0
+            (_pd, _pdiag), (_dd_all, _) = jax.vmap(
+                lambda e: jax.jvp(_ad_theta_depth_diag, (th0,), (e,)))(
+                    jnp.asarray(_E))
+            _diag0 = jax.tree_util.tree_map(lambda x: x[0], _pdiag)
+            _check_converged(_diag0, "AD warm re-converge (shared primal)")
+            for _i, _n in enumerate(_ad_chem_rows):
+                _ad_cols[_n] = np.asarray(_dd_all[_i])
+            log(f"[fwd] AD Jacobian: {len(_ad_chem_rows)} rows from one "
+                f"shared warm primal in {time.time()-t1:.0f} s")
+        elif _ad_chem_rows:
+            # per-row fallback: certify the rows' shared linearization
+            # point once (asserting it without checking let stall exits
+            # pass silently).
             _, _diag_w = chem.converged_y(
                 th0, warm_y=y_sol, lnZ_ref=0.0, c_o_ref=0.0,
                 return_conv_diag=True)
@@ -2282,7 +2439,8 @@ def run_model(params: dict, log=print) -> Path:
 
         for j, name in enumerate(jac_names):
             t1 = time.time()
-            advance()
+            if name not in _ad_cols:
+                advance()        # batched AD rows advanced once, above
             if name in CLOUD_FISHER_PARAMS or name in MIE_FISHER_PARAMS:
                 # RT-only deck row, no chemistry re-solve: power-law deck and
                 # MMR are smooth (ungated); Mie rg/sigmag ride the miegrid
@@ -2310,23 +2468,29 @@ def run_model(params: dict, log=print) -> Path:
                     f"{time.time()-t1:.0f} s")
                 continue
             if cp["jac_method"] == "ad":
-                # AD row: one warm-started forward-mode jvp along this
-                # theta direction (composition directions included -- the
+                # AD row: warm-started forward-mode jvp along this theta
+                # direction (composition directions included -- the
                 # cross-validated differential map; lnZ is the fixed-
-                # structural-grid derivative, see the module docstring)
-                i_par = theta_names.index(name)
-                e = np.zeros_like(theta)
-                e[i_par] = 1.0
-                _, dd = jax.jvp(_ad_theta_depth, (th0,), (jnp.asarray(e),))
-                jac[j] = np.asarray(dd)
+                # structural-grid derivative, see the module docstring).
+                # Normally already computed in the shared-primal batch.
+                if name in _ad_cols:
+                    jac[j] = _ad_cols[name]
+                else:
+                    i_par = theta_names.index(name)
+                    e = np.zeros_like(theta)
+                    e[i_par] = 1.0
+                    _, dd = jax.jvp(_ad_theta_depth, (th0,),
+                                    (jnp.asarray(e),))
+                    jac[j] = np.asarray(dd)
                 if not np.isfinite(jac[j]).all():
                     raise RuntimeError(
                         f"AD Jacobian for {name}: non-finite entries")
                 fd_h.append(0.0)          # no FD step: AD row
                 fd_err.append(np.nan)     # no h-vs-2h metric: AD row
                 row_method.append("ad-jvp")
-                log(f"[fwd] AD Jacobian d(depth)/d({name}) in "
-                    f"{time.time()-t1:.0f} s (warm-started jvp)")
+                log(f"[fwd] AD Jacobian d(depth)/d({name}) "
+                    + ("from the shared-primal batch" if name in _ad_cols
+                       else f"in {time.time()-t1:.0f} s (warm-started jvp)"))
                 continue
             h = FD_STEPS[name]
             dvals = {}
