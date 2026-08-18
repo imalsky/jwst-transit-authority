@@ -83,39 +83,31 @@ def test_panel_xlim_verbatim_when_given_automatic_otherwise():
             plt.close(fig)
 
 
-def test_lognormal_panel_window_stays_positive():
-    """A positive-support (lognormal) curve gets its window from ln-space
-    quantiles: however wide the forecast, the C/O axis never extends below
-    zero, while a plain Gaussian panel of the same display sigma does."""
+def test_truncated_co_panel_window_clamps_at_zero():
+    """A zero-clipped (positive-quantity) curve keeps the symmetric
+    mu +/- 3.5 sigma window on the right but never extends the axis below
+    zero; a plain Gaussian panel of the same width does go negative."""
     from jwst_tool import posteriors
-    center, s_ln = 0.55, 1.4              # very unconstrained C/O
-    curve = posteriors.lognormal_ratio_curve(center, s_ln)
+    center, sigma = 0.55, 0.479          # weakly constrained C/O
+    curve = posteriors.truncated_gaussian_curve(center, sigma)
     pan = dict(axis_label="C/O", notes=[], center=center,
                curves=[dict(label="one draw", theta=curve["theta"],
-                            pdf=curve["pdf"], mu=center,
-                            sigma=center * s_ln,
-                            curve_family="lognormal_from_local_ln_gaussian",
-                            sigma_ln=s_ln, color="#2a78d6")])
+                            pdf=curve["pdf"], mu=center, sigma=sigma,
+                            curve_family="gaussian_truncated_positive",
+                            color="#2a78d6")])
     fig = summary_figure.compose_summary_figure(
         _spectrum(), posterior_panels=[pan])
     try:
         lo, hi = fig.axes[1].get_xlim()
-        assert lo > 0.0 and hi > lo
-        assert np.all(np.asarray(curve["theta"]) > 0.0)
-        # the window follows the VISIBLE mass (same pdf-height criterion as
-        # the Gaussian +/-3.5 sigma window), not a symmetric ln-space span
-        # whose right edge would sit at center*exp(3.5*sigma_ln) with the
-        # curve visually zero over most of the axis
-        assert hi < center * np.exp(summary_figure._XLIM_SIGMA * s_ln) / 2.0
-        pdf = np.asarray(curve["pdf"])
-        th = np.asarray(curve["theta"])
-        vis = th[pdf >= pdf.max() * summary_figure._XLIM_PDF_FRAC]
-        assert hi >= vis.max() and lo <= vis.min()
-        # the same width through the Gaussian branch DOES go negative,
-        # which is exactly what the lognormal routing exists to avoid
+        assert lo >= 0.0
+        assert hi == pytest.approx(center + summary_figure._XLIM_SIGMA * sigma,
+                                   rel=1e-6)
+        assert np.all(np.asarray(curve["theta"]) >= 0.0)
+        # the same width through the plain Gaussian branch DOES go negative,
+        # which is exactly what the clipped family exists to avoid
         gfig = summary_figure.compose_summary_figure(
             _spectrum(),
-            posterior_panels=[_panel_sized(mu=center, sigma=center * s_ln)])
+            posterior_panels=[_panel_sized(mu=center, sigma=sigma)])
         try:
             assert gfig.axes[1].get_xlim()[0] < 0.0
         finally:

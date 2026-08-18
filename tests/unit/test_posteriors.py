@@ -41,7 +41,7 @@ CO = 0.55
 def test_curves_match_fisher_and_are_honestly_labeled():
     """The statistical core in one place: honesty labels, sigma equal to the
     Fisher forecast, the display-unit transforms (dlnCO reported as absolute
-    C/O with the exact lognormal curve family), a caller grid used verbatim,
+    C/O with the zero-clipped Gaussian curve family), a caller grid used verbatim,
     and a LIST of results combining via combined_forecast."""
     r = _result()
     out = posteriors.marginalized_posteriors(r, FREE, CENTERS, co_eval=CO)
@@ -56,21 +56,22 @@ def test_curves_match_fisher_and_are_honestly_labeled():
         assert rec["constrained"]
         assert rec["sigma_display"] == pytest.approx(want, rel=1e-12)
         assert rec["center"] == CENTERS[name]
-        # pdf integrates to ~1 on the +/-5-sigma grid. Ordinary display
-        # coordinates stay Gaussian; absolute C/O is the exact positive
-        # transform of the local ln(C/O) Gaussian.
+        # Ordinary display coordinates stay Gaussian (pdf integrates to
+        # ~1 on the +/-5-sigma grid); absolute C/O is the same Gaussian
+        # clipped at the physical boundary C/O = 0.
         theta, pdf = rec["theta"], rec["pdf"]
         # np.trapezoid is NumPy 2.0+; np.trapz was removed in NumPy 2.4
         _trapz = getattr(np, "trapezoid", None) or np.trapz
-        assert _trapz(pdf, theta) == pytest.approx(1.0, abs=1e-4)
         if name == "dlnCO":
-            s_log = sig[name]
-            assert rec["curve_family"] == "lognormal_from_local_ln_gaussian"
-            assert np.all(theta > 0.0)
-            assert theta.min() == pytest.approx(CO * np.exp(-5 * s_log))
-            assert theta.max() == pytest.approx(CO * np.exp(5 * s_log))
-            assert theta[theta.size // 2] == pytest.approx(CO)
+            assert rec["curve_family"] == "gaussian_truncated_positive"
+            assert np.all(theta >= 0.0)
+            assert theta.min() == pytest.approx(max(CO - 5 * want, 0.0))
+            assert theta.max() == pytest.approx(CO + 5 * want)
+            assert theta[np.argmax(pdf)] == pytest.approx(CO, rel=1e-2)
+            # clipping can only REMOVE mass, never add it
+            assert _trapz(pdf, theta) <= 1.0 + 1e-4
         else:
+            assert _trapz(pdf, theta) == pytest.approx(1.0, abs=1e-4)
             assert rec["curve_family"] == "gaussian"
             assert theta[np.argmax(pdf)] == pytest.approx(
                 CENTERS[name], abs=1e-12)
@@ -98,11 +99,13 @@ def test_curves_match_fisher_and_are_honestly_labeled():
         assert outc["params"][name]["sigma_display"] == pytest.approx(
             want, rel=1e-12)
 
-    # the broad C/O prior curve respects the positivity boundary and is
-    # asymmetric (lognormal mode below the median)
-    curve = posteriors.lognormal_ratio_curve(0.55, sigma_log=1.0)
-    assert np.all(curve["theta"] > 0.0)
-    assert curve["theta"][np.argmax(curve["pdf"])] < 0.55
+    # a very broad C/O curve is clipped at the physical boundary: the grid
+    # starts exactly at 0 and the peak stays at the center
+    curve = posteriors.truncated_gaussian_curve(0.55, 1.0)
+    assert curve["theta"].min() == 0.0
+    assert np.all(curve["theta"] >= 0.0)
+    assert curve["theta"][np.argmax(curve["pdf"])] == pytest.approx(
+        0.55, abs=0.06)
 
 
 def test_null_directions_are_flagged_never_faked():
@@ -155,9 +158,8 @@ def test_input_validation_raises():
         posteriors.marginalized_posteriors(r, ["lnZ"], {"lnZ": 1.0})
     with pytest.raises(ValueError, match="unconstrained"):
         posteriors.gaussian_curve(0.0, np.inf)
-    with pytest.raises(ValueError, match="C/O grid"):
-        posteriors.lognormal_ratio_curve(
-            0.55, 1.0, grid=np.linspace(-0.1, 1.0, 30))
+    with pytest.raises(ValueError, match="center"):
+        posteriors.truncated_gaussian_curve(-0.1, 1.0)
 
 
 # --- named combinations ------------------------------------------------------

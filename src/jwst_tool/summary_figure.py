@@ -178,22 +178,14 @@ def _validate_panels(posterior_panels) -> list[dict]:
                 _mu = float(_mu)
                 if not np.isfinite(_mu):
                     raise ValueError(f"{cw}: mu must be finite, got {_mu!r}")
-            # sigma_ln is the internal ln-space width of a positive-support
-            # (lognormal) curve; with curve_family it drives the x-window in
-            # ln space so a wide C/O forecast never extends the axis below 0
-            _sln = c.get("sigma_ln")
-            if _sln is not None:
-                _sln = float(_sln)
-                if not (np.isfinite(_sln) and _sln > 0.0):
-                    raise ValueError(f"{cw}: sigma_ln must be finite and "
-                                     f"> 0, got {_sln!r}")
+            # curve_family marks a positive-support (zero-clipped) curve, so
+            # the automatic x-window never extends the axis below zero
             _fam = c.get("curve_family")
             curves.append(dict(label=str(_req(c, "label", cw)),
                                theta=theta, pdf=pdf,
                                mu=_mu, sigma=_sg,
                                curve_family=(None if _fam is None
                                              else str(_fam)),
-                               sigma_ln=_sln,
                                kind=(None if c.get("kind") is None
                                      else str(c["kind"])),
                                color=str(c.get("color", "#333333")),
@@ -487,13 +479,6 @@ _FIG_W_IN = 13.0
 # At 3.5 it is 0.2% -- visually on the axis -- and >99.95% of the mass is in
 # frame either way.
 _XLIM_SIGMA = 3.5
-# The pdf height (as a fraction of peak) a Gaussian has at +/-_XLIM_SIGMA.
-# Positive-support (lognormal) curves are windowed to where their pdf stays
-# above this SAME height: a symmetric ln-space window (center*exp(+/-3.5
-# sigma)) blows the right edge up by exp(3.5 sigma) while the curve is
-# visually zero over most of it (a sigma_ln ~ 0.9 curve pushed the C/O axis
-# to ~25 with all its mass below ~5).
-_XLIM_PDF_FRAC = float(np.exp(-0.5 * _XLIM_SIGMA ** 2))
 
 
 def _fmt_val(v: float) -> str:
@@ -584,24 +569,12 @@ def _plot_posterior_panel(axp, pan: dict, color: str,
         for c in pan["curves"]:
             if c["mu"] is None or c["sigma"] is None:
                 continue
-            if (c.get("curve_family") == "lognormal_from_local_ln_gaussian"
-                    and c.get("sigma_ln") is not None):
-                # positive-support curve: window to where the DRAWN pdf
-                # stays above the height a Gaussian has at +/-_XLIM_SIGMA
-                # (the same visible-tail criterion as the branch below).
-                # Strictly positive (the curve grid is), and far tighter
-                # than a symmetric ln-space window, whose right edge grows
-                # as exp(_XLIM_SIGMA * sigma_ln) while the curve is
-                # visually zero over most of it.
-                _th = np.asarray(c["theta"], dtype=float)
-                _pd = np.asarray(c["pdf"], dtype=float)
-                _vis = _pd >= float(np.max(_pd)) * _XLIM_PDF_FRAC
-                if _vis.any():
-                    _spans.append((float(_th[_vis].min()),
-                                   float(_th[_vis].max())))
-            else:
-                _spans.append((c["mu"] - _XLIM_SIGMA * c["sigma"],
-                               c["mu"] + _XLIM_SIGMA * c["sigma"]))
+            _lo_c = c["mu"] - _XLIM_SIGMA * c["sigma"]
+            if c.get("curve_family") == "gaussian_truncated_positive":
+                # positive quantity (C/O): the curve is clipped at zero, so
+                # the window never extends below it
+                _lo_c = max(_lo_c, 0.0)
+            _spans.append((_lo_c, c["mu"] + _XLIM_SIGMA * c["sigma"]))
         if _spans:
             _lo = min(s[0] for s in _spans)
             _hi = max(s[1] for s in _spans)

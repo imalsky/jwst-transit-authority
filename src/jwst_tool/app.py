@@ -2914,14 +2914,14 @@ if _have_fisher:
                         if _p == "dlnCO":
                             # C/O lives on (0, inf): shift the center by the
                             # INTERNAL ln-space draw (multiplicative, stays
-                            # positive) and draw the same lognormal family
-                            # the no-draw forecast uses. The linear-space
-                            # center + delta_display goes negative for an
-                            # unconstrained C/O.
+                            # positive; center + delta_display can go
+                            # negative for an unconstrained C/O) and draw
+                            # the same clipped-at-zero Gaussian family the
+                            # no-draw forecast uses.
                             _mu_d = _pr["center"] * float(
                                 np.exp(_mr["delta"][_p]))
-                            _mc = posteriors.lognormal_ratio_curve(
-                                _mu_d, _pr["sigma_internal"])
+                            _mc = posteriors.truncated_gaussian_curve(
+                                _mu_d, _pr["sigma_display"])
                         else:
                             _mu_d = _pr["center"] + float(
                                 _mr["delta_display"][_p])
@@ -2939,8 +2939,6 @@ if _have_fisher:
                             mu=_mu_d,
                             sigma=_pr["sigma_display"],
                             curve_family=_pr["curve_family"],
-                            sigma_ln=(_pr["sigma_internal"]
-                                      if _p == "dlnCO" else None),
                             color=_col, ls="-", lw=1.8,
                             kind=posteriors.MOCK_RECOVERY_KIND))
                     else:
@@ -2949,8 +2947,6 @@ if _have_fisher:
                             pdf=_pr["pdf"], mu=_pr["center"],
                             sigma=_pr["sigma_display"],
                             curve_family=_pr["curve_family"],
-                            sigma_ln=(_pr["sigma_internal"]
-                                      if _p == "dlnCO" else None),
                             color=_col, ls="-", lw=1.8))
                 else:
                     _notes.append(f"{_lbl}: unconstrained -- this "
