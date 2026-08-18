@@ -74,6 +74,13 @@
       "n": 403,
       "median": 1.0,
       "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
+     "flux_ratio_photon": {
+      "n": 403,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
       "p95": 1.5342966136556664,
       "max_abs_dev": 0.6843566754462655
      },
@@ -152,6 +159,13 @@
       "p95": 1.0,
       "max_abs_dev": 2.220446049250313e-16
      },
+     "flux_ratio_photon": {
+      "n": 3330,
+      "median": 1.0,
+      "p05": 1.0,
+      "p95": 1.0,
+      "max_abs_dev": 2.220446049250313e-16
+     },
      "sigma_ratio_matched": {
       "n": 3330,
       "median": 1.100815085105479,
@@ -221,6 +235,13 @@
       "disperser": "g235h"
      },
      "flux_ratio": {
+      "n": 3424,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
+     "flux_ratio_photon": {
       "n": 3424,
       "median": 1.0,
       "p05": 0.9999999999999999,
@@ -302,6 +323,13 @@
       "p95": 1.0000000000000002,
       "max_abs_dev": 2.220446049250313e-16
      },
+     "flux_ratio_photon": {
+      "n": 1286,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
      "sigma_ratio_matched": {
       "n": 1286,
       "median": 1.0916483723296284,
@@ -371,6 +399,13 @@
       "disperser": "gr700xd"
      },
      "flux_ratio": {
+      "n": 2040,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
+     "flux_ratio_photon": {
       "n": 2040,
       "median": 1.010905024410218,
       "p05": 1.0,
@@ -446,6 +481,13 @@
       "disperser": "grismr"
      },
      "flux_ratio": {
+      "n": 1812,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
+     "flux_ratio_photon": {
       "n": 1812,
       "median": 1.0,
       "p05": 0.9999999999999999,
@@ -529,6 +571,13 @@
       "p95": 1.0,
       "max_abs_dev": 2.220446049250313e-16
      },
+     "flux_ratio_photon": {
+      "n": 1267,
+      "median": 1.0,
+      "p05": 1.0,
+      "p95": 1.0,
+      "max_abs_dev": 2.220446049250313e-16
+     },
      "sigma_ratio_matched": {
       "n": 1267,
       "median": 1.0816633222985705,
@@ -606,6 +655,13 @@
       "p95": 1.0,
       "max_abs_dev": 2.220446049250313e-16
      },
+     "flux_ratio_photon": {
+      "n": 372,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0,
+      "max_abs_dev": 2.220446049250313e-16
+     },
      "sigma_ratio_matched": {
       "n": 372,
       "median": 1.4844737012012248,
@@ -630,6 +686,336 @@
       "% full well high?": "All good (80% < 80%)",
       "Num Groups Reset?": "All good",
       "Minimum Integrations?": "All good"
+     }
+    },
+    {
+     "key": "nirspec_g140h",
+     "saturation_mask": {
+      "n_ours": 3665,
+      "n_pandexo": 3665,
+      "n_matched": 3665,
+      "matched_frac": 1.0,
+      "partial_equal_frac": 1.0,
+      "full_equal_frac": 1.0,
+      "partial_disagree": 0,
+      "full_disagree": 0,
+      "partial_flagged_ours": 0,
+      "partial_flagged_pandexo": 0,
+      "full_flagged_ours": 0,
+      "full_flagged_pandexo": 0
+     },
+     "status": "OK",
+     "npix_ours": 3510,
+     "npix_pandexo": 3510,
+     "npix_matched": 3510,
+     "ngroup_ours": 35,
+     "ngroup_pandexo": 35,
+     "sat_frac_ours": 0.7966086060509314,
+     "t_int_ours_s": 32.49248,
+     "t_int_pandexo_s": 32.472,
+     "t_frame_pandexo_s": 0.902,
+     "n_int_ours": 310,
+     "n_int_pandexo_in": 311.0,
+     "n_int_pandexo_out": 311.0,
+     "config_ours": {
+      "subarray": "sub2048",
+      "readout": "nrsrapid",
+      "filter": "f100lp",
+      "disperser": "g140h"
+     },
+     "config_pandexo": {
+      "subarray": "sub2048",
+      "readout": "nrsrapid",
+      "mode": "bots",
+      "filter": "f100lp",
+      "disperser": "g140h"
+     },
+     "flux_ratio": {
+      "n": 3510,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
+     "flux_ratio_photon": {
+      "n": 3510,
+      "median": 1.1253977876393864,
+      "p05": 1.0414734984329348,
+      "p95": 1.2922383934501214,
+      "max_abs_dev": 0.3172454620771621
+     },
+     "sigma_ratio_matched": {
+      "n": 3510,
+      "median": 1.1322020625128517,
+      "p05": 1.1038933078980155,
+      "p95": 1.150621664037162,
+      "max_abs_dev": 0.15355356553623878
+     },
+     "sigma_ratio_policy": {
+      "n": 3510,
+      "median": 1.1340267245548814,
+      "p05": 1.1056723474211387,
+      "p95": 1.152476011193575,
+      "max_abs_dev": 0.15541263775856828
+     },
+     "var_excess_ours": 1.4401563951469636,
+     "var_excess_pandexo": 1.013725613193694,
+     "pandexo_warnings": {
+      "Group Number Too Low?": "All good",
+      "Group Number Too High?": "All good",
+      "Non linear?": "All good",
+      "Saturated?": "All good",
+      "% full well high?": "All good (80% < 80%)",
+      "Num Groups Reset?": "All good",
+      "Minimum Integrations?": "All good"
+     }
+    },
+    {
+     "key": "nirspec_g235m",
+     "saturation_mask": {
+      "n_ours": 1368,
+      "n_pandexo": 1368,
+      "n_matched": 1368,
+      "matched_frac": 1.0,
+      "partial_equal_frac": 1.0,
+      "full_equal_frac": 1.0,
+      "partial_disagree": 0,
+      "full_disagree": 0,
+      "partial_flagged_ours": 0,
+      "partial_flagged_pandexo": 0,
+      "full_flagged_ours": 0,
+      "full_flagged_pandexo": 0
+     },
+     "status": "OK",
+     "npix_ours": 1368,
+     "npix_pandexo": 1368,
+     "npix_matched": 1368,
+     "ngroup_ours": 23,
+     "ngroup_pandexo": 23,
+     "sat_frac_ours": 0.783510279657452,
+     "t_int_ours_s": 21.66848,
+     "t_int_pandexo_s": 21.648,
+     "t_frame_pandexo_s": 0.902,
+     "n_int_ours": 465,
+     "n_int_pandexo_in": 467.0,
+     "n_int_pandexo_out": 467.0,
+     "config_ours": {
+      "subarray": "sub2048",
+      "readout": "nrsrapid",
+      "filter": "f170lp",
+      "disperser": "g235m"
+     },
+     "config_pandexo": {
+      "subarray": "sub2048",
+      "readout": "nrsrapid",
+      "mode": "bots",
+      "filter": "f170lp",
+      "disperser": "g235m"
+     },
+     "flux_ratio": {
+      "n": 1368,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0,
+      "max_abs_dev": 2.220446049250313e-16
+     },
+     "flux_ratio_photon": {
+      "n": 1368,
+      "median": 1.0,
+      "p05": 1.0,
+      "p95": 1.0521757411219474,
+      "max_abs_dev": 0.06700293984279537
+     },
+     "sigma_ratio_matched": {
+      "n": 1368,
+      "median": 1.0815244680913438,
+      "p05": 1.0799717951439824,
+      "p95": 1.1052597403321505,
+      "max_abs_dev": 0.1141256074550776
+     },
+     "sigma_ratio_policy": {
+      "n": 1368,
+      "median": 1.0838478316026916,
+      "p05": 1.0822918231564325,
+      "p95": 1.1076340926718447,
+      "max_abs_dev": 0.11651900571816753
+     },
+     "var_excess_ours": 1.1742869909153542,
+     "var_excess_pandexo": 1.012168426045171,
+     "pandexo_warnings": {
+      "Group Number Too Low?": "All good",
+      "Group Number Too High?": "All good",
+      "Non linear?": "All good",
+      "Saturated?": "All good",
+      "% full well high?": "All good (78% < 80%)",
+      "Num Groups Reset?": "All good",
+      "Minimum Integrations?": "All good"
+     }
+    },
+    {
+     "key": "niriss_soss_ord2",
+     "saturation_mask": {
+      "n_ours": 1362,
+      "n_pandexo": 1362,
+      "n_matched": 1362,
+      "matched_frac": 1.0,
+      "partial_equal_frac": 1.0,
+      "full_equal_frac": 1.0,
+      "partial_disagree": 0,
+      "full_disagree": 0,
+      "partial_flagged_ours": 0,
+      "partial_flagged_pandexo": 0,
+      "full_flagged_ours": 0,
+      "full_flagged_pandexo": 0
+     },
+     "status": "OK",
+     "npix_ours": 1362,
+     "npix_pandexo": 1362,
+     "npix_matched": 1362,
+     "ngroup_ours": 17,
+     "ngroup_pandexo": 17,
+     "sat_frac_ours": 0.7697919519551595,
+     "t_int_ours_s": 98.91248,
+     "t_int_pandexo_s": 98.892,
+     "t_frame_pandexo_s": 5.494,
+     "n_int_ours": 102,
+     "n_int_pandexo_in": 103.0,
+     "n_int_pandexo_out": 103.0,
+     "config_ours": {
+      "subarray": "substrip256",
+      "readout": "nisrapid",
+      "filter": "clear",
+      "disperser": "gr700xd"
+     },
+     "config_pandexo": {
+      "subarray": "substrip256",
+      "readout": "nisrapid",
+      "mode": "soss",
+      "filter": "clear",
+      "disperser": "gr700xd"
+     },
+     "flux_ratio": {
+      "n": 1362,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 3.3306690738754696e-16
+     },
+     "flux_ratio_photon": {
+      "n": 1362,
+      "median": 1.300369972586383,
+      "p05": 1.1621299457510255,
+      "p95": 1.5550539903030527,
+      "max_abs_dev": 0.5973199343677071
+     },
+     "sigma_ratio_matched": {
+      "n": 1362,
+      "median": 1.018183650365502,
+      "p05": 0.9652524070602253,
+      "p95": 1.0974001167933316,
+      "max_abs_dev": 0.09832292077488347
+     },
+     "sigma_ratio_policy": {
+      "n": 1362,
+      "median": 1.023162573212733,
+      "p05": 0.96997249587832,
+      "p95": 1.1027664085346054,
+      "max_abs_dev": 0.10369372503197449
+     },
+     "var_excess_ours": 2.6851991167851157,
+     "var_excess_pandexo": 2.015934045024344,
+     "pandexo_warnings": {
+      "Group Number Too Low?": "All good",
+      "Group Number Too High?": "All good",
+      "Non linear?": "All good",
+      "Saturated?": "All good",
+      "% full well high?": "All good (77% < 80%)",
+      "Num Groups Reset?": "All good",
+      "Minimum Integrations?": "All good"
+     }
+    },
+    {
+     "key": "nircam_f277w",
+     "saturation_mask": {
+      "n_ours": 900,
+      "n_pandexo": 900,
+      "n_matched": 900,
+      "matched_frac": 1.0,
+      "partial_equal_frac": 1.0,
+      "full_equal_frac": 1.0,
+      "partial_disagree": 0,
+      "full_disagree": 0,
+      "partial_flagged_ours": 0,
+      "partial_flagged_pandexo": 0,
+      "full_flagged_ours": 0,
+      "full_flagged_pandexo": 0
+     },
+     "status": "OK",
+     "npix_ours": 900,
+     "npix_pandexo": 900,
+     "npix_matched": 900,
+     "ngroup_ours": 100,
+     "ngroup_pandexo": 100,
+     "sat_frac_ours": 0.16453843443931276,
+     "t_int_ours_s": 34.40673,
+     "t_int_pandexo_s": 34.401610000000005,
+     "t_frame_pandexo_s": 0.34061,
+     "n_int_ours": 293,
+     "n_int_pandexo_in": 294.0,
+     "n_int_pandexo_out": 294.0,
+     "config_ours": {
+      "subarray": "subgrism64",
+      "readout": "rapid",
+      "filter": "f277w",
+      "disperser": "grismr"
+     },
+     "config_pandexo": {
+      "subarray": "subgrism64",
+      "readout": "rapid",
+      "mode": "lw_tsgrism",
+      "filter": "f277w",
+      "disperser": "grismr"
+     },
+     "flux_ratio": {
+      "n": 900,
+      "median": 1.0,
+      "p05": 1.0,
+      "p95": 1.0,
+      "max_abs_dev": 2.220446049250313e-16
+     },
+     "flux_ratio_photon": {
+      "n": 900,
+      "median": 1.0,
+      "p05": 1.0,
+      "p95": 1.0,
+      "max_abs_dev": 2.220446049250313e-16
+     },
+     "sigma_ratio_matched": {
+      "n": 900,
+      "median": 1.0922341220071534,
+      "p05": 0.7854372201453844,
+      "p95": 1.0928380937509024,
+      "max_abs_dev": 0.23870373761019492
+     },
+     "sigma_ratio_policy": {
+      "n": 900,
+      "median": 1.0940964151276102,
+      "p05": 0.7867764150140996,
+      "p95": 1.0947014166619515,
+      "max_abs_dev": 0.2374057038246613
+     },
+     "var_excess_ours": 1.2140930709719584,
+     "var_excess_pandexo": 1.0321889876525012,
+     "pandexo_warnings": {
+      "Group Number Too Low?": "All good",
+      "Group Number Too High?": "Optimized NGROUPS (486) exceeds the maximum (100). SET TO NGROUPS=100",
+      "Non linear?": "All good",
+      "Saturated?": "All good",
+      "% full well high?": "All good (16% < 80%)",
+      "Num Groups Reset?": "All good",
+      "Minimum Integrations?": "All good",
+      "NIRCam Readout Optimization": "User selected RAPID; readout pattern optimization was not performed. Estimate assumes no target acquisition and a standard 2,100-second initial slew.",
+      "NIRCam Data Excess?": "Estimated data excess is 27.8 GB, above the 15 GB recommended limit. Verify and revise the setup in APT."
      }
     }
    ]
@@ -705,6 +1091,13 @@
       "disperser": "prism"
      },
      "flux_ratio": {
+      "n": 306,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
+     "flux_ratio_photon": {
       "n": 306,
       "median": 1.0,
       "p05": 0.9999999999999999,
@@ -786,6 +1179,13 @@
       "p95": 1.0,
       "max_abs_dev": 2.220446049250313e-16
      },
+     "flux_ratio_photon": {
+      "n": 3330,
+      "median": 1.0,
+      "p05": 1.0,
+      "p95": 1.0,
+      "max_abs_dev": 2.220446049250313e-16
+     },
      "sigma_ratio_matched": {
       "n": 3330,
       "median": 1.075746275317126,
@@ -855,6 +1255,13 @@
       "disperser": "g235h"
      },
      "flux_ratio": {
+      "n": 3424,
+      "median": 1.0,
+      "p05": 1.0,
+      "p95": 1.0,
+      "max_abs_dev": 4.440892098500626e-16
+     },
+     "flux_ratio_photon": {
       "n": 3424,
       "median": 1.0,
       "p05": 1.0,
@@ -936,6 +1343,13 @@
       "p95": 1.0000000000000002,
       "max_abs_dev": 2.220446049250313e-16
      },
+     "flux_ratio_photon": {
+      "n": 1286,
+      "median": 1.0,
+      "p05": 1.0,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
      "sigma_ratio_matched": {
       "n": 1286,
       "median": 1.0497962663680642,
@@ -1005,6 +1419,13 @@
       "disperser": "gr700xd"
      },
      "flux_ratio": {
+      "n": 2040,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 3.3306690738754696e-16
+     },
+     "flux_ratio_photon": {
       "n": 2040,
       "median": 1.010905024410218,
       "p05": 1.0,
@@ -1080,6 +1501,13 @@
       "disperser": "grismr"
      },
      "flux_ratio": {
+      "n": 1812,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
+     "flux_ratio_photon": {
       "n": 1812,
       "median": 1.0,
       "p05": 0.9999999999999999,
@@ -1163,6 +1591,13 @@
       "p95": 1.0,
       "max_abs_dev": 2.220446049250313e-16
      },
+     "flux_ratio_photon": {
+      "n": 1267,
+      "median": 1.0,
+      "p05": 1.0,
+      "p95": 1.0,
+      "max_abs_dev": 2.220446049250313e-16
+     },
      "sigma_ratio_matched": {
       "n": 1267,
       "median": 1.0984061729575745,
@@ -1240,6 +1675,13 @@
       "p95": 1.0,
       "max_abs_dev": 2.220446049250313e-16
      },
+     "flux_ratio_photon": {
+      "n": 372,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0,
+      "max_abs_dev": 2.220446049250313e-16
+     },
      "sigma_ratio_matched": {
       "n": 372,
       "median": 1.3494781141182648,
@@ -1264,6 +1706,336 @@
       "% full well high?": "All good (78% < 80%)",
       "Num Groups Reset?": "All good",
       "Minimum Integrations?": "All good"
+     }
+    },
+    {
+     "key": "nirspec_g140h",
+     "saturation_mask": {
+      "n_ours": 3665,
+      "n_pandexo": 3665,
+      "n_matched": 3665,
+      "matched_frac": 1.0,
+      "partial_equal_frac": 1.0,
+      "full_equal_frac": 1.0,
+      "partial_disagree": 0,
+      "full_disagree": 0,
+      "partial_flagged_ours": 0,
+      "partial_flagged_pandexo": 0,
+      "full_flagged_ours": 0,
+      "full_flagged_pandexo": 0
+     },
+     "status": "OK",
+     "npix_ours": 3510,
+     "npix_pandexo": 3510,
+     "npix_matched": 3510,
+     "ngroup_ours": 3,
+     "ngroup_pandexo": 3,
+     "sat_frac_ours": 0.6072800646634615,
+     "t_int_ours_s": 3.62848,
+     "t_int_pandexo_s": 3.608,
+     "t_frame_pandexo_s": 0.902,
+     "n_int_ours": 2781,
+     "n_int_pandexo_in": 2798.0,
+     "n_int_pandexo_out": 2798.0,
+     "config_ours": {
+      "subarray": "sub2048",
+      "readout": "nrsrapid",
+      "filter": "f100lp",
+      "disperser": "g140h"
+     },
+     "config_pandexo": {
+      "subarray": "sub2048",
+      "readout": "nrsrapid",
+      "mode": "bots",
+      "filter": "f100lp",
+      "disperser": "g140h"
+     },
+     "flux_ratio": {
+      "n": 3510,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
+     "flux_ratio_photon": {
+      "n": 3510,
+      "median": 1.1253977876393864,
+      "p05": 1.0414734984329348,
+      "p95": 1.2922383934501214,
+      "max_abs_dev": 0.3172454620771621
+     },
+     "sigma_ratio_matched": {
+      "n": 3510,
+      "median": 1.0759912711373834,
+      "p05": 1.0721375426441853,
+      "p95": 1.0820211790256695,
+      "max_abs_dev": 0.10101478585662771
+     },
+     "sigma_ratio_policy": {
+      "n": 3510,
+      "median": 1.079274978907709,
+      "p05": 1.0754094896144584,
+      "p95": 1.0853232888554896,
+      "max_abs_dev": 0.10437486033356924
+     },
+     "var_excess_ours": 1.3123067947835358,
+     "var_excess_pandexo": 1.0280345258601526,
+     "pandexo_warnings": {
+      "Group Number Too Low?": "All good",
+      "Group Number Too High?": "All good",
+      "Non linear?": "All good",
+      "Saturated?": "All good",
+      "% full well high?": "All good (61% < 80%)",
+      "Num Groups Reset?": "All good",
+      "Minimum Integrations?": "All good"
+     }
+    },
+    {
+     "key": "nirspec_g235m",
+     "saturation_mask": {
+      "n_ours": 1368,
+      "n_pandexo": 1368,
+      "n_matched": 1368,
+      "matched_frac": 1.0,
+      "partial_equal_frac": 1.0,
+      "full_equal_frac": 1.0,
+      "partial_disagree": 0,
+      "full_disagree": 0,
+      "partial_flagged_ours": 0,
+      "partial_flagged_pandexo": 0,
+      "full_flagged_ours": 0,
+      "full_flagged_pandexo": 0
+     },
+     "status": "OK",
+     "npix_ours": 1368,
+     "npix_pandexo": 1368,
+     "npix_matched": 1368,
+     "ngroup_ours": 3,
+     "ngroup_pandexo": 3,
+     "sat_frac_ours": 0.7548156892427884,
+     "t_int_ours_s": 3.62848,
+     "t_int_pandexo_s": 3.608,
+     "t_frame_pandexo_s": 0.902,
+     "n_int_ours": 2781,
+     "n_int_pandexo_in": 2798.0,
+     "n_int_pandexo_out": 2798.0,
+     "config_ours": {
+      "subarray": "sub2048",
+      "readout": "nrsrapid",
+      "filter": "f170lp",
+      "disperser": "g235m"
+     },
+     "config_pandexo": {
+      "subarray": "sub2048",
+      "readout": "nrsrapid",
+      "mode": "bots",
+      "filter": "f170lp",
+      "disperser": "g235m"
+     },
+     "flux_ratio": {
+      "n": 1368,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
+     "flux_ratio_photon": {
+      "n": 1368,
+      "median": 1.0,
+      "p05": 1.0,
+      "p95": 1.0521757411219474,
+      "max_abs_dev": 0.06700293984279537
+     },
+     "sigma_ratio_matched": {
+      "n": 1368,
+      "median": 1.0352401450132263,
+      "p05": 1.0261855611037243,
+      "p95": 1.0563429821127839,
+      "max_abs_dev": 0.061676285934898045
+     },
+     "sigma_ratio_policy": {
+      "n": 1368,
+      "median": 1.0383994885873982,
+      "p05": 1.029317271918841,
+      "p95": 1.059566727278324,
+      "max_abs_dev": 0.06491630726519149
+     },
+     "var_excess_ours": 1.0837459933070792,
+     "var_excess_pandexo": 1.0176059328551412,
+     "pandexo_warnings": {
+      "Group Number Too Low?": "All good",
+      "Group Number Too High?": "All good",
+      "Non linear?": "All good",
+      "Saturated?": "All good",
+      "% full well high?": "All good (75% < 80%)",
+      "Num Groups Reset?": "All good",
+      "Minimum Integrations?": "All good"
+     }
+    },
+    {
+     "key": "niriss_soss_ord2",
+     "saturation_mask": {
+      "n_ours": 1362,
+      "n_pandexo": 1362,
+      "n_matched": 1362,
+      "matched_frac": 1.0,
+      "partial_equal_frac": 1.0,
+      "full_equal_frac": 1.0,
+      "partial_disagree": 0,
+      "full_disagree": 0,
+      "partial_flagged_ours": 0,
+      "partial_flagged_pandexo": 0,
+      "full_flagged_ours": 0,
+      "full_flagged_pandexo": 0
+     },
+     "status": "OK",
+     "npix_ours": 1362,
+     "npix_pandexo": 1362,
+     "npix_matched": 1362,
+     "ngroup_ours": 2,
+     "ngroup_pandexo": 2,
+     "sat_frac_ours": 0.7817590606553819,
+     "t_int_ours_s": 16.50248,
+     "t_int_pandexo_s": 16.482,
+     "t_frame_pandexo_s": 5.494,
+     "n_int_ours": 611,
+     "n_int_pandexo_in": 613.0,
+     "n_int_pandexo_out": 613.0,
+     "config_ours": {
+      "subarray": "substrip256",
+      "readout": "nisrapid",
+      "filter": "clear",
+      "disperser": "gr700xd"
+     },
+     "config_pandexo": {
+      "subarray": "substrip256",
+      "readout": "nisrapid",
+      "mode": "soss",
+      "filter": "clear",
+      "disperser": "gr700xd"
+     },
+     "flux_ratio": {
+      "n": 1362,
+      "median": 1.0,
+      "p05": 0.9999999999999998,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 4.440892098500626e-16
+     },
+     "flux_ratio_photon": {
+      "n": 1362,
+      "median": 1.3003699725863829,
+      "p05": 1.1621299457510255,
+      "p95": 1.5550539903030527,
+      "max_abs_dev": 0.5973199343677071
+     },
+     "sigma_ratio_matched": {
+      "n": 1362,
+      "median": 1.0607630291947734,
+      "p05": 1.0493154100847966,
+      "p95": 1.1362304505023708,
+      "max_abs_dev": 0.1499472479275974
+     },
+     "sigma_ratio_policy": {
+      "n": 1362,
+      "median": 1.0624977205076287,
+      "p05": 1.0510313808305918,
+      "p95": 1.1380885555056948,
+      "max_abs_dev": 0.15182778433989674
+     },
+     "var_excess_ours": 1.9085983419281556,
+     "var_excess_pandexo": 1.3224335283745476,
+     "pandexo_warnings": {
+      "Group Number Too Low?": "All good",
+      "Group Number Too High?": "All good",
+      "Non linear?": "All good",
+      "Saturated?": "All good",
+      "% full well high?": "All good (78% < 80%)",
+      "Num Groups Reset?": "All good",
+      "Minimum Integrations?": "All good"
+     }
+    },
+    {
+     "key": "nircam_f277w",
+     "saturation_mask": {
+      "n_ours": 900,
+      "n_pandexo": 900,
+      "n_matched": 900,
+      "matched_frac": 1.0,
+      "partial_equal_frac": 1.0,
+      "full_equal_frac": 1.0,
+      "partial_disagree": 0,
+      "full_disagree": 0,
+      "partial_flagged_ours": 0,
+      "partial_flagged_pandexo": 0,
+      "full_flagged_ours": 0,
+      "full_flagged_pandexo": 0
+     },
+     "status": "OK",
+     "npix_ours": 900,
+     "npix_pandexo": 900,
+     "npix_matched": 900,
+     "ngroup_ours": 67,
+     "ngroup_pandexo": 67,
+     "sat_frac_ours": 0.7987363954920969,
+     "t_int_ours_s": 23.166600000000003,
+     "t_int_pandexo_s": 23.16148,
+     "t_frame_pandexo_s": 0.34061,
+     "n_int_ours": 435,
+     "n_int_pandexo_in": 436.0,
+     "n_int_pandexo_out": 436.0,
+     "config_ours": {
+      "subarray": "subgrism64",
+      "readout": "rapid",
+      "filter": "f277w",
+      "disperser": "grismr"
+     },
+     "config_pandexo": {
+      "subarray": "subgrism64",
+      "readout": "rapid",
+      "mode": "lw_tsgrism",
+      "filter": "f277w",
+      "disperser": "grismr"
+     },
+     "flux_ratio": {
+      "n": 900,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
+     "flux_ratio_photon": {
+      "n": 900,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
+     "sigma_ratio_matched": {
+      "n": 900,
+      "median": 1.0961839193179879,
+      "p05": 0.8657617587527733,
+      "p95": 1.09676586605122,
+      "max_abs_dev": 0.22023244045862633
+     },
+     "sigma_ratio_policy": {
+      "n": 900,
+      "median": 1.0974431775382731,
+      "p05": 0.8667563159546308,
+      "p95": 1.09802579279181,
+      "max_abs_dev": 0.2193366704222669
+     },
+     "var_excess_ours": 1.1921497568959154,
+     "var_excess_pandexo": 1.0063153042584543,
+     "pandexo_warnings": {
+      "Group Number Too Low?": "All good",
+      "Group Number Too High?": "All good",
+      "Non linear?": "All good",
+      "Saturated?": "All good",
+      "% full well high?": "All good (80% < 80%)",
+      "Num Groups Reset?": "All good",
+      "Minimum Integrations?": "All good",
+      "NIRCam Readout Optimization": "User selected RAPID; readout pattern optimization was not performed. Estimate assumes no target acquisition and a standard 2,100-second initial slew.",
+      "NIRCam Data Excess?": "Estimated data excess is 27.5 GB, above the 15 GB recommended limit. Verify and revise the setup in APT."
      }
     }
    ]
@@ -1339,6 +2111,13 @@
       "disperser": "prism"
      },
      "flux_ratio": {
+      "n": 403,
+      "median": 1.0,
+      "p05": 1.0,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 3.3306690738754696e-16
+     },
+     "flux_ratio_photon": {
       "n": 403,
       "median": 1.0,
       "p05": 1.0,
@@ -1420,6 +2199,13 @@
       "p95": 1.0,
       "max_abs_dev": 2.220446049250313e-16
      },
+     "flux_ratio_photon": {
+      "n": 3330,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0,
+      "max_abs_dev": 2.220446049250313e-16
+     },
      "sigma_ratio_matched": {
       "n": 3330,
       "median": 1.1673556141423913,
@@ -1489,6 +2275,13 @@
       "disperser": "g235h"
      },
      "flux_ratio": {
+      "n": 3424,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
+     "flux_ratio_photon": {
       "n": 3424,
       "median": 1.0,
       "p05": 0.9999999999999999,
@@ -1570,6 +2363,13 @@
       "p95": 1.0000000000000002,
       "max_abs_dev": 2.220446049250313e-16
      },
+     "flux_ratio_photon": {
+      "n": 1286,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
      "sigma_ratio_matched": {
       "n": 1286,
       "median": 1.1241271649817195,
@@ -1639,6 +2439,13 @@
       "disperser": "gr700xd"
      },
      "flux_ratio": {
+      "n": 2040,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
+     "flux_ratio_photon": {
       "n": 2040,
       "median": 1.010905024410218,
       "p05": 1.0,
@@ -1714,6 +2521,13 @@
       "disperser": "grismr"
      },
      "flux_ratio": {
+      "n": 1812,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
+     "flux_ratio_photon": {
       "n": 1812,
       "median": 1.0,
       "p05": 0.9999999999999999,
@@ -1797,6 +2611,13 @@
       "p95": 1.0,
       "max_abs_dev": 2.220446049250313e-16
      },
+     "flux_ratio_photon": {
+      "n": 1267,
+      "median": 1.0,
+      "p05": 1.0,
+      "p95": 1.0,
+      "max_abs_dev": 2.220446049250313e-16
+     },
      "sigma_ratio_matched": {
       "n": 1267,
       "median": 0.9968832079661778,
@@ -1874,6 +2695,13 @@
       "p95": 1.0000000000000002,
       "max_abs_dev": 2.220446049250313e-16
      },
+     "flux_ratio_photon": {
+      "n": 372,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
      "sigma_ratio_matched": {
       "n": 372,
       "median": 1.533828458937871,
@@ -1898,6 +2726,336 @@
       "% full well high?": "All good (80% < 80%)",
       "Num Groups Reset?": "All good",
       "Minimum Integrations?": "All good"
+     }
+    },
+    {
+     "key": "nirspec_g140h",
+     "saturation_mask": {
+      "n_ours": 3665,
+      "n_pandexo": 3665,
+      "n_matched": 3665,
+      "matched_frac": 1.0,
+      "partial_equal_frac": 1.0,
+      "full_equal_frac": 1.0,
+      "partial_disagree": 0,
+      "full_disagree": 0,
+      "partial_flagged_ours": 0,
+      "partial_flagged_pandexo": 0,
+      "full_flagged_ours": 0,
+      "full_flagged_pandexo": 0
+     },
+     "status": "OK",
+     "npix_ours": 3510,
+     "npix_pandexo": 3510,
+     "npix_matched": 3510,
+     "ngroup_ours": 394,
+     "ngroup_pandexo": 394,
+     "sat_frac_ours": 0.7983236159621019,
+     "t_int_ours_s": 356.31048000000004,
+     "t_int_pandexo_s": 356.29,
+     "t_frame_pandexo_s": 0.902,
+     "n_int_ours": 28,
+     "n_int_pandexo_in": 29.0,
+     "n_int_pandexo_out": 29.0,
+     "config_ours": {
+      "subarray": "sub2048",
+      "readout": "nrsrapid",
+      "filter": "f100lp",
+      "disperser": "g140h"
+     },
+     "config_pandexo": {
+      "subarray": "sub2048",
+      "readout": "nrsrapid",
+      "mode": "bots",
+      "filter": "f100lp",
+      "disperser": "g140h"
+     },
+     "flux_ratio": {
+      "n": 3510,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
+     "flux_ratio_photon": {
+      "n": 3510,
+      "median": 1.1253977876393864,
+      "p05": 1.0414734984329348,
+      "p95": 1.2922383934501216,
+      "max_abs_dev": 0.3172454620771621
+     },
+     "sigma_ratio_matched": {
+      "n": 3510,
+      "median": 1.1678303265715884,
+      "p05": 1.1382397365677552,
+      "p95": 1.1865741982247664,
+      "max_abs_dev": 0.1887485649349503
+     },
+     "sigma_ratio_policy": {
+      "n": 3510,
+      "median": 1.1885014946524164,
+      "p05": 1.1583871367298517,
+      "p95": 1.2075771420033243,
+      "max_abs_dev": 0.20978999606797477
+     },
+     "var_excess_ours": 1.5312043978118646,
+     "var_excess_pandexo": 1.0128859695206782,
+     "pandexo_warnings": {
+      "Group Number Too Low?": "All good",
+      "Group Number Too High?": "All good",
+      "Non linear?": "All good",
+      "Saturated?": "All good",
+      "% full well high?": "All good (80% < 80%)",
+      "Num Groups Reset?": "All good",
+      "Minimum Integrations?": "All good"
+     }
+    },
+    {
+     "key": "nirspec_g235m",
+     "saturation_mask": {
+      "n_ours": 1368,
+      "n_pandexo": 1368,
+      "n_matched": 1368,
+      "matched_frac": 1.0,
+      "partial_equal_frac": 1.0,
+      "full_equal_frac": 1.0,
+      "partial_disagree": 0,
+      "full_disagree": 0,
+      "partial_flagged_ours": 0,
+      "partial_flagged_pandexo": 0,
+      "full_flagged_ours": 0,
+      "full_flagged_pandexo": 0
+     },
+     "status": "OK",
+     "npix_ours": 1368,
+     "npix_pandexo": 1368,
+     "npix_matched": 1368,
+     "ngroup_ours": 202,
+     "ngroup_pandexo": 202,
+     "sat_frac_ours": 0.7994303153996394,
+     "t_int_ours_s": 183.12648,
+     "t_int_pandexo_s": 183.106,
+     "t_frame_pandexo_s": 0.902,
+     "n_int_ours": 55,
+     "n_int_pandexo_in": 56.0,
+     "n_int_pandexo_out": 56.0,
+     "config_ours": {
+      "subarray": "sub2048",
+      "readout": "nrsrapid",
+      "filter": "f170lp",
+      "disperser": "g235m"
+     },
+     "config_pandexo": {
+      "subarray": "sub2048",
+      "readout": "nrsrapid",
+      "mode": "bots",
+      "filter": "f170lp",
+      "disperser": "g235m"
+     },
+     "flux_ratio": {
+      "n": 1368,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
+     "flux_ratio_photon": {
+      "n": 1368,
+      "median": 1.0,
+      "p05": 1.0,
+      "p95": 1.0521757411219474,
+      "max_abs_dev": 0.06700293984279537
+     },
+     "sigma_ratio_matched": {
+      "n": 1368,
+      "median": 1.1084978722854446,
+      "p05": 1.1026975703820903,
+      "p95": 1.1337327811525517,
+      "max_abs_dev": 0.14286561569802747
+     },
+     "sigma_ratio_policy": {
+      "n": 1368,
+      "median": 1.118529731715507,
+      "p05": 1.1126769373222696,
+      "p95": 1.1439930154535223,
+      "max_abs_dev": 0.15320850177005618
+     },
+     "var_excess_ours": 1.2280633387762974,
+     "var_excess_pandexo": 1.0117132969293499,
+     "pandexo_warnings": {
+      "Group Number Too Low?": "All good",
+      "Group Number Too High?": "All good",
+      "Non linear?": "All good",
+      "Saturated?": "All good",
+      "% full well high?": "All good (80% < 80%)",
+      "Num Groups Reset?": "All good",
+      "Minimum Integrations?": "All good"
+     }
+    },
+    {
+     "key": "niriss_soss_ord2",
+     "saturation_mask": {
+      "n_ours": 1362,
+      "n_pandexo": 1362,
+      "n_matched": 1362,
+      "matched_frac": 1.0,
+      "partial_equal_frac": 1.0,
+      "full_equal_frac": 1.0,
+      "partial_disagree": 0,
+      "full_disagree": 0,
+      "partial_flagged_ours": 0,
+      "partial_flagged_pandexo": 0,
+      "full_flagged_ours": 0,
+      "full_flagged_pandexo": 0
+     },
+     "status": "OK",
+     "npix_ours": 1362,
+     "npix_pandexo": 1362,
+     "npix_matched": 1362,
+     "ngroup_ours": 30,
+     "ngroup_pandexo": 30,
+     "sat_frac_ours": 0.14090292212486266,
+     "t_int_ours_s": 170.33447999999999,
+     "t_int_pandexo_s": 170.314,
+     "t_frame_pandexo_s": 5.494,
+     "n_int_ours": 59,
+     "n_int_pandexo_in": 60.0,
+     "n_int_pandexo_out": 60.0,
+     "config_ours": {
+      "subarray": "substrip256",
+      "readout": "nisrapid",
+      "filter": "clear",
+      "disperser": "gr700xd"
+     },
+     "config_pandexo": {
+      "subarray": "substrip256",
+      "readout": "nisrapid",
+      "mode": "soss",
+      "filter": "clear",
+      "disperser": "gr700xd"
+     },
+     "flux_ratio": {
+      "n": 1362,
+      "median": 1.0,
+      "p05": 0.9999999999999999,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 3.3306690738754696e-16
+     },
+     "flux_ratio_photon": {
+      "n": 1362,
+      "median": 1.3003699725863829,
+      "p05": 1.1621299457510255,
+      "p95": 1.555053990303053,
+      "max_abs_dev": 0.5973199343677071
+     },
+     "sigma_ratio_matched": {
+      "n": 1362,
+      "median": 0.9227600001571441,
+      "p05": 0.8616531777523165,
+      "p95": 1.003337194960817,
+      "max_abs_dev": 0.2208145796998101
+     },
+     "sigma_ratio_policy": {
+      "n": 1362,
+      "median": 0.9305471424355287,
+      "p05": 0.8689246415008933,
+      "p95": 1.0118043256221205,
+      "max_abs_dev": 0.21423905873218352
+     },
+     "var_excess_ours": 14.53849388251432,
+     "var_excess_pandexo": 13.378757363249054,
+     "pandexo_warnings": {
+      "Group Number Too Low?": "All good",
+      "Group Number Too High?": "Optimized NGROUPS (170) exceeds the maximum (30). SET TO NGROUPS=30",
+      "Non linear?": "All good",
+      "Saturated?": "All good",
+      "% full well high?": "All good (14% < 80%)",
+      "Num Groups Reset?": "All good",
+      "Minimum Integrations?": "All good"
+     }
+    },
+    {
+     "key": "nircam_f277w",
+     "saturation_mask": {
+      "n_ours": 900,
+      "n_pandexo": 900,
+      "n_matched": 900,
+      "matched_frac": 1.0,
+      "partial_equal_frac": 1.0,
+      "full_equal_frac": 1.0,
+      "partial_disagree": 0,
+      "full_disagree": 0,
+      "partial_flagged_ours": 0,
+      "partial_flagged_pandexo": 0,
+      "full_flagged_ours": 0,
+      "full_flagged_pandexo": 0
+     },
+     "status": "OK",
+     "npix_ours": 900,
+     "npix_pandexo": 900,
+     "npix_matched": 900,
+     "ngroup_ours": 100,
+     "ngroup_pandexo": 100,
+     "sat_frac_ours": 0.01949438692339111,
+     "t_int_ours_s": 34.40673,
+     "t_int_pandexo_s": 34.401610000000005,
+     "t_frame_pandexo_s": 0.34061,
+     "n_int_ours": 293,
+     "n_int_pandexo_in": 294.0,
+     "n_int_pandexo_out": 294.0,
+     "config_ours": {
+      "subarray": "subgrism64",
+      "readout": "rapid",
+      "filter": "f277w",
+      "disperser": "grismr"
+     },
+     "config_pandexo": {
+      "subarray": "subgrism64",
+      "readout": "rapid",
+      "mode": "lw_tsgrism",
+      "filter": "f277w",
+      "disperser": "grismr"
+     },
+     "flux_ratio": {
+      "n": 900,
+      "median": 1.0,
+      "p05": 1.0,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
+     "flux_ratio_photon": {
+      "n": 900,
+      "median": 1.0,
+      "p05": 1.0,
+      "p95": 1.0000000000000002,
+      "max_abs_dev": 2.220446049250313e-16
+     },
+     "sigma_ratio_matched": {
+      "n": 900,
+      "median": 1.0354714091917618,
+      "p05": 0.7624530007218794,
+      "p95": 1.0407081371811848,
+      "max_abs_dev": 0.2406127854808906
+     },
+     "sigma_ratio_policy": {
+      "n": 900,
+      "median": 1.0372369201229017,
+      "p05": 0.7637530067822161,
+      "p95": 1.042482576896284,
+      "max_abs_dev": 0.2393180066813022
+     },
+     "var_excess_ours": 1.3582526698770812,
+     "var_excess_pandexo": 1.2844985623049228,
+     "pandexo_warnings": {
+      "Group Number Too Low?": "All good",
+      "Group Number Too High?": "Optimized NGROUPS (4103) exceeds the maximum (100). SET TO NGROUPS=100",
+      "Non linear?": "All good",
+      "Saturated?": "All good",
+      "% full well high?": "All good (2% < 80%)",
+      "Num Groups Reset?": "All good",
+      "Minimum Integrations?": "All good",
+      "NIRCam Readout Optimization": "User selected RAPID; readout pattern optimization was not performed. Estimate assumes no target acquisition and a standard 2,100-second initial slew.",
+      "NIRCam Data Excess?": "Estimated data excess is 27.8 GB, above the 15 GB recommended limit. Verify and revise the setup in APT."
      }
     }
    ]

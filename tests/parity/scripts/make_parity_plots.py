@@ -251,7 +251,9 @@ def fig_extracted_flux(summary, out_root, mode="nirspec_g395h",
     order = np.argsort(wl_o)
     wl_o, flux_o = wl_o[order], flux_o[order]
     wl_p = np.asarray(p["wave"])
-    erate = np.asarray(p["e_rate_out"])
+    # back to pandeia's electron rate: PandExo's remove_QY divided the
+    # quantum yield out of e_rate_out (see run_parity.compare_mode)
+    erate = np.asarray(p["e_rate_out"]) * np.asarray(p["qy_on_grid"])
     # pair on the shared extraction grid (identical wavelengths)
     idx = np.clip(np.searchsorted(wl_o, wl_p), 0, wl_o.size - 1)
     ex = np.abs(wl_o[idx] - wl_p) < 1e-9 * np.maximum(wl_p, 1e-9)
@@ -281,16 +283,19 @@ def fig_extracted_flux(summary, out_root, mode="nirspec_g395h",
                  f"{STAR_LABEL[star]} star\n(the ETC engine product, "
                  f"Pandeia {release} both sides; grids matched at rtol 1e-9)")
     ax.legend(frameon=False, fontsize=9.5)
-    ax.annotate("narrow dips = stellar absorption lines in this tool's\n"
-                "PHOENIX spectrum (e.g. Br-α 4.05, Pf-δ 3.30 μm); PandExo's\n"
-                "separate stellar spectrum smooths them. They cancel in the\n"
-                "transit-depth ratio and wash out in binning.",
+    # (an earlier annotation blamed "narrow dips" on the two sides using
+    # different stellar spectra; both sides now receive the identical
+    # PandExo-resampled spectrum, and after the quantum-yield unfold the two
+    # extractions agree per pixel, so the curves are the same line)
+    ax.annotate("both sides receive the identical resampled stellar\n"
+                "spectrum; after the quantum-yield unfold the two\n"
+                "extractions agree per pixel (median ratio 1.0000)",
                 xy=(0.985, 0.97), xycoords="axes fraction", ha="right",
                 va="top", fontsize=7.6, color=INK2)
     _style(ax)
     axr = axes[1]
     axr.plot(wl_pair, ratio, color="#c3c2bd", lw=0.6, alpha=0.9, zorder=2,
-             label="per-pixel (independent-extraction jitter)")
+             label="per-pixel")
     axr.plot(bc, bmed, color=TOOL, lw=2.0, zorder=3,
              label=f"binned median = {med:.4f} (the systematic)")
     axr.axhline(1.0, color=PANDEXO, lw=1.0, ls=":", zorder=1)

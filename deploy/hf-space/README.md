@@ -24,8 +24,11 @@ Operational notes:
 - Requirements: persistent storage (Small tier), secret `HF_TOKEN` with read
   access to the dataset repo, CPU Upgrade hardware recommended.
 - A forward model run takes minutes of CPU (photochemical kinetics to
-  steady state); Fisher forecasts take 10-25 min depending on method.
-  The in-app status panel reports data availability and progress.
+  steady state); Fisher forecasts take tens of minutes depending on method.
+  Space hardware is ~2.5x slower than the laptop the estimates were
+  measured on; the app scales its displayed estimates accordingly
+  (`_RUNTIME_SCALE`). The in-app status panel reports data availability
+  and progress.
 - To update the code: push to GitHub, bump the three `*_SHA` ARG defaults in
   the Dockerfile (and `deploy/pins.env` with them), then upload the Space
   files. Changing an ARG default busts the layers that clone the repos, so no

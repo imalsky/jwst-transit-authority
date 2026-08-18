@@ -210,16 +210,27 @@ def engine_mode(instrument: str, mode: str) -> str:
 # the set passes the dataviz palette validator in wavelength-adjacency order;
 # MODE_MARKER is the secondary, color-independent encoding.
 _COLORS = ["#2a78d6", "#199e70", "#a35a00", "#007a00",
-           "#4a3aa7", "#d43f3e", "#a83a9e", "#006c8e"]
+           "#4a3aa7", "#d43f3e", "#a83a9e", "#006c8e",
+           "#c2185b", "#8b46c8", "#00929e", "#d81b8c"]
 # The 8th slot (nirspec_g395m) was re-chosen while still unused:
 # the original "#c2571f" sat at deltaE(Lab) ~16 from the G235H orange and ~24
 # from wavelength-neighbor F444W; "#006c8e" holds 5.94:1 on white and
 # deltaE >= 38 to every existing color (the palette's own internal minimum
 # is 32.6), >= 54 to its wavelength-adjacent neighbors (G395H, F444W).
+# Slots 9-12 (G140H rose, G235M violet, SOSS-ord2 cyan, F277W pink) fill the
+# only hue niches the first 8 left open. The 12-slot set passes the dataviz
+# palette validator in wavelength-adjacency order (the two flags it reports
+# are properties of the frozen first 8: g395m's chroma 0.098 vs the 0.10
+# floor, and the g395h/f444w deutan pair, both carried by the markers).
+# Contrast on white 3.75-5.87:1 for the new four; a 12-slot palette cannot
+# keep the old Lab deltaE >= 32 minimum -- the new colors hold >= 20 to
+# their nearest neighbor and the fixed per-mode MARKERS stay the
+# color-independent encoding.
 
 # Fixed marker shape per mode: series must never rely on color alone
 # (grayscale print, color-vision deficiency).
-_MARKERS = ["o", "s", "D", "^", "v", "P", "X", "*"]
+_MARKERS = ["o", "s", "D", "^", "v", "P", "X", "*",
+            "<", ">", "p", "h"]
 
 # PandExo-compatible hard maximum group counts per instrument (NIRCam grism
 # capped at 100). Every mode's ngroup_max must respect its instrument's cap
@@ -406,6 +417,83 @@ MODES = {
         floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=1,
         ngroup_warn_below=2, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
+    # The 2026-08-17 additions (slots 9-12, appended in this order on
+    # purpose -- see the palette note above). Tokens verified against
+    # pandeia_data-2026.7-jwst config.json files and one live Pandeia 2026.7
+    # calculation per mode; r_native_med is the median R(lambda) of the
+    # refdata dispersion file over the registry band.
+    #
+    # G140H: the only high-R coverage below G235H's 1.66 um. Instrument band
+    # 0.97-1.83 (f100lp; measured good-bin grid 0.970-1.831, matching
+    # Birkmann et al. 2022 Table 2); wl_min = 1.0 is the model's short edge
+    # (same intersection contract as PRISM/SOSS). NRS1/NRS2 detector gap
+    # measured at 1.314-1.351 um by the same largest-grid-step method that
+    # reproduces the shipped G235H/G395H display edges.
+    "nirspec_g140h": dict(
+        label="NIRSpec G140H",
+        instrument="nirspec", mode="bots",
+        config=dict(instrument=dict(disperser="g140h", filter="f100lp"),
+                    detector=dict(subarray="sub2048",
+                                  readout_pattern="nrsrapid")),
+        strategy=dict(aperture_size=0.7, sky_annulus=[0.75, 1.5]),
+        background="ecliptic", background_level="medium",
+        wl_min=1.0, wl_max=1.83,
+        r_native_med=2700,   # measured median 2734 over 1.0-1.83 um
+        floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=1,
+        ngroup_warn_below=2, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
+    ),
+    # G235M: the medium-R companion to G235H (the same trade G395M offers
+    # against G395H). Band 1.66-3.12: the measured good-bin grid
+    # (1.661-3.120), matching Birkmann et al. 2022 Table 2; the medium
+    # gratings sit entirely on NRS1, no detector gap.
+    "nirspec_g235m": dict(
+        label="NIRSpec G235M",
+        instrument="nirspec", mode="bots",
+        config=dict(instrument=dict(disperser="g235m", filter="f170lp"),
+                    detector=dict(subarray="sub2048",
+                                  readout_pattern="nrsrapid")),
+        strategy=dict(aperture_size=0.7, sky_annulus=[0.75, 1.5]),
+        background="ecliptic", background_level="medium",
+        wl_min=1.66, wl_max=3.12,
+        r_native_med=1000,   # measured median 1018 over 1.66-3.12 um
+        floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=1,
+        ngroup_warn_below=2, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
+    ),
+    # SOSS order 2: same optics and subarray as order 1, extracted at
+    # strategy order=2. Instrument order-2 band is 0.63-1.26 um
+    # (pandeia range gr700xd_2), so the model's 1.0 um short edge leaves a
+    # NARROW usable band, 1.0-1.26 um -- deliberate: it is the only
+    # higher-R-than-PRISM coverage at the short end besides G140H.
+    "niriss_soss_ord2": dict(
+        label="NIRISS SOSS (ord 2)",
+        instrument="niriss", mode="soss",
+        config=dict(instrument=dict(filter="clear", disperser="gr700xd"),
+                    detector=dict(subarray="substrip256",
+                                  readout_pattern="nisrapid")),
+        strategy=dict(order=2),
+        background="ecliptic", background_level="medium",
+        wl_min=1.0, wl_max=1.26,
+        r_native_med=1140,   # measured median 1137 over 1.0-1.26 um
+        floor_ppm_suggested=20.0, noise_infl=1.0, ngroup_min=1,
+        ngroup_warn_below=2, ngroup_max=30,
+    ),
+    # F277W: the fourth NIRCam LW grism TSO filter this registry covers.
+    # Band 2.45-3.1 = the filter's half-power points (2.419-3.130, measured
+    # from the shipped transmission curve) rounded inward to 0.05, the same
+    # convention the F322W2 (2.425-4.012 -> 2.45-3.95) and F444W
+    # (3.881-5.009 -> 3.9-4.95) entries follow.
+    "nircam_f277w": dict(
+        label="NIRCam F277W",
+        instrument="nircam", mode="lw_tsgrism",
+        config=dict(instrument=dict(filter="f277w", disperser="grismr"),
+                    detector=dict(subarray="subgrism64", readout_pattern="rapid")),
+        strategy=dict(aperture_size=0.4, sky_annulus=[0.5, 1.5]),
+        background="ecliptic", background_level="medium",
+        wl_min=2.45, wl_max=3.1,
+        r_native_med=1300,   # measured median 1276 over 2.45-3.1 um
+        floor_ppm_suggested=25.0, noise_infl=1.0, ngroup_min=1,
+        ngroup_warn_below=4, ngroup_max=100,
+    ),
 }
 
 # Literature achieved-vs-predicted noise ratios: reference points only, never
@@ -419,9 +507,13 @@ LITERATURE_NOISE_FACTORS = {
     "nirspec_g395h": 1.10,
     "nirspec_g235h": 1.10,
     "nirspec_g395m": 1.10,   # extrapolated from G395H (no published number)
+    "nirspec_g140h": 1.10,   # extrapolated from G395H (no published number)
+    "nirspec_g235m": 1.10,   # extrapolated from G395H (no published number)
     "niriss_soss": 1.20,
+    "niriss_soss_ord2": 1.20,  # same optics as order 1 (Radica et al. 2023)
     "nircam_f322w2": 1.05,
     "nircam_f444w": 1.05,
+    "nircam_f277w": 1.05,    # same editorial placeholder as the other NIRCam
     "miri_lrs": 1.15,
 }
 

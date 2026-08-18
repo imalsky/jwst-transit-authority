@@ -4,8 +4,9 @@ Launch via the console script ``jwst-tool`` (installed with vulcan-jwst-tool), o
 directly:  streamlit run src/jwst_tool/app.py  (from the repo root).
 
 Pipeline per run: VULCAN-JAX photochemistry -> ExoJax
-transmission/emission spectrum (local subprocess, disk-cached; ~1.5-2 min at the
-default 100-layer resolution) -> Pandeia ETC noise per instrument mode
+transmission/emission spectrum (local subprocess, disk-cached; ~1.5-2 min at
+the default 100-layer resolution on the maintainer's laptop, ~2.5x that on the
+HF Space -- see _RUNTIME_SCALE) -> Pandeia ETC noise per instrument mode
 (subprocess in its own conda env, disk-cached) -> science-goal scoring per mode.
 Two goal types: DETECT a molecule (conditional template S/N) or CONSTRAIN a
 parameter (Fisher forecast from consistency-checked Jacobians, vs a target
@@ -366,6 +367,13 @@ with st.expander("Data status: what this machine has installed"
 # GUI mention below so a re-measurement updates one place. (FD costs come
 # from the run-time estimator's own model -- "Jacobian-row cost model".)
 _AD_ROW_MIN, _AD_ROW_MAX = 1, 2        # minutes per AD row
+
+# All wall-time constants below were measured on the maintainer's laptop.
+# The HF Space (SPACE_ID set there and only there) runs the same work
+# ~2.5x slower, so every DISPLAYED estimate and progress-bar prior is
+# scaled by this factor. The forward.py PROG weights are relative
+# fractions and need no scaling.
+_RUNTIME_SCALE = 2.5 if os.environ.get("SPACE_ID") else 1.0
 
 _PROG_RE = re.compile(r"\[fwd\] PROG ([0-9.]+) (.*)")
 
@@ -1398,14 +1406,15 @@ with st.sidebar:
                 _n_comp = sum(p in ("lnZ", "dlnCO") for p in fisher_params)
                 _n_theta = sum(p in ("lnKzz", "Tirr", "Tint", "log_kappa",
                                      "log_gamma") for p in fisher_params)
-                _est_min = _n_comp * 7 + _n_theta * 4
+                _est_min = int((_n_comp * 7 + _n_theta * 4) * _RUNTIME_SCALE)
                 if _est_min >= 20:
                     st.warning(
                         f"Finite differences with {len(fisher_params)} free "
                         f"parameters is slow: roughly {_est_min}-"
                         f"{int(_est_min * 1.4)} min. Switch the "
                         "differentiation method to AD "
-                        f"(~{_AD_ROW_MIN}-{_AD_ROW_MAX} min per row, "
+                        f"(~{int(_AD_ROW_MIN * _RUNTIME_SCALE)}-"
+                        f"{int(_AD_ROW_MAX * _RUNTIME_SCALE)} min per row, "
                         "photochemistry locked on) or free fewer "
                         "parameters.")
 
@@ -1420,6 +1429,7 @@ with st.sidebar:
     # Pandeia 2026.7 wavelength grids (largest grid step); scoring always
     # uses the worker's actual pixels, so the gap never enters the math.
     _MODE_BAND_DISPLAY = {
+        "nirspec_g140h": "1.00-1.31 + 1.35-1.83 µm",
         "nirspec_g235h": "1.66-2.20 + 2.27-3.07 µm",
         "nirspec_g395h": "2.87-3.72 + 3.82-5.18 µm",
     }
@@ -1751,8 +1761,11 @@ if _lbl_mode:
                 f"{int(round(nu_pts * 2950 / 8000 / 50) * 50)}")
 else:
     grid_lbl = f"{nz}-layer, correlated-k R=1000"
+# One scaled total feeds the estimate string AND the progress-bar prior,
+# so the number the user reads is the number the bar starts from.
+_est_total_min = (base_min + _wo_min + fd_min) * _RUNTIME_SCALE
 est = "instant (cached)" if cached else (
-    f"~{base_min + _wo_min + fd_min:.0f} min (local {grid_lbl} run"
+    f"~{_est_total_min:.0f} min ({grid_lbl} run"
     + (f" + {len(fisher_params)} Jacobian rows" if fisher_params else "")
     + ")")
 
@@ -1897,7 +1910,7 @@ def _compute_locked():
                        expanded=True) as status:
             # prior = the same rough pre-run estimate shown next to the Run
             # button; the bar's remaining time converges to the measured pace
-            bar = _TimedBar(prior_total_s=(base_min + _wo_min + fd_min) * 60.0,
+            bar = _TimedBar(prior_total_s=_est_total_min * 60.0,
                             text="starting …")
             # unique per launch: a key-only name is SHARED between two
             # same-key runs, and one visitor's rewrite can truncate the file
@@ -2512,14 +2525,14 @@ with st.expander("Mode details"):
                        key=K("dl_modes_csv"))
     if goal_r == "detect":
         st.caption(
-            "Nuisance-profiled: per-segment depth offsets plus the local "
-            "T-P, reference-radius and cloud Jacobian directions (when "
-            "available) are profiled out. Calibration-only: per-segment "
-            "depth offsets alone.")
+            "Nuisance-profiled: the score lets the per-segment depth "
+            "offsets float, and also the local T-P, reference-radius and "
+            "cloud directions when they are available. Calibration-only: "
+            "only the depth offsets float.")
     st.caption(
-        "Mode ranking reflects forecasted science information only; check "
-        "target acquisition, schedulability, data volume and program-level "
-        "feasibility in APT.")
+        "The ranking uses the forecast science information only. It does "
+        "not check target acquisition, scheduling, data volume, or other "
+        "program limits. Check those in APT.")
 
 
 with st.expander("Add a custom mode set"):
@@ -2528,6 +2541,10 @@ with st.expander("Add a custom mode set"):
     # posteriors.combo_forecast (the same combination math as
     # the all-usable-modes row). They add rows to the Fisher table below
     # and bars to the comparison chart above.
+    st.caption(
+        "For an observation that uses more than one mode: add the modes "
+        "as a set here, then select that set in 'Spectrum & forecast "
+        "series' under the figure.")
     if fisher_names and "jac" in model:
         _cb_opts = [r["mode_key"] for r in results
                     if r.get("jac_bins") is not None]
@@ -2546,7 +2563,11 @@ with st.expander("Add a custom mode set"):
                          placeholder="e.g. SOSS + G395H")
         _cbc2.multiselect("Modes in the combination", _cb_opts,
                           key=K("cb_modes"),
-                          format_func=lambda k: ins.MODES[k]["label"])
+                          format_func=lambda k: ins.MODES[k]["label"],
+                          help="Pick the modes the observation would use "
+                               "together. The set gets one combined "
+                               "forecast row and can be drawn as one "
+                               "series in the figure.")
         _cbc3.button("Add combination", key=K("cb_add"), on_click=_combo_add)
         _usable_keys = [r["mode_key"] for r in results
                         if r.get("jac_bins") is not None and not r["saturated"]]
@@ -2697,20 +2718,22 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
         # specific elemental perturbation directions (vulcan_chem contract),
         # not every physical way of changing Z or C/O
         _param_defs = {
-            "lnZ": "lnZ scales O/C/N/S together (He/H fixed, C/O preserved)",
-            "dlnCO": "dlnCO scales carbon at fixed oxygen",
+            "lnZ": "lnZ raises or lowers O, C, N and S together; He and H "
+                   "stay fixed and C/O does not change",
+            "dlnCO": "dlnCO changes carbon while oxygen stays fixed",
             "lnKzz": "lnKzz scales the whole Kzz profile",
         }
         _defs = [_param_defs[n] for n in fisher_names if n in _param_defs]
         if _defs:
-            st.caption("Parameter directions: " + "; ".join(_defs)
-                       + ". Each ± is local precision along that direction "
-                         "under this atmosphere.")
+            st.caption("What each parameter changes: " + "; ".join(_defs)
+                       + ". Each ± is the local precision along that "
+                         "direction, for this atmosphere.")
         if fdiag:
             rank, dim = fdiag["fisher_rank"], fdiag["fisher_dimension"]
             st.caption(
-                f"Numerical health (combined): Fisher rank {rank}/{dim}, condition "
-                f"number {fdiag['condition_number']:.2g}."
+                f"Numerical health of the combined forecast: the Fisher "
+                f"matrix has rank {rank} of {dim} and condition number "
+                f"{fdiag['condition_number']:.2g}."
                 + (" **Rank-deficient: degenerate directions are reported as "
                    "unconstrained, not as fake finite numbers.**" if rank < dim else ""))
         # No "How to read this table" expander here: that reference material
@@ -2881,9 +2904,22 @@ if _have_fisher:
                         # what this realization recovers), so no width
                         # information is lost by dropping the unshifted twin.
                         # The dotted center line marks the input value.
-                        _d = float(_mr["delta_display"][_p])
-                        _mc = posteriors.gaussian_curve(
-                            _pr["center"] + _d, _pr["sigma_display"])
+                        if _p == "dlnCO":
+                            # C/O lives on (0, inf): shift the center by the
+                            # INTERNAL ln-space draw (multiplicative, stays
+                            # positive) and draw the same lognormal family
+                            # the no-draw forecast uses. The linear-space
+                            # center + delta_display goes negative for an
+                            # unconstrained C/O.
+                            _mu_d = _pr["center"] * float(
+                                np.exp(_mr["delta"][_p]))
+                            _mc = posteriors.lognormal_ratio_curve(
+                                _mu_d, _pr["sigma_internal"])
+                        else:
+                            _mu_d = _pr["center"] + float(
+                                _mr["delta_display"][_p])
+                            _mc = posteriors.gaussian_curve(
+                                _mu_d, _pr["sigma_display"])
                         _curves.append(dict(
                             # says it is a FIT to one draw, not a forecast:
                             # its center moved off the input value, and a
@@ -2893,8 +2929,11 @@ if _have_fisher:
                             # mu/sigma make the figure REPORT the width: the
                             # curve's outline cannot, since each axis
                             # auto-scales to its own +/-5 sigma
-                            mu=_pr["center"] + _d,
+                            mu=_mu_d,
                             sigma=_pr["sigma_display"],
+                            curve_family=_pr["curve_family"],
+                            sigma_ln=(_pr["sigma_internal"]
+                                      if _p == "dlnCO" else None),
                             color=_col, ls="-", lw=1.8,
                             kind=posteriors.MOCK_RECOVERY_KIND))
                     else:
@@ -2902,6 +2941,9 @@ if _have_fisher:
                             label=str(_lbl), theta=_pr["theta"],
                             pdf=_pr["pdf"], mu=_pr["center"],
                             sigma=_pr["sigma_display"],
+                            curve_family=_pr["curve_family"],
+                            sigma_ln=(_pr["sigma_internal"]
+                                      if _p == "dlnCO" else None),
                             color=_col, ls="-", lw=1.8))
                 else:
                     _notes.append(f"{_lbl}: unconstrained -- this "
@@ -3054,6 +3096,8 @@ with _fig_ctx.expander("Figure settings"):
     _post_xlims = [
         _axis_range(st, p["axis_label"], K("sum_post_" + p["param"]),
                     _fig_box.warning,
+                    # C/O is the one panel on a positive-only axis
+                    positive=(p["param"] == "dlnCO"),
             )
         for p in _post_panels]
 # Blank wavelength boxes fall back to the span the SELECTED modes cover, so

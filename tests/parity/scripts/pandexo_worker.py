@@ -13,7 +13,8 @@ job.json:
      "star": {"teff":.., "logg":.., "metal":.., "kmag":..},
      "transit_duration_s": .., "sat_level_pct": 80.0, "depth": 0.01,
      "modes": [{"key":.., "pandexo_name":..,
-                "config_overrides": {"detector": {...}, "instrument": {...}}},
+                "config_overrides": {"detector": {...}, "instrument": {...},
+                                     "strategy": {...}}},
                ...]}
 
 result.json: {"__provenance__": {...}, <key>: {...} | {"error": traceback}}.
@@ -21,7 +22,9 @@ Per mode key: PandExo's native-grid (R=None) results with noise_floor=0 and
 baseline fraction 1.0 (out-of-transit time == in-transit time):
     wave, error (final error with floor=0), timing (PandExo timing dict),
     ngroup, config (the exact pandeia configuration PandExo ran),
-    electrons_out/in, var_out/in, e_rate_out, error_no_floor, warnings.
+    electrons_out/in, var_out/in, e_rate_out, error_no_floor, warnings,
+    qy_on_grid (the quantum-yield curve PandExo's remove_QY divided out of
+    every flux; multiply back to recover pandeia's electron rate).
 """
 import json
 import os
@@ -236,10 +239,37 @@ def _one_mode(jdi, job, m, shared_star):
     exo = _exo_dict(jdi, job, shared_star)
     inst = jdi.load_mode_dict(m["pandexo_name"])
     for section, kv in (m.get("config_overrides") or {}).items():
-        inst["configuration"][section].update(kv)
+        # "strategy" is a TOP-LEVEL section of the PandExo mode dict (it
+        # carries the SOSS extraction order); everything else lives under
+        # "configuration".
+        if section == "strategy":
+            inst["strategy"].update(kv)
+        else:
+            inst["configuration"][section].update(kv)
     res = jdi.run_pandexo(exo, inst, save_file=False, verbose=False)
 
     fs = res["FinalSpectrum"]
+    # PandExo divides pandeia's extracted electron rate by the detector
+    # quantum yield (jwst.remove_QY) so its shot-noise formula runs on
+    # photons; every flux it reports (e_rate_out, electrons_*) carries that
+    # division, while the tool side reports pandeia's raw electron rate.
+    # Record the exact curve by probing PandExo's own remove_QY with a unit
+    # spectrum on the same grid -- no reimplementation to drift. Identity
+    # (all 1.0) for NIRCam/MIRI and red of ~3 um on NIRSpec.
+    from pandexo.engine.jwst import remove_QY
+    _wave = np.asarray(fs["wave"], float)
+    _probe = {"1d": {"extracted_flux": [_wave, np.ones_like(_wave)]}}
+    _inst_name = m["pandexo_name"].split(" ")[0].lower()
+    qy_on_grid = 1.0 / np.asarray(
+        remove_QY(_probe, _inst_name)["1d"]["extracted_flux"][1], float)
+    # validity only (finite, positive): the reference files themselves dip
+    # marginally below 1 (NIRISS red end reaches 0.99990), so a physics
+    # bound of >= 1 would reject real reference data
+    if not (np.all(np.isfinite(qy_on_grid)) and np.all(qy_on_grid > 0.0)):
+        raise RuntimeError(
+            f"{m['key']}: probed quantum-yield curve is not finite and "
+            f"positive (min {np.nanmin(qy_on_grid)}, "
+            f"max {np.nanmax(qy_on_grid)})")
     raw = res["RawData"]
     pout = res["PandeiaOutTrans"]
     cfg = res["PandeiaOutTrans"]["input"]["configuration"]
@@ -266,6 +296,7 @@ def _one_mode(jdi, job, m, shared_star):
         "var_out": np.asarray(raw["var_out"], float).tolist(),
         "var_in": np.asarray(raw["var_in"], float).tolist(),
         "e_rate_out": np.asarray(raw["e_rate_out"], float).tolist(),
+        "qy_on_grid": qy_on_grid.tolist(),
         "sat_wave": sat_wave.tolist(),
         "n_partial_saturated": n_part_sat.tolist(),
         "n_full_saturated": n_full_sat.tolist(),

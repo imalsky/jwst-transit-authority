@@ -178,9 +178,22 @@ def _validate_panels(posterior_panels) -> list[dict]:
                 _mu = float(_mu)
                 if not np.isfinite(_mu):
                     raise ValueError(f"{cw}: mu must be finite, got {_mu!r}")
+            # sigma_ln is the internal ln-space width of a positive-support
+            # (lognormal) curve; with curve_family it drives the x-window in
+            # ln space so a wide C/O forecast never extends the axis below 0
+            _sln = c.get("sigma_ln")
+            if _sln is not None:
+                _sln = float(_sln)
+                if not (np.isfinite(_sln) and _sln > 0.0):
+                    raise ValueError(f"{cw}: sigma_ln must be finite and "
+                                     f"> 0, got {_sln!r}")
+            _fam = c.get("curve_family")
             curves.append(dict(label=str(_req(c, "label", cw)),
                                theta=theta, pdf=pdf,
                                mu=_mu, sigma=_sg,
+                               curve_family=(None if _fam is None
+                                             else str(_fam)),
+                               sigma_ln=_sln,
                                kind=(None if c.get("kind") is None
                                      else str(c["kind"])),
                                color=str(c.get("color", "#333333")),
@@ -560,11 +573,23 @@ def _plot_posterior_panel(axp, pan: dict, color: str,
     if xlim is not None:
         axp.set_xlim(float(xlim[0]), float(xlim[1]))
     else:
-        _spans = [(c["mu"], c["sigma"]) for c in pan["curves"]
-                  if c["mu"] is not None and c["sigma"] is not None]
+        _spans = []
+        for c in pan["curves"]:
+            if c["mu"] is None or c["sigma"] is None:
+                continue
+            if (c.get("curve_family") == "lognormal_from_local_ln_gaussian"
+                    and c.get("sigma_ln") is not None):
+                # positive-support curve: symmetric window in ln space, so
+                # the axis never extends below zero however wide the sigma
+                _spans.append(
+                    (c["mu"] * float(np.exp(-_XLIM_SIGMA * c["sigma_ln"])),
+                     c["mu"] * float(np.exp(_XLIM_SIGMA * c["sigma_ln"]))))
+            else:
+                _spans.append((c["mu"] - _XLIM_SIGMA * c["sigma"],
+                               c["mu"] + _XLIM_SIGMA * c["sigma"]))
         if _spans:
-            _lo = min(m - _XLIM_SIGMA * sg for m, sg in _spans)
-            _hi = max(m + _XLIM_SIGMA * sg for m, sg in _spans)
+            _lo = min(s[0] for s in _spans)
+            _hi = max(s[1] for s in _spans)
             if pan["center"] is not None:
                 # never crop the input-value line out of frame
                 _lo, _hi = min(_lo, pan["center"]), max(_hi, pan["center"])

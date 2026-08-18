@@ -47,7 +47,9 @@ STARS = {
 
 MODE_KEYS = ("nirspec_prism", "nirspec_g395h", "nirspec_g235h", "niriss_soss",
              "nircam_f322w2", "nircam_f444w", "miri_lrs",
-             "nirspec_g395m")
+             "nirspec_g395m",
+             "nirspec_g140h", "nirspec_g235m", "niriss_soss_ord2",
+             "nircam_f277w")
 
 # Modes that MUST produce a valid unsaturated comparison somewhere in the
 # matrix; a silently missing row would otherwise shrink the claim.
@@ -109,10 +111,20 @@ LOW_NGROUP_EXACT = 3
 # Per-integration time inherits the group choice; gate the relative gap so a
 # ramp-policy divergence cannot hide behind a passing group diff.
 MAX_TINT_REL_DIFF = 0.15
-# Extracted flux is a true 1:1 comparison (same engine, same configuration).
-# This gates the MEDIAN ratio only; per-pixel extraction jitter (p05/p95 and
-# max_abs_dev are recorded in every row) is a disclosed property of the two
-# independent extractions, not a gated quantity.
+# Extracted flux is a true 1:1 comparison (same engine, same configuration)
+# ONCE both sides are in the same convention: PandExo divides the detector
+# quantum yield out of every flux it reports (jwst.remove_QY, photon
+# convention for its shot-noise formula), while the tool reports pandeia's
+# raw electron rate. The worker records the exact QY curve (qy_on_grid) and
+# run_parity multiplies it back before this ratio, so the compared rates are
+# engine-identical; measured residual is ~1 ulp on every mode. The QY curve
+# is identity for NIRCam/MIRI and red of ~3 um on NIRSpec -- which is why
+# the pre-2026-08-17 artifact showed exact ratios on red modes and blue-
+# rising "tails" (mislabeled extraction jitter) on prism/soss/g235m, and why
+# the first two all-blue modes (g140h, soss order 2) pushed the MEDIAN to
+# 1.13/1.30 and exposed the convention gap. This gates the MEDIAN ratio
+# only; p05/p95 and max_abs_dev are recorded in every row, and the photon-
+# convention ratio stays disclosed per row as flux_ratio_photon.
 MAX_FLUX_RATIO_DEV = 0.03
 
 # Sigma ratios are deliberately NOT gated to unity: pandeia's full extracted

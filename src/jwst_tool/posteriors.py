@@ -257,6 +257,10 @@ def marginalized_posteriors(results, free_names: list[str], centers: dict,
         c_disp = fisher.display_sigma(name, c_int, co_eval=co_eval)
         rec = dict(center=float(centers[name]),
                    sigma_display=float(s_disp),
+                   # internal-unit sigma: the lognormal curve family and its
+                   # positive x-window are parameterized in ln units, where
+                   # the display sigma (a linearization) cannot be inverted
+                   sigma_internal=float(s_int),
                    sigma_conditional_display=float(c_disp),
                    unit=_param_unit(name))
         if np.isfinite(s_disp):

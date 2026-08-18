@@ -83,6 +83,38 @@ def test_panel_xlim_verbatim_when_given_automatic_otherwise():
             plt.close(fig)
 
 
+def test_lognormal_panel_window_stays_positive():
+    """A positive-support (lognormal) curve gets its window from ln-space
+    quantiles: however wide the forecast, the C/O axis never extends below
+    zero, while a plain Gaussian panel of the same display sigma does."""
+    from jwst_tool import posteriors
+    center, s_ln = 0.55, 1.4              # very unconstrained C/O
+    curve = posteriors.lognormal_ratio_curve(center, s_ln)
+    pan = dict(axis_label="C/O", notes=[], center=center,
+               curves=[dict(label="one draw", theta=curve["theta"],
+                            pdf=curve["pdf"], mu=center,
+                            sigma=center * s_ln,
+                            curve_family="lognormal_from_local_ln_gaussian",
+                            sigma_ln=s_ln, color="#2a78d6")])
+    fig = summary_figure.compose_summary_figure(
+        _spectrum(), posterior_panels=[pan])
+    try:
+        lo, hi = fig.axes[1].get_xlim()
+        assert lo > 0.0 and hi > lo
+        assert np.all(np.asarray(curve["theta"]) > 0.0)
+        # the same width through the Gaussian branch DOES go negative,
+        # which is exactly what the lognormal routing exists to avoid
+        gfig = summary_figure.compose_summary_figure(
+            _spectrum(),
+            posterior_panels=[_panel_sized(mu=center, sigma=center * s_ln)])
+        try:
+            assert gfig.axes[1].get_xlim()[0] < 0.0
+        finally:
+            plt.close(gfig)
+    finally:
+        plt.close(fig)
+
+
 def test_explicit_depth_range_is_used_verbatim():
     """An explicit depth window is never overridden -- not even for legend
     headroom, which the auto-fit path adds and this path deliberately does

@@ -127,6 +127,29 @@ PANDEXO_MODES = {
                  {"detector": {"subarray": "slitlessprism",
                                "readout_pattern": "fastr1",
                                "readmode": "fastr1"}}),
+    "nirspec_g140h": ("NIRSpec G140H",
+                      {"detector": {"subarray": "sub2048",
+                                    "readout_pattern": "nrsrapid",
+                                    "readmode": "nrsrapid"}}),
+    "nirspec_g235m": ("NIRSpec G235M",
+                      {"detector": {"subarray": "sub2048",
+                                    "readout_pattern": "nrsrapid",
+                                    "readmode": "nrsrapid"}}),
+    # PandExo has no order-2 SOSS template: reuse the SOSS template and pin
+    # the extraction order through the strategy override channel (top-level
+    # "strategy" section, applied to inst["strategy"] in pandexo_worker).
+    "niriss_soss_ord2": ("NIRISS SOSS",
+                         {"detector": {"subarray": "substrip256",
+                                       "readout_pattern": "nisrapid",
+                                       "readmode": "nisrapid"},
+                          "strategy": {"order": 2}}),
+    # PandExo has no F277W template: reuse the F322W2 grism template with the
+    # filter pinned, the same way both NIRCam entries already pin theirs.
+    "nircam_f277w": ("NIRCam F322W2",
+                     {"instrument": {"filter": "f277w"},
+                      "detector": {"subarray": "subgrism64",
+                                   "readout_pattern": "rapid",
+                                   "readmode": "rapid"}}),
 }
 assert set(PANDEXO_MODES) == set(pg.MODE_KEYS), (
     "PANDEXO_MODES does not match the declared experiment in parity_gate.py")
@@ -356,7 +379,17 @@ def compare_mode(key: str, ours: dict, px: dict) -> dict:
             "mode": px["config"]["instrument"].get("mode"),
             "filter": px["config"]["instrument"].get("filter"),
             "disperser": px["config"]["instrument"].get("disperser")},
-        flux_ratio=_stats(flux_o[io] / np.asarray(px["e_rate_out"])[ip]),
+        # like-for-like electron rates: PandExo's remove_QY divided the
+        # detector quantum yield out of e_rate_out (photon convention for its
+        # shot-noise formula); multiply the recorded curve back so both sides
+        # are pandeia's extracted electron rate. Gated to unity in the gate.
+        flux_ratio=_stats(flux_o[io] / (np.asarray(px["e_rate_out"])[ip]
+                                        * np.asarray(px["qy_on_grid"])[ip])),
+        # disclosed only: the photon-convention ratio (== the QY curve when
+        # the electron rates agree) so the artifact keeps the divergence
+        # between the two conventions visible
+        flux_ratio_photon=_stats(
+            flux_o[io] / np.asarray(px["e_rate_out"])[ip]),
         sigma_ratio_matched=_stats(sigma_ours(n_p_in, n_p_out) / err_p[ip]),
         sigma_ratio_policy=_stats(sigma_ours(n_ours, n_ours) / err_p[ip]),
         var_excess_ours=excess_ours, var_excess_pandexo=excess_px,

@@ -2,7 +2,7 @@
 
 vulcan-jwst-tool plans JWST exoplanet spectroscopy. A live forward model
 (VULCAN-JAX photochemistry, then ExoJAX radiative transfer through the shared
-[vulcan-forward](https://github.com/imalsky/vulcan-forward) engine) is scored
+[vulcan-forward](https://github.com/imalsky/vulcan-forward) package) is scored
 against STScI Pandeia instrument noise. Given a planet and a science goal, it
 ranks JWST time-series modes and estimates how many transits or eclipses
 are needed.

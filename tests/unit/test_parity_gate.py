@@ -220,8 +220,8 @@ def test_matrix_membership_gates(gate, passing):
     _fails(gate, s, "appears 2 times")
 
     s = copy.deepcopy(passing)
-    s["stars"]["w39_like"]["modes"].append(_ok_row("nirspec_g140h"))
-    _fails(gate, s, "'nirspec_g140h' is not part of the declared")
+    s["stars"]["w39_like"]["modes"].append(_ok_row("nirspec_g140m"))
+    _fails(gate, s, "'nirspec_g140m' is not part of the declared")
 
 
 def test_config_and_measurement_drift_fails(gate, passing):

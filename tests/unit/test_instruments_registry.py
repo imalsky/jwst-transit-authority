@@ -6,10 +6,8 @@ unique -- series must never rely on color alone), a LITERATURE_NOISE_FACTORS
 reference entry per mode, the ngroup ordering + PandExo instrument caps, the
 explicit TSO pinning rule (readout_pattern, background AND background_level,
 extraction strategy, sane wavelength span -- never leave these implicit on a
-new mode), the G395M entry's refdata-verified tokens and appended-last
-palette slot, and that the parity harness's MODE_KEYS stays the frozen
-7-mode experiment (G395M is deliberately NOT parity-covered; the README's
-open-gaps list says so).
+new mode), the G395M entry's refdata-verified tokens and fixed palette slot,
+and that the parity harness's MODE_KEYS covers every registered mode.
 """
 from __future__ import annotations
 
@@ -25,10 +23,10 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "parity" / "scripts"
 
 def test_display_encodings_are_complete_and_unique():
     """A mode key missing any per-mode table entry is a half-registered mode,
-    and while len(MODES) fits the 8-slot palettes every mode must get a
+    and while len(MODES) fits the 12-slot palettes every mode must get a
     DISTINCT color and marker (grayscale print, CVD)."""
-    assert len(ins.MODES) <= 8, (
-        "MODES outgrew the 8-slot color/marker palettes -- extend _COLORS/"
+    assert len(ins.MODES) <= 12, (
+        "MODES outgrew the 12-slot color/marker palettes -- extend _COLORS/"
         "_MARKERS (palette-checker validated) before adding the mode")
     for key in ins.MODES:
         assert key in ins.MODE_COLOR, f"{key}: no MODE_COLOR"
@@ -89,11 +87,14 @@ def test_every_mode_pins_the_full_tso_configuration():
 def test_g395m_registry_entry_matches_the_verified_refdata_tokens():
     """The 2026-08-12 addition: tokens verified against pandeia_data-2026.7
     (and 2026.2) nirspec config.json; wl span is the jwst-docs usable G395M
-    science bandpass; the palette slot is the appended-last 8th."""
+    science bandpass; the palette slot is the 8th (enumeration position 7 --
+    colors/markers are assigned by enumeration order, so a mode may only
+    ever be APPENDED after it, never inserted before)."""
     m = ins.MODES["nirspec_g395m"]
-    assert list(ins.MODES)[-1] == "nirspec_g395m", (
-        "nirspec_g395m must stay LAST in MODES: colors/markers are assigned "
-        "by enumeration order, so reordering silently recolors every mode")
+    assert list(ins.MODES)[7] == "nirspec_g395m", (
+        "nirspec_g395m must stay in MODES slot 7: colors/markers are "
+        "assigned by enumeration order, so reordering silently recolors "
+        "every mode")
     assert m["instrument"] == "nirspec" and m["mode"] == "bots"
     assert m["config"]["instrument"] == dict(disperser="g395m",
                                              filter="f290lp")
