@@ -583,7 +583,9 @@ def K(name: str) -> str:
 
 
 def _axis_range(container, label: str, key: str, warn, *, unit: str = "",
-                positive: bool = False, fmt: str = "%.6g",
+                positive: bool = False,
+                positive_reason: str = "it is drawn on a log axis",
+                fmt: str = "%.6g",
                 step: float | None = None, help: str | None = None):
     """A plain min/max pair of number boxes for one plot axis.
 
@@ -598,11 +600,13 @@ def _axis_range(container, label: str, key: str, warn, *, unit: str = "",
     figure builders, not here, so a half-specified range is refused VISIBLY
     through ``warn`` rather than half-applied.
 
-    ``positive``: the axis is drawn on a LOG scale, so a bound at or below zero
-    is refused here. The figure builders raise on it -- correctly, they are the
-    API backstop -- but that exception reaches Streamlit uncaught and kills the
-    whole results page. A typed number is a user choice, not a defect: warn and
-    fall back to the automatic fit, the same way a one-sided window does.
+    ``positive``: a bound at or below zero is refused here, with
+    ``positive_reason`` naming WHY for this axis (log-scale axes like
+    wavelength; positive-definite linear axes like C/O). The figure builders
+    raise on it -- correctly, they are the API backstop -- but that exception
+    reaches Streamlit uncaught and kills the whole results page. A typed
+    number is a user choice, not a defect: warn and fall back to the
+    automatic fit, the same way a one-sided window does.
     """
     _u = f" ({unit})" if unit else ""
     c_lo, c_hi = container.columns(2)
@@ -619,7 +623,7 @@ def _axis_range(container, label: str, key: str, warn, *, unit: str = "",
         warn(f"{label} range needs min below max. Fitting to the data.")
         return None
     if positive and float(lo) <= 0.0:
-        warn(f"{label} is drawn on a log axis, so min must be above 0. "
+        warn(f"{label} min must be above 0 ({positive_reason}). "
              "Fitting to the data.")
         return None
     return (float(lo), float(hi))
@@ -3099,8 +3103,12 @@ with _fig_ctx.expander("Figure settings"):
     _post_xlims = [
         _axis_range(st, p["axis_label"], K("sum_post_" + p["param"]),
                     _fig_box.warning,
-                    # C/O is the one panel on a positive-only axis
+                    # C/O is the one panel on a positive-only axis: the
+                    # axis is LINEAR, but a ratio has no values at or
+                    # below zero (the wavelength axis is the log case)
                     positive=(p["param"] == "dlnCO"),
+                    positive_reason="C/O is a ratio, so only positive "
+                                    "values exist",
             )
         for p in _post_panels]
 # Blank wavelength boxes fall back to the span the SELECTED modes cover, so

@@ -102,6 +102,15 @@ def test_lognormal_panel_window_stays_positive():
         lo, hi = fig.axes[1].get_xlim()
         assert lo > 0.0 and hi > lo
         assert np.all(np.asarray(curve["theta"]) > 0.0)
+        # the window follows the VISIBLE mass (same pdf-height criterion as
+        # the Gaussian +/-3.5 sigma window), not a symmetric ln-space span
+        # whose right edge would sit at center*exp(3.5*sigma_ln) with the
+        # curve visually zero over most of the axis
+        assert hi < center * np.exp(summary_figure._XLIM_SIGMA * s_ln) / 2.0
+        pdf = np.asarray(curve["pdf"])
+        th = np.asarray(curve["theta"])
+        vis = th[pdf >= pdf.max() * summary_figure._XLIM_PDF_FRAC]
+        assert hi >= vis.max() and lo <= vis.min()
         # the same width through the Gaussian branch DOES go negative,
         # which is exactly what the lognormal routing exists to avoid
         gfig = summary_figure.compose_summary_figure(

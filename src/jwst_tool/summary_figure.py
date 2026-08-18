@@ -487,6 +487,13 @@ _FIG_W_IN = 13.0
 # At 3.5 it is 0.2% -- visually on the axis -- and >99.95% of the mass is in
 # frame either way.
 _XLIM_SIGMA = 3.5
+# The pdf height (as a fraction of peak) a Gaussian has at +/-_XLIM_SIGMA.
+# Positive-support (lognormal) curves are windowed to where their pdf stays
+# above this SAME height: a symmetric ln-space window (center*exp(+/-3.5
+# sigma)) blows the right edge up by exp(3.5 sigma) while the curve is
+# visually zero over most of it (a sigma_ln ~ 0.9 curve pushed the C/O axis
+# to ~25 with all its mass below ~5).
+_XLIM_PDF_FRAC = float(np.exp(-0.5 * _XLIM_SIGMA ** 2))
 
 
 def _fmt_val(v: float) -> str:
@@ -579,11 +586,19 @@ def _plot_posterior_panel(axp, pan: dict, color: str,
                 continue
             if (c.get("curve_family") == "lognormal_from_local_ln_gaussian"
                     and c.get("sigma_ln") is not None):
-                # positive-support curve: symmetric window in ln space, so
-                # the axis never extends below zero however wide the sigma
-                _spans.append(
-                    (c["mu"] * float(np.exp(-_XLIM_SIGMA * c["sigma_ln"])),
-                     c["mu"] * float(np.exp(_XLIM_SIGMA * c["sigma_ln"]))))
+                # positive-support curve: window to where the DRAWN pdf
+                # stays above the height a Gaussian has at +/-_XLIM_SIGMA
+                # (the same visible-tail criterion as the branch below).
+                # Strictly positive (the curve grid is), and far tighter
+                # than a symmetric ln-space window, whose right edge grows
+                # as exp(_XLIM_SIGMA * sigma_ln) while the curve is
+                # visually zero over most of it.
+                _th = np.asarray(c["theta"], dtype=float)
+                _pd = np.asarray(c["pdf"], dtype=float)
+                _vis = _pd >= float(np.max(_pd)) * _XLIM_PDF_FRAC
+                if _vis.any():
+                    _spans.append((float(_th[_vis].min()),
+                                   float(_th[_vis].max())))
             else:
                 _spans.append((c["mu"] - _XLIM_SIGMA * c["sigma"],
                                c["mu"] + _XLIM_SIGMA * c["sigma"]))
