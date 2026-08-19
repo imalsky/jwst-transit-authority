@@ -93,20 +93,18 @@ PANDEXO_MODES = {
                     {"detector": {"subarray": "substrip256",
                                   "readout_pattern": "nisrapid",
                                   "readmode": "nisrapid"}}),
-    # NIRCam and MIRI were pinned only PARTIALLY until 2026-08-04 (NIRCam got
-    # a filter and no detector block, MIRI got a readout and no subarray).
-    # The parent 2026.2 artifact shows both sides still EXECUTED identical
-    # hardware (subgrism64/rapid, slitlessprism) -- PandExo's choices matched
-    # at that PandExo revision -- so the old artifact was a matched-config
-    # comparison in fact, just not by construction. Current PandExo defaults
-    # moved (MIRI's template default is now slitlessprism_ip; NIRCam's
-    # readout is template policy, "optimize"), so the pins are now explicit
-    # to keep the submitted hardware fixed on both sides:
+    # NIRCam and MIRI must be pinned in FULL, never partially: PandExo
+    # template defaults move (MIRI's is slitlessprism_ip; NIRCam's readout is
+    # template policy, "optimize"), so only explicit pins keep the submitted
+    # hardware fixed on both sides:
     #   * NIRCam: 'rapid' and 'bright1' are BOTH valid for lw_tsgrism and the
     #     engine declares NO default. SUBGRISM64 + RAPID is a flight-capable
     #     grism-TSO choice (this tool's registry), not the unique flown one;
-    #     under RAPID PandExo reports a data-volume excess warning, recorded
-    #     per row and surfaced in REPORT.md, not adjudicated by this gate.
+    #     under RAPID PandExo reports a data-volume excess warning (~28 GB
+    #     against a 15 GB advisory) on every star tested. It is recorded per
+    #     row in parity_summary.json with the rest of PandExo's raw warnings,
+    #     which is where REPORT.md points; the gate does not adjudicate it,
+    #     and the GUI says only that it checks no program limits.
     #   * MIRI: 'slitlessprism' is 72 x 416 with tframe 0.15904 s (this
     #     tool's registry choice). PandExo's current default
     #     'slitlessprism_ip' is a cropped 68 x 384 variant; all three
@@ -347,11 +345,13 @@ def compare_mode(key: str, ours: dict, px: dict) -> dict:
     excess_px = float(np.median(v_out[e_out > 0] / e_out[e_out > 0])) \
         if (e_out > 0).any() else float("nan")
 
-    # Saturation is classified from the MEASURED full-well fraction as well as
-    # the worker's `unusable` flag. A configuration can return usable pixels
-    # while sitting above the saturation limit -- the committed 2026-07
-    # artifact carried two such rows labeled OK, one at 7.31x full well. Those
-    # numbers are still reported; they just cannot count as a validation row.
+    # Saturation is classified from the MEASURED saturation fraction (of
+    # Pandeia's per-mode saturation level, NOT of the physical full well) as
+    # well as the worker's `unusable` flag. A configuration can return usable
+    # pixels while sitting above the saturation limit -- the committed 2026-07
+    # artifact carried two such rows labeled OK, one at 7.31x that level.
+    # Those numbers are still reported; they just cannot count as a
+    # validation row.
     _sat_frac = float(ours["sat_frac"])
     _status = "OK" if _sat_frac <= SAT_LIMIT else "SATURATED_ABOVE_LIMIT"
     out.update(
@@ -430,9 +430,9 @@ def main():
             json.dumps(summary, indent=1))
         print(f"=== {sname}: done ===", flush=True)
 
-    # FAIL CLOSED. Previously this wrote the summary and returned None (exit
-    # 0), so a stale, saturated, or version-mismatched artifact still looked
-    # like a passing release gate.
+    # FAIL CLOSED: writing the summary and returning None (exit 0) would let
+    # a stale, saturated, or version-mismatched artifact look like a passing
+    # release gate.
     problems = pg.validate(summary)
     summary["gate"] = pg.gate_block(problems)
     (OUTPUTS / "parity_summary.json").write_text(json.dumps(summary, indent=1))

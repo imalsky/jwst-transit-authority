@@ -217,8 +217,7 @@ def default_opacity_mode(params: dict) -> str:
     cross section directly on the output grid, far below exojax's critical
     resolution, and is measurably biased in BOTH observables -- worst in
     emission, where it suppressed more than half the emergent flux
-    (measurements: vulcan-forward README, the two Opacity sections; the
-    engine's interim HITRAN-built "ckd" mode was removed with forward 0.8.0).
+    (measurements: vulcan-forward README, the two Opacity sections).
 
     ONE case keeps "lbl", and it is physics, not preference: a MIE CONDENSATE
     DECK. Mie extinction has structure across a band, so it cannot be folded
@@ -911,8 +910,8 @@ def canonical_params(params: dict) -> dict:
         "Tint": round(float(params.get("Tint", 100.0)), 2),
         "log_kappa": round(float(params.get("log_kappa", -2.3)), 3),
         "log_gamma": round(float(params.get("log_gamma", -1.0)), 3),
-        # physical VULCAN knobs (all flow through the validated cfg_overrides hook;
-        # defaults reproduce the previous hard-coded behavior = the W39b cfg values)
+        # physical VULCAN knobs (all flow through the validated cfg_overrides
+        # hook; the defaults are the W39b cfg values)
         "use_photo": bool(params.get("use_photo", True)),
         "sl_angle_deg": round(float(params.get("sl_angle_deg", 83.0)), 1),
         "f_diurnal": round(float(params.get("f_diurnal", 1.0)), 3),
@@ -1541,8 +1540,8 @@ def _rt_profile_common(cp: dict, config) -> dict:
     """The RT-facing profile keys (exojax_rt / build_emis_model read exactly
     these); the dict is pinned by the golden regression test."""
     profile = dict(config.WIDE)
-    # numerical resolution (was the fidelity tier): the ExoJax RT layer count is
-    # LOCKED equal to the chemistry layer count -- chemistry and RT share one grid.
+    # numerical resolution: the ExoJax RT layer count is LOCKED equal to the
+    # chemistry layer count -- chemistry and RT share one grid.
     profile["nz"] = cp["nz"]
     profile["art_nlayer"] = cp["nz"]
     profile["nu_pts"] = cp["nu_pts"]

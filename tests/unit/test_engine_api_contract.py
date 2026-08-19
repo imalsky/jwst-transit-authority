@@ -2,11 +2,11 @@
 
 `deploy/pins.env` pins the sibling repositories by commit, and
 `test_deploy_pins.py` checks that the Dockerfile and CI agree on those strings.
-What neither could check is whether the pinned pair is COMPATIBLE. On
-2026-08-14 the shipped pins were VULCAN_JAX at a commit that had removed a
-parameter and vulcan-forward at a commit that still passed it, so every fresh
-forward model on the deployed Space raised TypeError. Three green suites and a
-passing pin test said nothing, because no test called the engine.
+What neither can check is whether the pinned pair is COMPATIBLE. Shipping
+VULCAN_JAX at a commit that has removed a parameter alongside vulcan-forward
+at a commit that still passes it makes every fresh forward model on the
+deployed Space raise TypeError, while three green suites and a passing pin
+test say nothing, because no test called the engine.
 
 This closes that at the consumer boundary: CI installs the siblings at the
 pinned commits, so an incompatible pair fails HERE. It is deliberately a

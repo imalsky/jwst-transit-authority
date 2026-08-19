@@ -130,17 +130,21 @@ def smooth_to_native_r(wl_model: np.ndarray, y: np.ndarray,
     Only bites where the MODEL grid resolves the kernel, i.e. model R >=
     2.3548 x the smallest native R in the band (MIRI LRS and PRISM under the
     correlated-k default's R = 1000 grid); on higher-R modes the kernel is
-    unresolved and the input is returned unchanged. SOSS and G395M were
-    resolved by the old line-by-line default at R ~ 2954 and are not now --
-    the caller discloses the skip (detect._lsf_skip_note).
+    unresolved and the input is returned unchanged. SOSS and G395M are not
+    resolved under that default -- the caller discloses the skip
+    (detect._lsf_skip_note).
 
     ``wl_r``/``r_curve`` are the native resolving-power table. ``wl_r`` MUST
     be strictly ascending and is validated: the kernel width comes from
     ``np.interp(lambda, wl_r, r_curve)``, which silently returns garbage on a
     descending table (numpy requires increasing xp and does not check). The
     pandeia pixel grid is DISPERSION order, not wavelength order -- MIRI LRS
-    ships it descending -- so a caller handing the raw worker grid straight
-    through got R = R(red end) at every wavelength. Sort before calling.
+    ships it descending, 13.86 -> 5.02 um -- so a caller handing the raw
+    worker grid straight through got the table's LAST entry at every
+    wavelength. For MIRI LRS that is R = 42 at 5 um, the BLUE end, because
+    its resolving power RISES with wavelength (42 at 5 um to 209 at 12 um);
+    the whole band was then blurred with that one over-wide kernel. Sort
+    before calling.
 
     ``weight`` is the stellar flux at ``wl_model``. The instrument measures
     LSF-averaged COUNTS, so d_obs = L[F d] / L[F], the flux-weighted LSF mean

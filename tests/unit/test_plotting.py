@@ -103,7 +103,7 @@ def _png_size(data: bytes) -> tuple[int, int]:
 
 
 # ---------------------------------------------------------------------------
-# The render lock: the ParseException crash of 2026-08-13
+# The render lock: mathtext ParseException under concurrent renders
 # ---------------------------------------------------------------------------
 
 def test_concurrent_renders_do_not_raise():
@@ -223,20 +223,19 @@ def test_app_materializes_figures_only_through_locked_helpers():
 
 
 def test_summary_legends_sit_inside_their_axes_and_cover_no_data():
-    """Summary-figure legends sit INSIDE the axes (maintainer, 2026-08-13;
-    the paired T-P/mixing-ratio panels keep external legends). "Inside"
-    alone is not the requirement -- the legends first went outside because
-    they landed on the data -- so the real invariant is that no legend
-    rectangle contains a plotted vertex, checked across 1/3/6 series since
-    the spectrum legend grows (record: the CLAUDE.md legend bullet).
+    """Summary-figure legends sit INSIDE the axes (maintainer; the paired
+    T-P/mixing-ratio panels keep external legends). "Inside" alone is not
+    the requirement -- a legend that lands on the data is the failure -- so
+    the real invariant is that no legend rectangle contains a plotted
+    vertex, checked across 1/3/6 series since the spectrum legend grows
+    (record: the CLAUDE.md legend bullet).
 
-    Also pinned on the same figures: no legend TITLES (2026-08-13: entries
-    carry their own numbers) and no multi-line entries (the broken spacing
-    came from folding a note into the model label); no overlapping tick
-    labels; width QUOTED as a number with the shaded band gone (2026-08-13:
-    overlapping fills muddied the panel); headroom DERIVED from the legend
-    row count, never a constant (a hardcoded 1.42 held only by coincidence);
-    and no y-limit inflation hack in the source.
+    Also pinned on the same figures: no legend TITLES (entries carry their
+    own numbers) and no multi-line entries (folding a note into the model
+    label breaks the row spacing); no overlapping tick labels; width QUOTED
+    as a number with no shaded band (overlapping fills muddy the panel);
+    headroom DERIVED from the legend row count, never a constant (which
+    holds only by coincidence); and no y-limit inflation hack in the source.
     """
     for n_pts in (1, 3, 6):
         fig = _summary_fig(n_points=n_pts)
@@ -323,10 +322,10 @@ def test_summary_legends_sit_inside_their_axes_and_cover_no_data():
 
 def test_a_fitted_panel_is_not_labelled_a_forecast():
     """A panel whose curves are FITS to the jitter draw must not call itself
-    a forecast (external review, 2026-08-14). A Fisher forecast is centered
-    on the input by construction, so a curve 2.7 sigma away under a
-    "forecast density" axis reads as a bug; it is not one, but the label
-    invited the wrong reading, so the axis names which of the two it is."""
+    a forecast (external review). A Fisher forecast is centered on the input
+    by construction, so a curve 2.7 sigma away under a "forecast density"
+    axis reads as a bug; it is not one, so the axis must name which of the
+    two it is."""
     from jwst_tool import posteriors
     wl = np.linspace(0.6, 12.0, 200)
     base = dict(wl_um=wl, depth_ppm=20000.0 + 300.0 * np.sin(wl),
@@ -371,14 +370,14 @@ def _log_points(depth, sigma):
 
 
 def test_log_depth_axis_refusals_whisker_clip_and_tick_spacing():
-    """Three pins on the y_log depth axis, all from the 2026-08-13 rework.
+    """Three pins on the y_log depth axis.
 
     1. Non-positive DEPTHS fail LOUDLY rather than rendering a partial curve
-       (matplotlib drops the non-positive points silently); an intermediate
-       whisker fix filtered to the positives and rendered a -400..900 ppm
-       model as its positive 69% with no indication -- never again.
-    2. A negative WHISKER must not refuse the axis (maintainer-reported,
-       2026-08-13: "Log depth axis unavailable ... starts at -288.9 ppm").
+       (matplotlib drops the non-positive points silently); filtering to the
+       positives renders a -400..900 ppm model as its positive 69% with no
+       indication -- never do that.
+    2. A negative WHISKER must not refuse the axis (maintainer-reported:
+       "Log depth axis unavailable ... starts at -288.9 ppm").
        50 +/- 340 ppm is ordinary at low S/N; the whisker is clipped at the
        spine and the limits follow the positive DEPTHS.
     3. Ticks come from a subdivided LogLocator, never a linear locator: a

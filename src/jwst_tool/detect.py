@@ -260,7 +260,8 @@ def _removed_spectrum(model: dict, mols: list[str], target_mol,
         # whenever the column saw through ANYWHERE, and on every planet tried
         # that was a 60 nm notch at the extreme blue edge carrying under a
         # thousandth of the planet's emission -- so it refused everything.
-        # Older cached runs carry only the min, and are read the old way.
+        # run_model writes this key with every emission model, and _VERSION
+        # rides in the cache key, so a readable model always carries it.
         if "emis_thin_flux_frac_wo" in model:
             frac = float(np.asarray(model["emis_thin_flux_frac_wo"])[index])
             if np.isfinite(frac) and frac > forward.EMIS_THIN_FLUX_FRAC:
@@ -272,27 +273,27 @@ def _removed_spectrum(model: dict, mols: list[str], target_mol,
                     "so its eclipse detection contrast would be overstated. "
                     "Detect a molecule with deeper opacity, or use "
                     "transmission.")
-        elif "emis_tau_bottom_min_wo" in model:
-            tau_bottom = float(np.asarray(model["emis_tau_bottom_min_wo"])[index])
-            if tau_bottom < 3.0:
-                raise ValueError(
-                    f"{target_mol} emission detection is not supported for this "
-                    f"atmosphere: with {target_mol} removed, the emission RT "
-                    f"column bottom is optically thin (min tau {tau_bottom:.2f} "
-                    "< 3), so its eclipse detection contrast would be "
-                    "overstated. Detect a molecule with deeper opacity, or use "
-                    "transmission. (This model predates the flux-weighted "
-                    "certificate; re-run it to get the less conservative test.)")
     return np.asarray(model["depth_wo"])[index][order]
 
 
 def _mode_warnings(mode: dict, mode_result: dict, t_in_s: float,
                    lsf_skip_note: str | None) -> dict:
     warnings = dict(mode_result.get("warnings", {}))
-    n_cycles = t_in_s / float(mode_result["t_cycle_s"])
+    t_cycle = float(mode_result["t_cycle_s"])
+    n_cycles = t_in_s / t_cycle
     if n_cycles < 3.0:
         warnings[f"only {n_cycles:.1f} integration cycles fit in transit "
                  "(PandExo enforces >= 3 by shortening the ramp)"] = True
+    # Long-ramp disclosure. The saturation search maximizes the ramp, which on
+    # a faint target can run far past what STScI advises or APT allows; the
+    # tool ranks configurations and never silently shortens one, so say so.
+    # t_cycle includes the between-integration reset, so this fires marginally
+    # early -- the conservative direction.
+    _limit = ins.INT_LENGTH_LIMIT_S.get(mode["instrument"])
+    if _limit is not None and t_cycle > _limit[0]:
+        warnings[f"integration is {t_cycle:.0f} s, above the "
+                 f"{_limit[0]:.0f} s {_limit[1]}; split the ramp or verify "
+                 "it in APT"] = True
     if lsf_skip_note:
         warnings[lsf_skip_note] = True
     ngroup = int(mode_result["ngroup"])
@@ -311,6 +312,20 @@ def _mode_warnings(mode: dict, mode_result: dict, t_in_s: float,
                  "permitted ramp and is very difficult to calibrate "
                  "accurately; confirm in APT whether this configuration "
                  "needs special approval before proposing"] = True
+    # A non-primary diffraction order is not a separate observation, and its
+    # saturation verdict is not its own. Both facts are easy to get wrong from
+    # the mode table alone, so state them on the row that carries the risk.
+    if int((mode.get("strategy") or {}).get("order", 1)) > 1:
+        warnings["this order shares one detector readout with order 1: "
+                 "selecting both orders costs one observation, not two, and "
+                 "both report the same ramp and cadence"] = True
+        if bool(mode_result.get("saturated", False)):
+            warnings["the saturation verdict here is set by the brighter "
+                     "order-1 trace (Pandeia measures saturation over the "
+                     "whole readout); STScI puts the SUBSTRIP256 bright limit "
+                     "about 2 magnitudes fainter in order 1 than in order 2 "
+                     "(J ~ 8.5 vs J ~ 6.3), so this order's own trace may "
+                     "still be usable -- check it in the ETC"] = True
     return warnings
 
 
@@ -396,10 +411,12 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         # R(lambda) must go in ASCENDING wavelength order: the pandeia pixel
         # grid is dispersion order, not wavelength order, and MIRI LRS ships
         # it DESCENDING (13.86 -> 5.02 um). Passing it raw made the operator's
-        # np.interp read a reversed table and return R = R(red end) = 42
-        # everywhere, blurring the whole 5-12 um band with a ~5x-too-wide
-        # kernel. smooth_to_native_r now refuses an out-of-order curve, so
-        # this sort is the contract, not a convenience.
+        # np.interp read a reversed table and return the curve's LAST entry,
+        # R = 42, everywhere. Note which end that is: MIRI LRS resolving power
+        # RISES with wavelength (42 at 5 um, 150 median, 209 at 12 um), so 42
+        # is the BLUE end, and pinning the whole 5-12 um band to it blurred it
+        # with a ~3.5x-too-wide kernel. smooth_to_native_r now refuses an
+        # out-of-order curve, so this sort is the contract, not a convenience.
         wl_r, r_curve = wl_pix[po], r_nat[po]
         depth_sm = binning.smooth_to_native_r(wl_model, depth, wl_r, r_curve,
                                               b_lo, b_hi, weight=flux_model)
@@ -410,11 +427,10 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         depth = depth_sm
         if not lsf_applied:
             # The operator auto-no-ops when the model grid cannot resolve the
-            # kernel, and that case used to be the SILENT one: the path that
-            # applied the blur printed a note, the path that did nothing said
-            # nothing. It is the more dangerous half. The model's own opacity
-            # smearing then stands in for the instrument line-spread function,
-            # which is a different width set by a numerical knob.
+            # kernel. That is the more dangerous half and must be disclosed:
+            # the model's own opacity smearing then stands in for the
+            # instrument line-spread function, which is a different width set
+            # by a numerical knob.
             # A Gaussian kernel needs R_model >= 2.3548 * R_native to be
             # resolved at all, and the binding R_native is the SMALLEST in
             # band (the widest kernel), matching smooth_to_native_r's test.
@@ -505,7 +521,7 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         n_pix_partial_sat=binning.bin_counts(op, n_part_sat > 0).astype(int),
         # POST-FILTER count: blind to channels the worker already dropped
         # (exactly the fully saturated ones) -- use the *_native fields for
-        # display/export. Kept with unchanged meaning.
+        # display/export.
         n_pix_full_sat_dropped=int(np.sum(n_full_sat > 0)),
         n_pix_degenerate_dropped=int(degen.sum()),
         # native-grid truth from the worker; None = not measured -- never

@@ -13,8 +13,9 @@ Nuisances, jointly fit and marginalized out of the report:
     otherwise masquerade as atmospheric structure).
   * combined: one SHARED lnR0 + one offset per SEGMENT across all modes.
 
-A parameter with no spectral response, or loaded on a numerically null Fisher
-direction, comes back inf ("unconstrained" in the GUI). The inversion is
+A parameter with no spectral response, loaded on a numerically null Fisher
+direction, or wider than its no-information scale (UNINFORMATIVE_SIGMA),
+comes back inf ("unconstrained" in the GUI). The inversion is
 ALWAYS rank-aware and unit-invariant: rank detection happens on the
 Jacobi-whitened (unit-diagonal) Fisher matrix (see _marg_sigmas).
 np.linalg.inv returns misleading finite numbers on ill-conditioned matrices,
@@ -43,6 +44,27 @@ REL_EIG_TOL = 1e-10
 # A parameter whose L2 projection onto the null subspace exceeds this reads
 # inf. Basis-invariant subspace norm, never a single eigenvector's component.
 NULL_LOAD_TOL = 1e-6
+
+# Widths at or past which the reported number is not a constraint, in the
+# FITTED coordinate. dlnCO is the only row whose display transform is a
+# LINEARIZATION (display_sigma: sigma_CO = C/O * sigma_lnCO); every other row
+# converts exactly (identity, or 1/ln10 for dex) and reports its width
+# verbatim however large it is. At sigma_lnCO = 1 that linearization has run
+# out: the symmetric display Gaussian's minus-1-sigma edge sits exactly at the
+# physical boundary C/O = 0, so "C/O = 0.55 +/- 0.55" and anything past it
+# describes the boundary, not a measurement. Such a direction reads
+# UNCONSTRAINED (inf), the same as a numerically null one -- never a number
+# that looks like a weak measurement. The value is derived, not tuned: it is
+# where sigma_CO reaches C/O.
+UNINFORMATIVE_SIGMA = {"dlnCO": 1.0}
+
+
+def _cut_uninformative(sigmas: dict) -> dict:
+    """inf for any width at or past its parameter's no-information scale
+    (UNINFORMATIVE_SIGMA); a name absent from that table passes through."""
+    return {n: (np.inf if float(s) >= UNINFORMATIVE_SIGMA.get(n, np.inf)
+                else float(s))
+            for n, s in sigmas.items()}
 
 
 def _marg_sigmas(F: np.ndarray, n_report: int,
@@ -195,16 +217,17 @@ def mode_forecast(result: dict, free_names: list[str],
     are [free..., lnR0], sigma (n_bins,), and (optionally) seg (n_bins,) for the
     per-segment offset nuisances. ``diag``: see _marg_sigmas.
     Pass a dict as ``conditional`` to also receive the conditional sigmas
-    (others fixed; see _conditional_sigmas) from the SAME Fisher matrix."""
+    (others fixed; see _conditional_sigmas) from the SAME Fisher matrix.
+    Both sets pass the no-information cut (_cut_uninformative)."""
     J = np.asarray(result["jac_bins"])
     steps = _segment_offset_rows(result)          # (n_steps, n_bins)
     Jn = np.vstack([J, steps]) if steps.size else J
     F = _fisher(Jn, result)
     if conditional is not None:
-        conditional.update(zip(free_names,
-                               _conditional_sigmas(F, len(free_names))))
+        conditional.update(_cut_uninformative(
+            dict(zip(free_names, _conditional_sigmas(F, len(free_names))))))
     sig = _marg_sigmas(F, len(free_names), diag=diag)
-    return dict(zip(free_names, sig))
+    return _cut_uninformative(dict(zip(free_names, sig)))
 
 
 def _combined_system(results: list[dict], n_f: int) -> tuple[int, list]:
@@ -246,16 +269,17 @@ def combined_forecast(results: list[dict], free_names: list[str],
     per detector SEGMENT (NRS1/NRS2 counted separately for the two-detector
     gratings), all marginalized. Noise is block-diagonal across modes
     (diagonal sigma; no cross-mode noise correlation is modeled).
-    ``conditional``: as in mode_forecast."""
+    ``conditional`` and the no-information cut: as in mode_forecast."""
     n_f = len(free_names)
     n_tot, system = _combined_system(results, n_f)
     F = np.zeros((n_tot, n_tot))
     for Jg, r in system:
         F += _fisher(Jg, r)
     if conditional is not None:
-        conditional.update(zip(free_names, _conditional_sigmas(F, n_f)))
+        conditional.update(_cut_uninformative(
+            dict(zip(free_names, _conditional_sigmas(F, n_f)))))
     sig = _marg_sigmas(F, n_f, diag=diag)
-    return dict(zip(free_names, sig))
+    return _cut_uninformative(dict(zip(free_names, sig)))
 
 
 def transits_to_target(result: dict, free_names: list[str], gp: str,

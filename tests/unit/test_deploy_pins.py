@@ -1,8 +1,7 @@
 """deploy/pins.env and the Space Dockerfile must name the same sibling
 commits: pins.env is the manifest CI installs from, the Dockerfile ARG
 defaults are what the Space image enforces at build time. Drift between
-them means CI validates different sibling code than the deployment ships
-(2026-08-09 review round 2, finding 6)."""
+them means CI validates different sibling code than the deployment ships."""
 from __future__ import annotations
 
 import re

@@ -117,46 +117,6 @@ else
     echo "      The Space's default opacity_mode will stop with an error."
 fi
 
-# PICASO reference tree (v18.1): OPTIONAL science data for the PICASO
-# provider + climate mode -- staged from JWST_TOOL_PICASO_REFDATA when set
-# (the tool's own selector; ~12 GB: chemistry grid + preweighted CK +
-# stellar grids + opacities.db). cp -c uses APFS clonefile (instant, no
-# extra disk) and falls back to a plain dereferencing copy elsewhere.
-if [ -n "${JWST_TOOL_PICASO_REFDATA:-}" ] \
-        && [ -d "$JWST_TOOL_PICASO_REFDATA/chemistry/visscher_grid_2121" ]; then
-    if [ ! -d "$STAGE/picaso-reference/chemistry/visscher_grid_2121" ]; then
-        echo "Staging picaso-reference (~12 GB; APFS clone when possible) ..."
-        cp -Rc "$JWST_TOOL_PICASO_REFDATA" "$STAGE/picaso-reference" 2>/dev/null \
-            || cp -RL "$JWST_TOOL_PICASO_REFDATA" "$STAGE/picaso-reference"
-        chmod -R u+w "$STAGE/picaso-reference"
-    fi
-    if [ ! -f "$STAGE/picaso-reference/manifest.json" ]; then
-        echo "Generating picaso-reference/manifest.json ..."
-        python3 - "$STAGE/picaso-reference" <<'PYEOF'
-import hashlib, json, sys
-from pathlib import Path
-root = Path(sys.argv[1])
-files, shas = {}, {}
-for p in sorted(root.rglob("*")):
-    if not p.is_file() or ".cache" in p.parts:
-        continue
-    rel = str(p.relative_to(root))
-    size = p.stat().st_size
-    files[rel] = size
-    if size <= 50 * 2**20:
-        shas[rel] = hashlib.sha1(p.read_bytes()).hexdigest()[:16]
-(root / "manifest.json").write_text(json.dumps(
-    {"tree": "picaso v4.0 reference", "n_files": len(files),
-     "files": files, "sha1_16": shas}, indent=1, sort_keys=True))
-print(f"manifest.json: {len(files)} files")
-PYEOF
-    fi
-else
-    echo "NOTE: JWST_TOOL_PICASO_REFDATA unset or incomplete -- skipping the"
-    echo "      picaso-reference stage (the PICASO provider/climate mode will"
-    echo "      show MISSING on the Space until it is uploaded)."
-fi
-
 # Resumable uploader (safe to re-run after an interrupted upload). Uploads the
 # staging dir's CONTENTS, giving jwst-data/ + retrieval-data/ at the repo root
 # -- exactly the layout bootstrap_data.py expects.

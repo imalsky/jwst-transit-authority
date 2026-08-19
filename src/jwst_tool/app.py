@@ -98,8 +98,8 @@ _MAX_POST_PANELS = 3
 
 # Custom-combination palette, deliberately disjoint from instruments.MODE_COLOR
 # so a combo line never collides with a member mode's color. Module level
-# because _series_color() (results section) needs it, and it used to be defined
-# further DOWN the script than that call -- a NameError on every results page.
+# because _series_color() (results section) needs it: defined further DOWN the
+# script than that call, it is a NameError on every results page.
 _COMBO_COLORS = ("#6a3d9a", "#117733", "#882255", "#88ccee")
 
 
@@ -1043,8 +1043,8 @@ with st.sidebar:
                     tp_file_ok = False
 
     # The column's pressure boundaries and the radius anchor: physics-defining
-    # inputs, so they live here in step 2 (moved out of "More settings",
-    # maintainer request). Widget keys are unchanged (shipped key contract).
+    # inputs, so they live here in step 2. Widget keys stay as they are
+    # (shipped key contract).
     with st.expander("Pressure limits & reference radius"):
         rt_ptop_bar = st.number_input(
             "RT top pressure (bar)",
@@ -1420,8 +1420,12 @@ with st.sidebar:
     # Display-only band strings: the modelled band (registry envelope
     # intersected with the forward-model span), with the NRS detector gap
     # shown for the H gratings. Gap edges measured from this tool's own
-    # Pandeia 2026.7 wavelength grids (largest grid step); scoring always
+    # Pandeia 2026.7 wavelength grids (largest grid step) and equal to
+    # Birkmann et al. 2022 Table 2 / jwst-docs BOTS Table 1; scoring always
     # uses the worker's actual pixels, so the gap never enters the math.
+    # The OUTER endpoints must equal the registry's wl_min/wl_max (a duplicate
+    # band statement is exactly how the G395M red edge drifted from its
+    # source); test_app_smoke pins that.
     _MODE_BAND_DISPLAY = {
         "nirspec_g140h": "1.00-1.31 + 1.35-1.83 µm",
         "nirspec_g235h": "1.66-2.20 + 2.27-3.07 µm",
@@ -1443,7 +1447,11 @@ with st.sidebar:
                     k, f"{ins.MODES[k]['wl_min']:g}-"
                        f"{ins.MODES[k]['wl_max']:g} µm")
                 + f", R ~ {ins.MODES[k]['r_native_med']})"))
-        n_transits = st.number_input(f"Number of {_evw}s", 1, 10, 1, 1,
+        # "per mode" is load-bearing: every selected mode is evaluated at this
+        # count, and a combined forecast sums their information at the same
+        # count, so K modes cost K x this many events -- except SOSS orders 1
+        # and 2, which come from one readout (their mode rows say so).
+        n_transits = st.number_input(f"Number of {_evw}s per mode", 1, 10, 1, 1,
                                      key=K("ntr"))
 
     # Mock-observation layer: generated AFTER the forward model and the
@@ -1484,9 +1492,18 @@ with st.sidebar:
             help="Out-of-event time anchoring the stellar flux; the PandExo "
                  "convention is baseline = T14.")
         sat_limit = st.number_input(
-            "Saturation limit (full-well fraction)",
+            "Saturation limit (fraction of Pandeia's saturation level)",
             0.5, 0.95, 0.80, 0.05, key=K("sat"),
-)
+            help="The longest ramp kept is the one whose brightest pixel "
+                 "stays under this fraction of Pandeia's saturation level "
+                 "for the mode. That level is not the physical full well and "
+                 "is not the same fraction of it on every instrument: "
+                 "Pandeia already holds NIRCam time-series modes at 70% of "
+                 "the well, so 0.80 there is about 56% of it, against 0.80 "
+                 "of NIRSpec's adopted value. 0.80 is PandExo's default and "
+                 "is what the parity comparison uses. STScI's time-series "
+                 "guidance is different: sample up the ramp to about half "
+                 "the saturation level, which is 0.50 here.")
         r_bin = st.number_input(
             "Analysis resolving power, R", 25, 500, 100, 25, key=K("rbin"))
         st.caption("Sets the final bins for every score and figure; it does "
@@ -1495,8 +1512,10 @@ with st.sidebar:
         # R = 1000 k-table bands wide, so sub-band structure the high-R
         # gratings record starts to matter at bin edges. Affected = the mode's
         # LSF outresolves the model (2.3548 x native R > 1000); tested on the
-        # MEDIAN native R, which classifies all eight shipped modes the same
-        # as the README's measured min-native-R numbers. Line-by-line (Mie)
+        # MEDIAN native R, which classifies all twelve shipped modes the same
+        # way the binding MIN native R does (re-checked 2026-08-18 against the
+        # 2026.7 dispersion files over the corrected bands: only PRISM and
+        # MIRI LRS fall on the resolved side either way). Line-by-line (Mie)
         # runs are excluded: nu_pts moves the model R there, and the
         # run-level LSF warning discloses per mode either way.
         if int(r_bin) >= 250 and not mie_condensate:
@@ -1625,7 +1644,7 @@ with st.sidebar:
     diff_esc, top_flux, bot_flux = [], [], []
 
     with st.expander("Advanced radiative transfer (ExoJAX)"):
-        # the pressure boundaries and the radius anchor moved to step 2
+        # the pressure boundaries and the radius anchor live in step 2
         # ("Pressure limits & reference radius"); only the chord
         # integration choice stays advanced
         if science_mode == "emission":
@@ -1707,8 +1726,7 @@ if tp_mode == "file" and not tp_file_ok and params_error is None:
 _lbl_mode = (str((_canon or {}).get("opacity_mode")
                  or forward.default_opacity_mode(params)) == "lbl")
 
-# rough runtime hint keyed off the resolution settings (0.47.0: the engine
-# build no longer runs a warm-up solve, ~0.7 min less than the old model)
+# rough runtime hint keyed off the resolution settings
 base_min = 0.1 + 0.010 * nz
 if _lbl_mode:                        # nu_pts sets the grid only on this path
     base_min += 0.00005 * (nu_pts - forward.NU_PTS_DEFAULT)
@@ -1838,7 +1856,8 @@ with st.expander("Run summary & configuration"):
         + (f" ({'AD' if jac_method == 'ad' else 'finite differences'})"
            if fisher_params else "") + "\n"
         f"- **Observation**: {len(mode_keys)} mode(s), {n_transits} {_evw}"
-        f"{'s' if n_transits > 1 else ''}, R={r_bin}, floor: {floor_mode}\n"
+        f"{'s' if n_transits > 1 else ''} per mode, R={r_bin}, floor: "
+        f"{floor_mode}, saturation limit {float(sat_limit):.2f}\n"
         f"- **Estimated runtime**: {est}")
     if _canon is not None:
         _share = share_config.build_share(
@@ -2393,8 +2412,11 @@ with st.expander("Mode details"):
     for r in sorted(results, key=key_order):
         notes = []
         if r["saturated"]:
-            notes.append(f"saturates (full-well {r['sat_frac']:.2f} at the "
-                         "shortest permitted ramp)")
+            # sat_frac is Pandeia's fraction of ITS per-mode saturation level,
+            # not of the physical full well (instruments.py docstring), so the
+            # label must not say "full well".
+            notes.append(f"saturates ({r['sat_frac']:.2f} of the saturation "
+                         "level at the shortest permitted ramp)")
         n_part = int(np.sum(np.asarray(r.get("n_pix_partial_sat", 0)) > 0))
         # Quote the NATIVE-grid count: a fully saturated channel has non-finite
         # extracted noise, so the worker's own filter drops it and the
@@ -2403,14 +2425,17 @@ with st.expander("Mode details"):
         _n_full_native = r.get("n_pix_full_sat_native")
         if _n_full_native is None:
             if r.get("n_pix_full_sat_dropped"):
-                notes.append(f"at least {r['n_pix_full_sat_dropped']} fully "
-                             "saturated pixels excluded (native count unmeasured; "
-                             "re-run for a worker v7+ census)")
+                notes.append(f"at least {r['n_pix_full_sat_dropped']} channels "
+                             "excluded for full saturation (native count "
+                             "unmeasured; re-run for a worker v7+ census)")
         elif _n_full_native:
-            notes.append(f"{_n_full_native} fully saturated pixels excluded")
+            # the census counts CHANNELS holding at least one fully saturated
+            # detector pixel, not saturated detector pixels
+            notes.append(f"{_n_full_native} channels excluded for full "
+                         "saturation")
         if r.get("n_pix_degenerate_dropped"):
-            notes.append(f"{r['n_pix_degenerate_dropped']} degenerate-wavelength "
-                         "pixels excluded")
+            notes.append(f"{r['n_pix_degenerate_dropped']} channels excluded "
+                         "for a degenerate wavelength solution")
         if n_part:
             notes.append(f"partial saturation in {n_part} bins")
         if r["warnings"]:
@@ -2663,9 +2688,9 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
                            _csv_bytes(pd.DataFrame(frows)),
                            f"{_fname_base}_fisher_forecast.csv", "text/csv",
                            key=K("dl_fisher_csv"))
-        # full-rank numerical-health prose was cut (maintainer copy pass);
-        # a rank DEFICIENCY is still disclosed -- degenerate directions
-        # would otherwise read as silently missing rows
+        # No full-rank numerical-health prose; a rank DEFICIENCY is still
+        # disclosed -- degenerate directions would otherwise read as
+        # silently missing rows
         if fdiag and fdiag["fisher_rank"] < fdiag["fisher_dimension"]:
             st.caption(
                 f"**Fisher matrix is rank-deficient ({fdiag['fisher_rank']} "
@@ -2833,6 +2858,7 @@ if _have_fisher:
                         _notes.append(f"{_lbl}: unconstrained (no curve)")
                 elif _pr["constrained"]:
                     _mr = _mock_rec.get(_lbl)
+                    _mc = None
                     if _mr is not None and _mr["recovered"].get(_p):
                         # THE JITTERED CURVE is the one drawn: same width as
                         # the forecast (it is the forecast, recentered on
@@ -2845,16 +2871,31 @@ if _have_fisher:
                             # positive; center + delta_display can go
                             # negative for an unconstrained C/O) and draw
                             # the same clipped-at-zero Gaussian family the
-                            # no-draw forecast uses.
-                            _mu_d = _pr["center"] * float(
-                                np.exp(_mr["delta"][_p]))
-                            _mc = posteriors.truncated_gaussian_curve(
-                                _mu_d, _pr["sigma_display"])
+                            # no-draw forecast uses. A weakly constrained C/O
+                            # sends exp(delta) off the forecast scale, where
+                            # the input-point width no longer describes the
+                            # shifted center: that draw has no curve
+                            # (mock_center_co returns None) and the unshifted
+                            # forecast is drawn instead.
+                            _mu_d = posteriors.mock_center_co(
+                                _pr["center"], _pr["sigma_display"],
+                                _mr["delta"][_p])
+                            if _mu_d is None:
+                                _notes.append(
+                                    f"{_lbl}: C/O is effectively "
+                                    "unconstrained -- one draw shifts "
+                                    f"ln(C/O) by {_mr['delta'][_p]:+.3g}, "
+                                    "off the panel scale, so the unshifted "
+                                    "forecast is drawn")
+                            else:
+                                _mc = posteriors.truncated_gaussian_curve(
+                                    _mu_d, _pr["sigma_display"])
                         else:
                             _mu_d = _pr["center"] + float(
                                 _mr["delta_display"][_p])
                             _mc = posteriors.gaussian_curve(
                                 _mu_d, _pr["sigma_display"])
+                    if _mc is not None:
                         _curves.append(dict(
                             # says it is a FIT to one draw, not a forecast:
                             # its center moved off the input value, and a
@@ -2914,9 +2955,8 @@ _fig_box = st.expander(
     expanded=True)
 
 # Per-mode expected performance, rendered IN the legend label of each
-# point series (replaces the retired right-hand ranking panel): the
-# conditional template S/N for a detection goal, the expected ± on a
-# chosen parameter for a constraint/Fisher run.
+# point series: the conditional template S/N for a detection goal, the
+# expected ± on a chosen parameter for a constraint/Fisher run.
 _leg_num: dict = {}
 if goal_r == "detect":
     # saturated modes carry no usable data anywhere else (rankings,

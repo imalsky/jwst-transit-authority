@@ -173,10 +173,8 @@ def test_combo_forecast_identity_saturation_policy_and_additivity():
     real), and zero usable modes raise rather than reporting nothing.
     Fisher information is additive over independent modes, so a superset
     combination can only tighten a marginalized sigma -- pinned on
-    ``combo_forecast`` directly since ``compare_combos`` (a thin wrapper
-    with no production consumer) was removed on 2026-08-14; this invariant
-    is pinned nowhere else. The with-centers path attaches constrained
-    posterior curves."""
+    ``combo_forecast`` directly, and nowhere else. The with-centers path
+    attaches constrained posterior curves."""
     k1, k2 = _registry_keys(2)
 
     # single-mode identity
@@ -366,6 +364,27 @@ def test_mock_recovery_zero_mean_fisher_covariance_and_labels():
     assert rec["units"]["dlnCO"] == "C/O ratio"
 
 
+def test_mock_center_co_refuses_an_off_scale_draw():
+    """The C/O draw recenters MULTIPLICATIVELY while the drawn width stays
+    the forecast width, which is linearized at the INPUT C/O. On a weakly
+    constrained direction exp(delta) runs orders of magnitude past that
+    width and the pairing breaks: the curve grid collapses to one float64
+    value. mock_center_co returns the shifted center inside the forecast
+    window and None past it, so that curve is never requested."""
+    sig_ln = 0.2
+    mu = posteriors.mock_center_co(CO, CO * sig_ln, 0.15)
+    assert mu == pytest.approx(CO * np.exp(0.15), rel=1e-12)
+    curve = posteriors.truncated_gaussian_curve(mu, CO * sig_ln)
+    assert np.all(np.diff(curve["theta"]) > 0.0)
+
+    # unconstrained C/O: a 1-sigma draw in ln(C/O) lands e^40 out
+    assert posteriors.mock_center_co(CO, CO * 40.0, 40.0) is None
+    # ... and that is exactly the center that has no representable curve
+    with pytest.raises(ValueError, match="unresolvable in float64"):
+        posteriors.truncated_gaussian_curve(CO * float(np.exp(40.0)),
+                                            CO * 40.0)
+
+
 def test_scoring_modules_never_reference_the_mock_layer():
     """Structural pin of the ONE-DIRECTIONAL rule (not "display only": the
     draw IS fitted by mock_recovery, whose recovered-parameter shift the GUI
@@ -406,9 +425,8 @@ def test_scoring_modules_never_reference_the_mock_layer():
 def test_mock_draw_uses_the_same_sigma_as_the_reported_error_bars():
     """The mock draw must be a realization of the SAME noise model whose
     error bars and forecasts are displayed beside it: no scale factor, and
-    the drawn scatter must match the reported sigma. A scale knob that moved
-    the dots without moving the forecast was removed in 0.29.4 -- this pins
-    the invariant so it cannot come back silently."""
+    the drawn scatter must match the reported sigma. A scale knob that moves
+    the dots without moving the forecast must never come back."""
     import inspect
 
     # the API must not accept a scale/multiplier on the draw

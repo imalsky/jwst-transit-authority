@@ -104,9 +104,9 @@ MAX_NGROUP_ABS_DIFF_FAINT = 5
 # +-1 tolerance above is meaningless there: 1 vs 2 groups is a 100% group
 # difference and ~33% of the integration time, and pandeia's extracted noise
 # is pathologically worse at 1 group. Whenever EITHER side selects at or
-# below this count, the two optimizers must agree EXACTLY (2026-08-09
-# review: a conservative seed once picked 1 group where PandExo's 2 was
-# measured safe, and the +-1 rule passed it).
+# below this count, the two optimizers must agree EXACTLY: a conservative
+# seed once picked 1 group where PandExo's 2 was measured safe, and the +-1
+# rule passed it.
 LOW_NGROUP_EXACT = 3
 # Per-integration time inherits the group choice; gate the relative gap so a
 # ramp-policy divergence cannot hide behind a passing group diff.
@@ -118,13 +118,12 @@ MAX_TINT_REL_DIFF = 0.15
 # raw electron rate. The worker records the exact QY curve (qy_on_grid) and
 # run_parity multiplies it back before this ratio, so the compared rates are
 # engine-identical; measured residual is ~1 ulp on every mode. The QY curve
-# is identity for NIRCam/MIRI and red of ~3 um on NIRSpec -- which is why
-# the pre-2026-08-17 artifact showed exact ratios on red modes and blue-
-# rising "tails" (mislabeled extraction jitter) on prism/soss/g235m, and why
-# the first two all-blue modes (g140h, soss order 2) pushed the MEDIAN to
-# 1.13/1.30 and exposed the convention gap. This gates the MEDIAN ratio
-# only; p05/p95 and max_abs_dev are recorded in every row, and the photon-
-# convention ratio stays disclosed per row as flux_ratio_photon.
+# is identity for NIRCam/MIRI and red of ~3 um on NIRSpec, so skipping the
+# unfold reads as exact ratios on red modes and blue-rising "tails" on
+# prism/soss/g235m -- never mistake those for extraction jitter. This gates
+# the MEDIAN ratio only; p05/p95 and max_abs_dev are recorded in every row,
+# and the photon-convention ratio stays disclosed per row as
+# flux_ratio_photon.
 MAX_FLUX_RATIO_DEV = 0.03
 
 # Sigma ratios are deliberately NOT gated to unity: pandeia's full extracted
@@ -318,10 +317,9 @@ def validate(summary: dict) -> list[str]:
                         "the per-pixel exclusion evidence differs")
             if status in ("SATURATED", "SATURATED_ABOVE_LIMIT"):
                 # Never a numerical validation row, but the saturation CLAIM
-                # itself is gated (2026-08-09 review round 2: these rows
-                # used to bypass every check, so a future false-saturated
-                # result could pass while an unsaturated row elsewhere kept
-                # coverage green).
+                # itself is gated: let these rows bypass every check and a
+                # false-saturated result passes while an unsaturated row
+                # elsewhere keeps coverage green.
                 sat = row.get("sat_frac_ours")
                 if sat is None or float(sat) <= SAT_LIMIT:
                     problems.append(
@@ -356,7 +354,8 @@ def validate(summary: dict) -> list[str]:
 
             # Saturation must be judged from the MEASURED fraction, not only
             # the worker's `unusable` flag. The committed 2026-07 artifact had
-            # two OK rows above the limit, one at 7.31x full well.
+            # two OK rows above the limit, one at 7.31x the saturation
+            # level (Pandeia's per-mode value, not the physical full well).
             sat = row.get("sat_frac_ours")
             if sat is None:
                 problems.append(f"{tag}: OK row with no measured sat_frac")
@@ -422,8 +421,8 @@ def validate(summary: dict) -> list[str]:
 
             # Per-integration time inherits the group choice; a passing group
             # diff must not hide a large timing gap. Missing/non-finite
-            # fields on an OK row are a FAILURE, never a skipped check
-            # (2026-08-09 review round 2: absent data used to fail open).
+            # fields on an OK row are a FAILURE, never a skipped check:
+            # absent data must never fail open.
             to, tp = row.get("t_int_ours_s"), row.get("t_int_pandexo_s")
             if (to is None or tp is None
                     or not (math.isfinite(float(to)) and float(to) > 0)

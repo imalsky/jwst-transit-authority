@@ -1,9 +1,9 @@
 """GUI smoke tests: the app renders end-to-end with no exception.
 
 Needs the GUI extras (streamlit + pandas); the dependency-light CI skips it.
-Uses Streamlit's AppTest; no forward-model run is launched. Pruned 2026-08-15
-(maintainer: fewer, stronger tests): AppTest boots are the expensive part, so
-every assertion that examines the same booted app lives in one test.
+Uses Streamlit's AppTest; no forward-model run is launched. AppTest boots are
+the expensive part, so every assertion that examines the same booted app lives
+in one test (maintainer: fewer, stronger tests).
 """
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def _synthetic_out(science_mode="transmission", saturated=False,
         "wl_um": wl,
         "depth": np.full(n, 0.021) + 1e-4 * np.sin(wl),
         "mols": np.array(["H2O", "CO2", "CO", "CH4", "SO2"], dtype="U8"),
-        # depth_wo rows align with wo_mols, not mols (v32)
+        # depth_wo rows align with wo_mols, not mols
         "wo_mols": np.array(["H2O", "CO2", "CO", "CH4", "SO2"], dtype="U8"),
         "depth_wo": np.tile(np.full(n, 0.0208), (5, 1)),
         "T": np.full(30, 1100.0),
@@ -120,12 +120,11 @@ def _deferred_labels(at):
 
 
 def test_fresh_boot_pre_run_contract():
-    """One default boot: no intro gate, the 0.27.0 speed-first mode trio (the
-    ETC computes only the selected modes), the data-status panel + annotated
-    molecules, noise multiplier at 1.0, and the mock controls -- the 'New
-    draw' button was removed 2026-08-13 but the seed field keeps a
-    realization reproducible; widget keys unchanged so share_config
-    round-trips."""
+    """One default boot: no intro gate, the speed-first mode trio (the ETC
+    computes only the selected modes), the data-status panel + annotated
+    molecules, noise multiplier at 1.0, and the mock controls -- there is no
+    'New draw' button, the seed field keeps a realization reproducible;
+    widget keys are the shipped contract, so share_config round-trips."""
     from jwst_tool import instruments as ins
 
     at = _run_app()
@@ -181,8 +180,8 @@ def test_gui_structure_defaults_match_canonical_params():
 
 
 def test_deferred_downloads_are_live_outside_a_run():
-    """Clicking a download widget mid-run cancels the run (the
-    ScriptControlException class, fixed 0.21.2, 2026-08-04), so the config
+    """Clicking a download widget mid-run cancels the run (Streamlit's
+    ScriptControlException is a BaseException), so the config
     JSON and the sidebar T-P example downloads render through deferred
     placeholder slots. Outside a run both must be LIVE download buttons,
     never dead busy stand-ins."""
@@ -206,13 +205,13 @@ def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
     """One fresh boot, three gating behaviors.
 
     1. Each geometry keeps its OWN column-bottom box (shipped key contract),
-       and the DEFAULT is structure-aware (v32): W39b transmission defaults
+       and the DEFAULT is structure-aware: W39b transmission defaults
        to its measured table's own bottom, emission (Guillot everywhere)
        to the round parametric default.
     2. AD under a constrain goal forces the photochemistry checkbox ON and
        disabled; switching back to detect releases it (the photo widget
        renders before the method menu, so the lock reads session state).
-    3. The noise floor defaults to "constant" (maintainer, 2026-08-13) -- the
+    3. The noise floor defaults to "constant" (maintainer) -- the
        CONSERVATIVE side, since it claims LESS precision than "No floor";
        "none" stays an explicit choice; "Wavelength table" with no upload is
        the one state that still BLOCKS the run.
@@ -260,7 +259,7 @@ def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
 
 
 def test_source_pins_fig_width_fisher_table_and_noise_recording():
-    """Source-level pins for three 2026-08-13 maintainer decisions: (1) the
+    """Source-level pins for three maintainer decisions: (1) the
     global noise multiplier COMPOSES with the per-mode multipliers and the
     config records the two factors APART (the product would re-multiply on
     restore); (2) every figure gets an explicit pixel width -- st.pyplot
@@ -298,10 +297,36 @@ def test_source_pins_fig_width_fisher_table_and_noise_recording():
         "the Fisher CSV is no longer built from the unblanked rows"
 
 
+def test_gap_band_labels_match_the_registry_bands():
+    """The mode picker's hand-written H-grating band strings must keep the
+    registry's own endpoints.
+
+    A duplicated band statement is how the G395M red edge drifted to 5.10
+    while its source (Birkmann et al. 2022 Table 2 / jwst-docs BOTS Table 1)
+    said 5.18. These three strings restate a band the registry already owns,
+    so pin the outer endpoints to it; the inner pair is the measured NRS1/NRS2
+    gap and has no registry counterpart."""
+    from jwst_tool import instruments as ins
+    src = APP.read_text()
+    i = src.index("_MODE_BAND_DISPLAY = {")
+    block = src[i:src.index("}", i)]
+    labels = dict(re.findall(r'"([a-z0-9_]+)":\s*"([^"]+)"', block))
+    assert labels, "the band-label table moved or changed shape"
+    for key, text in labels.items():
+        assert key in ins.MODES, f"{key} is not a registry mode"
+        edges = [float(x) for x in re.findall(r"\d+\.\d+", text)]
+        assert len(edges) == 4, f"{key}: expected two sub-bands, got {text!r}"
+        assert edges == sorted(edges), f"{key}: band edges out of order"
+        m = ins.MODES[key]
+        assert (edges[0], edges[-1]) == (m["wl_min"], m["wl_max"]), (
+            f"{key}: label {text!r} disagrees with the registry band "
+            f"{m['wl_min']}-{m['wl_max']}")
+
+
 def test_lbl_widgets_render_only_with_mie_deck():
     """The broadening gas, native grid points, and line-wing grid widgets act
-    only when a Mie deck forces line-by-line mode, so they render only then
-    (2026-08-16); the default-boot absence is pinned in the removals test
+    only when a Mie deck forces line-by-line mode, so they render only then;
+    the default-boot absence is pinned in the removals test
     above. Keys are the shipped contract and must not change. Also pins the
     mode picker's measured native-R labels (r_native_med: display metadata
     measured from the 2026.7 refdata dispersion files -- re-measure on any
@@ -349,15 +374,15 @@ def test_results_render_and_below_target_is_warning_not_error():
 
 def test_emission_results_use_eclipse_terms():
     """An emission run says "eclipse" throughout, never "transit"; an
-    above-target result renders NO banner (maintainer, 2026-08-13: the figure
-    and mode table already carry the number)."""
+    above-target result renders NO banner (maintainer: the figure and mode
+    table already carry the number)."""
     out, out_meta = _synthetic_out(science_mode="emission",
                                    sigma_detect=8.0, n_transits=3)
     at = _run_with_result(out, out_meta)
     assert not at.exception, at.exception
     assert not at.success, \
         f"an above-target result must render no banner: {[s.value for s in at.success]}"
-    # the figure section is an EXPANDER (2026-08-13), not a subheader
+    # the figure section is an EXPANDER, not a subheader
     _exps = [e.label for e in at.get("expander")]
     assert any("eclipse emission spectrum" in e for e in _exps), _exps
     assert not any(e == "Proposal summary figure" for e in _exps)
@@ -431,8 +456,8 @@ def test_custom_archive_fill_and_uv_menu_never_moves():
     """Custom planet, one boot: the nearest-Teff caption tracks a typed Teff
     while the UV MENU never moves, and the archive Fill button writes the
     snapshot row into the form (pending-then-apply path) -- still without
-    touching the UV menu (no substitute spectra, maintainer rule
-    2026-08-09)."""
+    touching the UV menu (no substitute spectra, standing maintainer
+    rule)."""
     at = _run_app()
     at.selectbox(key="n0_planet").set_value("custom").run()
     assert not at.exception, at.exception
@@ -478,7 +503,7 @@ def test_mock_observation_disclosure_and_recovery_overlay():
 
 def test_combo_builder_fisher_table_naming_and_reset():
     """One booted app with Jacobians carries the whole combo story: every
-    results section is an expander (2026-08-13 renames pinned); a primed
+    results section is an expander (renames pinned); a primed
     combination LEADS the STATIC constraint table under the user's own name
     ('All usable modes', no 'COMBO: ' prefix; st.table so a header click
     cannot detach the blanked mode names); the builder adds and removes
@@ -574,8 +599,8 @@ def test_emission_mode_archive_fill_skips_transit_duration():
     "widget,value,field",
     # the molecule selectbox keys on the extra-molecule selection, so the key
     # carries the default extra set (jwst_tool.app: K("mol_<provider>_<mols>"));
-    # CS2/C2H6 left the default at v31 (no ExoMolOP table), SH+SO JOINED it at
-    # v34 (measured 10.0 and 48.1 ppm on W39b -- forward.EXTRA_MOLECULES_DEFAULT)
+    # CS2/C2H6 are out of the default (no ExoMolOP table); SH+SO are in
+    # (measured 10.0 and 48.1 ppm on W39b -- forward.EXTRA_MOLECULES_DEFAULT)
     [("n0_mol_vulcan_C2H2_C2H4_H2S_HCN_NH3_OCS_SH_SO", "CO2",
       "target_mol"),                                # the reported bug
      ("n0_noisescale", 2.0, "noise_scale")])        # an observation-block field
@@ -660,7 +685,7 @@ def test_axis_bounds_refuse_one_sided_and_reach_the_figure(monkeypatch):
     at = _run_with_result(out, out_meta,
                           n0_sum_y_min=20500.0)     # max left blank
     assert not at.exception, at.exception
-    # Axis-control contract (maintainer, 2026-08-14/15): every axis is a
+    # Axis-control contract (maintainer): every axis is a
     # typed min/max number-box pair that STARTS blank, no sliders anywhere,
     # no wavelength-range radio.
     assert not [r for r in at.radio if r.key == "n0_sum_wlmode"]
@@ -689,10 +714,10 @@ def test_axis_bounds_refuse_one_sided_and_reach_the_figure(monkeypatch):
 
 def test_mixing_ratio_panel_selects_species_by_name(monkeypatch):
     """ymix is the FULL network state (89 species for SNCHO); model["mols"]
-    is the short RT list. Zipping them positionally read the wrong species:
-    found 2026-08-14 against Tsai et al. 2023's published WASP-39 b VULCAN
-    run -- the curve labelled CO2 sat at 0.847 at 1 bar, which is H2. The
-    panel and its CSV were mislabelled for every species."""
+    is the short RT list. Zipping them positionally reads the wrong species:
+    measured against Tsai et al. 2023's published WASP-39 b VULCAN run, the
+    curve labelled CO2 sat at 0.847 at 1 bar, which is H2 -- the panel and
+    its CSV were mislabelled for every species."""
     from jwst_tool import plotting
     seen = {}
     _real = plotting.build_vmr_figure

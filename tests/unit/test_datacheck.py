@@ -211,7 +211,7 @@ def test_engine_data_unavailable_is_one_loud_item(monkeypatch):
     assert "tree not found" in items[0].detail
 
 
-# --- ExoMolOP k-table coverage (v31) -----------------------------------------
+# --- ExoMolOP k-table coverage -----------------------------------------------
 
 class _FakeEngineCfg:
     """Just enough engine-config surface for check_engine_data."""
@@ -244,9 +244,9 @@ def test_exomolop_status_never_auto(tmp_path, monkeypatch):
 
 def test_missing_ktables_are_required_items_with_the_fetch_command(
         tmp_path, monkeypatch):
-    # Before v31 `jwst-tool data` reported green while the data behind the
-    # DEFAULT opacity_mode could be entirely absent -- the false green this
-    # check exists to prevent.
+    # The false green this check exists to prevent: `jwst-tool data`
+    # reporting green while the data behind the DEFAULT opacity_mode is
+    # entirely absent.
     cfg = _FakeEngineCfg(_fake_root(tmp_path, ["H2O"]))
     monkeypatch.setattr(datacheck, "_engine_config", lambda: cfg)
     items = {i.key: i for i in datacheck.check_engine_data(

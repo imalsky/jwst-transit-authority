@@ -14,7 +14,16 @@ job.json:
 result.json: one entry per mode key, plus a reserved "__provenance__" entry
 (the exact backend identity, written before any mode runs). Per mode key:
     {"wl": [...um], "flux": [...e-/s], "noise_1int": [...e-/s, sigma for 1 integ],
-     "n_part_sat": [...], "n_full_sat": [...],   per-pixel saturated-group counts
+     "n_part_sat": [...], "n_full_sat": [...],
+                                    NOT group counts: for each extracted
+                                    wavelength channel, the NUMBER OF DETECTOR
+                                    PIXELS inside that channel's extraction
+                                    box that are partially (some groups lost)
+                                    or fully (fewer than mingroups usable)
+                                    saturated. Pandeia builds them as
+                                    sum(saturation_mask == 1) and == 2. Only
+                                    "> 0" is ever used downstream, but the
+                                    counts are pixels, not groups.
      "r_native": [...] | null,      native resolving power R(lambda) on the wl
                                     grid (null = host skips the LSF blur,
                                     safe for high-R modes only),
@@ -23,13 +32,27 @@ result.json: one entry per mode key, plus a reserved "__provenance__" entry
                                     (nint=2 minus nint=1 exposure difference,
                                     which includes the between-integration
                                     reset),
-     "ngroup": .., "sat_frac": .., "sat_ngroups": ..,
+     "ngroup": ..,
+     "sat_frac": ..,                pandeia's fraction_saturation: the peak
+                                    accumulated charge over the WHOLE scene,
+                                    divided by the engine's per-mode
+                                    saturation_fullwell. That divisor is not
+                                    the physical full well and differs by
+                                    mode (instruments.py docstring), and for
+                                    a multi-order mode (SOSS) it is the
+                                    brightest order, not the extracted one.
+     "sat_ngroups": ..,             min over the detector of pandeia's
+                                    groups-before-saturation map, i.e. the
+                                    ramp length at which the brightest pixel
+                                    reaches saturation_fullwell.
      "saturated": bool, "engine_version": "..",
-     "n_pix_native": ..,             NATIVE-GRID counts, taken BEFORE the
-     "n_pix_unusable_dropped": ..,   finite/positive `good` filter (fully
+     "n_pix_native": ..,             NATIVE-GRID channel counts, taken BEFORE
+     "n_pix_unusable_dropped": ..,   the finite/positive `good` filter (fully
      "n_pix_part_sat_native": ..,    saturated channels have non-finite
-     "n_pix_full_sat_native": ..,    extracted noise, so `good` drops them);
-                                     these four are the reporting truth.
+     "n_pix_full_sat_native": ..,    extracted noise, so `good` drops them).
+                                     The two *_sat_native counts are numbers
+                                     of CHANNELS holding at least one such
+                                     pixel; these four are the reporting truth.
      "warnings": {...}}      -- or {"error": "..."} if that mode failed.
 
 Star normalization: band-integrated synphot photsys normalization to the
@@ -49,6 +72,19 @@ never presented as maximal. A mode saturated at ngroup_min is kept,
 flagged, with its degraded numbers so the GUI can say why. Channel-level
 saturation comes from the report's 1d curves so the host can exclude or
 flag per pixel.
+
+Both the search and the "saturated" verdict read the SCENE-WIDE
+fraction_saturation, matching PandExo. On a multi-order mode (SOSS) that is
+the brightest order, so an order-2 selection inherits order 1's saturation
+even though its own extraction may be clean; detect discloses that, and
+instruments.MODES["niriss_soss_ord2"] records why it is not overridden here.
+
+The seed formulas assume saturation_time grows linearly with ngroup. That is
+EXACT for every shipped mode: pandeia's saturation_time is
+tframe * (ndrop1 + (ngroup - 1) * (nframe + ndrop2) + nframe), and all four
+readout patterns used here (NRSRAPID/NISRAPID/RAPID/FASTR1) have nframe = 1
+and ndrop2 = 0. A future frame-averaging pattern would break the linearity,
+not the search -- the bracket still proves maximality by measurement.
 """
 import copy
 import glob
@@ -123,8 +159,7 @@ def _native_r(refdata, m, wl):
     if m["instrument"] == "nircam" and m["mode"] == "lw_tsgrism":
         # The LW grism dispersion file carries NO disperser token in its name
         # (jwst_nircam_disp_*.fits, 2.4-5.0 um; the dhs0-ord* files are the
-        # short-wave DHS), so the token pattern above matches nothing and
-        # NIRCam ran without a native-R export until worker v12.
+        # short-wave DHS), so the token pattern above matches nothing here.
         # The exact prefix is required: a bare *disp*.fits glob sorts the
         # dhs0 files first.
         pat = os.path.join(refdata, "jwst", "nircam", "dispersion",
@@ -152,7 +187,9 @@ def _run(perform_calculation, calc, ngroup, nint=1):
 
 
 def _sat_curve(rpt, key, n_pix):
-    """Per-pixel saturated-group counts from the 1d report.
+    """Saturated-PIXEL counts per extracted wavelength channel, from the 1d
+    report (pandeia: sum(saturation_mask == 1) for partial, == 2 for full,
+    over that channel's extraction box). Not group counts.
 
     LOAD-BEARING: a missing or renamed report key must FAIL here -- a silent
     all-zeros fallback would stop excluding saturated pixels after an engine
@@ -184,15 +221,14 @@ def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
     sat_ng = probe["scalar"].get("sat_ngroups")
 
     # Saturation is a MEASUREMENT, never a prediction: the mode is saturated
-    # exactly when the shortest permitted ramp measures above the limit. (The
-    # old `predicted candidate < ng_min` test classified saturation from an
-    # estimate; a predictor falling below the floor does not prove the
-    # measured floor is unsafe.)
+    # exactly when the shortest permitted ramp measures above the limit. A
+    # predictor falling below the floor does not prove the measured floor is
+    # unsafe.
     saturated = sat_probe > sat_limit
     ng_best, rpt = ng_min, probe
-    # Maximality is PROVEN, not extrapolated (the
-    # earlier predictor-stall exit could stop one integer below the true
-    # optimum on ramps with a per-integration time offset). Bracket
+    # Maximality is PROVEN, not extrapolated: a predictor-stall exit can stop
+    # one integer below the true optimum on ramps with a per-integration time
+    # offset. Bracket
     # invariant: ng_best is the largest MEASURED-safe count, hi the smallest
     # MEASURED-unsafe one; the search is complete only when ng_best == ng_max
     # or hi == ng_best + 1. Every candidate is strictly inside the bracket,
@@ -261,7 +297,7 @@ def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
         return {
             "unusable": True,
             "reason": (f"no unsaturated pixels at the shortest ramp "
-                       f"(ngroup={ng_best}, max full-well fraction "
+                       f"(ngroup={ng_best}, peak saturation fraction "
                        f"{float(rpt['scalar']['fraction_saturation']):.1f}) -- "
                        "target too bright for this mode"),
             "ngroup": int(ng_best),
@@ -326,8 +362,7 @@ def _refdata_version(refdata):
 
     A VERSION_PSF file is deliberately NOT accepted here: it names a PSF
     library, and with every supported backend on the split layout a misplaced
-    PSF marker must not authenticate a data tree (the retired 3.0-era
-    fallback allowed exactly that)."""
+    PSF marker must not authenticate a data tree."""
     for name in ("VERSION", "VERSION_DATA"):
         p = os.path.join(refdata, name)
         if os.path.isfile(p):
@@ -363,8 +398,7 @@ def _check_backend_match(engine_version, refdata, psf_dir=None):
     A mismatched pair runs with wrong calibrations; the PSF library is the
     same hazard, so its RELEASE is checked, not just existence. Every
     supported backend uses the split-PSF layout, so an empty ``psf_dir`` is
-    always refused (the embedded 3.0-era layout retired with the legacy
-    backend).
+    always refused.
 
     Returns the provenance fields; raises RuntimeError naming the offending
     component on any mismatch or undeterminable version.

@@ -17,24 +17,22 @@ from pathlib import Path
 
 from packaging.requirements import Requirement
 
-# Roots: the three local packages' dependencies get walked, plus the gui
-# extra (streamlit/pandas) and the Space bootstrap's huggingface_hub.
-# v18: picaso + the runtime imports its metadata does NOT declare (measured
-# by the 2026-07-20 import trace: synphot/stsynphot/virga/bokeh/xarray and
-# friends are imported at picaso.justdoit import time but only partially
-# declared) -- the trace is the authority, the walker fills in versions.
-ROOTS = ["vulcan-jwst-tool", "vulcan-retrieval", "vulcan-jax",
+# Roots: the local packages' dependencies get walked, plus the gui extra
+# (streamlit/pandas) and the Space bootstrap's huggingface_hub. The trailing
+# entries are runtime imports that the roots' metadata does NOT declare; the
+# walker only fills in their versions.
+ROOTS = ["vulcan-jwst-tool", "vulcan-jax",
          "streamlit", "pandas", "huggingface_hub", "matplotlib",
-         "picaso", "synphot", "stsynphot", "virga-exo", "bokeh", "xarray",
-         "photutils", "pooch", "sortedcontainers", "cloudpickle",
-         "Bottleneck", "cftime", "crc32c", "defusedxml", "miepython",
+         "pooch", "sortedcontainers", "cloudpickle",
          "platformdirs", "setuptools", "threadpoolctl", "zstandard",
          "xyzservices"]
 # (jaraco.collections/jaraco.text are setuptools-vendored, not standalone
 # distributions -- pinning setuptools covers them)
 # Local editables: present in the closure but installed from the repo
-# checkouts by the Dockerfile, never from PyPI.
-LOCAL = {"vulcan-jwst-tool", "vulcan-retrieval", "vulcan-jax"}
+# checkouts by the Dockerfile, never from PyPI. vulcan-forward MUST be here:
+# it is a hard dependency of vulcan-jwst-tool with no PyPI release, so pinning
+# it writes a line the --no-deps install cannot resolve and the image fails.
+LOCAL = {"vulcan-jwst-tool", "vulcan-jax", "vulcan-forward"}
 
 seen: set[str] = set()
 pins: dict[str, str] = {}

@@ -2,9 +2,9 @@
 
 The mapping must restore exactly the widget state the download described, and
 an invalid file must raise before anything could be applied. No Streamlit, no
-pandeia, no JAX: the mapping is pure dict work over canonical params. Pruned
-2026-08-15 (maintainer: fewer, stronger tests): refusal micro-tests are
-merged into consolidated fail-closed tests; every assertion survives.
+pandeia, no JAX: the mapping is pure dict work over canonical params.
+Refusals are merged into consolidated fail-closed tests (maintainer: fewer,
+stronger tests).
 """
 import pytest
 
@@ -237,9 +237,9 @@ def test_noise_model_config_evolution_round_trips():
     """The global "Noise multiplier" and the per-mode multipliers round-trip
     as SEPARATE factors (the app composes them; recording the product would
     re-multiply on restore); a file predating the global knob restores the
-    OLD behavior (no scale invented, no failure); and the 0.28.0-removed
+    same behavior (no scale invented, no failure); and the removed
     correlated-floor scenarios load with a note (they never changed the
-    model) while scenario="random", the old default, loads silently."""
+    model) while scenario="random" loads silently."""
     goal = dict(goal="detect", goal_mol="H2O", target_sig=3.0)
 
     def _obs(**over):
@@ -412,8 +412,8 @@ def test_restore_bounds_match_the_widgets():
 
 
 def test_gui_removed_physics_defaults_load_and_nondefaults_refuse():
-    """Condensation, settling, escape and BC fluxes are API-only
-    (2026-08-13). Defaults load normally, but a configuration that ENABLES
+    """Condensation, settling, escape and BC fluxes are API-only.
+    Defaults load normally, but a configuration that ENABLES
     any of them must RAISE, not load with a note: these switches change the
     atmosphere the model computes, so pinning them off would show a
     successful restore while Run computed something the file does not

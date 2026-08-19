@@ -1,4 +1,4 @@
-"""Per-mode noise caching (0.27.0): run_modes computes ONLY the cache
+"""Per-mode noise caching: run_modes computes ONLY the cache
 misses, batches them into one worker invocation, and stores each mode under
 its own single-mode job key -- so a selection change costs exactly the newly
 added modes. The worker is stubbed; no pandeia involved."""

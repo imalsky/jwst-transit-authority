@@ -1,4 +1,4 @@
-"""The v18.1 public-instance run limiter: slot semantics + lifecycle."""
+"""The public-instance run limiter: slot semantics + lifecycle."""
 import pytest
 
 from jwst_tool import runlimit

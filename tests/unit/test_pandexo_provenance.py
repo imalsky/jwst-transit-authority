@@ -105,8 +105,8 @@ def test_genuine_checkout_reports_head_and_dirty_flag(worker, git_env,
 
 
 def test_worktree_checkout_reports_head(worker, git_env, tmp_path):
-    """Worktrees keep .git as a FILE; the old fail-closed isdir(.git) check
-    wrongly rejected them."""
+    """Worktrees keep .git as a FILE, so a fail-closed isdir(.git) check
+    wrongly rejects them."""
     main = tmp_path / "PandExo"
     _pandexo_checkout(main)
     wt = tmp_path / "wt"

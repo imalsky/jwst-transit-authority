@@ -51,7 +51,7 @@ def _pf(path, **kw):
 
 
 def test_condensation_detection_only_with_full_refusal_matrix():
-    # v14: use_condense is canonical (default False); a detection-only
+    # use_condense is canonical (default False); a detection-only
     # condensing run (photo + moldiff on, no Fisher) is ACCEPTED. The pinned
     # reservoir is not a reproducible function of the parameters, so
     # condensation + Fisher refuses under EVERY jac_method (FD included);
@@ -104,8 +104,7 @@ def test_removed_modes_refuse_never_substitute():
 
 
 def test_shipped_tables_gate_defaults_and_are_never_substituted():
-    """2026-08-11 maintainer decision (reversing the structure half of the
-    2026-08-09 speed-first flip): a planet whose bundled measured T-P/Kzz
+    """Maintainer decision: a planet whose bundled measured T-P/Kzz
     table is VERIFIED end-to-end defaults to it; every other planet defaults
     to analytic Guillot + constant Kzz and carries a written tp_table_note.
     Each planet resolves to ITS OWN table; a planet without one refuses
@@ -152,9 +151,9 @@ def test_guillot_default_tirr_follows_planet_and_custom_system():
                          800.0), 2500.0)
         cp = forward.canonical_params(dict(planet=key, tp_mode="guillot"))
         assert cp["Tirr"] == expect, key
-    # the values that used to disagree, pinned explicitly
+    # per-planet values, pinned explicitly
     assert forward.default_tirr("wasp39b") == 1580.0
-    assert forward.default_tirr("hd209458b") == 2060.0   # was 1580 via the API
+    assert forward.default_tirr("hd209458b") == 2060.0
     sys_cool = dict(star_teff=3300.0, rstar_rsun=0.30, orbit_au=0.05)
     teq = planets.system_teq(**sys_cool)                    # ~350 K
     expect = min(max(round(teq * math.sqrt(2.0) / 20.0) * 20.0, 800.0), 2500.0)
@@ -177,7 +176,7 @@ def test_tp_table_gates_are_grid_scoped_and_require_the_bottom(tmp_path):
     evaluates (re-gridded onto CHEM_P_SPAN_DYN), not every raw row: a table
     extending past the grid (a hot thermosphere) is fine if the in-grid part
     is modelable. (2) A table stopping above the chemistry-grid bottom is
-    REFUSED (v17): the engine would clamp-extend the last tabulated T
+    REFUSED: the engine would clamp-extend the last tabulated T
     isothermally over the quench region."""
     def _write(name, T):
         p = tmp_path / name
@@ -205,8 +204,8 @@ def test_tp_table_gates_are_grid_scoped_and_require_the_bottom(tmp_path):
 
 
 def test_resolution_knobs_defaults_ranges_and_refusals():
-    # the fidelity "quality" tier is gone; explicit nz/nu_pts/yconv default
-    # to the old "fast" tier; the RT layer count is derived, not cache-keyed
+    # there is no fidelity "quality" tier: nz/nu_pts/yconv are explicit and
+    # the RT layer count is derived, not cache-keyed
     cp = forward.canonical_params(_p())
     assert cp["nz"] == forward.NZ_DEFAULT == 100
     assert cp["nu_pts"] == forward.NU_PTS_DEFAULT == 4000
@@ -216,15 +215,15 @@ def test_resolution_knobs_defaults_ranges_and_refusals():
     # explicit in-range values accepted; the yconv ladder reaches its 1e-4
     # floor. nu_pts is INERT under the default correlated-k mode (the model
     # grid comes from the published k-tables) and is normalized to its default
-    # there (v32, Kzz precedent); it stays live in lbl mode.
+    # there (Kzz precedent); it stays live in lbl mode.
     cp = forward.canonical_params(_p(nz=150, nu_pts=8000, yconv_cri=1.0e-4))
     assert (cp["nz"], cp["nu_pts"], cp["yconv_cri"]) == (150, 4000, 1.0e-4)
     cp = forward.canonical_params(_p(opacity_mode="lbl", nu_pts=8000))
     assert cp["nu_pts"] == 8000
     assert forward.YCONV_RANGE == (1.0e-4, 1.0e-2)
-    # nu_pts cap raised 8000 -> 32000 at v27: the old cap sat BELOW the model
-    # resolving power that NIRSpec G395H's line-spread function needs, so
-    # opacity convergence could not be demonstrated inside the allowed range
+    # the nu_pts cap must stay ABOVE the model resolving power that NIRSpec
+    # G395H's line-spread function needs, or opacity convergence cannot be
+    # demonstrated inside the allowed range
     for bad in (dict(nz=40), dict(nz=200), dict(nu_pts=1000),
                 dict(nu_pts=40000), dict(yconv_cri=1.0),
                 dict(yconv_cri=5.0e-5)):
@@ -233,7 +232,7 @@ def test_resolution_knobs_defaults_ranges_and_refusals():
 
 
 def test_extra_molecules_resolve_in_engine_and_unknown_refused():
-    # v25 (Shami Tsai request): CS2 photochemical sulfur + the CH4-photolysis
+    # Shami Tsai request: CS2 photochemical sulfur + the CH4-photolysis
     # hydrocarbons. Import-light: vulcan_forward.constants is pure constants.
     from vulcan_forward import constants as _vfc
     for mol in ("CS2", "C2H4", "C2H6"):
@@ -271,10 +270,10 @@ def test_composition_structural_path_baseline_and_ranges():
     # run_model additionally cross-checks the live cfg
     assert abs(forward.CO_BASELINE - 0.00295 / 0.00537) < 1e-12
     assert abs(forward.CO_BASELINE - 0.549) < 1e-3
-    # v13: composition is ONE structural path -- co_ratio (absolute N_C/N_O)
-    # and met_x_solar go straight into the cfg elemental abundances; the
-    # legacy differential knobs are gone from the canonical params entirely
-    # v32: the DEFAULT co_ratio is CO_DEFAULT (the baseline rounded onto the
+    # Composition is ONE structural path -- co_ratio (absolute N_C/N_O)
+    # and met_x_solar go straight into the cfg elemental abundances; there
+    # are no differential composition knobs in the canonical params
+    # The DEFAULT co_ratio is CO_DEFAULT (the baseline rounded onto the
     # widgets' 0.05 grid); CO_BASELINE stays the display baseline + cross-check
     cp = forward.canonical_params(_p())
     assert cp["co_ratio"] == forward.CO_DEFAULT == 0.55
@@ -291,7 +290,7 @@ def test_composition_structural_path_baseline_and_ranges():
 
 
 def test_fisher_names_and_jac_method_matrix():
-    # v13: FD Jacobians are certified re-solves -- no photo-on tangent
+    # FD Jacobians are certified re-solves -- no photo-on tangent
     # regime, so FD Fisher works photo-off; unknown rows refuse loudly
     cp = forward.canonical_params(_p(use_photo=False, fisher_params=["lnZ"]))
     assert cp["fisher_params"] == ["lnZ"] and cp["use_photo"] is False
@@ -299,7 +298,7 @@ def test_fisher_names_and_jac_method_matrix():
         forward.canonical_params(_p(fisher_params=["lnFoo"]))
     with pytest.raises(ValueError, match="unknown Fisher parameter"):
         forward.canonical_params(_p(fisher_params=["Tint_cl"]))  # climate-only
-    # v14: jac_method is canonical -- certified FD by default, unknown refused
+    # jac_method is canonical -- certified FD by default, unknown refused
     assert forward.canonical_params(
         _p(fisher_params=["lnKzz"]))["jac_method"] == "fd"
     with pytest.raises(ValueError, match="jac_method"):
@@ -322,13 +321,12 @@ def test_fisher_names_and_jac_method_matrix():
 
 
 def test_rt_knobs_defaults_validation_and_cache_key():
-    # v15: three ExoJAX RT knobs are canonical (cache-keyed). Defaults are
-    # the pre-v15 hard-coded values, so a default run reproduces v14 physics.
+    # three ExoJAX RT knobs are canonical (cache-keyed)
     cp = forward.canonical_params(_p())
     assert cp["rt_ptop_bar"] == 1.0e-8
     assert cp["rt_integration"] == "simpson"
     assert cp["rt_dit_res"] == 1.0
-    # v32: rt_dit_res is INERT under the default correlated-k mode (PreMODIT
+    # rt_dit_res is INERT under the default correlated-k mode (PreMODIT
     # never runs) and normalized to its default there, like nu_pts; it stays
     # live -- and key-live -- in lbl mode. Out-of-range values still refuse
     # in both modes (validation precedes normalization).
@@ -382,8 +380,8 @@ def test_chem_key_separates_chemistry_from_rt_only_edits():
 
 # --- WASP-39 b reference state: DO NOT let this drift ------------------------
 # The REFERENCE configuration (tp_mode="file", the shipped evening-terminator
-# table) is the one measured against the published JWST detection, and since
-# 2026-08-11 also the DEFAULT. The guard anchors to the EXPLICIT file-mode
+# table) is the one measured against the published JWST detection, and also
+# the DEFAULT. The guard anchors to the EXPLICIT file-mode
 # config so it protects the reference even if the default moves again.
 # Re-measure against the literature before updating expected values.
 W39B_REFERENCE = {
@@ -393,7 +391,7 @@ W39B_REFERENCE = {
     "kzz_mode": "file",                     # mixing from the table, not a stand-in
     "kzz_const": 0.0,                       # inert once tabulated
     "met_x_solar": 10.0,                    # Tsai+2023 10x solar
-    "co_ratio": 0.55,                       # CO_DEFAULT (v32, maintainer):
+    "co_ratio": 0.55,                       # CO_DEFAULT (maintainer):
                                             # the cfg C_H/O_H 0.549348 rounded
                                             # onto the 0.05 widget grid; the
                                             # 0.12% composition shift awaits
@@ -418,7 +416,7 @@ def test_wasp39b_reference_state_is_the_literature_validated_one():
 
 
 def test_network_semantics():
-    """The v33 kinetics-network contract, at the numpy level.
+    """The kinetics-network contract, at the numpy level.
 
     (a) default sncho, carried in the canonical dict; unknown value refused.
     (b) ncho removes exactly the sulfur species from the RT sets: SO2 from
@@ -453,7 +451,7 @@ def test_network_semantics():
 
 
 def test_wo_mols_end_to_end_semantics():
-    """The v32 leave-one-out contract, end to end at the numpy level.
+    """The leave-one-out contract, end to end at the numpy level.
 
     (a) canonical form: default = every RT molecule in fold order; a subset
         canonicalizes to fold order deduped; unknown molecules refuse; [] is
@@ -465,9 +463,9 @@ def test_wo_mols_end_to_end_semantics():
     (d) consumers index depth_wo by the model's wo_mols, never by mols, and
         refuse loudly when the target has no removed spectrum.
     (e) the GUI asks for the TARGET only on detect and [] on constrain
-        (0.41.0: the score reads one row and the all-molecule block
-        dominated a cold run) -- the all-molecule batch stays reachable
-        through the API's wo_mols=None default.
+        (the score reads one row, and the all-molecule block dominates a cold
+        run) -- the all-molecule batch stays reachable through the API's
+        wo_mols=None default.
     """
     # (a) canonicalization
     cp = forward.canonical_params(_p())
@@ -530,30 +528,8 @@ def test_wo_mols_end_to_end_semantics():
 def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # The key hashes every canonical parameter: if ANY default feeding the
     # reference run changes, this trips even when the pins above still pass.
-    # RE-PINNED at v34 (history: 92ac1d4902dc7c39 v33, 57c662c1be8b0776 v32,
-    # c20582509e215eb0 v31, acba771e80c772a1 v30, 9b30d6d526e2a78a v29,
-    # ead8394cf913ff67 v28, ba52447cad5b40c5 v27, de55467c4a459b4e v26,
-    # f14f4d10512552ea first).
-    # v34 completed the opacity menu: EXTRA_MOLECULES now lists every network
-    # species with a published ExoMolOP k-table (22 entries), and the GUI
-    # preselection moved to the MEASURED subset EXTRA_MOLECULES_DEFAULT, which
-    # ADDS SO and SH. That is a real spectrum change at the default, not a
-    # relabelling: SO alone contributes 48 ppm at 9.36 um on this atmosphere.
-    # v33 added the network parameter (sncho default / ncho sulfur-free);
-    # the spectrum at the default is bit-identical to v32's. v32 added the
-    # wo_mols leave-one-out set to the canonical params, rounded the default
-    # co_ratio to CO_DEFAULT (0.55), made the p_btm_bar default
-    # structure-aware, and normalized the inert nu_pts/rt_dit_res out of the
-    # exomolop-mode key.
-    # v31 removed the interim "ckd" opacity mode
-    # (forward 0.8.0); the spectrum is bit-identical to v30's. v30 switched
-    # the default opacity DATA to "exomolop" (published ExoMol/HITEMP
-    # k-tables, H2/He broadening) from HITRAN 296 K air-broadened lines,
-    # cutting the PRISM amplitude excess from 2.80x to 1.48x the data (the
-    # old "~2.2x gap vs published spectra" was RESOLVED 2026-08-15 as a
-    # decode error in OUR harness; real residual ~8%, and the RT is
-    # verified vs petitRADTRANS to 0.0013-0.096% rms -- decode record:
-    # vulcan-forward README).
+    # Re-pinning this key is a _VERSION bump: state what moved the spectrum
+    # in notes.md, which carries the per-version history of both.
     # NOT RE-MEASURED at v30/v31, required before quoting this key as a
     # science result: the default-geometry median depth (19,712 ppm at
     # v28-v29) and the G395H SO2 significance (2.89 at v27, BELOW the
@@ -561,7 +537,7 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # run; SO2 also needs the pandeia backend. Full history: notes.md.
     assert forward.params_key(forward.canonical_params(
         dict(planet="wasp39b", tp_mode="file"))) == "874d580abb25e870"
-    # ... and since 2026-08-11 the bare DEFAULT run is that same atmosphere
+    # ... and the bare DEFAULT run is that same atmosphere
     assert forward.params_key(forward.canonical_params(
         dict(planet="wasp39b"))) == "874d580abb25e870"
     # the sha1 pin is only meaningful re-derived from the file the run
@@ -777,11 +753,11 @@ def test_emission_mode_gating_star_params_and_hygiene(tmp_path):
     cp_f = forward.canonical_params(_pf(_table(tmp_path),
                                         science_mode="emission"))
     assert cp_f["science_mode"] == "emission"
-    # v32: the default follows the STRUCTURE, not the geometry -- a measured
+    # The default follows the STRUCTURE, not the geometry -- a measured
     # table caps the column at its own bottom (7.6 bar for the shipped
     # tables), parametric profiles get the round 10 bar. Emission needs no
     # deeper default: measured, 7.6 bar is optically thick (tau 30-370) in
-    # every instrument window (the brief 100 bar default was retracted).
+    # every instrument window.
     assert cp_f["p_btm_bar"] == forward.P_BTM_FILE_BAR
     assert cp_t["p_btm_bar"] == forward.P_BTM_PARAMETRIC_BAR
     # a deeper column is still reachable, and still gated on the table covering
@@ -798,7 +774,7 @@ def test_emission_mode_gating_star_params_and_hygiene(tmp_path):
             != forward.params_key(_p(tp_mode="guillot", Tirr=1560.0)))
 
 
-# --- v17 (2026-07-19 audit response) ----------------------------------------
+# --- composition FD stencils + the dayside emission default ----------------
 
 def test_composition_fd_stencil_envelope():
     """FD Fisher rows for lnZ/dlnCO refuse a baseline within one 2h stencil of
@@ -844,7 +820,7 @@ def test_emission_defaults_to_the_dayside_temperature():
         assert cp["Tirr"] == 1234.0
 
 
-# --- unknown-key rejection (v31) ---------------------------------------------
+# --- unknown-key rejection -------------------------------------------------
 
 def test_unknown_keys_refuse_with_a_hint_and_output_round_trips():
     # The bug this pins: a validation driver passed {"mode": "emission"}, the
@@ -912,7 +888,7 @@ def test_param_keys_read_matches_the_source():
     assert keys == set(forward._PARAM_KEYS_READ)
 
 
-# --- ExoMolOP no-table gate (v31) --------------------------------------------
+# --- ExoMolOP no-table gate ------------------------------------------------
 
 def test_species_without_an_exomolop_table_refuse_early_under_the_default():
     # ExoMolOP publishes no CS2/C2H6 k-table: under the default opacity_mode
@@ -926,7 +902,7 @@ def test_species_without_an_exomolop_table_refuse_early_under_the_default():
 
 
 def test_molecule_list_invariants():
-    """v34 menu/default consistency, none of it enforced by the code itself."""
+    """Menu/default consistency, none of it enforced by the code itself."""
     import re
     # the preselected set must be a selectable subset with tables
     assert set(forward.EXTRA_MOLECULES_DEFAULT) <= set(forward.EXTRA_MOLECULES)

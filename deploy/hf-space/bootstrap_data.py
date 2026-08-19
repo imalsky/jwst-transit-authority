@@ -18,10 +18,10 @@ DATASET_REPO = os.environ.get("DATASET_REPO", "imalsky/vulcan-jwst-tool-data")
 # are the load-bearing VERSION FILES, not directories: an empty or truncated
 # tree must not count as seeded. Only the 2026.7 pair is listed, because
 # instruments.py defines exactly one backend ("current" = 2026.7) and raises
-# for anything else. The 2026.2 trees were required here until 2026-08-14,
-# from before the archival backend was removed; boot then failed closed on
-# 4.33 GB nothing could reach. They may still sit in the dataset repo, which
-# is harmless -- an unlisted tree is simply downloaded and ignored.
+# for anything else. Other Pandeia trees may still sit in the dataset repo,
+# which is harmless -- an unlisted tree is simply downloaded and ignored.
+# Never list a tree no backend can reach: boot then fails closed on data
+# nothing could use.
 # The per-molecule k-table markers are DERIVED, in ktable_markers() below.
 MARKERS = [
     DATA / "jwst-data" / "cdbs" / "grid" / "phoenix" / "catalog.fits",
@@ -36,12 +36,12 @@ MARKERS = [
 def ktable_markers() -> list[Path]:
     """One marker per k-table the INSTALLED tool can select.
 
-    DERIVED, never hardcoded: until 2026-08-17 a single H2O.ktable.h5 stood
-    for the whole tree, so a seeded /data satisfied the check forever. Adding
-    SH and SO to the default molecule set then left the persistent volume one
-    boot behind the dataset repo with no way to catch up -- markers present,
-    download skipped, every default run stopping on a missing table. A
-    per-molecule list makes a widened menu re-seed on the next boot.
+    DERIVED, never hardcoded. One marker standing for the whole tree lets a
+    seeded /data satisfy the check forever, so widening the molecule menu
+    leaves the persistent volume a boot behind the dataset repo with no way
+    to catch up -- markers present, download skipped, every default run
+    stopping on a missing table. A per-molecule list re-seeds on the next
+    boot instead.
     """
     from jwst_tool import forward
     return [DATA / "retrieval-data" / "exomolop" / f"{m}.ktable.h5"

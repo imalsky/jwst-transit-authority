@@ -8,9 +8,9 @@ Holds what the planner needs from the ``vulcan-forward`` engine:
 - the engine's data locations, resolved lazily so importing this module never
   touches the filesystem.
 
-The attribute surface is deliberately unchanged from the retrieval-framework
-config module it replaced, so every ``config.MOLECULES`` /
-``cfg.CIA_H2HE_FILE`` call site keeps working. (history: notes.md)
+The attribute surface is a contract shared with the retrieval framework's
+config module: every ``config.MOLECULES`` / ``cfg.CIA_H2HE_FILE`` call site
+must keep working.
 """
 from __future__ import annotations
 

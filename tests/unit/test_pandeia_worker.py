@@ -15,11 +15,10 @@ from jwst_tool import pandeia_worker as pw
 # --- native-R dispersion lookup ----------------------------------------------
 
 def test_native_r_finds_the_tokenless_nircam_grism_file(tmp_path):
-    """Worker v12: the NIRCam LW grism dispersion file carries NO disperser
-    token in its name (jwst_nircam_disp_*.fits), so the *grismr* token
-    pattern matched nothing and NIRCam ran without a native-R export. The
-    lookup must pick that file and never the alphabetically-earlier
-    short-wave dhs0-ord* files."""
+    """The NIRCam LW grism dispersion file carries NO disperser token in its
+    name (jwst_nircam_disp_*.fits), so the *grismr* token pattern matches
+    nothing. The lookup must pick that file and never the alphabetically-
+    earlier short-wave dhs0-ord* files."""
     fits = pytest.importorskip("astropy.io.fits")
     import numpy as np
 
@@ -60,7 +59,7 @@ def test_group_caps():
 
 
 def test_ramp_floors_equal_pandeia_mingroups():
-    """Since worker v8 the search floor is pandeia 2026.7's per-detector
+    """The search floor is pandeia 2026.7's per-detector
     mingroups (jwst/<instrument>/config.json: nirspec 1, niriss 1,
     nircam 1, miri 2) -- the same field PandExo reads, so both tools search
     the same ramp space. The warn thresholds are instrument-specific
@@ -146,9 +145,8 @@ def test_matched_triple_and_psf_identity(tmp_path):
 
 
 def test_any_component_out_of_step_is_refused(tmp_path):
-    """Any component out of step must fail BEFORE a calculation; the PSF
-    release is the one that used to go unchecked. Unidentifiable refdata is
-    refused too."""
+    """Any component out of step must fail BEFORE a calculation, the PSF
+    release included. Unidentifiable refdata is refused too."""
     for engine, data_ver, psf_ver, offender in (
             ("2026.2", "2026.7", "2026.7", "does not match pandeia_data"),
             ("2026.7", "2026.2", "2026.7", "does not match pandeia_data"),
@@ -167,9 +165,9 @@ def test_any_component_out_of_step_is_refused(tmp_path):
 
 
 def test_missing_psf_tree_is_refused(tmp_path):
-    """Every backend uses the split-PSF layout since the legacy (3.0)
-    backend was removed: a missing PSF dir is always an error, and the
-    split 2026+ layout must never masquerade as embedded-PSF data."""
+    """Every backend uses the split-PSF layout: a missing PSF dir is always
+    an error, and the split 2026+ layout must never masquerade as
+    embedded-PSF data."""
     ref, _ = _triple(tmp_path, "2026.7", "2026.7")
     for psf_dir in (None, ""):
         with pytest.raises(RuntimeError, match="requires a separate PSF"):
@@ -240,7 +238,7 @@ def _run_one_mode(wl, flux, noise, n_full, n_part, sat_frac=0.5,
                   ngroup_min=2, ngroup_max=10, call_log=None):
     """Drive `_one_mode` with stub pandeia callables (no engine involved).
 
-    ``sat_by_ngroup`` (ngroup -> measured full-well fraction) makes
+    ``sat_by_ngroup`` (ngroup -> measured saturation fraction) makes
     saturation depend on the requested ramp, which the group-search
     regression tests need; the default constant ``sat_frac`` keeps the
     older census tests unchanged. ``call_log`` collects the ngroup of every
@@ -311,7 +309,7 @@ def test_full_saturation_is_counted_before_the_good_filter():
 
     assert out["n_pix_native"] == 2
     assert out["n_pix_unusable_dropped"] == 1
-    assert out["n_pix_full_sat_native"] == 1        # the count that used to be 0
+    assert out["n_pix_full_sat_native"] == 1
     assert out["n_pix_part_sat_native"] == 1
 
 
@@ -332,7 +330,8 @@ def test_native_census_survives_an_all_unusable_mode():
 
 
 def test_detect_never_substitutes_the_post_filter_count():
-    """A pre-v7 payload must read UNMEASURED, not a falsely-clean zero."""
+    """A payload with no native census must read UNMEASURED, not a
+    falsely-clean zero."""
     from jwst_tool import detect
 
     assert detect._native_pixel_counts({}) == {
@@ -347,7 +346,7 @@ def test_detect_never_substitutes_the_post_filter_count():
 
 def test_sat_curve_is_loud_on_missing_or_misaligned_keys():
     """The saturation curves are load-bearing: a missing/renamed report key or
-    a grid-length mismatch raises, never the old silent all-zeros fallback."""
+    a grid-length mismatch raises, never a silent all-zeros fallback."""
     import numpy as np
     rpt = {"1d": {"n_full_saturated": [[1.0, 2.0, 3.0], [0.0, 1.0, np.nan]]}}
     curve = pw._sat_curve(rpt, "n_full_saturated", 3)
@@ -358,7 +357,7 @@ def test_sat_curve_is_loud_on_missing_or_misaligned_keys():
         pw._sat_curve(rpt, "n_full_saturated", 4)
 
 
-# --- group search selects the largest MEASURED-safe ramp (2026-08-09 review) --
+# --- group search selects the largest MEASURED-safe ramp ---------------------
 
 _CLEAN = dict(wl=[1.0, 2.0], flux=[1.0e6, 5.0e5], noise=[1.0e3, 2.0e3],
               n_full=[0.0, 0.0], n_part=[0.0, 0.0])
@@ -386,8 +385,8 @@ _GROUP_SEARCH_CASES = {
     "saturated_floor": (lambda ng: 0.85 * ng, None, (1, True, None), []),
     # the upward search stops at the APT/PandExo cap
     "cap_respected": (lambda ng: 0.005 * ng, None, (30, False, None), []),
-    # review round 2 counterexample f(n)=0.1n+0.1: the v9 predictor stalled
-    # at 6; the bracket search must PROVE 7 by measuring 8 unsafe
+    # counterexample f(n)=0.1n+0.1: a predictor stalls at 6; the bracket
+    # search must PROVE 7 by measuring 8 unsafe
     "affine_offset_maximum": (lambda ng: 0.1 * ng + 0.1, None,
                               (7, False, True), []),
     # completeness = the boundary neighbor was measured (3 in the call log)

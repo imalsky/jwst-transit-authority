@@ -4,7 +4,7 @@ no-floor detection-limit semantics."""
 import numpy as np
 import pytest
 
-from jwst_tool import detect, noise as noise_mod
+from jwst_tool import detect, instruments as ins, noise as noise_mod
 
 
 def test_offset_profiled_out():
@@ -159,7 +159,10 @@ def test_ramp_and_budget_disclosures():
             if "below this mode's STScI-recommended ramp" in w]
     assert len(hits) == 1
     assert "1 group(s) per integration" in hits[0]
-    assert "Cycle 4" in hits[0]              # the NIRSpec-specific reason
+    # the NIRSpec-specific reason, paraphrasing jwst-docs "NIRSpec Detector
+    # Recommended Strategies" (the minimum recommended ramp is 2 groups; 1 is
+    # for very bright BOTS targets). It must NOT be a generic short-ramp note.
+    assert "very bright BOTS target" in hits[0]
     assert r["saturated"] is False
     # at the threshold: no short-ramp warning
     mr2, model2 = _lsf_mode_inputs(lambda wl: np.zeros(wl.size))
@@ -362,3 +365,73 @@ def test_miri_lsf_uses_local_native_r_not_the_dispersion_order_end_value():
     r_flat = detect.evaluate_mode("miri_lrs", mr_flat, model_flat, **kw)
     assert np.max(np.abs(r_flat["depth"] - r_asc["depth"])) > 1e-6, \
         "fixture is insensitive to R(lambda); the ordering test proves nothing"
+
+
+@pytest.mark.parametrize(
+    "mode_key,t_cycle,expect",
+    [("nirspec_prism", 1600.0, True),    # above STScI's 1500 s NIRSpec advice
+     ("nirspec_prism", 1400.0, False),
+     ("miri_lrs", 2100.0, True),         # above APT's 2000 s MIRI hard limit
+     ("miri_lrs", 1900.0, False),
+     ("niriss_soss", 5000.0, False),     # no entry: the 30-group cap binds
+     ("nircam_f444w", 5000.0, False)])   # no entry: the 100-group cap binds
+def test_over_long_integrations_are_disclosed(mode_key, t_cycle, expect):
+    """The ramp search maximizes groups, so on a faint target it can run past
+    what STScI advises (NIRSpec: 1,500 s) or APT allows (MIRI: 2,000 s). The
+    tool never shortens a ramp for the user, so it must say so instead.
+    NIRISS and NIRCam have no limit entry -- their group caps bind first."""
+    kw = dict(target_mol=None, R_bin=100.0, t_in_s=3.0e5, t_out_s=3.0e5,
+              n_transits=1, floor_spec=None)
+    m = ins.MODES[mode_key]
+    wl_pix = np.linspace(m["wl_min"] * 1.001, m["wl_max"] * 0.999, 600)
+    mr = dict(wl=wl_pix.tolist(), flux=np.full(wl_pix.size, 1e6).tolist(),
+              noise_1int=np.full(wl_pix.size, 1e3).tolist(),
+              t_cycle_s=t_cycle, r_native=None,
+              n_full_sat=np.zeros(wl_pix.size).tolist(),
+              n_part_sat=np.zeros(wl_pix.size).tolist(),
+              ngroup=int(1e4), sat_frac=0.79, saturated=False)
+    wl_model = np.linspace(m["wl_min"] * 0.95, m["wl_max"] * 1.05, 4000)
+    model = dict(wl_um=wl_model, depth=np.full(wl_model.size, 0.01),
+                 mols=[], wo_mols=[])
+    r = detect.evaluate_mode(mode_key, mr, model, **kw)
+    hits = [w for w in r["warnings"] if "integration is" in w]
+    assert bool(hits) is expect, (mode_key, t_cycle, hits)
+    if expect:
+        limit = ins.INT_LENGTH_LIMIT_S[m["instrument"]]
+        assert f"{limit[0]:.0f} s {limit[1]}" in hits[0]
+
+
+def test_a_secondary_order_declares_its_shared_readout_and_saturation():
+    """SOSS orders 1 and 2 are ONE readout of SUBSTRIP256, so the order-2 row
+    must say that selecting both costs one observation, and that its
+    saturation verdict comes from the brighter order-1 trace (Pandeia's
+    fraction_saturation is scene-wide). Order 1 gets neither note."""
+    kw = dict(target_mol=None, R_bin=100.0, t_in_s=3600.0, t_out_s=3600.0,
+              n_transits=1, floor_spec=None)
+
+    def _inputs(mode_key, saturated):
+        m = ins.MODES[mode_key]
+        wl_pix = np.linspace(m["wl_min"] * 1.001, m["wl_max"] * 0.999, 400)
+        mr = dict(wl=wl_pix.tolist(), flux=np.full(wl_pix.size, 1e6).tolist(),
+                  noise_1int=np.full(wl_pix.size, 1e3).tolist(),
+                  t_cycle_s=20.0, r_native=None,
+                  n_full_sat=np.zeros(wl_pix.size).tolist(),
+                  n_part_sat=np.zeros(wl_pix.size).tolist(),
+                  ngroup=5, sat_frac=1.4 if saturated else 0.5,
+                  saturated=saturated)
+        wl_model = np.linspace(m["wl_min"] * 0.95, m["wl_max"] * 1.05, 4000)
+        return mr, dict(wl_um=wl_model, depth=np.full(wl_model.size, 0.01),
+                        mols=[], wo_mols=[])
+
+    def _notes(mode_key, saturated):
+        mr, model = _inputs(mode_key, saturated)
+        return list(detect.evaluate_mode(mode_key, mr, model, **kw)["warnings"])
+
+    shared = "shares one detector readout with order 1"
+    verdict = "set by the brighter order-1 trace"
+    assert any(shared in w for w in _notes("niriss_soss_ord2", False))
+    assert not any(verdict in w for w in _notes("niriss_soss_ord2", False))
+    sat2 = _notes("niriss_soss_ord2", True)
+    assert any(shared in w for w in sat2) and any(verdict in w for w in sat2)
+    ord1 = _notes("niriss_soss", True)
+    assert not any(shared in w or verdict in w for w in ord1)

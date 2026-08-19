@@ -5,7 +5,7 @@ no-floor transits-to-target limit must be exact."""
 import numpy as np
 import pytest
 
-from jwst_tool import detect, fisher
+from jwst_tool import detect, fisher, posteriors
 
 
 def test_marg_sigmas_matches_independent_oracles():
@@ -87,6 +87,36 @@ def test_degenerate_directions_read_inf_never_garbage():
     assert np.isinf(sig2[0]) and np.isinf(sig2[1]) and np.isfinite(sig2[2])
     # regression guard: plain inv would have "succeeded" silently
     assert np.all(np.isfinite(np.linalg.inv(F2)))
+
+
+def test_uninformative_width_reads_unconstrained():
+    """A C/O width past the no-information scale is not a constraint. The C/O
+    display transform sigma_CO = C/O * sigma_lnCO is a linearization; at
+    sigma_lnCO = 1 its minus-1-sigma edge sits exactly on the physical
+    boundary C/O = 0. Past that the forecast must read unconstrained (inf)
+    end to end -- reported width AND posterior curve -- never a finite number
+    that looks like a weak measurement. Sigma scales linearly with the per-bin
+    noise, so one design brackets the cut from both sides. Rows with an exact
+    display transform (lnZ) are never cut, however wide."""
+    rng = np.random.default_rng(7)
+    nb = 40
+    free = ["dlnCO", "lnZ"]
+    base = dict(jac_bins=rng.standard_normal((3, nb)),   # [dlnCO, lnZ, lnR0]
+                sigma=np.full(nb, 1e-4), mode_key="nirspec_prism",
+                depth=np.full(nb, 0.02))
+    s0 = fisher.mode_forecast(base, free)["dlnCO"]
+    assert np.isfinite(s0)
+    for target, constrained in ((0.9, True), (1.1, False)):
+        r = dict(base, sigma=base["sigma"] * (target / s0))
+        sig = fisher.mode_forecast(r, free)
+        assert bool(np.isfinite(sig["dlnCO"])) is constrained
+        if constrained:
+            assert sig["dlnCO"] == pytest.approx(target, rel=1e-9)
+        assert np.isfinite(sig["lnZ"])
+        out = posteriors.marginalized_posteriors(
+            r, free, {"dlnCO": 0.55, "lnZ": 1.0}, co_eval=0.55)
+        assert out["params"]["dlnCO"]["constrained"] is constrained
+        assert (out["params"]["dlnCO"]["theta"] is None) is not constrained
 
 
 def test_combined_forecast_structure_and_order_invariance():

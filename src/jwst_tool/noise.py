@@ -59,6 +59,14 @@ _BACKEND_FINGERPRINT = None
 # requires of a committed artifact. Bump whenever pandeia_worker.py output
 # changes (per-version history: notes.md); a bump without a fresh parity run
 # fails the gate test.
+#
+# "Output" here means a MEASURED value. NOT bumped on 2026-08-18, when the
+# worker's `unusable` reason string stopped calling sat_frac a "full-well
+# fraction" (it is a fraction of Pandeia's per-mode saturation level, which
+# is already derated on some instruments): no number moved, so an old cache
+# entry is still exactly right, while a bump would discard every cached ETC
+# result and invalidate the committed parity artifact over one sentence.
+# A change to any measured field still bumps.
 WORKER_VERSION = 12
 
 
@@ -86,8 +94,8 @@ def backend_fingerprint() -> dict:
             pass
     refver = []
     # refdata identifies itself via VERSION/VERSION_DATA; a VERSION_PSF file
-    # inside a refdata tree is a misplaced PSF marker, never a data version
-    # (the retired 3.0-era fallback let one authenticate the tree)
+    # inside a refdata tree is a misplaced PSF marker, never a data version:
+    # it must never authenticate the tree
     for root, names in ((Path(ins.PANDEIA_REFDATA),
                          ("VERSION", "VERSION_DATA")),
                         (Path(ins.PANDEIA_PSF_DIR) if ins.PANDEIA_PSF_DIR
@@ -205,13 +213,13 @@ def missing_modes(star: dict, mode_keys: list[str],
 
 def run_modes(star: dict, mode_keys: list[str], sat_limit: float = 0.80,
               progress=None, force: bool = False) -> dict:
-    """The production ETC path (0.27.0): per-mode cache, one worker batch.
+    """The production ETC path: per-mode cache, one worker batch.
 
     Each mode is cached under its own single-mode job key, so a run computes
     ONLY the modes it needs and a later selection change costs exactly the
-    newly added modes -- the pre-0.27.0 design computed all seven registry
-    modes on every first run so that selection changes were free, which made
-    the default run ~2.5x slower than its three-mode selection required.
+    newly added modes. Computing every registry mode on the first run instead
+    makes the default run ~2.5x slower than its three-mode selection
+    requires.
     All cache misses go to the worker in ONE batch job (one subprocess, one
     pandeia import), and the result is split back into per-mode files.
     Returns {mode_key: payload, "__provenance__": {...}} like the worker.

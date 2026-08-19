@@ -23,8 +23,8 @@ HERE = Path(__file__).resolve().parent
 STAGE = Path(os.environ.get("STAGE_DIR", Path.home() / "Desktop" / "hf_data_stage"))
 # Pandeia markers are the load-bearing VERSION FILES, not directories: an
 # empty or truncated tree must not count as staged. Only the 2026.7 pair,
-# matching the single backend instruments.py defines; see bootstrap_data.py
-# for why the 2026.2 entries were dropped on 2026-08-14.
+# matching the single backend instruments.py defines; the same rule as
+# bootstrap_data.py's MARKERS.
 STAGE_MARKERS = [
     STAGE / "jwst-data" / "cdbs" / "grid" / "phoenix" / "catalog.fits",
     STAGE / "jwst-data" / "pandeia_data-2026.7-jwst" / "VERSION_DATA",

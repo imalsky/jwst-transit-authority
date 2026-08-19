@@ -87,8 +87,8 @@ def test_floor_is_hard_max_on_final_bins():
     is the Pandeia random sigma exactly (scalar zero == no floor). A chosen
     floor is a hard max, not quadrature (quadrature would inflate
     above-floor bins by up to sqrt(2)). The entered constant floor arrives
-    unchanged at EVERY binning R -- the retired convention scaled it by
-    sqrt(R/100) for finer bins."""
+    unchanged at EVERY binning R -- never rescaled by sqrt(R/100) for finer
+    bins."""
     mr = _mode_result()
     edges = np.geomspace(3.0, 5.0, 12)
     nz = _bins(mr, edges, None)
@@ -164,7 +164,7 @@ def test_floor_is_consumed_downstream_unchanged():
 
 def test_fisher_rank_and_sigmas_invariant_under_unit_rescaling():
     """Rescaling parameters over 1e-12..1e12 must not change sigmas, rank, or
-    the constrained subspace (the raw-eigenvalue threshold did). A 2-D null
+    the constrained subspace (a raw-eigenvalue threshold does). A 2-D null
     space stays invariant too, which requires the basis-invariant subspace
     projection in the null-overlap test. A parameter with zero response
     reads inf, finite ones invert exactly."""
@@ -229,8 +229,8 @@ def _slope_row(wl: np.ndarray) -> np.ndarray:
 
 def test_detection_score_invariant_under_nuisance_remix():
     """The profiled score depends only on the SPAN of the nuisance rows: it
-    must be invariant under 24-decade per-row rescaling (the raw-eigenvalue
-    threshold silently dropped a valid down-scaled row) AND under an
+    must be invariant under 24-decade per-row rescaling (a raw-eigenvalue
+    threshold silently drops a valid down-scaled row) AND under an
     arbitrary nonsingular remix of the rows, not just per-row rescaling.
     An all-zero row is ignored, never an error or a changed score."""
     rng = np.random.default_rng(7)

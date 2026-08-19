@@ -1,7 +1,6 @@
 """transits_to_target under the diagonal noise model.
 
-Since the correlated-floor scenarios were removed (0.28.0), the score is
-monotone in N (sigma_N = max(sigma_random_N, floor)), so sig_inf is an exact
+With no correlated-floor scenarios, the score is monotone in N (sigma_N = max(sigma_random_N, floor)), so sig_inf is an exact
 ceiling: a floored target above it short-circuits to unreachable, and a
 reachable target returns the smallest count. No-floor runs report sig_inf =
 inf and never a floor-proven "unreachable".

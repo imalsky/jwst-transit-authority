@@ -1,14 +1,13 @@
 """The PandExo parity harness must FAIL CLOSED.
 
-`run_parity.py` used to write a summary and exit 0 no matter what, so stale
-or saturated artifacts looked like passing release gates. The gate now lives
-in the import-safe `tests/parity/scripts/parity_gate.py`, shared by the
-runner, the renderers, and these tests -- no exec tricks, no duplicated
-constants. Each `_fails` block breaks one thing in a synthetic full-matrix
-passing summary and proves `validate()` (or `validate_artifact()`) fails;
-related fail-closed branches are grouped into one test each, and every
-branch the old micro-tests covered is still exercised. The committed
-artifact must re-validate as a current pass.
+A runner that writes a summary and exits 0 no matter what lets stale or
+saturated artifacts look like passing release gates. The gate lives in the
+import-safe `tests/parity/scripts/parity_gate.py`, shared by the runner, the
+renderers, and these tests -- no exec tricks, no duplicated constants. Each
+`_fails` block breaks one thing in a synthetic full-matrix passing summary
+and proves `validate()` (or `validate_artifact()`) fails; related fail-closed
+branches are grouped into one test each. The committed artifact must
+re-validate as a current pass.
 """
 from __future__ import annotations
 
@@ -176,10 +175,11 @@ def test_saturation_mask_evidence_is_required(gate, passing):
 
 
 def test_row_status_gates(gate, passing):
-    """Row status must come from the measurement, never a label. The old
-    artifact carried two saturated rows labeled OK, one at 7.31x full well;
-    and the old validator silently skipped any non-OK/ERROR status, which
-    hid a 65.9%-pixel-match row behind SATURATED_ABOVE_LIMIT."""
+    """Row status must come from the measurement, never a label. Artifacts
+    have carried saturated rows labeled OK, one at 7.31x the saturation
+    level (Pandeia's per-mode value, not the physical full well), and a
+    validator that silently skips any non-OK/ERROR status hides a
+    65.9%-pixel-match row behind SATURATED_ABOVE_LIMIT."""
     problems = _fails(gate, _mut(passing, R0 + ("sat_frac_ours",),
                                  0.8548803964), "above the")
     assert any("above the" in p and "limit" in p for p in problems), problems
@@ -197,10 +197,10 @@ def test_row_status_gates(gate, passing):
 
 def test_matrix_membership_gates(gate, passing):
     """The full star x mode matrix is the experiment: nothing missing,
-    nothing extra, nothing duplicated. Deleting whole stars must fail --
-    the reviewer demonstrated the old coverage-only check passed with two
-    of three stars removed; one star losing a mode fails even though the
-    coverage set is still satisfied by the other stars."""
+    nothing extra, nothing duplicated. Deleting whole stars must fail: a
+    coverage-only check passes with two of three stars removed. One star
+    losing a mode fails even though the coverage set is still satisfied by
+    the other stars."""
     s = copy.deepcopy(passing)
     dropped = s["stars"]["w39_like"]["modes"].pop()
     _fails(gate, s, f"declared mode {dropped['key']!r} has no row")
@@ -362,7 +362,7 @@ def test_plots_revalidate_instead_of_trusting_the_passed_bit(plots, gate,
         gate["REQUIRED_PANDEIA_RELEASE"]
 
 
-# --- 2026-08-09 review gates: short ramps, timing, sigma anomaly -------------
+# --- short ramps, timing, sigma anomaly --------------------------------------
 
 def test_short_ramp_policy(gate, passing):
     """1 vs 2 groups is a ramp-policy divergence, not rounding: whenever

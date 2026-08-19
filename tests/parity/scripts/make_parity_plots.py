@@ -55,9 +55,9 @@ INK2 = "#52514e"
 GRID = "#e6e5e2"
 
 # The plotted mode set is the GATE's declared experiment, never a local copy.
-# A hand-maintained list here silently dropped nirspec_g395m from the
-# committed config-parity figure while REPORT.md advertised the full matrix
-# (found 2026-08-14); test_instruments_registry pins MODE_KEYS against the
+# A hand-maintained list here silently drops modes from the committed
+# config-parity figure while REPORT.md advertises the full matrix;
+# test_instruments_registry pins MODE_KEYS against the
 # registry, so deriving from it inherits that guard. Colours and short labels
 # likewise come from the one validated registry palette.
 MODES = list(pg.MODE_KEYS)
@@ -198,11 +198,11 @@ def _require_raw_matches_summary(summary, star, o_all, p_all, of, pf):
     older experiment. Plotting those silently re-labels stale numbers with the
     committed artifact's release banner.
 
-    This is not hypothetical. On 2026-08-14 the outputs directory held a
-    worker-v10, 7-mode run while the committed summary was worker v11 with 8
-    modes; regenerating drew a 0.9973 binned-median flux ratio over an
-    artifact that records exactly 1.0 (max_abs_dev 2.2e-16). House rule: a
-    check that cannot run must say so, and a mismatch is a hard error.
+    This is not hypothetical: an outputs directory holding a worker-v10,
+    7-mode run beside a committed worker-v11, 8-mode summary drew a 0.9973
+    binned-median flux ratio over an artifact that records exactly 1.0
+    (max_abs_dev 2.2e-16). House rule: a check that cannot run must say so,
+    and a mismatch is a hard error.
     """
     s_star = summary["stars"][star]
     s_modes = {r["key"] for r in s_star["modes"]}
@@ -283,10 +283,10 @@ def fig_extracted_flux(summary, out_root, mode="nirspec_g395h",
                  f"{STAR_LABEL[star]} star\n(the ETC engine product, "
                  f"Pandeia {release} both sides; grids matched at rtol 1e-9)")
     ax.legend(frameon=False, fontsize=9.5)
-    # (an earlier annotation blamed "narrow dips" on the two sides using
-    # different stellar spectra; both sides now receive the identical
-    # PandExo-resampled spectrum, and after the quantum-yield unfold the two
-    # extractions agree per pixel, so the curves are the same line)
+    # both sides receive the identical PandExo-resampled spectrum, and after
+    # the quantum-yield unfold the two extractions agree per pixel, so the
+    # curves are the same line -- never label a residual here as a stellar-
+    # spectrum difference
     ax.annotate("both sides receive the identical resampled stellar\n"
                 "spectrum; after the quantum-yield unfold the two\n"
                 "extractions agree per pixel (median ratio 1.0000)",

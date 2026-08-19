@@ -227,11 +227,10 @@ def check_engine_data(base_mols: list[str], extra_mols: list[str]) -> list[Item]
                "it): download https://hitran.org/data/CIA/main/H2-He_2011.cia "
                f"to {h2he} (the /main/ path segment is required)."))
 
-    # HITRAN line lists feed the LINE-BY-LINE opacity mode only, which since
-    # v31 runs solely under a Mie condensate deck. The default correlated-k
-    # mode reads the ExoMolOP k-tables below and never opens these files, so
-    # they are not required for a default run (they used to be listed as
-    # required, which described the pre-v30 default).
+    # HITRAN line lists feed the LINE-BY-LINE opacity mode only, which runs
+    # solely under a Mie condensate deck. The default correlated-k mode reads
+    # the ExoMolOP k-tables below and never opens these files, so they are
+    # not required for a default run.
     for mol in base_mols + extra_mols:
         spec = cfg.MOLECULES.get(mol)
         if spec is None or spec["source"] != "hitran":
@@ -248,11 +247,11 @@ def check_engine_data(base_mols: list[str], extra_mols: list[str]) -> list[Item]
                    "it."))
 
     # ExoMolOP k-tables: what the DEFAULT opacity_mode ("exomolop") actually
-    # reads, ~389 MB per species. Before v31 this check did not exist, so
-    # `jwst-tool data` reported green while the data behind every default run
-    # could be entirely absent. Never AUTO -- the engine refuses to download
-    # at run time. Species with no published table (forward._NO_EXOMOLOP_TABLE,
-    # refused early by canonical_params) are skipped here.
+    # reads, ~389 MB per species. Without this check `jwst-tool data` reports
+    # green while the data behind every default run is entirely absent.
+    # Never AUTO -- the engine refuses to download at run time. Species with
+    # no published table (forward._NO_EXOMOLOP_TABLE, refused early by
+    # canonical_params) are skipped here.
     from jwst_tool.forward import _NO_EXOMOLOP_TABLE
     ktable_mols = [m for m in base_mols + extra_mols
                    if m not in _NO_EXOMOLOP_TABLE]

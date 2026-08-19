@@ -142,9 +142,8 @@ def _validate_spectrum(spectrum: dict) -> dict:
 def _validate_panels(posterior_panels) -> list[dict]:
     panels = list(posterior_panels or [])
     if len(panels) > 3:
-        # 3, not 2: the GUI's _MAX_POST_PANELS was raised to 3 and
-        # this guard was not, so a three-parameter selection would have raised
-        # here instead of rendering.
+        # This cap must track the GUI's _MAX_POST_PANELS: if it lags, a
+        # selection the widget allows raises here instead of rendering.
         raise ValueError("compose_summary_figure: at most three posterior "
                          f"panels are supported, got {len(panels)}")
     out = []
@@ -213,10 +212,10 @@ def _validate_panels(posterior_panels) -> list[dict]:
 def _wl_ticks(lo: float, hi: float, max_n: int = 7) -> list[float]:
     """"Nice" wavelength ticks inside [lo, hi] on a log axis.
 
-    The old fixed list (1, 1.5, 2, 3, ... 12) is right for a full-range
-    spectrum and wrong for a zoom: a 3.0-3.5 um window landed a single tick.
-    This falls back to progressively finer steps until the window carries
-    enough of them, so a user-chosen range is always readable.
+    A fixed list (1, 1.5, 2, 3, ... 12) is right for a full-range spectrum and
+    wrong for a zoom: a 3.0-3.5 um window lands a single tick. This falls back
+    to progressively finer steps until the window carries enough of them, so a
+    user-chosen range is always readable.
     """
     for step in (1.0, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01):
         first = np.ceil(lo / step) * step
@@ -269,8 +268,8 @@ def _visible_ylim(spec: dict, lo: float, hi: float):
             return (y0 / f, y1 * f)
         pad = 0.10 * (y1 - y0) if y1 > y0 else max(1.0, abs(y0) * 0.01)
         return (y0 - pad, y1 + pad)
-    # Fallback (no model inside the window): the old points-inclusive fit,
-    # whiskers included so a point's whisker is never clipped.
+    # Fallback (no model inside the window): a points-inclusive fit, whiskers
+    # included so a point's whisker is never clipped.
     centers, whiskers = [], []
     for p in spec["points"]:
         pm = (p["wl_um"] >= lo) & (p["wl_um"] <= hi)
@@ -284,17 +283,17 @@ def _visible_ylim(spec: dict, lo: float, hi: float):
         # A negative WHISKER may be dropped from the limits; a negative CENTER
         # may not. An eclipse depth of 50 +/- 340 ppm has a 1-sigma lower bound
         # below zero -- physically ordinary at low S/N -- and letting that set
-        # y0 tripped the positive-range guard below, refusing a log axis on
-        # data whose depths were entirely positive and spanned 1.4 decades
-        # (exactly where a log axis earns its keep). The whisker is then
-        # clipped at the spine and visibly runs off the bottom, which costs far
-        # less than refusing the axis.
+        # y0 trips the positive-range guard below, refusing a log axis on data
+        # whose depths are entirely positive and span 1.4 decades (exactly
+        # where a log axis earns its keep). The whisker is then clipped at the
+        # spine and visibly runs off the bottom, which costs far less than
+        # refusing the axis.
         #
         # Model depths are NOT filtered: silently dropping part of the plotted
-        # curve is the failure the guard exists to catch. A first version of
-        # this fix filtered everything and rendered a -400..900 ppm model as
-        # its positive 69% with no indication -- so a mixed-sign model must
-        # still reach the guard and be refused.
+        # curve is the failure the guard exists to catch. Filtering everything
+        # renders a -400..900 ppm model as its positive 69% with no
+        # indication, so a mixed-sign model must still reach the guard and be
+        # refused.
         whiskers = [w[w > 0.0] for w in whiskers]
     allv = np.concatenate([a for a in centers + whiskers if a.size])
     if allv.size == 0:
@@ -333,18 +332,15 @@ def _plot_spectrum(ax, spec: dict) -> None:
     for p in spec["points"]:
         # markeredgecolor MUST be set: science.mplstyle leaves it "auto" with
         # markeredgewidth 1.0, and on a 3.6 pt marker a 1 pt black edge
-        # swallows the fill -- every mode's marker rendered black and the
-        # per-mode color was invisible. That color is now the series identity
+        # swallows the fill -- every mode's marker renders black and the
+        # per-mode color is invisible. That color is the series identity
         # shared with the forecast panels, so it has to read.
-        # ms 3.6, down from 5.0 (the points were
-        # blocking the model). Two changes address that, and the size is the
-        # smaller of them: the model line is also raised ABOVE the points
-        # (zorder 4, see _plot_spectrum) so it can no longer be chopped into
-        # fragments. That is what allows the markers to stay large enough to
-        # READ -- rendered at 3.0 / 3.6 / 4.2 / 5.0 over the model line, and at
-        # 3.0 the eight shapes all collapse to a dot, which would silently undo
-        # the per-mode marker encoding. 3.6 is the smallest size where D/^/v
-        # and P/X/* still separate.
+        # ms 3.6: the model line is raised ABOVE the points (zorder 4, see
+        # _plot_spectrum), which is what lets the markers stay large enough
+        # to READ. Measured at 3.0 / 3.6 / 4.2 / 5.0 over the model line: at
+        # 3.0 the eight shapes all collapse to a dot, silently undoing the
+        # per-mode marker encoding. 3.6 is the smallest size where D/^/v and
+        # P/X/* still separate.
         ax.errorbar(p["wl_um"], p["depth_ppm"], yerr=p["sigma_ppm"],
                     fmt=p["marker"], ms=3.6, lw=0.9, color=p["color"],
                     markerfacecolor=p["color"], markeredgecolor=p["color"],
@@ -377,15 +373,14 @@ def _plot_spectrum(ax, spec: dict) -> None:
     ylim = spec["depth_range"] or _visible_ylim(spec, lo, hi)
     if ylim is not None:
         if spec["depth_range"] is None and spec["points"]:
-            # Headroom for the IN-AXES legend.
-            # Unlike the old y-limit inflation this replaces, it is applied
-            # to the VISIBLE data range and sized from the legend's actual
-            # row count, so it scales with what is drawn instead of being a
-            # fixed fudge -- and only when a legend will be drawn at all.
-            # An explicit depth_range from the caller is never overridden.
+            # Headroom for the IN-AXES legend, applied to the VISIBLE data
+            # range and sized from the legend's actual row count, so it
+            # scales with what is drawn instead of being a fixed fudge -- and
+            # only when a legend will be drawn at all. An explicit
+            # depth_range from the caller is never overridden.
             _rows = len(spec["points"]) + 1 + (spec["depth2_ppm"] is not None)
-            # ~5.5% of the axis per legend row (was 7.5%, which overshot now
-            # that the data padding is tighter). Two columns above 4 entries.
+            # ~5.5% of the axis per legend row, matched to the data padding.
+            # Two columns above 4 entries.
             _frac = min(0.38, 0.055 * (_rows if _rows <= 4
                                        else np.ceil(_rows / 2) + 1))
             y0, y1 = ylim
@@ -405,16 +400,14 @@ def _plot_spectrum(ax, spec: dict) -> None:
         # LOG-SPACED ticks at every span (LogLocator with 1-2-5 subdivisions),
         # formatted as plain numbers rather than powers of ten.
         #
-        # This replaces a MaxNLocator branch that placed LINEARLY spaced ticks
-        # whenever the span was under 1.5 decades. That was written to fix a
-        # real problem -- a transit depth spans a tiny fraction of a decade
-        # (measured: 0.019 for a 19.6-20.5 kppm range), and a bare decade
-        # locator puts every tick outside the view, so the axis drew with NO
-        # labels at all. But linear ticks on a log axis are misleading: equal
-        # label steps sit at unequal distances. Measured tick counts inside the
-        # view with subs=(1, 2, 5): 8 at 0.019 decades, 7 at 0.48, 5 at 1.38,
-        # 6 at 1.70, 9 at 2.60 -- so the subdivided log locator solves the
-        # no-labels case that motivated the linear branch, at every span.
+        # A transit depth spans a tiny fraction of a decade (measured: 0.019
+        # for a 19.6-20.5 kppm range), and a bare decade locator puts every
+        # tick outside the view, so the axis draws with NO labels at all.
+        # LINEARLY spaced ticks on a log axis are not the answer: equal label
+        # steps sit at unequal distances. Measured tick counts inside the view
+        # with subs=(1, 2, 5): 8 at 0.019 decades, 7 at 0.48, 5 at 1.38, 6 at
+        # 1.70, 9 at 2.60 -- the subdivided log locator solves the no-labels
+        # case at every span.
         ax.yaxis.set_major_locator(
             LogLocator(base=10.0, subs=(1.0, 2.0, 5.0)))
         ax.yaxis.set_minor_locator(NullLocator())
@@ -425,12 +418,11 @@ def _plot_spectrum(ax, spec: dict) -> None:
     ax.tick_params(labelsize=_TICK)
     ax.grid(alpha=0.25)
     if spec["points"]:
-        # Legend INSIDE the axes superseding the
-        # below-the-axes placement. loc="best" lets matplotlib score the
+        # Legend INSIDE the axes. loc="best" lets matplotlib score the
         # candidate corners against the plotted artists, so it lands where
-        # the data is not -- there is NO y-limit inflation to make room (that
-        # padding distorted the visible depth range purely for the legend's
-        # benefit, and is what the outside placement originally fixed).
+        # the data is not -- there is NO y-limit inflation to make room, which
+        # would distort the visible depth range purely for the legend's
+        # benefit.
         # A translucent frame keeps it readable if it must sit over gridlines.
         # TWO COLUMNS BY GROUP: model curves in the
         # first, instrument modes in the second. matplotlib fills a legend
@@ -454,8 +446,8 @@ def _plot_spectrum(ax, spec: dict) -> None:
             _ncol = 1
         # "upper left" into the reserved headroom, not "best": with a wide
         # spectrum every corner touches data at some wavelength.
-        # No legend TITLE: the entries carry their own
-        # numbers, so the title was a second caption inside the legend.
+        # No legend TITLE: the entries carry their own numbers, so a title is
+        # a second caption inside the legend.
         _leg = ax.legend(_h, _l, loc="upper left", frameon=True,
                          framealpha=0.82,
                          edgecolor="none", fontsize=_LEG,
@@ -471,13 +463,12 @@ def _plot_spectrum(ax, spec: dict) -> None:
 _PHI = 1.618
 _FIG_W_IN = 13.0
 
-# Forecast-panel x window: +/-N sigma about the widest drawn curve. 3 keeps
-# >99.7% of the mass and fills the panel; the grid's own +/-5 sigma left the
-# curve visually flat across most of the axis.
-# 3.5 sigma, not 3: at 3 sigma the curve is still at 1.1% of peak when it
-# meets the spine, so it reads as CLIPPED rather than as a tail going to zero.
-# At 3.5 it is 0.2% -- visually on the axis -- and >99.95% of the mass is in
-# frame either way.
+# Forecast-panel x window: +/-N sigma about the widest drawn curve. The
+# grid's own +/-5 sigma leaves the curve visually flat across most of the
+# axis. 3.5 sigma, not 3: at 3 sigma the curve is still at 1.1% of peak when
+# it meets the spine, so it reads as CLIPPED rather than as a tail going to
+# zero. At 3.5 it is 0.2% -- visually on the axis -- and >99.95% of the mass
+# is in frame either way.
 _XLIM_SIGMA = 3.5
 
 
@@ -599,8 +590,8 @@ def _plot_posterior_panel(axp, pan: dict, color: str,
                    or "relative forecast density", fontsize=_AX_LBL)
     # Headroom for the in-axes legend, sized from the legend's ROW COUNT --
     # the same rule the spectrum panel uses, and what CLAUDE.md documents.
-    # This replaced a hardcoded 1.42: with one curve per selected series the
-    # legend grows with the selection, so a constant only held by coincidence
+    # Never a hardcoded fraction: with one curve per selected series the
+    # legend grows with the selection, so a constant only holds by coincidence
     # (the legend sits upper-left while the curves peak centrally). Curves are
     # peak-normalized to 1.0, so the top is 1.0 + the legend's share.
     _rows = len(pan["curves"]) + (pan["center"] is not None)
@@ -673,11 +664,11 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
     # argument). Reentrant, so a caller holding it already is fine.
     with plotting.render_lock, \
             plt.style.context([str(_STYLE_FILE), _STYLE_OVERRIDES]):
-        # Spectrum at 2x width, then ONE PANEL PER PARAMETER.
-        # The single merged twin-axis box this replaces could not work: see
-        # _plot_posterior_panel for the measurement. A 2:1 wavelength panel is
-        # the right shape for a spectrum and matches how these appear in
-        # papers; the posterior panels stay square.
+        # Spectrum at 2x width, then ONE PANEL PER PARAMETER -- never a single
+        # merged twin-axis box (see _plot_posterior_panel for the
+        # measurement). A 2:1 wavelength panel is the right shape for a
+        # spectrum and matches how these appear in papers; the posterior
+        # panels stay square.
         # ASPECT RATIOS: the spectrum is golden
         # ratio (PHI:1 wide) and every forecast panel is SQUARE. Both are
         # enforced twice over -- the figure size is SOLVED so each gridspec
@@ -688,8 +679,7 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
         _npan = max(1, len(panels))
         _top = 0.965 if title is None else 0.905
         _bottom = 0.165 if footnote else 0.135
-        # wspace 0.16, was 0.24: a narrower gap. The
-        # y tick labels on each posterior panel are what set the floor here --
+        # The y tick labels on each posterior panel set the wspace floor here:
         # below ~0.13 they start colliding with the panel to their left.
         _left, _right, _wspace = 0.055, 0.988, 0.16
         # fig_w = axes_h * sum(width_ratios) * (1 + npan*wspace/ncols)
@@ -715,12 +705,9 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
         # -- RIGHT: one square panel per marginalized forecast posterior ----
         for i in range(_npan):
             axp = fig.add_subplot(gs[0, i + 1])
-            # SQUARE. The equal-height rule this
-            # replaces is preserved anyway: the figure height is solved so a
-            # square panel exactly fills the row, so square and
-            # same-height-as-the-spectrum are the same thing here -- which is
-            # why the earlier attempt needed set_box_aspect(None) and this one
-            # does not.
+            # SQUARE. The figure height is solved so a square panel exactly
+            # fills the row, so square and same-height-as-the-spectrum are the
+            # same thing here.
             axp.set_box_aspect(1.0)
             if i >= len(panels):
                 axp.set_axis_off()

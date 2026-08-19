@@ -54,8 +54,8 @@ def test_panel_xlim_verbatim_when_given_automatic_otherwise():
 
     The curve is NOT resampled: posteriors.gaussian_curve's grid is MC-pinned
     elsewhere, so this must stay a pure window -- the same curve, a different
-    frame. (2026-08-14: this replaces a sigma-multiple slider. The axis
-    controls are typed min/max numbers now, so the panel window is an absolute
+    frame. (There is no sigma-multiple slider: the axis
+    controls are typed min/max numbers, so the panel window is an absolute
     pair in the parameter's own units, not a width.)
     """
     mu, sigma = 1.0, 0.1
@@ -194,9 +194,8 @@ def test_validation_is_loud():
         summary_figure.compose_summary_figure(
             _spectrum(with_points=False),
             posterior_panels=[dict(axis_label="x", curves=[], notes=[])])
-    # the cap is THREE (2026-08-13), matching the GUI's _MAX_POST_PANELS --
-    # it was 2 here while the widget already allowed 3, so a three-parameter
-    # selection raised instead of rendering
+    # the cap is THREE, matching the GUI's _MAX_POST_PANELS: a lower cap
+    # here makes a selection the widget allows raise instead of rendering
     with pytest.raises(ValueError, match="at most three"):
         summary_figure.compose_summary_figure(
             _spectrum(with_points=False),

@@ -1,6 +1,6 @@
 """The gravitational constant is duplicated across repos; pin it.
 
-`forward.py:1561` converts this tool's surface-gravity input into the planet
+`forward.py:1640` converts this tool's surface-gravity input into the planet
 mass VULCAN-JAX wants:
 
     Mp = gs_cgs * rp_cm**2 / planets.G_CGS
@@ -10,7 +10,7 @@ and `vulcan_jax.atm_setup.surface_gravity` inverts it:
     gs = phy_const.G_grav * Mp / Rp**2
 
 so `gs` round-trips ONLY because two independently-declared literals happen to
-carry the same digits. Nothing checked that until 2026-08-14. A one-digit edit
+carry the same digits. A one-digit edit
 on either side would silently rescale every atmosphere this tool submits, with
 no error anywhere: the value stays physical, just wrong.
 

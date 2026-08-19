@@ -104,9 +104,8 @@ def build_share(canon: dict, goal: dict, observation: dict,
         "goal": dict(goal),
         "observation": dict(observation),
         # Which software wrote this file is recorded ONCE, inside the
-        # provenance block ("software"): provenance._versions() is a superset
-        # of the top-level copy this key used to carry (it adds jax and
-        # numpy). Informational only -- a configuration must load on any tool
+        # provenance block ("software"), never as a second top-level copy.
+        # Informational only -- a configuration must load on any tool
         # version, and widget_state never reads it.
         "provenance": provenance.snapshot(observation.get("seed")),
     }
@@ -428,9 +427,9 @@ def _reject_removed_physics(cp: dict) -> None:
 
 
 def _network_suffix(cp: dict) -> str:
-    """Widget-key suffix for the non-default kinetics network (v33): the
-    sncho keys stay byte-identical to the pre-v33 contract, ncho widgets get
-    their own keys (same pattern as the provider-suffixed molecule keys)."""
+    """Widget-key suffix for the non-default kinetics network: the sncho keys
+    carry no suffix (shipped key contract), ncho widgets get their own keys
+    (same pattern as the provider-suffixed molecule keys)."""
     net = str(cp.get("network", "sncho"))
     return "" if net == "sncho" else f"_{net}"
 

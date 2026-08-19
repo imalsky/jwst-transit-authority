@@ -132,8 +132,20 @@ def gaussian_curve(center: float, sigma: float, grid=None,
                              f"at least 2 points, got shape {theta.shape}")
         if not np.all(np.isfinite(theta)):
             raise ValueError("gaussian_curve: grid contains non-finite values")
-        if not np.all(np.diff(theta) > 0.0):
-            raise ValueError("gaussian_curve: grid must be strictly ascending")
+    # Both paths: a grid that repeats a value carries no curve. An AUTO grid
+    # collapses that way when the +/- n_sigma window is thinner than one
+    # float64 step at the center -- which is what a center shifted far from
+    # the point where its sigma was linearized produces. Name that cause
+    # rather than reporting it as a bad grid.
+    step = np.diff(theta)
+    if np.any(step < 0.0):
+        raise ValueError("gaussian_curve: grid must be strictly ascending")
+    if np.any(step == 0.0):
+        raise ValueError(
+            f"gaussian_curve: the window around center {center!r} is "
+            f"unresolvable in float64 at sigma {sigma!r} -- the grid repeats "
+            "values. A center shifted far from where its sigma was "
+            "linearized is the usual cause.")
     z = (theta - center) / sigma
     pdf = np.exp(-0.5 * z * z) / (sigma * np.sqrt(2.0 * np.pi))
     return dict(theta=theta, pdf=pdf)
@@ -570,3 +582,40 @@ def mock_recovery(results, free_names: list[str], realization: dict,
                 delta=out_delta, delta_display=out_disp,
                 units={n: _param_unit(n) for n in free_names},
                 recovered=recovered)
+
+
+def mock_center_co(center: float, sigma_display: float, delta_ln: float,
+                   n_sigma: float = 5.0):
+    """Recovered absolute C/O for ONE draw, or None when it is off scale.
+
+    C/O lives on (0, inf), so the recovered center is shifted
+    MULTIPLICATIVELY by the internal ln-space shift (center +
+    delta_display can land below zero for a weakly constrained C/O).
+
+    The drawn curve keeps the FORECAST width, and that width is linearized
+    at the INPUT C/O (sigma_CO = C/O * sigma_lnCO). The pairing only holds
+    while the shifted center stays inside the forecast's own +/- n_sigma
+    window: on a weakly constrained direction exp(delta_ln) runs to many
+    orders of magnitude, and a center that far out carries no width
+    information -- its curve degenerates to one float64 value and the panel
+    axis stretches to the shifted center. Such a draw returns None; the
+    caller reports it and draws the unshifted forecast, never an off-scale
+    spike.
+    """
+    center = float(center)
+    sigma_display = float(sigma_display)
+    delta_ln = float(delta_ln)
+    if not (np.isfinite(center) and center > 0.0):
+        raise ValueError(f"mock_center_co: center must be finite and > 0, "
+                         f"got {center!r}")
+    if not (np.isfinite(sigma_display) and sigma_display > 0.0):
+        raise ValueError(f"mock_center_co: sigma_display must be finite and "
+                         f"> 0, got {sigma_display!r}")
+    if not np.isfinite(delta_ln):
+        raise ValueError(f"mock_center_co: delta_ln must be finite, got "
+                         f"{delta_ln!r}")
+    with np.errstate(over="ignore"):
+        mu = center * float(np.exp(delta_ln))
+    if not np.isfinite(mu):
+        return None
+    return mu if abs(mu - center) <= float(n_sigma) * sigma_display else None
