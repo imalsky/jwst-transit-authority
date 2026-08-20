@@ -254,7 +254,7 @@ st.markdown(
     "'Spectrum & forecast series' under the figure.\n\n"
     "The tool computes a forward "
     "spectrum and a Pandeia noise forecast, ranks the selected modes, and "
-    "reports how many transits or eclipses reach your target.\n\n"
+    "reports how many transits or eclipses reach your target. "
     "This is a planning tool. Detection values are conditional template "
     "S/N estimates, and parameter constraints are local Fisher estimates "
     "under the assumed atmosphere and noise model.")

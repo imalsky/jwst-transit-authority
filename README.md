@@ -1,41 +1,73 @@
 # vulcan-jwst-tool
 
-vulcan-jwst-tool plans JWST exoplanet spectroscopy. A live forward model
-(VULCAN-JAX photochemistry, then ExoJAX radiative transfer through the shared
-[vulcan-forward](https://github.com/imalsky/vulcan-forward) package) is scored
-against STScI Pandeia instrument noise. Given a planet and a science goal, it
-ranks JWST time-series modes and estimates how many transits or eclipses
-are needed.
-Transmission and thermal emission are both supported. The package imports as
-`jwst_tool` and installs the `jwst-tool` console script.
+`vulcan-jwst-tool` is a planning tool for JWST observations. The goal is to understand, for a given
+science goal, the relative information that different JWST modes give you. The tool combines:
 
-## Install
+- VULCAN-JAX photochemical kinetics;
+- ExoJAX transmission or thermal-emission spectra; and
+- STScI Pandeia instrument signal and noise.
+
+The tool ranks supported modes and estimates the number of transits or
+eclipses needed (e.g. to detect SO2 at a certain confidence). It also provides conditional
+template signal-to-noise values and local Fisher forecasts.
+
+In particular, I've focused on making the whole pipeline auto-differentiable. This is hugely helpful because the gradients and the Jacobians can be calculated quickly. Also, by hosting this online,
+users can test ideas quickly instead of downloading 10s of GBs of data.
+
+Try the [public web app](https://huggingface.co/spaces/imalsky/jwst-tool), or
+install the package for local runs. The Python package imports as `jwst_tool`. If you find bugs,
+note them here on GitHub or email me please.
+
+## Example
+
+![WASP-39 b SO2 detection](assets/w39b_so2_forecast.png)
+
+This is the tool's default case: detect SO2 on WASP-39 b in transmission,
+with one transit per mode. Left: the VULCAN x ExoJAX model, the same model
+without SO2, and one seeded mock realization per mode; each legend entry
+carries that mode's conditional template S/N for SO2. Right: per-mode
+marginalized Fisher constraints on C/O and [M/H], drawn recentered on the
+same noise draw. These are linearized forecasts, not sampled posteriors.
+
+To make this figure, open the web app, keep the defaults, and press Run.
+
+## Install (don't)
+
+This can be run locally, but I really want the main tool to be the online version.
+Locally, Python 3.10 or later is required. Pandeia runs in a separate Python 3.12
+environment so that its dependencies do not change the forward-model
+environment.
 
 ```bash
-pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple 'vulcan-jwst-tool[gui]'
+python -m pip install \
+  -i https://test.pypi.org/simple/ \
+  --extra-index-url https://pypi.org/simple/ \
+  "vulcan-jwst-tool[gui]"
+
 conda create -n pandeia_2026_7 python=3.12
 conda run -n pandeia_2026_7 pip install pandeia.engine==2026.7
 ```
 
-Set the data locations in your shell profile:
+Set the data and output paths:
 
 ```bash
-export JWST_TOOL_DATA_DIR="$HOME/vulcan/jwst_data"
-export JWST_TOOL_OUTPUT_DIR="$HOME/vulcan/jwst_output"
-export JWST_TOOL_PANDEIA_PYTHON="$(conda run -n pandeia_2026_7 which python)"
-export VULCAN_FORWARD_DATA="$HOME/vulcan/forward_data"
+export JWST_TOOL_DATA_DIR="$HOME/vulcan/jwst-data"
+export JWST_TOOL_OUTPUT_DIR="$HOME/vulcan/jwst-output"
+export JWST_TOOL_PANDEIA_PYTHON="/path/to/pandeia_2026_7/bin/python"
+export VULCAN_FORWARD_DATA="$HOME/vulcan/forward-data"
 ```
 
-Then fetch the reference data. `jwst-tool fetch` downloads everything with a
-public URL and prints the two STScI downloads it cannot script. The ExoMolOP
-k-tables (the default opacity source) are fetched separately:
+Fetch the available reference data and check the installation:
 
 ```bash
 jwst-tool fetch
-python -m vulcan_forward.fetch_exomolop --molecules H2O,CO2,CO,CH4,SO2,C2H2,C2H4,H2S,HCN,NH3,OCS,SO,SH
+python -m vulcan_forward.fetch_exomolop \
+  --molecules H2O,CO2,CO,CH4,SO2,C2H2,C2H4,H2S,HCN,NH3,OCS,SO,SH
+jwst-tool data
 ```
 
-`jwst-tool data` reports what is installed, with a remedy per missing item.
+`jwst-tool fetch` prints instructions for STScI files that need a manual
+download. Pandeia engine, reference-data, and PSF releases must match.
 
 ## Run
 
@@ -43,57 +75,65 @@ python -m vulcan_forward.fetch_exomolop --molecules H2O,CO2,CO,CH4,SO2,C2H2,C2H4
 jwst-tool
 ```
 
-This launches the Streamlit GUI. Keep the defaults (WASP-39 b, detect SO2 at
-3 sigma, PRISM + G395H + MIRI LRS) and press Run for a first result. A fresh
-parameter set takes a few minutes; results are cached. The "Custom planet"
-mode plans transiting planets within the tool's supported parameter ranges,
-with an optional auto-fill from a shipped NASA Exoplanet Archive snapshot.
+This starts the Streamlit app. The first model can take several minutes.
+Later runs can use cached chemistry, spectra, and noise calculations.
 
-## Scope and limits
+The tool includes fixed configurations for selected NIRSpec, NIRISS SOSS,
+NIRCam grism, and MIRI LRS modes. It supports transmission and eclipse
+planning. Custom targets must stay within the model and opacity ranges shown
+in the app.
 
-The noise model is diagonal: per-bin Pandeia noise, an optional floor, and
-per-detector-segment depth offsets. It omits time-correlated residuals,
-visit-long trends, and stellar heterogeneity. Detection scores are
-conditional matched-template S/N values, not retrieval posteriors; a
-retrieval freeing more parameters usually reports lower significance. Noise
-forecasts are pandeia-extracted, benchmarked against PandExo, and
-conservative relative to PandExo on nearly every tested mode; the current
-measured numbers are in `tests/parity/outputs/REPORT.md`. Fisher
-constraints use certified derivatives (central finite differences that must
-pass a step-halving consistency gate, or forward-mode AD; an uncertified
-derivative is never reported). Fisher values are local, linearized
-half-widths under the assumed atmosphere and noise model, marginalized over
-the other free parameters unless labeled conditional; rank-deficient
-directions are reported as unconstrained.
+## How to interpret the result
 
-## Tests and validation
+Use the rankings for exploration and mode comparison. Before a proposal,
+confirm the final setup, saturation limits, groups, subarray, and timing in
+the current JWST ETC and APT.
 
-This tool includes test suites, as well as other validation checks. The suites
-run in CI for each repository:
-[jax-vulcan](https://github.com/imalsky/jax-vulcan),
-[vulcan-forward](https://github.com/imalsky/vulcan-forward),
-[vulcan-jwst-tool](https://github.com/imalsky/vulcan-jwst-tool), and
-[vulcan-retrieval](https://github.com/imalsky/vulcan-retrieval). For
-end-to-end tests, see the set of validation figures that I've created
-[here](https://github.com/imalsky/vulcan-forward/tree/main/validation/figures).
-This includes trying to recreate the results of
-[Tsai et al. 2023](https://doi.org/10.5281/zenodo.7542781), the
-[JWST ERS carbon dioxide paper](https://doi.org/10.5281/zenodo.6959427), and
-VULCAN 2.0 and petitRADTRANS on identical inputs.
+- Detection scores are conditional template signal-to-noise values. They are
+  not retrieval significances.
+- Fisher intervals are local, linear estimates under the selected atmosphere
+  and noise assumptions. By this, I mean that it is local around the specific forward model that
+  was run, and shouldn't be considered global behavior for different input parameters that can
+  change the resulting atmosphere a lot.
+- The default covariance treats spectral bins as independent. It does not model
+  time-correlated systematics, stellar heterogeneity, or visit-long trends.
+- A noise floor can be added, but one fixed floor cannot represent every
+  target, mode, and reduction method.
+- Models and cached outputs are evidence, not observational ground truth.
 
-## Deployment
+## Validation
 
-The public instance runs as a Hugging Face Space; the recipe is in `deploy/`.
+The test suite covers instrument configuration, binning, noise scaling,
+detection statistics, Fisher calculations, and full transmission and emission
+chains. Pandeia results are also compared with PandExo. Radiative-transfer
+checks against petitRADTRANS and science comparison figures are stored in
+[`vulcan-forward`](https://github.com/imalsky/vulcan-forward/tree/main/validation/figures).
 
-## How to cite
+```bash
+python -m pip install -e ".[gui,dev]"
+python -m pytest tests -q
+```
 
-Cite the software via [`CITATION.cff`](CITATION.cff). Published results should
-also cite the components a run used: VULCAN (Tsai et al. 2017, 2021), FastChem
-(Stock et al. 2018), ExoJAX (Kawahara et al. 2022, 2025), Pandeia
-(Pontoppidan et al. 2016), PandExo for the noise benchmark (Batalha et al.
-2017), virga and its refractive-index dataset for cloud runs, and the NASA
-Exoplanet Archive for the custom-planet fill (Christiansen et al. 2025).
+## Papers and citation
 
-## License
+Use [`CITATION.cff`](CITATION.cff) to cite this software. Also cite the parts
+used in the analysis:
 
-GPLv3, inherited from VULCAN.
+- VULCAN: [Tsai et al. (2017)](https://doi.org/10.3847/1538-4365/228/2/20)
+  and [Tsai et al. (2021)](https://doi.org/10.3847/1538-4357/ac29bc)
+- ExoJAX: [Kawahara et al. (2022)](https://arxiv.org/abs/2105.14782) and
+  [Kawahara et al. (2025)](https://arxiv.org/abs/2410.06900)
+- Pandeia: [Pontoppidan et al. (2016)](https://doi.org/10.1117/12.2231768)
+- PandExo comparison: [Batalha et al. (2017)](https://doi.org/10.1088/1538-3873/aa65b0)
+- ExoMolOP tables: [Chubb et al. (2021)](https://doi.org/10.1051/0004-6361/202038350)
+- FastChem initialization: [Stock et al. (2018)](https://doi.org/10.1093/mnras/sty1531)
+
+Record the software commits, Pandeia release, reference-data release, opacity
+data, reaction network, and model settings with any published result.
+
+## Support and license
+
+Open a [GitHub issue](https://github.com/imalsky/vulcan-jwst-tool/issues) and
+include the exported configuration, versions, and full error message.
+
+`vulcan-jwst-tool` is released under GPLv3.
