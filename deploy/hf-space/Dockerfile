@@ -56,10 +56,9 @@ RUN set -e; \
     cat /srv/vulcan/BUILD_INFO
 
 # Pins live in the jwst-tool repo (deploy/) so the Space shim never drifts
-# from the validated versions. The app env installs the FULL LOCK with
-# --no-deps: the validated environment violates some declared metadata
-# (exojax 2.2.3 pins numpy<2, the working env runs numpy 2.0.2), so a
-# resolver pass is guaranteed to fail -- replicate, don't resolve. The lock
+# from the validated versions. The app env installs the FULL resolver-clean
+# lock with --no-deps so a later image rebuild reproduces the certified
+# versions instead of re-resolving newer transitive dependencies. The lock
 # includes streamlit/pandas (gui extra) and huggingface_hub (bootstrap).
 RUN /opt/conda/envs/pandeia/bin/pip install --no-cache-dir \
         -r /srv/vulcan/vulcan-jwst-tool/deploy/requirements-pandeia.txt

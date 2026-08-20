@@ -34,6 +34,12 @@ dependencies = [
     "numpy>=1.26",
     "matplotlib",
     "jax>=0.6.2",
+    # Emission converts the local PHOENIX grid into a stellar surface-flux
+    # spectrum in jwst_tool.stellar.  These were present in the Space lock but
+    # missing from the package metadata, so a clean local install failed only
+    # when the first emission model reached the stellar-SED step.
+    "synphot>=1.5",
+    "stsynphot>=1.4",
     # The forward-model engine is a shared distribution since 2026-07-29,
     # so this tool no longer depends on the retrieval application at all
     # (they are siblings over one engine). 0.1.0 is the extraction
