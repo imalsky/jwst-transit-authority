@@ -235,7 +235,7 @@ st.set_page_config(page_title="JWST Exoplanet Observation Planner",
 # ---------------------------------------------------------------------------
 # Header: short orientation, no acknowledgment gate
 # ---------------------------------------------------------------------------
-st.title("JWST exoplanet observation planner")
+st.title("How to use this tool")
 st.subheader("Warning: This tool is in beta mode. That means if you find "
              "a bug, you beta email isaacmalsky@gmail.com")
 st.markdown(
@@ -255,9 +255,9 @@ st.markdown(
     "The tool computes a forward "
     "spectrum and a Pandeia noise forecast, ranks the selected modes, and "
     "reports how many transits or eclipses reach your target. "
-    "This is a planning tool. Detection values are conditional template "
-    "S/N estimates, and parameter constraints are local Fisher estimates "
-    "under the assumed atmosphere and noise model.")
+    "Detection values are conditional template "
+    "S/N estimates, and parameter constraints are local Fisher "
+    "estimates.")
 
 # The Run row renders HERE (above the explainers). Its widgets depend on
 # sidebar state that is read further down, so the slot is reserved now and
