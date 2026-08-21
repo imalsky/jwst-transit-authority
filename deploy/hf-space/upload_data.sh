@@ -94,8 +94,8 @@ PYEOF
         [ -e "$dst" ] || ln "$src" "$dst" 2>/dev/null || cp -c "$src" "$dst"
     done
     # Provenance must describe what was STAGED, not the maintainer's whole
-    # local tree. Copying it wholesale (until 2026-08-17) made the dataset
-    # repo claim 17 tables when 11 were uploaded, and a check that trusted it
+    # local tree. Copying it wholesale once made the dataset repo claim 17
+    # tables when 11 were uploaded, and a check that trusted it
     # concluded SH/SO were present when they had never been staged -- the
     # Space then failed at run time on the default molecule set.
     KTABLE_MOLS="$KTABLE_MOLS" python3 - "$KTABLE_SRC/provenance.json" \

@@ -5,7 +5,7 @@ SURFACE flux density per wavenumber (erg s^-1 cm^-2 / cm^-1) on the native RT
 grid, from the same minimal-CDBS PHOENIX grid the Pandeia noise side uses.
 
 Units contract: the CDBS PHOENIX models are emergent SURFACE flux densities
-and ExoJax ``ArtEmisPure`` returns the planet's in the same convention, so
+and ExoJAX ``ArtEmisPure`` returns the planet's in the same convention, so
 
     eclipse depth  d_ec(nu) = (F_p(nu) / F_s(nu)) * (R_p/R_s)^2
 

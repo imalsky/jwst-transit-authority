@@ -60,13 +60,13 @@ _BACKEND_FINGERPRINT = None
 # changes (per-version history: notes.md); a bump without a fresh parity run
 # fails the gate test.
 #
-# "Output" here means a MEASURED value. NOT bumped on 2026-08-18, when the
-# worker's `unusable` reason string stopped calling sat_frac a "full-well
-# fraction" (it is a fraction of Pandeia's per-mode saturation level, which
-# is already derated on some instruments): no number moved, so an old cache
-# entry is still exactly right, while a bump would discard every cached ETC
-# result and invalidate the committed parity artifact over one sentence.
-# A change to any measured field still bumps.
+# "Output" here means a MEASURED value; wording-only changes do not bump
+# (e.g. the worker's `unusable` reason string no longer calls sat_frac a
+# "full-well fraction" -- it is a fraction of Pandeia's per-mode saturation
+# level, which is already derated on some instruments): no number moves, so
+# an old cache entry stays exactly right, while a bump would discard every
+# cached ETC result and invalidate the committed parity artifact over one
+# sentence. A change to any measured field still bumps.
 WORKER_VERSION = 12
 
 

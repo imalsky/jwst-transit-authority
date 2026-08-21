@@ -8,7 +8,7 @@ pinned: false
 # VULCAN JWST Tool
 
 JWST observability and information-content forecasts on live VULCAN-JAX
-photochemical kinetics: forward transmission/emission spectra (ExoJax RT),
+photochemical kinetics: forward transmission/emission spectra (ExoJAX RT),
 Pandeia 2026.7 noise (the STScI-supported matched triple), conditional
 template S/N, and certified Fisher constraint forecasts.
 

@@ -4,10 +4,7 @@ name: full-stack-smoke
 # numpy-only and installs the two sibling packages at the PINNED commits from
 # deploy/pins.env, so it cannot catch drift at the siblings' HEADs. This job
 # is the drift canary: it installs the WHOLE stack from the current HEADs of
-# all FOUR sibling repos (vulcan-forward was split out of vulcan-retrieval on
-# 2026-07-29; this workflow missed the split and every chem test skipped with
-# "No module named 'vulcan_forward'" from 2026-08-03 until the 2026-08-10
-# fix) and exercises the condensation path end-to-end:
+# all FOUR sibling repos and exercises the condensation path end-to-end:
 #
 #   fresh env
 #   -> install jax-vulcan HEAD (VULCAN-JAX)
@@ -29,7 +26,7 @@ name: full-stack-smoke
 on:
   workflow_dispatch:
   schedule:
-    # Weekly, Monday 06:00 UTC. Catches drift in any of the three HEADs.
+    # Weekly, Monday 06:00 UTC. Catches drift in any of the four HEADs.
     - cron: "0 6 * * 1"
 
 jobs:

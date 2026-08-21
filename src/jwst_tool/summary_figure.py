@@ -589,7 +589,7 @@ def _plot_posterior_panel(axp, pan: dict, color: str,
     axp.set_ylabel(pan.get("density_label")
                    or "relative forecast density", fontsize=_AX_LBL)
     # Headroom for the in-axes legend, sized from the legend's ROW COUNT --
-    # the same rule the spectrum panel uses, and what CLAUDE.md documents.
+    # the same rule the spectrum panel uses.
     # Never a hardcoded fraction: with one curve per selected series the
     # legend grows with the selection, so a constant only holds by coincidence
     # (the legend sits upper-left while the curves peak centrally). Curves are

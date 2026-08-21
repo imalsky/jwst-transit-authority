@@ -1,9 +1,9 @@
-"""Forward model runner: VULCAN-JAX photochemistry -> ExoJax transmission spectrum.
+"""Forward model runner: VULCAN-JAX photochemistry -> ExoJAX transmission spectrum.
 
 Two faces:
 
 * Imported by the GUI (light): ``params_key`` / ``cache_path`` / ``load_result``
-  touch only the disk cache -- no JAX, no VULCAN, no ExoJax imports.
+  touch only the disk cache -- no JAX, no VULCAN, no ExoJAX imports.
 * Run as a script (heavy): ``python -m jwst_tool.forward params.json`` runs the
   live pipeline and writes the npz cache entry. Progress goes to stdout as
   "[fwd] ..." lines; "[fwd] PROG <frac> <label>" lines drive the GUI bar.
@@ -217,7 +217,7 @@ def default_opacity_mode(params: dict) -> str:
     cross section directly on the output grid, far below exojax's critical
     resolution, and is measurably biased in BOTH observables -- worst in
     emission, where it suppressed more than half the emergent flux
-    (measurements: vulcan-forward README, the two Opacity sections).
+    (measurements: vulcan-forward notes.md, the two Opacity sections).
 
     ONE case keeps "lbl", and it is physics, not preference: a MIE CONDENSATE
     DECK. Mie extinction has structure across a band, so it cannot be folded
@@ -941,7 +941,7 @@ def canonical_params(params: dict) -> dict:
         "rt_dit_res": round(float(params.get("rt_dit_res", 1.0)), 3),
         # "exomolop" = correlated-k over the published k-tables; "lbl" = direct
         # sampling, kept only for the Mie deck (measurably biased in both
-        # observables -- vulcan-forward README, Opacity sections).
+        # observables -- vulcan-forward notes.md, Opacity sections).
         "opacity_mode": str(params.get("opacity_mode",
                                        default_opacity_mode(params))),
         # The pressure at which rp_rjup and gs_cgs apply. A catalogue radius
@@ -1068,7 +1068,7 @@ def canonical_params(params: dict) -> dict:
                 "so they cannot run under opacity_mode='exomolop' (the "
                 "default). Drop them, or set opacity_mode='lbl' knowingly "
                 "(sampled line-by-line, measurably biased -- vulcan-forward "
-                "README, Opacity sections).")
+                "notes.md, Opacity sections).")
     # --- leave-one-out spectrum set -----------------------------------------
     # After the molecule-universe checks, so the RT set is final. Canonical
     # form: a subset of active_molecules(cp) in fold order (deduped), which
@@ -1180,7 +1180,7 @@ def canonical_params(params: dict) -> dict:
                 "differences of pinned transients are equally "
                 "untrustworthy. Clear the Fisher parameter list (detection "
                 "works), or turn condensation off. For aerosol opacity in a "
-                "forecast use the differentiable ExoJax cloud deck "
+                "forecast use the differentiable ExoJAX cloud deck "
                 "(cloud_on) instead.")
         if not cp["use_photo"]:
             raise ValueError(
@@ -1263,7 +1263,7 @@ def canonical_params(params: dict) -> dict:
                 f"mie_log_mmr={cp['mie_log_mmr']} outside {MIE_LOG_MMR_RANGE} "
                 "(log10 condensate mass mixing ratio)")
         if science_mode == "emission":
-            # The ExoJax emission solver (ArtEmisPure) is pure-absorption, so a
+            # The ExoJAX emission solver (ArtEmisPure) is pure-absorption, so a
             # Mie deck's scattering extinction would be counted as thermal
             # absorption -- a conservative-scattering cloud would radiate like a
             # blackbody instead of zero, faking a thermal source in a cloudy
@@ -1540,7 +1540,7 @@ def _rt_profile_common(cp: dict, config) -> dict:
     """The RT-facing profile keys (exojax_rt / build_emis_model read exactly
     these); the dict is pinned by the golden regression test."""
     profile = dict(config.WIDE)
-    # numerical resolution: the ExoJax RT layer count is LOCKED equal to the
+    # numerical resolution: the ExoJAX RT layer count is LOCKED equal to the
     # chemistry layer count -- chemistry and RT share one grid.
     profile["nz"] = cp["nz"]
     profile["art_nlayer"] = cp["nz"]
@@ -1872,7 +1872,7 @@ def run_model(params: dict, log=print) -> Path:
 
     t0 = time.time()
     advance()
-    log("[fwd] building ExoJax RT (opacities + CIA) ...")
+    log("[fwd] building ExoJAX RT (opacities + CIA) ...")
     rt = exojax_rt.build_rt_model(profile)
     log(f"[fwd] RT ready in {time.time()-t0:.0f} s")
     # Echo check on the RT knobs: an engine too old to know these
@@ -1954,7 +1954,7 @@ def run_model(params: dict, log=print) -> Path:
         def art_T(th):
             return tp_eval(th[3:], p_art_j)
 
-    # ExoJax power-law retrieval cloud [log10 kappac0 (cm^2/g at 3.5 um),
+    # ExoJAX power-law retrieval cloud [log10 kappac0 (cm^2/g at 3.5 um),
     # alphac]: the BASELINE deck; the cloud= Fisher rows differentiate
     # around this vector (None when the deck is off).
     cloud_vec = (jnp.asarray([cp["log_kappa_cloud"], cp["alpha_cloud"]])

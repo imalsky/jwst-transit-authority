@@ -146,7 +146,7 @@ def test_fresh_boot_pre_run_contract():
     assert at.checkbox(key="n0_shownoise").value is True   # ON by default
     assert at.number_input(key="n0_seed").value == 0
     assert not [b for b in at.get("button") if b.key == "n0_reroll"], \
-        "the 'New draw' button was removed (maintainer, 2026-08-13)"
+        "the 'New draw' button was removed (maintainer decision)"
     # editing the seed still redraws without recomputing
     at.number_input(key="n0_seed").set_value(7).run()
     assert not at.exception, at.exception

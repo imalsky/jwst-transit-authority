@@ -186,7 +186,7 @@ def require_pandeia_python() -> str:
         f"  Backend '{JWST_TOOL_BACKEND}' also expects\n"
         f"    refdata: {_BE['refdata']}\n"
         f"    PSFs:    {_BE['psf'] or '(none: this backend carries its own)'}\n"
-        "  See README 'Pandeia backend' and `jwst-tool data` for the setup "
+        "  See the README's Install section and `jwst-tool data` for the setup "
         "steps.")
 
 

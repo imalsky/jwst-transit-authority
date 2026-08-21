@@ -228,7 +228,7 @@ def test_summary_legends_sit_inside_their_axes_and_cover_no_data():
     the requirement -- a legend that lands on the data is the failure -- so
     the real invariant is that no legend rectangle contains a plotted
     vertex, checked across 1/3/6 series since the spectrum legend grows
-    (record: the CLAUDE.md legend bullet).
+    (maintainer rule).
 
     Also pinned on the same figures: no legend TITLES (entries carry their
     own numbers) and no multi-line entries (folding a note into the model

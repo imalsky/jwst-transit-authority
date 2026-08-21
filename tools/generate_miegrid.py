@@ -1,4 +1,4 @@
-"""Generate ExoJax Mie lookup grids (miegrid_lognorm_<condensate>.mg.npz).
+"""Generate ExoJAX Mie lookup grids (miegrid_lognorm_<condensate>.mg.npz).
 
 One-time per condensate; the forward model only LOADS grids (pure
 numpy/jax, differentiable) and refuses loudly when one is missing, pointing

@@ -1,8 +1,8 @@
-"""JWST instrument-selection tool: VULCAN-JAX chemistry -> ExoJax RT -> Pandeia noise.
+"""JWST instrument-selection tool: VULCAN-JAX chemistry -> ExoJAX RT -> Pandeia noise.
 
 A live-forward-model instrument selector (PandExo-style GUI): pick a science
 goal (detect molecule X on a WASP-39b-like planet), and the tool runs the
-live VULCAN-JAX + ExoJax forward model locally, builds parameter Jacobians
+live VULCAN-JAX + ExoJAX forward model locally, builds parameter Jacobians
 as central finite differences of independently converged solves
 by default (each row ships its own step-size consistency bound -- see
 forward.py's FD block) with an opt-in warm-jvp AD path for every row,

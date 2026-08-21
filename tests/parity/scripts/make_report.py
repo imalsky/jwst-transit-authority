@@ -215,7 +215,8 @@ def main(require_pass: bool = False):
     w(f"| sigma ratio, MIRI LRS | {env['miri']} | same band |")
     w("")
     w(env["sense"] + " The residual sigma difference is the noise model "
-      "itself, not the configuration (mechanism: README.md). Saturation "
+      "itself, not the configuration (mechanism: notes.md, Parity "
+      "testing). Saturation "
       "masks are wavelength-aligned and gated for complete coverage and "
       "exact agreement; rows above the saturation limit are diagnostic "
       "rows, not validation rows.")

@@ -1,7 +1,7 @@
 name: tests
 
 # Fast, dependency-light CI: the whole unit suite is numpy-only (the pandeia and
-# JAX/VULCAN-JAX/ExoJax imports are function-local, so every jwst_tool module
+# JAX/VULCAN-JAX/ExoJAX imports are function-local, so every jwst_tool module
 # imports with numpy alone), plus two LIGHT touchpoints on the sibling packages
 # that the install step below supplies. It exercises the count-space binning operator, the
 # noise/floor/covariance math, detection + Fisher nuisance projection, the
@@ -33,7 +33,7 @@ jobs:
         # their own trees (exojax, the full JAX stack) are not needed here.
         #
         # The two siblings ARE needed, from GitHub, for two light touchpoints
-        # the unit suite reaches (they were the 6 failures 2026-07-22..08-02):
+        # the unit suite reaches:
         #   vulcan-jax     located with importlib.find_spec for its bundled
         #                  atm/*.txt T-P tables; the package is never executed
         #   vulcan-forward `from vulcan_forward import constants`, pure

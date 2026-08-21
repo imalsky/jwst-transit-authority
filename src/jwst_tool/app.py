@@ -3,7 +3,7 @@
 Launch via the console script ``jwst-tool`` (installed with vulcan-jwst-tool), or
 directly:  streamlit run src/jwst_tool/app.py  (from the repo root).
 
-Pipeline per run: VULCAN-JAX photochemistry -> ExoJax
+Pipeline per run: VULCAN-JAX photochemistry -> ExoJAX
 transmission/emission spectrum (local subprocess, disk-cached; ~1.5-2 min at
 the default 100-layer resolution on the maintainer's laptop, ~2.5x that on the
 HF Space -- see _RUNTIME_SCALE) -> Pandeia ETC noise per instrument mode
@@ -264,7 +264,7 @@ st.markdown(
 # filled once those values exist.
 _run_slot = st.container()
 
-# Mirrors the README "Tests and validation" section; nothing here runs.
+# Mirrors the README "Validation" section; nothing here runs.
 with st.expander("Validation"):
     st.markdown(
         "This tool includes test suites, as well as other validation checks. "
@@ -2697,7 +2697,7 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
                 f"of {fdiag['fisher_dimension']}): degenerate directions "
                 "read as unconstrained.**")
         # No "How to read this table" expander here: that reference material
-        # lives in README.md ("Scope and limits"); do not re-add it.
+        # lives in README.md ("How to interpret the result"); do not re-add it.
     elif out.get("fisher_names"):
         st.info("A constraint forecast was requested but the cached model has "
                 "no Jacobian. Press Run to compute it.")
