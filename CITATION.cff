@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-message: "If you use vulcan-jwst-tool in published work, please cite it as below, along with the underlying codes listed in the README's How to cite section."
+message: "If you use vulcan-jwst-tool in published work, please cite it as below, along with the underlying codes listed in the README's Papers and citation section."
 type: software
 title: "vulcan-jwst-tool: a JWST exoplanet observation planner with a live photochemical forward model"
 authors:
