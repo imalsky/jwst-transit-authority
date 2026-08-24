@@ -3107,5 +3107,365 @@
    "sat_limit": 0.8,
    "wl_match_rtol": 1e-09
   }
+ },
+ "lsf_impulse": {
+  "star": "w39_like",
+  "sigma_rel": 5e-05,
+  "amp": 0.5,
+  "provenance_ours": {
+   "engine_version": "2026.7",
+   "refdata_path": "pandeia_data-2026.7-jwst",
+   "refdata_name": "pandeia_data-2026.7-jwst",
+   "psf_path": "pandeia_psfs-2026.7-jwst",
+   "psf_name": "pandeia_psfs-2026.7-jwst",
+   "refdata_version": "2026.7",
+   "refdata_version_source": "VERSION_DATA",
+   "psf_version": "2026.7",
+   "psf_version_source": "VERSION_PSF",
+   "python": "3.12.11",
+   "numpy": "2.5.1",
+   "worker_version": 12
+  },
+  "modes": {
+   "nirspec_prism": {
+    "1.5": {
+     "r_native": 33.62439896462246,
+     "n_pixels": 27,
+     "fwhm_ratio": 0.9609138347800826,
+     "area_ratio": 1.0009792348368824,
+     "peak_ratio": 1.0338763258575412,
+     "max_resid_over_peak": 0.033876325857541155,
+     "r100_bin_ratio": 1.0338763258575412
+    },
+    "2": {
+     "r_native": 48.671081838877065,
+     "n_pixels": 26,
+     "fwhm_ratio": 0.9389645098852694,
+     "area_ratio": 1.0011124398736797,
+     "peak_ratio": 1.0509436988318261,
+     "max_resid_over_peak": 0.05094369883182624,
+     "r100_bin_ratio": 1.0509436988318261
+    },
+    "2.6": {
+     "r_native": 76.99618446427772,
+     "n_pixels": 27,
+     "fwhm_ratio": 0.9161004503054428,
+     "area_ratio": 1.0013459859000706,
+     "peak_ratio": 1.084313185927893,
+     "max_resid_over_peak": 0.08431318592789284,
+     "r100_bin_ratio": 1.0812836596351296
+    },
+    "3.1": {
+     "r_native": 107.92416177953594,
+     "n_pixels": 26,
+     "fwhm_ratio": 0.849284947782344,
+     "area_ratio": 0.999518223673547,
+     "peak_ratio": 1.142843396510383,
+     "max_resid_over_peak": 0.14284339651038302,
+     "r100_bin_ratio": 1.0538166131165256
+    },
+    "3.6": {
+     "r_native": 145.31607380069644,
+     "n_pixels": 26,
+     "fwhm_ratio": 0.8640536508138391,
+     "area_ratio": 1.0001745586632176,
+     "peak_ratio": 1.0698253321149245,
+     "max_resid_over_peak": 0.13525231248986613,
+     "r100_bin_ratio": 1.0112334809399326
+    },
+    "4.1": {
+     "r_native": 189.2779091742452,
+     "n_pixels": 26,
+     "fwhm_ratio": 0.8080900096465657,
+     "area_ratio": 1.0006506295365294,
+     "peak_ratio": 1.2219452042972045,
+     "max_resid_over_peak": 0.22194520429720466,
+     "r100_bin_ratio": 1.0256531245249465
+    },
+    "4.6": {
+     "r_native": 240.05242687079502,
+     "n_pixels": 26,
+     "fwhm_ratio": 1.1097452132175423,
+     "area_ratio": 1.0013140655655046,
+     "peak_ratio": 1.0291821252150544,
+     "max_resid_over_peak": 0.14852808476853738,
+     "r100_bin_ratio": 1.027333440869184
+    }
+   },
+   "nirspec_g395h": {
+    "3.1": {
+     "r_native": 2090.903760728307,
+     "n_pixels": 27,
+     "fwhm_ratio": 0.9583094174190164,
+     "area_ratio": 1.0101321062660615,
+     "peak_ratio": 1.0401204332236396,
+     "max_resid_over_peak": 0.04012043322363962,
+     "r100_bin_ratio": 0.9599269670300765
+    },
+    "3.6": {
+     "r_native": 2446.5445202648216,
+     "n_pixels": 26,
+     "fwhm_ratio": 0.9696013344614758,
+     "area_ratio": 0.9652765161660007,
+     "peak_ratio": 1.0334555145777362,
+     "max_resid_over_peak": 0.03529555392983514,
+     "r100_bin_ratio": 0.9975663005612169
+    },
+    "4.1": {
+     "r_native": 2812.9027373836648,
+     "n_pixels": 26,
+     "fwhm_ratio": 0.9672787864981517,
+     "area_ratio": 1.0193142238916126,
+     "peak_ratio": 1.033299120103773,
+     "max_resid_over_peak": 0.033299120103772874,
+     "r100_bin_ratio": 0.9831684121349669
+    },
+    "4.6": {
+     "r_native": 3194.6695447442203,
+     "n_pixels": 26,
+     "fwhm_ratio": 0.9645456449208375,
+     "area_ratio": 0.990353676985006,
+     "peak_ratio": 1.0361205036827748,
+     "max_resid_over_peak": 0.036120503682774835,
+     "r100_bin_ratio": 0.9995139322050051
+    }
+   },
+   "nirspec_g235h": {
+    "2": {
+     "r_native": 2276.3677470897405,
+     "n_pixels": 27,
+     "fwhm_ratio": 0.9575130863686147,
+     "area_ratio": 0.985919529548345,
+     "peak_ratio": 1.0391532538913855,
+     "max_resid_over_peak": 0.050421578969647586,
+     "r100_bin_ratio": 0.9340867481861778
+    },
+    "2.6": {
+     "r_native": 3017.733733991709,
+     "n_pixels": 27,
+     "fwhm_ratio": 0.9620364779563212,
+     "area_ratio": 1.002284240117102,
+     "peak_ratio": 1.0378326208100677,
+     "max_resid_over_peak": 0.03783262081006766,
+     "r100_bin_ratio": 0.988132852790045
+    }
+   },
+   "nirspec_g395m": {
+    "3.1": {
+     "r_native": 783.4532191820691,
+     "n_pixels": 26,
+     "fwhm_ratio": 1.3323889516376606,
+     "area_ratio": 0.9986663279781041,
+     "peak_ratio": 1.0482610330890025,
+     "max_resid_over_peak": 0.2681564256569861,
+     "r100_bin_ratio": 0.9468374108917643
+    },
+    "3.6": {
+     "r_native": 910.6712279974083,
+     "n_pixels": 26,
+     "fwhm_ratio": 1.056799180232828,
+     "area_ratio": 1.0236147296578202,
+     "peak_ratio": 1.0975738926917051,
+     "max_resid_over_peak": 0.19146544304737348,
+     "r100_bin_ratio": 1.0153703527947862
+    },
+    "4.1": {
+     "r_native": 1038.3694963851221,
+     "n_pixels": 27,
+     "fwhm_ratio": 0.8577089094259892,
+     "area_ratio": 0.9602422929712724,
+     "peak_ratio": 1.0417444207809992,
+     "max_resid_over_peak": 0.20290246035285373,
+     "r100_bin_ratio": 0.9380996918363779
+    },
+    "4.6": {
+     "r_native": 1166.6355350690415,
+     "n_pixels": 26,
+     "fwhm_ratio": 1.0397269177664126,
+     "area_ratio": 1.0031113965640643,
+     "peak_ratio": 1.0396722364130038,
+     "max_resid_over_peak": 0.1344213030479928,
+     "r100_bin_ratio": 1.0031132315359708
+    }
+   },
+   "niriss_soss": {
+    "1.1": {
+     "r_native": 581.8900021710416,
+     "n_pixels": 24,
+     "fwhm_ratio": 0.5822932584381151,
+     "area_ratio": 0.8954541508388904,
+     "peak_ratio": 0.9578079274317554,
+     "max_resid_over_peak": 0.3767223586094777,
+     "r100_bin_ratio": 0.9339033144794682
+    },
+    "1.5": {
+     "r_native": 762.6599829110293,
+     "n_pixels": 25,
+     "fwhm_ratio": 3.2984129213870776,
+     "area_ratio": 0.9241588769321522,
+     "peak_ratio": 0.7291982889024852,
+     "max_resid_over_peak": 0.27080171109751483,
+     "r100_bin_ratio": 1.070090837580972
+    },
+    "2": {
+     "r_native": 1021.8021163263893,
+     "n_pixels": 24,
+     "fwhm_ratio": 2.610630250042612,
+     "area_ratio": 0.9216344505191197,
+     "peak_ratio": 0.732758524008041,
+     "max_resid_over_peak": 0.267241475991959,
+     "r100_bin_ratio": 0.8872129729533521
+    },
+    "2.6": {
+     "r_native": 1338.298476926888,
+     "n_pixels": 24,
+     "fwhm_ratio": 2.219225534170976,
+     "area_ratio": 0.9119609130510303,
+     "peak_ratio": 0.6468887971058684,
+     "max_resid_over_peak": 0.35311120289413156,
+     "r100_bin_ratio": 0.9238795609159528
+    }
+   },
+   "nircam_f322w2": {
+    "2.6": {
+     "r_native": 1215.8277666904032,
+     "n_pixels": 26,
+     "fwhm_ratio": 1.9283679874545683,
+     "area_ratio": 0.9574004774647176,
+     "peak_ratio": 0.8179431278853944,
+     "max_resid_over_peak": 0.22816651183618353,
+     "r100_bin_ratio": 0.9574004774647297
+    },
+    "3.1": {
+     "r_native": 1400.491239135851,
+     "n_pixels": 27,
+     "fwhm_ratio": 1.6990654410477135,
+     "area_ratio": 0.9418048039141234,
+     "peak_ratio": 0.7223079619088355,
+     "max_resid_over_peak": 0.2776920380911645,
+     "r100_bin_ratio": 0.9450540129076637
+    },
+    "3.6": {
+     "r_native": 1535.060131634582,
+     "n_pixels": 28,
+     "fwhm_ratio": 1.6564969887188716,
+     "area_ratio": 0.9401105647692864,
+     "peak_ratio": 0.7160767789277855,
+     "max_resid_over_peak": 0.2839232210722145,
+     "r100_bin_ratio": 0.9618330905061749
+    }
+   },
+   "nircam_f444w": {
+    "4.1": {
+     "r_native": 1621.7943304273433,
+     "n_pixels": 31,
+     "fwhm_ratio": 1.599121201697494,
+     "area_ratio": 0.9223568039948763,
+     "peak_ratio": 0.709157305269542,
+     "max_resid_over_peak": 0.290842694730458,
+     "r100_bin_ratio": 0.9695769675078697
+    },
+    "4.6": {
+     "r_native": 1667.9465148798813,
+     "n_pixels": 33,
+     "fwhm_ratio": 1.5419718861763094,
+     "area_ratio": 0.9978136795344043,
+     "peak_ratio": 0.7232506999658539,
+     "max_resid_over_peak": 0.2767493000341461,
+     "r100_bin_ratio": 1.0104804317287703
+    }
+   },
+   "miri_lrs": {
+    "7.5": {
+     "r_native": 101.39630053562787,
+     "n_pixels": 25,
+     "fwhm_ratio": 1.4404899248962781,
+     "area_ratio": 0.999491522442129,
+     "peak_ratio": 0.650147302675258,
+     "max_resid_over_peak": 0.34985269732474206,
+     "r100_bin_ratio": 0.6976789853664324
+    },
+    "10.5": {
+     "r_native": 173.0922476774835,
+     "n_pixels": 35,
+     "fwhm_ratio": 1.3332674417038566,
+     "area_ratio": 0.9935710951484436,
+     "peak_ratio": 0.6934802610131747,
+     "max_resid_over_peak": 0.30651973898682533,
+     "r100_bin_ratio": 0.8628463958646518
+    }
+   },
+   "nirspec_g140h": {
+    "1.1": {
+     "r_native": 2093.4583430817734,
+     "n_pixels": 26,
+     "fwhm_ratio": 0.9670181347704307,
+     "area_ratio": 1.0850253955126596,
+     "peak_ratio": 1.0378930629940815,
+     "max_resid_over_peak": 0.03802800657774487,
+     "r100_bin_ratio": 0.9948417346282418
+    },
+    "1.5": {
+     "r_native": 2912.0903976606737,
+     "n_pixels": 27,
+     "fwhm_ratio": 0.9614457167528448,
+     "area_ratio": 1.0227410609472947,
+     "peak_ratio": 1.0384480906594187,
+     "max_resid_over_peak": 0.03844809065941866,
+     "r100_bin_ratio": 1.0225055016451312
+    }
+   },
+   "nirspec_g235m": {
+    "2": {
+     "r_native": 850.2748367885238,
+     "n_pixels": 26,
+     "fwhm_ratio": 1.2864928940573155,
+     "area_ratio": 0.9392052724173257,
+     "peak_ratio": 1.0399183309618567,
+     "max_resid_over_peak": 0.27014082685459373,
+     "r100_bin_ratio": 0.8887148772368821
+    },
+    "2.6": {
+     "r_native": 1107.958781470302,
+     "n_pixels": 27,
+     "fwhm_ratio": 0.8037530866649693,
+     "area_ratio": 0.9191280045069131,
+     "peak_ratio": 1.04147433782348,
+     "max_resid_over_peak": 0.18681400077572377,
+     "r100_bin_ratio": 0.9090463879080335
+    },
+    "3.1": {
+     "r_native": 1324.583417801514,
+     "n_pixels": 26,
+     "fwhm_ratio": 1.004871826149222,
+     "area_ratio": 0.9681072382880866,
+     "peak_ratio": 1.0370034944537987,
+     "max_resid_over_peak": 0.14931572293203896,
+     "r100_bin_ratio": 0.9602173897588353
+    }
+   },
+   "niriss_soss_ord2": {
+    "1.1": {
+     "r_native": 1108.311537283623,
+     "n_pixels": 26,
+     "fwhm_ratio": 3.343831643683769,
+     "area_ratio": 0.8224191671278888,
+     "peak_ratio": 0.6557922983132304,
+     "max_resid_over_peak": 0.3442077016867696,
+     "r100_bin_ratio": 0.8224880567992254
+    }
+   },
+   "nircam_f277w": {
+    "2.6": {
+     "r_native": 1215.8277666904032,
+     "n_pixels": 26,
+     "fwhm_ratio": 1.923735074823866,
+     "area_ratio": 0.9558150504055851,
+     "peak_ratio": 0.8178573952965773,
+     "max_resid_over_peak": 0.22751496422298015,
+     "r100_bin_ratio": 0.9558150504055973
+    }
+   }
+  }
  }
 }

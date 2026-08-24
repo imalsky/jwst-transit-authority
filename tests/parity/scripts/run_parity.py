@@ -398,7 +398,101 @@ def compare_mode(key: str, ours: dict, px: dict) -> dict:
     return out
 
 
+# --- LSF impulse response (`--impulse`) ------------------------------------
+# Inject narrow emission lines into the shared stellar SED, run the tool's own
+# Pandeia path twice (continuum, continuum+lines), and compare the extracted
+# per-pixel response with binning.smooth_to_native_r applied to the same lines
+# on the same wl / r_native grid. Constant-depth parity cannot exercise the
+# LSF operator (a flat spectrum is its fixed point); this does.
+IMPULSE_STAR = "w39_like"
+IMPULSE_LINES_UM = (0.75, 1.1, 1.5, 2.0, 2.6, 3.1, 3.6, 4.1, 4.6, 5.5, 7.5, 10.5)
+IMPULSE_SIGMA_REL = 5e-5      # line sigma / lambda: unresolved by every mode
+IMPULSE_AMP = 0.5             # line peak / continuum
+
+
+def _impulse_sed(shared: dict):
+    from jwst_tool import binning
+    w0 = np.asarray(shared["wave_um"], float)
+    f0 = np.asarray(shared["flux_mjy"], float)
+    fine = [w0]
+    for lam in IMPULSE_LINES_UM:
+        sig = IMPULSE_SIGMA_REL * lam
+        fine.append(lam + sig * np.arange(-8.0, 8.01, 0.25))
+    w = np.unique(np.concatenate(fine))
+    cont = np.exp(np.interp(np.log(w), np.log(w0), np.log(f0)))
+    rel = np.zeros_like(w)
+    for lam in IMPULSE_LINES_UM:
+        rel += IMPULSE_AMP * np.exp(-0.5 * ((w - lam) / (IMPULSE_SIGMA_REL * lam)) ** 2)
+    return w, cont, rel, binning
+
+
+def _impulse_mode(key: str, cont_res: dict, line_res: dict, w, cont, rel, binning) -> dict:
+    wl = np.asarray(cont_res["wl"], float)
+    if not np.array_equal(wl, np.asarray(line_res["wl"], float)):
+        raise SystemExit(f"{key}: continuum and line runs returned different pixel grids")
+    po = np.argsort(wl)
+    wl_s, r_s = wl[po], np.asarray(cont_res["r_native"], float)[po]
+    obs = (np.asarray(line_res["flux"], float) / np.asarray(cont_res["flux"], float) - 1.0)[po]
+    m = ins.MODES[key]
+    lo, hi = max(m["wl_min"], wl_s.min()), min(m["wl_max"], wl_s.max())
+    pred_fine = binning.smooth_to_native_r(w, rel, wl_s, r_s, lo * 0.97, hi * 1.03, weight=cont)
+    c_lo, c_hi = binning._pixel_cells(wl_s)
+    cum = np.concatenate([[0.0], np.cumsum(0.5 * (pred_fine[1:] + pred_fine[:-1]) * np.diff(w))])
+    pred = (np.interp(c_hi, w, cum) - np.interp(c_lo, w, cum)) / (c_hi - c_lo)
+
+    def fwhm(x, y):
+        pk = int(np.argmax(y)); half = 0.5 * y[pk]
+        if y[pk] <= 0 or pk in (0, y.size - 1): return float("nan")
+        l = np.interp(half, y[:pk + 1], x[:pk + 1]); r = np.interp(half, y[pk:][::-1], x[pk:][::-1])
+        return float(r - l)
+
+    lines = {}
+    for lam in IMPULSE_LINES_UM:
+        r_at = float(np.interp(lam, wl_s, r_s)); fw = lam / r_at
+        if not (lo + 5 * fw < lam < hi - 5 * fw):
+            continue
+        win = np.abs(wl_s - lam) < 6.0 * fw
+        b100 = np.abs(np.log(wl_s / lam)) < 0.5 / 100.0
+        o, p = obs[win], pred[win]
+        lines[f"{lam:g}"] = dict(
+            r_native=r_at, n_pixels=int(win.sum()),
+            fwhm_ratio=fwhm(wl_s[win], o) / fwhm(wl_s[win], p),
+            area_ratio=float(np.sum(o * (c_hi - c_lo)[win]) / np.sum(p * (c_hi - c_lo)[win])),
+            peak_ratio=float(o.max() / p.max()),
+            max_resid_over_peak=float(np.max(np.abs(o - p)) / p.max()),
+            r100_bin_ratio=float(obs[b100].mean() / pred[b100].mean()))
+    return lines
+
+
+def main_impulse():
+    shared = json.loads((OUTPUTS / f"{IMPULSE_STAR}_pandexo.json").read_text())["__shared_star__"]
+    w, cont, rel, binning = _impulse_sed(shared)
+    keys = list(PANDEXO_MODES)
+    star = STARS[IMPULSE_STAR]
+    print(f"=== impulse: {IMPULSE_STAR}, continuum ===", flush=True)
+    cont_res = run_ours(star, keys, {"wave_um": w.tolist(), "flux_mjy": cont.tolist()})
+    print(f"=== impulse: {IMPULSE_STAR}, continuum + lines ===", flush=True)
+    line_res = run_ours(star, keys, {"wave_um": w.tolist(), "flux_mjy": (cont * (1.0 + rel)).tolist()})
+    out = {"star": IMPULSE_STAR, "sigma_rel": IMPULSE_SIGMA_REL, "amp": IMPULSE_AMP,
+           "provenance_ours": _scrub_paths(line_res.get("__provenance__") or {}), "modes": {}}
+    for k in keys:
+        if "error" in cont_res.get(k, {}) or "error" in line_res.get(k, {}):
+            out["modes"][k] = {"error": (cont_res.get(k) or line_res.get(k)).get("error")}
+            continue
+        out["modes"][k] = _impulse_mode(k, cont_res[k], line_res[k], w, cont, rel, binning)
+        for lam, d in out["modes"][k].items():
+            print(f"  {k:16s} {lam:>5s} um  R={d['r_native']:6.0f}  fwhm {d['fwhm_ratio']:.3f}  "
+                  f"area {d['area_ratio']:.3f}  peak {d['peak_ratio']:.3f}  "
+                  f"maxres/peak {d['max_resid_over_peak']:.3f}  R100 {d['r100_bin_ratio']:.4f}", flush=True)
+    summary = json.loads((OUTPUTS / "parity_summary.json").read_text())
+    summary["lsf_impulse"] = out
+    (OUTPUTS / "parity_summary.json").write_text(json.dumps(summary, indent=1))
+    print(f"lsf_impulse -> {OUTPUTS / 'parity_summary.json'}")
+
+
 def main():
+    if "--impulse" in sys.argv:
+        return main_impulse()
     # raw per-run JSON goes in tests/parity/outputs/ (git-ignored there,
     # alongside the committed parity_summary.json and REPORT.md)
     out_root = OUTPUTS

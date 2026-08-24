@@ -17,8 +17,12 @@ Guardrails:
   blue SOSS), detect.evaluate_mode blurs depth, removed-molecule depth, and
   every Jacobian row to R_native via smooth_to_native_r BEFORE the cell
   average; on high-R modes the blur is a no-op. The Gaussian R(lambda)
-  kernel approximates the full Pandeia response matrix (impulse-response
-  validation against the engine is a documented pending gate).
+  kernel approximates the full Pandeia response matrix; measured against an
+  impulse through the engine (tests/parity/scripts/run_parity.py --impulse,
+  parity_summary.json["lsf_impulse"]) it matches to 3-5% on the NIRSpec H
+  gratings, while the slitless modes (NIRCam grism, SOSS, MIRI LRS) respond
+  1.4-3.3x broader than lambda/R_refdata -- narrow features there are
+  under-blurred.
 """
 from __future__ import annotations
 
