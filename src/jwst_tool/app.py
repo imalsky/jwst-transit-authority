@@ -49,6 +49,7 @@ from jwst_tool import noise as noise_mod
 from jwst_tool import posteriors
 from jwst_tool import proc as proc_mod
 from jwst_tool import plotting
+from jwst_tool import provenance
 from jwst_tool import share_config
 from jwst_tool import summary_figure
 from jwst_tool import instruments as ins
@@ -163,7 +164,16 @@ def _show_fig(fig, tight: bool = True) -> None:
 
 
 def _csv_bytes(df: pd.DataFrame) -> bytes:
-    return df.to_csv(index=False).encode()
+    """CSV with a one-line identity header (`pd.read_csv(..., comment="#")`)."""
+    p = provenance.snapshot()
+    repos = " ".join(f"{k}={p['repositories'][k]['commit'][:12]}"
+                     for k in ("vulcan-jwst-tool", "vulcan-forward", "vulcan-jax"))
+    ps, cs = p["pandeia_stack"], p["cache_schema"]
+    head = (f"# provenance: jwst-tool {p['software']['vulcan-jwst-tool']} | {repos} | "
+            f"pandeia engine {ps['engine']} refdata {ps['refdata']['version']} "
+            f"psf {ps['psf']['version']} | cache model v{cs['model']} "
+            f"worker v{cs['pandeia_worker']}\n")
+    return (head + df.to_csv(index=False)).encode()
 
 
 def _has_floor(r: dict) -> bool:
@@ -1868,6 +1878,7 @@ with st.expander("Run summary & configuration"):
                            if tp_file_path else None),
             floor_table=(np.asarray(floor_table).tolist()
                          if floor_table is not None else None))
+        st.json(_share["provenance"], expanded=False)
         # deferred: sits right above the progress box, the natural thing to
         # click during a multi-minute wait
         _deferred_download(
