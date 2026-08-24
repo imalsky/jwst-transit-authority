@@ -6,9 +6,9 @@ Model, removed-molecule model, Jacobians, and noise all go through one
 operator (binning.build_operator, flux-weighted). Fully saturated pixels are
 excluded from the operator; partially saturated pixels are kept but counted
 per bin. For modes whose final bins approach the native resolving power
-(MIRI LRS, NIRSpec PRISM, blue SOSS) the model is first blurred to the
-instrument's R(lambda) (binning.smooth_to_native_r); a no-op for high-R
-gratings.
+(MIRI LRS, NIRSpec PRISM, SOSS) the model is first blurred to the
+instrument's measured response, R(lambda) / instruments.LSF_WIDTH
+(binning.smooth_to_native_r); a no-op for high-R gratings.
 
 sigma_detect is a CONDITIONAL MATCHED-TEMPLATE S/N at the specified
 atmospheric state: the nested-model chi-square distance between the full
@@ -417,7 +417,11 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         # is the BLUE end, and pinning the whole 5-12 um band to it blurred it
         # with a ~3.5x-too-wide kernel. smooth_to_native_r now refuses an
         # out-of-order curve, so this sort is the contract, not a convenience.
-        wl_r, r_curve = wl_pix[po], r_nat[po]
+        # The kernel width is the MEASURED response, R_refdata / the mode's
+        # impulse-fitted width (instruments.LSF_WIDTH): on the slitless modes
+        # the PSF, not the dispersion, sets it.
+        wl_r = wl_pix[po]
+        r_curve = ins.lsf_r(mode_key, wl_r, r_nat[po])
         depth_sm = binning.smooth_to_native_r(wl_model, depth, wl_r, r_curve,
                                               b_lo, b_hi, weight=flux_model)
         # metadata ONLY -- never gate the blur of OTHER vectors on this: a
@@ -437,11 +441,11 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
             # r_model is measured from the model grid itself rather than a
             # named setting, because "raise nu_pts" is advice that does
             # nothing under the default correlated-k mode.
-            _rn = float(np.nanmin(r_nat)) if np.isfinite(r_nat).any() else 0.0
+            _rn = float(np.nanmin(r_curve)) if np.isfinite(r_curve).any() else 0.0
             _lsf_skip_note = (
                 f"native-R LSF is a NO-OP here: the model spectrum's own "
                 f"resolving power (R = {r_model:.0f}) cannot resolve this "
-                f"mode's line-spread function (native R down to {_rn:.0f}, "
+                f"mode's line-spread function (response R down to {_rn:.0f}, "
                 "which needs about 2.35x that in model resolving power). The "
                 "model's own opacity sampling sets the effective width "
                 "instead. Under the default correlated-k opacity mode the "

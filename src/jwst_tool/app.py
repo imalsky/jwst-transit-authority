@@ -1521,16 +1521,18 @@ with st.sidebar:
         # Past R ~ 250 the analysis bins are four or fewer of the model's
         # R = 1000 k-table bands wide, so sub-band structure the high-R
         # gratings record starts to matter at bin edges. Affected = the mode's
-        # LSF outresolves the model (2.3548 x native R > 1000); tested on the
-        # MEDIAN native R, which classifies all twelve shipped modes the same
-        # way the binding MIN native R does (re-checked 2026-08-18 against the
-        # 2026.7 dispersion files over the corrected bands: only PRISM and
-        # MIRI LRS fall on the resolved side either way). Line-by-line (Mie)
+        # LSF outresolves the model (2.3548 x response R > 1000, the median
+        # native R over the mode's measured width at mid-band,
+        # instruments.LSF_WIDTH); the median classifies all shipped modes the
+        # same way the binding MIN does (only PRISM and MIRI LRS fall on the
+        # resolved side either way). Line-by-line (Mie)
         # runs are excluded: nu_pts moves the model R there, and the
         # run-level LSF warning discloses per mode either way.
         if int(r_bin) >= 250 and not mie_condensate:
             _coarse = [ins.MODES[k]["label"] for k in mode_keys
-                       if 2.3548 * ins.MODES[k]["r_native_med"] > 1000.0]
+                       if 2.3548 * float(ins.lsf_r(
+                           k, 0.5 * (ins.MODES[k]["wl_min"] + ins.MODES[k]["wl_max"]),
+                           ins.MODES[k]["r_native_med"])) > 1000.0]
             if _coarse:
                 st.caption(f"Bins this fine approach the model's R = 1000 "
                            f"opacity resolution on {', '.join(_coarse)}: "

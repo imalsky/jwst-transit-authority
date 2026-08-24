@@ -110,6 +110,39 @@ def test_jacobian_lsf_does_not_depend_on_baseline_shape():
     assert np.max(np.abs(r_none["jac_bins"][0] - r_flat["jac_bins"][0])) > 5e-6
 
 
+def test_lsf_width_is_applied_as_r_over_width(monkeypatch):
+    """detect blurs with R_refdata / instruments.LSF_WIDTH: bit-identical to
+    handing the operator the divided curve with the table off, and broader
+    than the unscaled blur on a narrow Jacobian feature."""
+    key = "miri_lrs"
+    wl_pix = np.linspace(5.0, 7.0, 600)
+    r_nat = np.full(wl_pix.size, 100.0)
+
+    def inputs(r_native):
+        mode_result = dict(
+            wl=wl_pix.tolist(), flux=np.full(wl_pix.size, 1e6).tolist(),
+            noise_1int=np.full(wl_pix.size, 1e3).tolist(), t_cycle_s=10.0,
+            r_native=r_native.tolist(), n_full_sat=np.zeros(wl_pix.size).tolist(),
+            n_part_sat=np.zeros(wl_pix.size).tolist(),
+            ngroup=10, sat_frac=0.5, saturated=False)
+        wl_model = np.linspace(4.9, 7.1, 4000)
+        jac = 1e-3 * np.exp(-0.5 * ((wl_model - 6.0) / 0.005) ** 2)
+        model = dict(wl_um=wl_model, depth=np.zeros(wl_model.size),
+                     mols=["H2O"], jac=[jac], jac_names=["p0"])
+        return mode_result, model
+
+    kw = dict(target_mol=None, R_bin=200.0, t_in_s=3600.0, t_out_s=3600.0,
+              n_transits=1, floor_spec=None)
+    with_table = detect.evaluate_mode(key, *inputs(r_nat), **kw)["jac_bins"][0]
+    width = r_nat / ins.lsf_r(key, wl_pix, r_nat)
+    assert width.min() > 1.0
+    monkeypatch.setattr(ins, "LSF_WIDTH", {})
+    divided = detect.evaluate_mode(key, *inputs(r_nat / width), **kw)["jac_bins"][0]
+    unscaled = detect.evaluate_mode(key, *inputs(r_nat), **kw)["jac_bins"][0]
+    assert np.array_equal(with_table, divided)
+    assert with_table.max() < 0.85 * unscaled.max()
+
+
 def test_r_bin_beyond_model_resolution_refuses():
     """Bins finer than the model's own grid would report interpolated
     structure the model does not contain (the pixel-level high-R-grating

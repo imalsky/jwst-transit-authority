@@ -64,6 +64,8 @@ import os
 import tempfile
 from pathlib import Path
 
+import numpy as np
+
 TOOL_DIR = Path(__file__).resolve().parent        # pandeia_worker.py lives here
 # parents[2] is the repo root in an editable checkout; the src/jwst_tool
 # marker tells a checkout apart from a site-packages install.
@@ -655,6 +657,37 @@ LITERATURE_NOISE_FACTORS = {
     "nircam_f277w": 1.05,    # same editorial placeholder as the other NIRCam
     "miri_lrs": 1.15,
 }
+
+# Width of the extracted line response relative to the Gaussian
+# lambda/R_refdata kernel, per mode as (wavelength_um, width) points: the
+# single-Gaussian FWHM scale fitted to a narrow line pushed through Pandeia
+# (tests/parity/scripts/run_parity.py --impulse, parity_summary.json
+# ["lsf_impulse"][mode][line]["width_fit"]). The refdata dispersion R is the
+# pixel dispersion; on the slitless modes the PSF along the dispersion axis
+# sets the response, which comes out this much broader. Interpolated in
+# wavelength, held flat outside the measured range. The NIRSpec modes fit
+# 0.94-1.02 and are left at 1. RE-MEASURE ON ANY REFDATA OR PSF CHANGE.
+LSF_WIDTH = {
+    "niriss_soss": ((1.1, 1.39), (1.5, 1.41), (2.0, 1.48), (2.6, 1.58)),
+    "niriss_soss_ord2": ((1.1, 1.33),),
+    "nircam_f277w": ((2.6, 1.37),),
+    "nircam_f322w2": ((2.6, 1.37), (3.1, 1.43), (3.6, 1.45)),
+    "nircam_f444w": ((4.1, 1.46), (4.6, 1.44)),
+    "miri_lrs": ((7.5, 1.59), (10.5, 1.49)),
+}
+
+
+def lsf_r(key: str, wl, r_native):
+    """Effective resolving power of the extracted response, R_refdata /
+    width, on the caller's wavelength grid; ``r_native`` unchanged for a
+    mode with no measured width."""
+    pts = LSF_WIDTH.get(key)
+    r = np.asarray(r_native, float)
+    if pts is None:
+        return r
+    lam, width = np.transpose(pts)
+    return r / np.interp(np.asarray(wl, float), lam, width)
+
 
 # enforce the PandExo group caps at import (loud, no silent out-of-range mode)
 for _key, _m in MODES.items():

@@ -56,7 +56,7 @@ for var in ("JWST_TOOL_PANDEIA_PYTHON", "JWST_TOOL_PANDEIA_REFDATA",
     if not os.environ.get(var):
         raise SystemExit(f"run_parity: {var} must be set (see module docstring)")
 
-from jwst_tool import instruments as ins            # noqa: E402
+from jwst_tool import binning, instruments as ins   # noqa: E402
 from jwst_tool import noise                          # noqa: E402
 import parity_gate as pg                             # noqa: E402
 
@@ -410,23 +410,42 @@ IMPULSE_SIGMA_REL = 5e-5      # line sigma / lambda: unresolved by every mode
 IMPULSE_AMP = 0.5             # line peak / continuum
 
 
+def _impulse_lines(w):
+    rel = np.zeros_like(w)
+    for lam in IMPULSE_LINES_UM:
+        rel += IMPULSE_AMP * np.exp(-0.5 * ((w - lam) / (IMPULSE_SIGMA_REL * lam)) ** 2)
+    return rel
+
+
 def _impulse_sed(shared: dict):
-    from jwst_tool import binning
+    """The SED handed to Pandeia. Pandeia convolves the spectrum with its own
+    lambda/R Gaussian on a fine internal grid and then np.interp's the result
+    back onto the INPUT grid (instrument.spectral_convolution), so the input
+    must resolve the instrument-broadened line, not just the injected one: a
+    grid dense only near the line core turns the broadened wings into linear
+    ramps to the next coarse point and adds 25-150% spurious line flux on
+    every R >~ 500 mode. Tiers around each line:
+    sigma/4 within +-8 sigma, lambda/2e4 within +-0.5%, lambda/5e3 within
+    +-2% (>= 10 lambda/R for R >= 500); the shared continuum grid
+    (R ~ 250-500) resolves the R ~ 100 modes by itself."""
     w0 = np.asarray(shared["wave_um"], float)
     f0 = np.asarray(shared["flux_mjy"], float)
     fine = [w0]
     for lam in IMPULSE_LINES_UM:
         sig = IMPULSE_SIGMA_REL * lam
         fine.append(lam + sig * np.arange(-8.0, 8.01, 0.25))
+        fine.append(lam * np.exp(np.arange(-5e-3, 5.01e-3, 5e-5)))
+        fine.append(lam * np.exp(np.arange(-2e-2, 2.01e-2, 2e-4)))
     w = np.unique(np.concatenate(fine))
+    # the tiers coincide to within an ulp at multiples of 2e-4; synphot
+    # refuses exact duplicates once Pandeia has folded in its midpoints
+    w = w[np.concatenate([[True], np.diff(np.log(w)) > 1e-8])]
     cont = np.exp(np.interp(np.log(w), np.log(w0), np.log(f0)))
-    rel = np.zeros_like(w)
-    for lam in IMPULSE_LINES_UM:
-        rel += IMPULSE_AMP * np.exp(-0.5 * ((w - lam) / (IMPULSE_SIGMA_REL * lam)) ** 2)
-    return w, cont, rel, binning
+    return w, cont, _impulse_lines(w)
 
 
-def _impulse_mode(key: str, cont_res: dict, line_res: dict, w, cont, rel, binning) -> dict:
+def _impulse_mode(key: str, cont_res: dict, line_res: dict, shared: dict) -> dict:
+    from scipy.optimize import minimize_scalar
     wl = np.asarray(cont_res["wl"], float)
     if not np.array_equal(wl, np.asarray(line_res["wl"], float)):
         raise SystemExit(f"{key}: continuum and line runs returned different pixel grids")
@@ -435,17 +454,30 @@ def _impulse_mode(key: str, cont_res: dict, line_res: dict, w, cont, rel, binnin
     obs = (np.asarray(line_res["flux"], float) / np.asarray(cont_res["flux"], float) - 1.0)[po]
     m = ins.MODES[key]
     lo, hi = max(m["wl_min"], wl_s.min()), min(m["wl_max"], wl_s.max())
-    pred_fine = binning.smooth_to_native_r(w, rel, wl_s, r_s, lo * 0.97, hi * 1.03, weight=cont)
     c_lo, c_hi = binning._pixel_cells(wl_s)
-    cum = np.concatenate([[0.0], np.cumsum(0.5 * (pred_fine[1:] + pred_fine[:-1]) * np.diff(w))])
-    pred = (np.interp(c_hi, w, cum) - np.interp(c_lo, w, cum)) / (c_hi - c_lo)
+    # The prediction is evaluated on a uniform R = 1e5 grid, NOT the SED
+    # grid: that one is coarse away from the lines, and a blurred line
+    # sampled there loses its wings.
+    w0, f0 = np.asarray(shared["wave_um"], float), np.asarray(shared["flux_mjy"], float)
+    w = np.exp(np.arange(np.log(lo * 0.95), np.log(hi * 1.05), 1e-5))
+    cont, rel, dw = np.exp(np.interp(np.log(w), np.log(w0), np.log(f0))), _impulse_lines(w), np.diff(w)
 
-    def fwhm(x, y):
-        pk = int(np.argmax(y)); half = 0.5 * y[pk]
-        if y[pk] <= 0 or pk in (0, y.size - 1): return float("nan")
-        l = np.interp(half, y[:pk + 1], x[:pk + 1]); r = np.interp(half, y[pk:][::-1], x[pk:][::-1])
-        return float(r - l)
+    def predict(r_curve, b_lo=lo * 0.97, b_hi=hi * 1.03):
+        fine = binning.smooth_to_native_r(w, rel, wl_s, r_curve, b_lo, b_hi, weight=cont)
+        cum = np.concatenate([[0.0], np.cumsum(0.5 * (fine[1:] + fine[:-1]) * dw)])
+        return (np.interp(c_hi, w, cum) - np.interp(c_lo, w, cum)) / (c_hi - c_lo)
 
+    def metrics(p, win, b100):
+        o, q = obs[win], p[win]
+        return dict(area_ratio=float(np.sum(o * (c_hi - c_lo)[win]) / np.sum(q * (c_hi - c_lo)[win])),
+                    peak_ratio=float(o.max() / q.max()),
+                    max_resid_over_peak=float(np.max(np.abs(o - q)) / q.max()),
+                    r100_bin_ratio=float(obs[b100].mean() / p[b100].mean()))
+
+    # `pred`: the Gaussian at the refdata R (the calibration input);
+    # `pred_eff`: what detect.evaluate_mode applies, R / instruments.LSF_WIDTH.
+    r_eff = ins.lsf_r(key, wl_s, r_s)
+    pred, pred_eff = predict(r_s), predict(r_eff)
     lines = {}
     for lam in IMPULSE_LINES_UM:
         r_at = float(np.interp(lam, wl_s, r_s)); fw = lam / r_at
@@ -453,20 +485,28 @@ def _impulse_mode(key: str, cont_res: dict, line_res: dict, w, cont, rel, binnin
             continue
         win = np.abs(wl_s - lam) < 6.0 * fw
         b100 = np.abs(np.log(wl_s / lam)) < 0.5 / 100.0
-        o, p = obs[win], pred[win]
+        # width_fit: the single-Gaussian FWHM scale (x lambda/R_refdata) that
+        # best fits the extracted line's SHAPE on its pixels, amplitude free
+        # (solved linearly at each width, so a throughput or order-overlap
+        # amplitude loss cannot masquerade as width) -- the number LSF_WIDTH
+        # stores. A half-maximum width read off 2-3 pixels is not usable.
+        fit = np.abs(wl_s - lam) < 12.0 * fw
+
+        def shape_resid(s):
+            p = predict(r_s / s, lam * 0.97, lam * 1.03)[fit]
+            return float(np.sum((obs[fit] - p * np.dot(obs[fit], p) / np.dot(p, p)) ** 2))
+        s_fit = minimize_scalar(shape_resid, bounds=(0.3, 5.0), method="bounded").x
         lines[f"{lam:g}"] = dict(
-            r_native=r_at, n_pixels=int(win.sum()),
-            fwhm_ratio=fwhm(wl_s[win], o) / fwhm(wl_s[win], p),
-            area_ratio=float(np.sum(o * (c_hi - c_lo)[win]) / np.sum(p * (c_hi - c_lo)[win])),
-            peak_ratio=float(o.max() / p.max()),
-            max_resid_over_peak=float(np.max(np.abs(o - p)) / p.max()),
-            r100_bin_ratio=float(obs[b100].mean() / pred[b100].mean()))
+            r_native=r_at, n_pixels=int(win.sum()), width_fit=float(s_fit),
+            **metrics(pred, win, b100),
+            applied=dict(width=float(r_at / np.interp(lam, wl_s, r_eff)),
+                         **metrics(pred_eff, win, b100)))
     return lines
 
 
 def main_impulse():
     shared = json.loads((OUTPUTS / f"{IMPULSE_STAR}_pandexo.json").read_text())["__shared_star__"]
-    w, cont, rel, binning = _impulse_sed(shared)
+    w, cont, rel = _impulse_sed(shared)
     keys = list(PANDEXO_MODES)
     star = STARS[IMPULSE_STAR]
     print(f"=== impulse: {IMPULSE_STAR}, continuum ===", flush=True)
@@ -479,11 +519,14 @@ def main_impulse():
         if "error" in cont_res.get(k, {}) or "error" in line_res.get(k, {}):
             out["modes"][k] = {"error": (cont_res.get(k) or line_res.get(k)).get("error")}
             continue
-        out["modes"][k] = _impulse_mode(k, cont_res[k], line_res[k], w, cont, rel, binning)
+        out["modes"][k] = _impulse_mode(k, cont_res[k], line_res[k], shared)
         for lam, d in out["modes"][k].items():
-            print(f"  {k:16s} {lam:>5s} um  R={d['r_native']:6.0f}  fwhm {d['fwhm_ratio']:.3f}  "
-                  f"area {d['area_ratio']:.3f}  peak {d['peak_ratio']:.3f}  "
-                  f"maxres/peak {d['max_resid_over_peak']:.3f}  R100 {d['r100_bin_ratio']:.4f}", flush=True)
+            a = d["applied"]
+            print(f"  {k:16s} {lam:>5s} um  R={d['r_native']:6.0f}  peak {d['peak_ratio']:.3f}  "
+                  f"maxres/peak {d['max_resid_over_peak']:.3f}  R100 {d['r100_bin_ratio']:.3f}  "
+                  f"width_fit {d['width_fit']:.2f} | applied x{a['width']:.2f}: "
+                  f"peak {a['peak_ratio']:.3f}  maxres/peak {a['max_resid_over_peak']:.3f}  "
+                  f"R100 {a['r100_bin_ratio']:.3f}", flush=True)
     summary = json.loads((OUTPUTS / "parity_summary.json").read_text())
     summary["lsf_impulse"] = out
     (OUTPUTS / "parity_summary.json").write_text(json.dumps(summary, indent=1))

@@ -16,13 +16,13 @@ Guardrails:
 * Where final bins approach the NATIVE resolving power (MIRI LRS, PRISM,
   blue SOSS), detect.evaluate_mode blurs depth, removed-molecule depth, and
   every Jacobian row to R_native via smooth_to_native_r BEFORE the cell
-  average; on high-R modes the blur is a no-op. The Gaussian R(lambda)
-  kernel approximates the full Pandeia response matrix; measured against an
-  impulse through the engine (tests/parity/scripts/run_parity.py --impulse,
-  parity_summary.json["lsf_impulse"]) it matches to 3-5% on the NIRSpec H
-  gratings, while the slitless modes (NIRCam grism, SOSS, MIRI LRS) respond
-  1.4-3.3x broader than lambda/R_refdata -- narrow features there are
-  under-blurred.
+  average; on high-R modes the blur is a no-op. The Gaussian kernel
+  approximates the full Pandeia response matrix; its width is
+  R_refdata / instruments.LSF_WIDTH, the per-mode width fitted to an impulse
+  through the engine (tests/parity/scripts/run_parity.py --impulse,
+  parity_summary.json["lsf_impulse"]): 1 on NIRSpec, 1.3-1.6 on the slitless
+  modes (NIRCam grism, SOSS, MIRI LRS), where the PSF sets the response;
+  the fitted kernel reproduces the extracted line to 5-10% of peak there.
 """
 from __future__ import annotations
 
@@ -132,11 +132,11 @@ def smooth_to_native_r(wl_model: np.ndarray, y: np.ndarray,
     resolving power R(lambda) over [band_lo, band_hi]; returns a full-length copy.
 
     Only bites where the MODEL grid resolves the kernel, i.e. model R >=
-    2.3548 x the smallest native R in the band (MIRI LRS and PRISM under the
-    correlated-k default's R = 1000 grid); on higher-R modes the kernel is
-    unresolved and the input is returned unchanged. SOSS and G395M are not
-    resolved under that default -- the caller discloses the skip
-    (detect._lsf_skip_note).
+    2.3548 x the smallest R in the band (MIRI LRS, PRISM, and SOSS order 1
+    under the correlated-k default's R = 1000 grid); on higher-R modes the
+    kernel is unresolved and the input is returned unchanged. NIRCam, SOSS
+    order 2, and the M gratings are not resolved under that default -- the
+    caller discloses the skip (detect._lsf_skip_note).
 
     ``wl_r``/``r_curve`` are the native resolving-power table. ``wl_r`` MUST
     be strictly ascending and is validated: the kernel width comes from

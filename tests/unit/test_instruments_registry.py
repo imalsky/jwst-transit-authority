@@ -16,6 +16,7 @@ import re
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from jwst_tool import instruments as ins
@@ -218,3 +219,21 @@ def test_r_native_med_still_matches_the_refdata_over_the_registry_band():
             f"{key}: r_native_med {shown:g} is {100 * abs(shown - measured) / measured:.1f}% "
             f"from the median {measured:.1f} measured over the current band "
             f"{m['wl_min']}-{m['wl_max']} -- re-measure after any band change")
+
+
+def test_lsf_width_table_is_well_formed():
+    """Every measured response width names a registered mode, sits inside
+    that mode's band in ascending wavelength order, and is a finite width
+    >= 1 (the PSF can only broaden the dispersion response); lsf_r divides
+    R by it and leaves a mode without a measurement untouched."""
+    assert set(ins.LSF_WIDTH) <= set(ins.MODES)
+    for key, pts in ins.LSF_WIDTH.items():
+        lam, width = np.transpose(pts)
+        m = ins.MODES[key]
+        assert np.all(np.diff(lam) > 0), key
+        assert m["wl_min"] <= lam.min() and lam.max() <= m["wl_max"], key
+        assert np.all(np.isfinite(width)) and np.all(width >= 1.0), key
+        r = np.full(lam.size, 1000.0)
+        assert np.allclose(ins.lsf_r(key, lam, r), r / width)
+    assert np.array_equal(ins.lsf_r("nirspec_g395h", [3.0, 4.0], [2000.0, 2500.0]),
+                          [2000.0, 2500.0])
