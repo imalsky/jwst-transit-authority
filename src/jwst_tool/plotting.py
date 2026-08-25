@@ -41,23 +41,6 @@ from matplotlib.ticker import (LogLocator, MaxNLocator, NullFormatter,
 # block does not deadlock.
 render_lock = threading.RLock()
 
-# IDENTICAL GEOMETRY for the T-P and mixing-ratio figures: same canvas, same
-# axes rectangle, so the two render at exactly the same size side by side.
-# The canvas is deliberately NOT square -- only the axes box is; the surplus
-# width on the right is the mixing-ratio legend strip, which the T-P figure
-# leaves blank. Do not "restore" a square canvas.
-#
-# The rect below is chosen so the allocated box is EXACTLY square
-# (0.6135 * 7.4 in = 4.54 in wide, 0.8566 * 5.3 in = 4.54 in tall), which
-# means set_box_aspect(1.0) is satisfied with no shrink-to-fit -- if these
-# numbers drift apart, matplotlib silently shrinks the axes and the two
-# figures stop matching. Recompute BOTH if you change the canvas.
-# test_plotting.py::test_tp_and_vmr_panels_share_one_geometry pins it.
-FIG_W_IN = 7.4
-FIG_H_IN = 5.3
-FIG_DPI = 200
-AXES_RECT = dict(left=0.0984, right=0.7119, bottom=0.1208, top=0.9774)
-
 # Tick-label crowding: a decade-per-tick log axis overruns a small square
 # panel, so cap the number of labelled decades and let the locator thin to
 # every 2nd/3rd/... decade. Minor labels are suppressed outright.
@@ -87,129 +70,85 @@ def _thin_log_axis(ax, which: str) -> None:
     axis.set_minor_formatter(NullFormatter())
 
 
-def _new_panel():
-    """A figure + axes at the shared geometry: identical canvas and identical
-    axes rectangle for every panel built here.
-
-    Uses an EXPLICIT rect rather than tight_layout, because tight_layout sizes
-    the axes from the labels each figure happens to carry -- which is exactly
-    how the T-P and mixing-ratio plots drifted to different sizes.
-    """
-    fig = plt.figure(figsize=(FIG_W_IN, FIG_H_IN), dpi=FIG_DPI)
-    ax = fig.add_subplot(111)
-    fig.subplots_adjust(**AXES_RECT)
-    ax.set_box_aspect(1.0)
-    return fig, ax
-
-
 TP_XLIM_DEFAULT = (1.0, 3000.0)
 VMR_XLIM_DEFAULT = (1e-12, 1.0)
 
 
-def _axis_window(name, v, positive):
-    """Validate an optional ``(lo, hi)`` axis window. None means the default."""
-    if v is None:
-        return None
-    try:
-        lo, hi = float(v[0]), float(v[1])
-    except (TypeError, ValueError, IndexError, KeyError):
-        raise ValueError(f"{name} must be a (lo, hi) pair or None, got {v!r}")
-    if not (np.isfinite(lo) and np.isfinite(hi) and lo < hi):
-        raise ValueError(f"{name} needs finite lo < hi, got {(lo, hi)}")
-    if positive and lo <= 0.0:
-        raise ValueError(f"{name} is plotted on a log axis, so lo must be > 0, "
-                         f"got {lo}")
-    return (lo, hi)
+# Structure figure: ONE canvas, two square panels side by side plus the
+# mixing-ratio legend strip on the right. Both panels get the SAME allocated
+# rect and set_box_aspect(1.0), so matplotlib squares them identically -- the
+# two can never drift to different sizes the way two separate figures did.
+STRUCT_FIG_DPI = 200
+STRUCT_FIG_W_IN = 11.0
+STRUCT_FIG_H_IN = 4.8
+STRUCT_AXES_RECT = dict(left=0.055, right=0.863, bottom=0.13, top=0.97,
+                        wspace=0.20)
+# Profiles read at a glance rather than as hairlines.
+STRUCT_LW = 2.6
 
 
-def build_tp_figure(p_bar, T_K, xlim=None, ylim=None):
-    """T-P profile: pressure (log, inverted) vs temperature. Square.
+def build_structure_figure(p_bar, T_K, columns):
+    """T-P profile and mixing-ratio profiles as ONE two-panel figure.
 
-    ``xlim``: temperature window in K, None for TP_XLIM_DEFAULT. ``ylim``:
-    pressure window in bar, None to fit the profile. Both are drawn INVERTED
-    on the pressure axis, so the caller passes (p_min, p_max) in the natural
-    order and this function orients it.
+    Left: pressure (log, inverted) vs temperature. Right: VMR (log) vs the
+    SAME pressure axis, shared through ``sharey`` so the two panels cannot
+    disagree about the vertical scale. ``columns`` is the ordered
+    ``[(molecule, vmr_array), ...]`` the caller sorted by peak abundance, so
+    the legend reads top-down.
 
-    Returns ``(fig, ylim)``; the returned ``ylim`` is the pressure axis range
-    in matplotlib's (inverted) order so the mixing-ratio panel beside it can
-    share the vertical scale verbatim.
+    Axis windows are the module defaults; this figure carries no per-axis
+    controls (the panel it belongs to has no figure-settings block).
     """
     p = np.asarray(p_bar, dtype=float)
     T = np.asarray(T_K, dtype=float)
     if p.ndim != 1 or p.shape != T.shape or p.size == 0:
-        raise ValueError(f"build_tp_figure: p_bar {p.shape} and T_K {T.shape} "
-                         "must be matching non-empty 1-D arrays")
-    xlim = _axis_window("build_tp_figure: xlim", xlim, positive=False)
-    ylim = _axis_window("build_tp_figure: ylim", ylim, positive=True)
-    with render_lock:
-        fig, ax = _new_panel()
-        ax.plot(T, p, color="#2a78d6", lw=1.6)
-        # the chemistry grid's validated temperature span
-        for tlim in (320.0, 2980.0):
-            ax.axvline(tlim, color="#cccccc", lw=0.8, ls=":")
-        ax.set_xlim(*(xlim or TP_XLIM_DEFAULT))
-        ax.set_yscale("log")
-        if ylim is not None:
-            ax.set_ylim(ylim[1], ylim[0])      # deep at the bottom
-        else:
-            ax.invert_yaxis()
-        _thin_log_axis(ax, "y")
-        # 4-digit temperature labels collide on a ~3 in box at the default
-        # locator; cap the count instead of rotating them
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=MAX_LIN_TICKS,
-                                               steps=[1, 2, 5, 10]))
-        ax.set_xlabel("temperature (K)")
-        ax.set_ylabel("pressure (bar)")
-        ax.grid(alpha=0.25)
-        return fig, ax.get_ylim()
-
-
-def build_vmr_figure(p_bar, columns, ylim=None, xlim=None):
-    """Mixing-ratio profiles: VMR (log) vs pressure (log, inverted). Square.
-
-    ``columns``: ordered ``[(molecule, vmr_array), ...]`` (the caller sorts;
-    peak-abundance order makes the legend read top-down). ``ylim``: pressure
-    range to share with the T-P panel, in MATPLOTLIB order (i.e. exactly what
-    ``build_tp_figure`` returned). ``xlim``: mixing-ratio window, None for
-    VMR_XLIM_DEFAULT.
-
-    The legend sits OUTSIDE the axes, in the strip to the RIGHT, so it can
-    never cover a profile and needs no y-limit padding.
-    """
-    p = np.asarray(p_bar, dtype=float)
+        raise ValueError(f"build_structure_figure: p_bar {p.shape} and T_K "
+                         f"{T.shape} must be matching non-empty 1-D arrays")
     cols = list(columns)
     if not cols:
-        raise ValueError("build_vmr_figure: columns is empty")
-    xlim = _axis_window("build_vmr_figure: xlim", xlim, positive=True)
+        raise ValueError("build_structure_figure: columns is empty")
     with render_lock:
-        fig, ax = _new_panel()
+        fig, (ax_t, ax_v) = plt.subplots(
+            1, 2, figsize=(STRUCT_FIG_W_IN, STRUCT_FIG_H_IN), dpi=STRUCT_FIG_DPI,
+            sharey=True)
+        fig.subplots_adjust(**STRUCT_AXES_RECT)
+        for ax in (ax_t, ax_v):
+            ax.set_box_aspect(1.0)
+
+        ax_t.plot(T, p, color="#2a78d6", lw=STRUCT_LW)
+        # the chemistry grid's validated temperature span
+        for tlim in (320.0, 2980.0):
+            ax_t.axvline(tlim, color="#cccccc", lw=0.8, ls=":")
+        ax_t.set_xlim(*TP_XLIM_DEFAULT)
+        # 4-digit temperature labels collide on a small box at the default
+        # locator; cap the count instead of rotating them
+        ax_t.xaxis.set_major_locator(MaxNLocator(nbins=MAX_LIN_TICKS,
+                                                 steps=[1, 2, 5, 10]))
+        ax_t.set_xlabel("temperature (K)")
+        ax_t.set_ylabel("pressure (bar)")
+
         for m, y in cols:
             ya = np.asarray(y, dtype=float)
             if ya.shape != p.shape:
                 raise ValueError(
-                    f"build_vmr_figure: {m} column {ya.shape} does not match "
-                    f"the pressure grid {p.shape}")
-            ax.plot(np.clip(ya, 1e-14, None), p, lw=1.4, label=str(m))
-        ax.set_xscale("log")
-        ax.set_xlim(*(xlim or VMR_XLIM_DEFAULT))
-        ax.set_yscale("log")
-        if ylim is not None:
-            ax.set_ylim(ylim)
-        else:
-            ax.invert_yaxis()
-        _thin_log_axis(ax, "x")
-        _thin_log_axis(ax, "y")
-        ax.set_xlabel("volume mixing ratio")
-        ax.set_ylabel("pressure (bar)")
-        ax.grid(alpha=0.25)
-        # Legend to the RIGHT of the axes in the
-        # strip AXES_RECT leaves free. Species read top-down in the same
-        # peak-abundance order the caller sorted them into, which a single
-        # column preserves and a multi-column block does not. Anchored just
-        # outside the axes' right edge, so it cannot touch a profile and
-        # needs no y-limit padding. Placed WITHOUT tight_layout: the whole
-        # point of the shared rect is that neither panel resizes itself.
-        ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0),
-                  frameon=False, fontsize=7, ncol=1,
-                  handletextpad=0.5, borderaxespad=0.0, labelspacing=0.35)
+                    f"build_structure_figure: {m} column {ya.shape} does not "
+                    f"match the pressure grid {p.shape}")
+            ax_v.plot(np.clip(ya, 1e-14, None), p, lw=STRUCT_LW, label=str(m))
+        ax_v.set_xscale("log")
+        ax_v.set_xlim(*VMR_XLIM_DEFAULT)
+        _thin_log_axis(ax_v, "x")
+        ax_v.set_xlabel("volume mixing ratio")
+
+        # ONE pressure axis for both panels (sharey), inverted once.
+        ax_t.set_yscale("log")
+        ax_t.invert_yaxis()
+        _thin_log_axis(ax_t, "y")
+        for ax in (ax_t, ax_v):
+            ax.grid(alpha=0.25)
+        # Legend in the strip STRUCT_AXES_RECT leaves free to the RIGHT, so
+        # it can never cover a profile and needs no y-limit padding. One
+        # column preserves the caller's peak-abundance order.
+        ax_v.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0),
+                    frameon=False, fontsize=7, ncol=1,
+                    handletextpad=0.5, borderaxespad=0.0, labelspacing=0.35)
         return fig

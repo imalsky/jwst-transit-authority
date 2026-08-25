@@ -124,12 +124,9 @@ def test_concurrent_renders_do_not_raise():
         try:
             for _ in range(10):
                 with plotting.render_lock:
-                    fig, ylim = plotting.build_tp_figure(p, T)
+                    fig = plotting.build_structure_figure(p, T, cols)
                     fig.savefig(io.BytesIO(), format="png")
                     plt.close(fig)
-                    g = plotting.build_vmr_figure(p, cols, ylim=ylim)
-                    g.savefig(io.BytesIO(), format="png")
-                    plt.close(g)
                     s = _summary_fig()
                     s.savefig(io.BytesIO(), format="png")
                     plt.close(s)
@@ -151,8 +148,8 @@ def test_builders_block_while_the_render_lock_is_held():
     asserts the builder cannot finish, whatever matplotlib does."""
     p, T = _tp()
     cols = _vmr_cols(p)
-    calls = {"build_tp_figure": lambda: plotting.build_tp_figure(p, T)[0],
-             "build_vmr_figure": lambda: plotting.build_vmr_figure(p, cols)}
+    calls = {"build_structure_figure":
+             lambda: plotting.build_structure_figure(p, T, cols)}
     for builder, call in calls.items():
         held, release, finished = (threading.Event() for _ in range(3))
         box = {}
@@ -335,8 +332,8 @@ def test_a_fitted_panel_is_not_labelled_a_forecast():
     def _panel(kind):
         c = posteriors.gaussian_curve(1.75 if kind else 1.0, 0.28)
         return dict(axis_label="[M/H] [dex]", center=1.0,
-                    density_label=("relative density, fit to one noise draw"
-                                   if kind else "relative forecast density"),
+                    density_label=("relative density" if kind
+                                   else "relative forecast density"),
                     curves=[dict(label="PRISM", theta=c["theta"],
                                  pdf=c["pdf"], mu=1.75 if kind else 1.0,
                                  sigma=0.28, color="#1f4e9c", ls="-", lw=1.8,
@@ -347,7 +344,7 @@ def test_a_fitted_panel_is_not_labelled_a_forecast():
                                 _panel(None)])
     try:
         fitted, forecast = fig.axes[1].get_ylabel(), fig.axes[2].get_ylabel()
-        assert "one noise draw" in fitted, fitted
+        assert fitted == "relative density", fitted
         assert "forecast" not in fitted, \
             f"a fitted panel still calls itself a forecast: {fitted!r}"
         assert forecast == "relative forecast density", forecast

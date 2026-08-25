@@ -383,8 +383,8 @@ def test_results_render_and_below_target_is_warning_not_error():
     assert not at.exception, at.exception
     dl_labels = {b.label for b in at.get("download_button")}
     assert {"Figure (PDF, vector)", "Figure (PNG)", "Binned points (CSV)",
-            "Native model (CSV)", "Values (CSV)",
-            "Mode details (CSV)"} <= dl_labels
+            "Native model (CSV)", "T-P values (CSV)",
+            "Mixing ratios (CSV)"} <= dl_labels
     assert any("No signal" in w.value for w in at.warning)
     assert not any("Best mode" in e.value for e in at.error)
 
@@ -534,19 +534,22 @@ def test_combo_builder_fisher_table_naming_and_reset():
     assert not at.exception, at.exception
     subs = [s.value for s in at.subheader]
     exps = [e.label for e in at.get("expander")]
-    assert "Add a custom mode set" in exps, exps
+    # the combo builder and the marginalized-forecast control were MERGED
+    # into the constraint-forecast panel; neither is a section of its own
+    assert "Add a custom mode set" not in exps, exps
     assert "Mode combinations" not in exps, exps
+    assert "Marginalized Fisher forecasts" not in exps, exps
+    assert "Marginalized Fisher forecasts" not in subs, subs
+    assert "Mode details" not in exps, exps
+    assert "Run summary & configuration" not in exps, exps
     assert "Parameter constraint forecast (local Fisher)" in exps, exps
     assert "Physical structure (T-P profile, mixing ratios)" in exps, exps
-    assert "Marginalized Fisher forecasts" in exps, exps
-    assert "Marginalized Fisher forecasts" not in subs, subs
     assert any("forecast summary" in e for e in exps), exps
     assert not any("forecast summary" in s for s in subs), subs
     assert "Figure (PDF, vector)" in {b.label
                                       for b in at.get("download_button")}
 
-    # the CONSTRAINT table specifically -- Mode details also has a "mode"
-    # column and renders first, so identify by the parameter column
+    # identify the CONSTRAINT table by its parameter column
     tables = [t.value for t in at.table
               if "mode" in getattr(t.value, "columns", [])
               and "parameter" in getattr(t.value, "columns", [])]
@@ -664,15 +667,17 @@ def test_changing_any_run_input_marks_the_result_stale(widget, value, field,
     assert _named() and field in _named()[0], _named()
 
 
-@pytest.mark.parametrize("key,label", [("n0_sum_x", "Wavelength"),
-                                       ("n0_struct_vmr", "Mixing ratio")])
+@pytest.mark.parametrize("key,label", [("n0_sum_x", "Wavelength")])
 def test_a_nonpositive_bound_on_a_log_axis_warns_instead_of_killing_the_page(
         key, label):
-    """A min at or below zero has no logarithm on a log axis (one summary
-    axis + one structure-panel axis cover both figure builders). The builders
+    """A min at or below zero has no logarithm on a log axis. The builders
     raise on it -- right for an API backstop, but uncaught it takes the
     ENTIRE results page down. A typed number is a user choice, not a defect:
-    warn, fall back to the automatic fit, keep the page alive."""
+    warn, fall back to the automatic fit, keep the page alive.
+
+    Only the summary figure carries axis controls now; the structure figure
+    has none (it draws at the module defaults), so there is no typed bound
+    left to poison there."""
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
     at = _run_with_result(out, out_meta,
                           **{f"{key}_min": 0.0, f"{key}_max": 5.0})
@@ -707,7 +712,7 @@ def test_axis_bounds_refuse_one_sided_and_reach_the_figure(monkeypatch):
     # no wavelength-range radio.
     assert not [r for r in at.radio if r.key == "n0_sum_wlmode"]
     assert not at.slider, [s.key for s in at.slider]
-    for _k in ("sum_x", "struct_T", "struct_p", "struct_vmr", "sum_post_lnZ"):
+    for _k in ("sum_x", "sum_post_lnZ"):
         for _end in ("min", "max"):
             assert at.number_input(key=f"n0_{_k}_{_end}").value is None, \
                 f"{_k}_{_end} should start blank"
@@ -737,13 +742,13 @@ def test_mixing_ratio_panel_selects_species_by_name(monkeypatch):
     its CSV were mislabelled for every species."""
     from jwst_tool import plotting
     seen = {}
-    _real = plotting.build_vmr_figure
+    _real = plotting.build_structure_figure
 
-    def _spy(p_bar, columns, **kw):
+    def _spy(p_bar, T_K, columns, **kw):
         seen["columns"] = list(columns)
-        return _real(p_bar, columns, **kw)
+        return _real(p_bar, T_K, columns, **kw)
 
-    monkeypatch.setattr(plotting, "build_vmr_figure", _spy)
+    monkeypatch.setattr(plotting, "build_structure_figure", _spy)
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
     at = _run_with_result(out, out_meta)
     assert not at.exception, at.exception

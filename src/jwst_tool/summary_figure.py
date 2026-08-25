@@ -580,7 +580,8 @@ def _plot_posterior_panel(axp, pan: dict, color: str,
     axp.set_yticks([])
     axp.tick_params(labelsize=_TICK)
     # The y label distinguishes a FORECAST (centered on the input by
-    # construction) from a RETRIEVAL on one noise draw (whose center moves).
+    # construction, "relative forecast density") from a fit to the jitter
+    # realization (whose center moves, plain "relative density").
     # Reviews re-find this: with jitter on, curves sit off the
     # injected value while the axis still read "forecast density" -- and a
     # forecast centered anywhere but the input would be a bug, so the label
