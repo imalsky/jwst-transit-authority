@@ -202,8 +202,11 @@ def _transits_cell(tt: dict, val_never: str, floored: bool) -> str:
         return f"unreachable (noise floor caps it at {val_never})"
     return str(tt["n"])
 
+# initial_sidebar_state: the default ("auto") starts the sidebar COLLAPSED
+# on a narrow viewport -- the huggingface.co iframe is one -- hiding every
+# input behind a small toggle, which reads as "half the tool is missing".
 st.set_page_config(page_title="JWST Exoplanet Observation Planner",
-                   layout="wide")
+                   layout="wide", initial_sidebar_state="expanded")
 
 # ---------------------------------------------------------------------------
 # Header: short orientation, no acknowledgment gate
@@ -969,9 +972,11 @@ with st.sidebar:
                 st.session_state[_k("tp")] = _tp_default
         if st.session_state.get(_k("tp")) not in _tp_opts:
             st.session_state[_k("tp")] = _tp_default
+        # the key is always set above, so no index= default: passing one as
+        # well makes Streamlit log a "created with a default value but also
+        # set via the Session State API" stack trace on every rerun
         tp_mode = st.selectbox(
             "Temperature-pressure profile", _tp_opts,
-            index=_tp_opts.index(_tp_default),
             key=_k("tp"),
             format_func={"guillot": "Guillot (2010)",
                          "file": "Tabulated table (T-P, optional Kzz)"}.get)
