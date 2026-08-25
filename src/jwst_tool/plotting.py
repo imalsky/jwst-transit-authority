@@ -82,7 +82,7 @@ VMR_XLIM_DEFAULT = (1e-12, 1.0)
 STRUCT_FIG_DPI = 200
 STRUCT_FIG_W_IN = 11.0
 STRUCT_FIG_H_IN = 4.8
-STRUCT_AXES_RECT = dict(left=0.055, right=0.863, bottom=0.13, top=0.97,
+STRUCT_AXES_RECT = dict(left=0.078, right=0.863, bottom=0.13, top=0.97,
                         wspace=0.20)
 # Profiles read at a glance rather than as hairlines.
 STRUCT_LW = 2.6
@@ -152,15 +152,16 @@ def build_structure_figure(p_bar, T_K, columns):
         _thin_log_axis(ax_v, "x")
         ax_v.set_xlabel("volume mixing ratio")
 
-        # ONE pressure axis for both panels (sharey), inverted once -- but
-        # drawn on BOTH: plt.subplots(sharey=True) hides the right panel's
-        # tick labels, which left the mixing-ratio panel with no visible
-        # pressure axis across the gap between the panels.
+        # ONE pressure axis for both panels (sharey), inverted once. Tick
+        # labels are drawn on BOTH panels (plt.subplots(sharey=True) hides
+        # the right panel's, which left the mixing-ratio panel with no
+        # visible pressure scale across the gap), but the "pressure (bar)"
+        # label appears ONCE, at the far left of the figure -- never between
+        # the panels (maintainer decision).
         ax_t.set_yscale("log")
         ax_t.invert_yaxis()
         _thin_log_axis(ax_t, "y")
         ax_v.tick_params(axis="y", labelleft=True)
-        ax_v.set_ylabel("pressure (bar)")
         for ax in (ax_t, ax_v):
             ax.grid(alpha=0.25)
         # Legend in the strip STRUCT_AXES_RECT leaves free to the RIGHT, so

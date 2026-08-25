@@ -192,9 +192,11 @@ def test_structure_panels_share_one_pressure_axis_drawn_on_both():
         lo, hi = ax_t.get_ylim()
         assert lo > hi, "pressure must increase downward"
         for ax in (ax_t, ax_v):
-            assert ax.get_ylabel() == "pressure (bar)", ax.get_ylabel()
             assert ax.yaxis.get_tick_params()["labelleft"], \
                 "pressure tick labels hidden on a panel"
+        # ONE axis label, at the far left -- never between the panels
+        assert ax_t.get_ylabel() == "pressure (bar)", ax_t.get_ylabel()
+        assert ax_v.get_ylabel() == "", ax_v.get_ylabel()
         # T-P in black; every species a distinct colour, and the species the
         # research note draws in the SAME colour as its figure
         assert ax_t.get_lines()[0].get_color() == plotting.TP_COLOR
