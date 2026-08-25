@@ -30,6 +30,7 @@ that no unlocked layout/export call survives in app.py).
 """
 from __future__ import annotations
 
+import itertools
 import threading
 
 import matplotlib.pyplot as plt
@@ -85,6 +86,16 @@ STRUCT_AXES_RECT = dict(left=0.055, right=0.863, bottom=0.13, top=0.97,
                         wspace=0.20)
 # Profiles read at a glance rather than as hairlines.
 STRUCT_LW = 2.6
+# T-P profile in black; mixing ratios in Paul Tol's colour-blind-safe
+# "vibrant" scheme, the SAME colour per species as the research note's
+# model-structure figure (jwst_note/scripts/fig_model_structure.py), with
+# Tol "muted" colours for any further RT molecule. All distinct from black.
+TP_COLOR = "black"
+VMR_COLORS = {"H2O": "#0077BB", "CO": "#33BBEE", "CO2": "#009988",
+              "CH4": "#EE7733", "H2S": "#BBBBBB", "SO2": "#CC3311",
+              "NH3": "#EE3377"}
+VMR_EXTRA_COLORS = ("#332288", "#117733", "#882255", "#AA4499", "#999933",
+                    "#44AA99", "#DDCC77", "#661100")
 
 
 def build_structure_figure(p_bar, T_K, columns):
@@ -115,7 +126,7 @@ def build_structure_figure(p_bar, T_K, columns):
         for ax in (ax_t, ax_v):
             ax.set_box_aspect(1.0)
 
-        ax_t.plot(T, p, color="#2a78d6", lw=STRUCT_LW)
+        ax_t.plot(T, p, color=TP_COLOR, lw=STRUCT_LW)
         # the chemistry grid's validated temperature span
         for tlim in (320.0, 2980.0):
             ax_t.axvline(tlim, color="#cccccc", lw=0.8, ls=":")
@@ -127,13 +138,15 @@ def build_structure_figure(p_bar, T_K, columns):
         ax_t.set_xlabel("temperature (K)")
         ax_t.set_ylabel("pressure (bar)")
 
+        extra = itertools.cycle(VMR_EXTRA_COLORS)
         for m, y in cols:
             ya = np.asarray(y, dtype=float)
             if ya.shape != p.shape:
                 raise ValueError(
                     f"build_structure_figure: {m} column {ya.shape} does not "
                     f"match the pressure grid {p.shape}")
-            ax_v.plot(np.clip(ya, 1e-14, None), p, lw=STRUCT_LW, label=str(m))
+            ax_v.plot(np.clip(ya, 1e-14, None), p, lw=STRUCT_LW, label=str(m),
+                      color=VMR_COLORS.get(str(m)) or next(extra))
         ax_v.set_xscale("log")
         ax_v.set_xlim(*VMR_XLIM_DEFAULT)
         _thin_log_axis(ax_v, "x")

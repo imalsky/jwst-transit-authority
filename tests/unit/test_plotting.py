@@ -195,6 +195,14 @@ def test_structure_panels_share_one_pressure_axis_drawn_on_both():
             assert ax.get_ylabel() == "pressure (bar)", ax.get_ylabel()
             assert ax.yaxis.get_tick_params()["labelleft"], \
                 "pressure tick labels hidden on a panel"
+        # T-P in black; every species a distinct colour, and the species the
+        # research note draws in the SAME colour as its figure
+        assert ax_t.get_lines()[0].get_color() == plotting.TP_COLOR
+        colors = {ln.get_label(): ln.get_color() for ln in ax_v.get_lines()}
+        assert len(set(colors.values())) == len(colors), colors
+        for name, c in plotting.VMR_COLORS.items():
+            if name in colors:
+                assert colors[name].upper() == c.upper(), (name, colors[name])
     finally:
         plt.close(fig)
 
