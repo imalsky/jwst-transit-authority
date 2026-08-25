@@ -144,7 +144,11 @@ def ktable_sources() -> dict:
             "dataset": rec["dataset"], "iso": rec["iso"],
             "natural_abundance": bool(rec["natural_abundance"]),
             "file": rec["file"], "url": rec["url"],
-            "doi": info.get("doi"), "date_id": info.get("date_id"),
+            # The fetcher's curated DOI wins where it exists: four ExoMolOP
+            # headers ship a placeholder instead of one. The header value is
+            # kept alongside, so nothing is silently substituted.
+            "doi": rec.get("doi") or info.get("doi"),
+            "header_doi": info.get("doi"), "date_id": info.get("date_id"),
             "ngauss": int(info["ngauss"]),
             "t_range_K": [float(v) for v in info["t_range_k"]],
             "p_range_bar": [float(v) for v in info["p_range_bar"]],

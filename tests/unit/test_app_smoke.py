@@ -144,7 +144,7 @@ def test_fresh_boot_pre_run_contract():
     # warning} exists, depending on whether the fetcher's record is
     # installed; the picker's VALUES stay species tokens while its OPTIONS
     # name the dataset behind each one.
-    from jwst_tool import datacheck, forward
+    from jwst_tool import datacheck, forward, planets
     pp = datacheck.exomolop_provenance_path()
     have = bool(pp and pp.is_file())
     srcs = [d for d in at.dataframe if "component" in list(d.value.columns)
@@ -161,6 +161,19 @@ def test_fresh_boot_pre_run_contract():
         assert offered <= set(df["component"])
         assert (df.loc[df["component"].isin(offered), "data set"] != "").all()
         assert all(" \u00b7 " in o for o in ms[0].options), ms[0].options
+        # Every row is citable: a real DOI AND a real page, on the opacity
+        # rows and the non-opacity data files alike. The regex also rejects
+        # the four ExoMolOP placeholder headers -- note the LOWERCASE x in
+        # 'x.xxxx/yyyyy' and 'xxxxxxx/xxxxxxxxx/xxxxxx', which a "10.xxxx"
+        # filter would miss. This is the whole no-blank-cells contract.
+        bad = [(c, d, u) for c, d, u in
+               zip(df["component"], df["source DOI"], df["source page"])
+               if not re.fullmatch(r"10\.\d{4,9}/\S+", str(d))
+               or not str(u).startswith("http")]
+        assert not bad, bad
+        # A new shipped UV spectrum must bring its citation with it, or the
+        # table would KeyError in front of a user.
+        assert set(planets.SFLUX_SOURCES) == set(planets.SFLUX_CHOICES)
     sld = at.number_input(key="n0_noisescale")
     assert sld.value == 1.0 and sld.label == "Global noise multiplier", \
         (sld.label, sld.value)

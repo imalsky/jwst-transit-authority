@@ -413,7 +413,8 @@ def test_restore_bounds_match_the_widgets():
 
 def test_provenance_snapshot_records_the_ktables(tmp_path, monkeypatch):
     """The exported provenance names the k-tables a run actually reads
-    (dataset, isotopologue, file, DOI per species), path-free; an absent
+    (dataset, isotopologue, file, curated + header DOI per species),
+    path-free; an absent
     provenance record is an explicit 'absent' entry with the remedy, never
     a silent omission."""
     import json
@@ -427,7 +428,8 @@ def test_provenance_snapshot_records_the_ktables(tmp_path, monkeypatch):
                 "file": "1H2-16O__POKAZATEL.h5"},
         "CO2": {"dataset": "Dozen", "iso": "12C-16O2",
                 "natural_abundance": True, "url": "https://x/CO2",
-                "file": "CO2-all__Dozen.h5"}}))
+                "file": "CO2-all__Dozen.h5",
+                "doi": "10.1093/mnras/staf2135"}}))
     monkeypatch.setenv("VULCAN_FORWARD_DATA", str(root))
     monkeypatch.setattr(exomolop, "table_info", lambda m: {
         "doi": "x.xxxx/yyyyy", "date_id": None, "ngauss": 16,
@@ -439,7 +441,14 @@ def test_provenance_snapshot_records_the_ktables(tmp_path, monkeypatch):
         kt = snap["datasets"]["ktables"]
         assert kt["status"] == "ok" and set(kt["tables"]) == {"H2O", "CO2"}
         assert kt["tables"]["CO2"]["natural_abundance"] is True
-        assert kt["tables"]["H2O"]["doi"] == "x.xxxx/yyyyy"   # verbatim
+        # DOI resolution, both branches: the fetcher's curated value wins
+        # where it exists (four ExoMolOP headers ship a placeholder), the
+        # header is the fallback, and the header value is always kept
+        # alongside so nothing is silently substituted.
+        assert kt["tables"]["H2O"]["doi"] == "x.xxxx/yyyyy"   # header fallback
+        assert kt["tables"]["CO2"]["doi"] == "10.1093/mnras/staf2135"
+        assert (kt["tables"]["CO2"]["header_doi"]
+                == kt["tables"]["H2O"]["header_doi"] == "x.xxxx/yyyyy")
         assert kt["tables"]["H2O"]["file"] == "1H2-16O__POKAZATEL.h5"
         assert str(tmp_path) not in json.dumps(snap)
         monkeypatch.setenv("VULCAN_FORWARD_DATA", str(tmp_path / "empty"))

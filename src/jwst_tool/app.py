@@ -291,53 +291,9 @@ with st.expander("Validation"):
         "6959427), and VULCAN 2.0 and petitRADTRANS on identical inputs.")
 
 # ---------------------------------------------------------------------------
-# Data availability -- detected live; the display adapts to what is installed
-# (missing data still fails loudly at run time; this is the up-front view)
+# Data availability -- detected live. The GUI reports only what BLOCKS a run;
+# the full install inventory is `jwst-tool data`.
 # ---------------------------------------------------------------------------
-_STATUS_LABEL = {datacheck.OK: "Installed", datacheck.MISSING: "Missing",
-                 datacheck.AUTO: "Downloaded on first use"}
-
-_DATA_GROUP = {
-    "Python stack (this environment)": "Software",
-    "Chemistry / RT engine data": "Atmosphere model",
-    "Chemistry equilibrium initializer": "Atmosphere model",
-    "Stellar UV spectra (photochemistry)": "Stellar UV",
-    f"Pandeia noise backend ({ins.JWST_TOOL_BACKEND})": "JWST noise",
-    "Star normalization data (synphot CDBS)": "Stellar spectrum",
-}
-
-
-def _data_use(it) -> str:
-    """Short statement of where one installed item enters a calculation."""
-    if it.key.startswith("pkg:"):
-        return "Runs the application" if it.required else "Runs this web interface"
-    if it.key == "engine:config":
-        return "Locates the opacity files used by the spectrum model"
-    if it.key.startswith("cia:"):
-        return "H2/He collision-induced absorption in every spectrum"
-    if it.key.startswith("ktable:"):
-        return ("Molecular absorption in the spectrum model" if
-                it.key != "ktable:provenance" else
-                "Identifies each molecular opacity file")
-    if it.key.startswith("fastchem:"):
-        return "Initial chemical-equilibrium abundances"
-    if it.key.startswith("uv:"):
-        return "Photolysis rates when this UV spectrum is selected"
-    if it.key == "pandeia:python":
-        return "Runs the JWST exposure and noise calculation"
-    if it.key == "pandeia:refdata":
-        return "JWST instrument throughput and detector model"
-    if it.key == "pandeia:psf":
-        return "JWST point-spread functions and extraction"
-    if it.key == "cdbs:phoenix":
-        return "Stellar spectrum selected from Teff, log(g), and [Fe/H]"
-    if "2mass" in it.key.lower():
-        return "Scales the stellar spectrum to the entered 2MASS Ks magnitude"
-    if "alpha_lyr" in it.key:
-        return "Reference Vega spectrum for local stellar-flux calculations"
-    return "Model input"
-
-
 def _data_label(it) -> str:
     """Public name without installation details or parenthetical clauses."""
     if it.key.startswith("pkg:"):
@@ -361,32 +317,12 @@ def _data_label(it) -> str:
     return it.label.split(" (")[0]
 
 
-def _data_status_rows(report: dict) -> list[dict]:
-    rows = []
-    for it in datacheck.all_items(report):
-        location = it.detail
-        if location.startswith("found: "):
-            location = location.removeprefix("found: ")
-        elif location == "importable":
-            location = "current Python environment"
-        rows.append({
-            "group": _DATA_GROUP.get(it.section, it.section),
-            "item": _data_label(it),
-            "used for": _data_use(it),
-            "required": "yes" if it.required else "optional",
-            "status": _STATUS_LABEL[it.status],
-            "file or environment": location,
-            "if unavailable": it.remedy if it.status != datacheck.OK else "",
-        })
-    return rows
-
-
 @st.cache_data(ttl=3600, show_spinner="Checking installed data ...")
 def _cached_full_report(_nonce: int, _backend: str):
     # Disk-persisted (the Space entrypoint warms it at boot) on top of the
     # in-process st.cache. The manifest check is sampled, not exhaustive
-    # (full pass: `jwst-tool data --deep`); the refresh button deletes the
-    # disk cache and rebuilds.
+    # (full pass: `jwst-tool data --deep`). Invalidation is the two 1-hour
+    # TTLs -- this one and datacheck.REPORT_CACHE_MAX_AGE_S.
     cached = datacheck.load_cached_report()
     if cached is not None:
         return cached
@@ -394,18 +330,7 @@ def _cached_full_report(_nonce: int, _backend: str):
                                        extra_mols=forward.EXTRA_MOLECULES)
 
 
-def _bump_data_nonce():
-    try:
-        datacheck.REPORT_CACHE_FILE.unlink()
-    except OSError:
-        pass
-    st.session_state["data_report_nonce"] = (
-        st.session_state.get("data_report_nonce", 0) + 1)
-
-
-_data_report = _cached_full_report(
-    st.session_state.get("data_report_nonce", 0),
-    ins.JWST_TOOL_BACKEND)
+_data_report = _cached_full_report(0, ins.JWST_TOOL_BACKEND)
 _missing_req = datacheck.missing_required(_data_report)
 if _missing_req:
     st.error(
@@ -451,51 +376,86 @@ def _mol_label(m: str) -> str:
         "(natural abundance)" if r["natural_abundance"] else f"({r['iso']})")
 
 
-def _opacity_rows(base_set, extra_set, extra_on, rayleigh_on, cloud_on):
-    """One row per offered molecule (base first) plus the continuum terms.
-    DOIs are the k-table headers verbatim (some upstream placeholders), so
-    they are never linked; the ExoMol page is."""
+# Every non-k-table source the tool reads, with the paper that defines it.
+# DOI + page are both REQUIRED here: a row with either one blank is a citation
+# the user cannot follow, and test_app_smoke pins that none is. Every DOI was
+# resolved against doi.org. The k-table rows get theirs from the engine.
+_CIA_SRC = ("HITRAN CIA 2011", "10.1016/j.jqsrt.2011.11.004",
+            "https://hitran.org/cia/")
+_EXOJAX_SRC = ("ExoJAX", "10.3847/1538-4365/ac3b4d",
+               "https://github.com/HajimeKawahara/exojax")
+
+def _source_rows(base_set, extra_set, extra_on, rayleigh_on, cloud_on,
+                 photo_on, sflux_sel):
+    """One row per data source the tool reads: the offered k-tables (base
+    first), the continuum terms, and the non-opacity data files. Every row
+    carries a resolvable DOI and page; `used in this setup` marks the ones
+    this configuration actually reads. The k-table band grid is one line in
+    the Opacity panel rather than a column repeating 25 identical values."""
     rows = []
     for m in list(base_set) + list(extra_set):
         r = _ksrc.get(m, {})
-        tr, pr, wr = (r.get("t_range_K"), r.get("p_range_bar"),
-                      r.get("wl_range_um"))
+        iso = ("natural abundance" if r.get("natural_abundance")
+               else r.get("iso", ""))
         rows.append({
             "component": m,
             "used in this setup": m in base_set or m in extra_on,
-            "data set": r.get("dataset", ""),
-            "isotopologue": ("natural abundance"
-                             if r.get("natural_abundance") else r.get("iso", "")),
-            "table range": (f"T {tr[0]:g}-{tr[1]:g} K; "
-                            f"P {pr[0]:g}-{pr[1]:g} bar; "
-                            f"λ {wr[0]:.2g}-{wr[1]:.3g} µm") if tr else "",
+            "data set": f"ExoMol {r['dataset']} ({iso})" if r else "",
             "source DOI": r.get("doi") or "",
-            "source page": r.get("url", ""),
-            "local file": r.get("file", "")})
-    try:
-        from jwst_tool import engine_config as _ecfg
-        _cia = (Path(_ecfg.CIA_H2H2_FILE).name, Path(_ecfg.CIA_H2HE_FILE).name)
-    except (ImportError, RuntimeError):
-        _cia = ("", "")
+            "source page": r.get("url", "")})
     rows += [
         {"component": "H2-H2 CIA", "used in this setup": True,
-         "data set": "HITRAN CIA 2011", "isotopologue": "",
-         "table range": "", "source DOI": "", "source page": "",
-         "local file": _cia[0]},
+         "data set": _CIA_SRC[0],
+         "source DOI": _CIA_SRC[1], "source page": _CIA_SRC[2]},
         {"component": "H2-He CIA", "used in this setup": True,
-         "data set": "HITRAN CIA 2011", "isotopologue": "",
-         "table range": "", "source DOI": "", "source page": "",
-         "local file": _cia[1]},
+         "data set": _CIA_SRC[0],
+         "source DOI": _CIA_SRC[1], "source page": _CIA_SRC[2]},
         {"component": "Rayleigh scattering (H2, He)",
          "used in this setup": bool(rayleigh_on),
-         "data set": "ExoJAX H2/He polarizabilities", "isotopologue": "",
-         "table range": "", "source DOI": "", "source page": "",
-         "local file": ""},
+         "data set": "ExoJAX H2/He polarizabilities",
+         "source DOI": _EXOJAX_SRC[1], "source page": _EXOJAX_SRC[2]},
+        # Cites the code that runs: exojax.atm.simple_clouds.powerlaw_clouds.
+        # Its alpha is -gamma of the petitRADTRANS definition
+        # (Molliere et al. 2019, 10.1051/0004-6361/201935470).
         {"component": "Power-law cloud/haze",
          "used in this setup": bool(cloud_on),
-         "data set": "Analytic model: kappa_cloud and alpha",
-         "isotopologue": "", "table range": "", "source DOI": "",
-         "source page": "", "local file": ""},
+         "data set": "ExoJAX powerlaw_clouds (kappa_cloud, alpha)",
+         "source DOI": _EXOJAX_SRC[1], "source page": _EXOJAX_SRC[2]},
+        {"component": "Chemical equilibrium initializer",
+         "used in this setup": True,
+         "data set": "FastChem 2.0 (VULCAN build)",
+         "source DOI": "10.1093/mnras/sty1531",
+         "source page": "https://github.com/exoclime/FastChem"},
+    ]
+    for fname, label in planets.SFLUX_CHOICES.items():
+        ds, doi, url = planets.SFLUX_SOURCES[fname]
+        rows.append({
+            "component": f"Stellar UV — {label}",
+            "used in this setup": bool(photo_on) and fname == sflux_sel,
+            "data set": ds, "source DOI": doi, "source page": url})
+    rows += [
+        {"component": "Stellar spectrum grid",
+         "used in this setup": True,
+         "data set": "PHOENIX (Allard et al., synphot CDBS)",
+         "source DOI": "10.1098/rsta.2011.0269",
+         "source page": "http://perso.ens-lyon.fr/france.allard/"},
+        {"component": "Ks bandpass (flux normalization)",
+         "used in this setup": True, "data set": "2MASS",
+         "source DOI": "10.1086/498708",
+         "source page": "https://irsa.ipac.caltech.edu/Missions/2mass.html"},
+        {"component": "Flux standard (Vega)",
+         "used in this setup": True,
+         "data set": "CALSPEC alpha_lyr_stis_011",
+         "source DOI": "10.1086/677655",
+         "source page": "https://www.stsci.edu/hst/instrumentation/"
+                        "reference-data-for-calibration-and-tools/"
+                        "astronomical-catalogs/calspec"},
+        {"component": "JWST exposure & noise model",
+         "used in this setup": True,
+         "data set": f"Pandeia {ins.BACKEND_RELEASE}",
+         "source DOI": "10.1117/12.2231768",
+         "source page": "https://jwst-docs.stsci.edu/jwst-etc-pandeia-"
+                        "engine-tutorial"},
     ]
     return rows
 
@@ -503,12 +463,6 @@ def _opacity_rows(base_set, extra_set, extra_on, rayleigh_on, cloud_on):
 with st.expander("Data" +
                  (f" ({len(_missing_req)} required item(s) missing)"
                   if _missing_req else "")):
-    st.markdown("#### Files and software")
-    st.dataframe(_data_status_rows(_data_report), width="stretch",
-                 hide_index=True)
-    st.button("Check again", on_click=_bump_data_nonce,
-              key="data_refresh_btn")
-    st.divider()
     _opacity_slot = st.container()
 
 # Measured AD Fisher-row wall time (WASP-39b defaults), threaded through the
@@ -1819,20 +1773,34 @@ if tp_mode == "file" and not tp_file_ok and params_error is None:
     params_error = "file-mode T-P selected but no valid table is loaded"
 
 with _opacity_slot:
-    st.markdown("#### Opacity used in this setup")
+    st.markdown("#### Data sources")
     if _ksrc_err:
         st.warning(_KSRC_WARN + _ksrc_err)
     else:
         st.dataframe(
-            _opacity_rows(_base_set, _extra_set, extra_mols, use_rayleigh
-                          and science_mode == "transmission", cloud_on),
+            _source_rows(_base_set, _extra_set, extra_mols, use_rayleigh
+                         and science_mode == "transmission", cloud_on,
+                         use_photo, sflux),
             column_config={
                 "used in this setup": st.column_config.CheckboxColumn(
                     "used in this setup"),
-                "source page": st.column_config.LinkColumn(
-                    "source page",
-                    display_text=r"https://www\.exomol\.com/db/(.+)/[^/]+$")},
+                # No display_text: it is a regex over the URL, and these
+                # pages span ExoMol, HITRAN, STScI and others.
+                "source page": st.column_config.LinkColumn("source page")},
             width="stretch", hide_index=True)
+        # Replaces a per-row "table range" column: every installed k-table
+        # shares one grid, so 25 identical cells said it 25 times. Derived,
+        # not asserted -- a mixed release widens these into a visible span.
+        if _ksrc:
+            _tr = [r["t_range_K"] for r in _ksrc.values()]
+            _pr = [r["p_range_bar"] for r in _ksrc.values()]
+            _wr = [r["wl_range_um"] for r in _ksrc.values()]
+            st.caption(
+                f"k-tables valid over T {min(t[0] for t in _tr):g}-"
+                f"{max(t[1] for t in _tr):g} K, "
+                f"P {min(p[0] for p in _pr):g}-{max(p[1] for p in _pr):g} bar, "
+                f"λ {min(w[0] for w in _wr):.2g}-"
+                f"{max(w[1] for w in _wr):.3g} µm.")
 
 # rough runtime hint keyed off the resolution settings
 base_min = 0.1 + 0.010 * nz

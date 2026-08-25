@@ -54,6 +54,27 @@ SFLUX_CHOICES = {
     "sflux-GJ1214.txt": "GJ 1214 (M4.5V, MUSCLES)",
 }
 
+# Where each shipped spectrum comes from: (data set, DOI, page). Keyed exactly
+# like SFLUX_CHOICES -- a spectrum without a citation cannot be listed in the
+# GUI's data-sources table, and a test pins the two key sets equal. Every DOI
+# resolved against doi.org.
+SFLUX_SOURCES = {
+    "sflux-W39b_Tsai2023.txt": (
+        "Tsai et al. 2023", "10.1038/s41586-023-05902-2",
+        "https://www.nature.com/articles/s41586-023-05902-2"),
+    "Gueymard_solar.txt": (
+        "Gueymard 2004", "10.1016/j.solener.2003.08.039",
+        "https://doi.org/10.1016/j.solener.2003.08.039"),
+    "sflux-HD189_Moses11.txt": (
+        "Moses et al. 2011", "10.1088/0004-637X/737/1/15",
+        "https://doi.org/10.1088/0004-637X/737/1/15"),
+    "sflux-epseri.txt": (
+        "MUSCLES Treasury Survey", "10.3847/0004-637X/820/2/89",
+        "https://archive.stsci.edu/prepds/muscles/"),
+}
+SFLUX_SOURCES["sflux-GJ436.txt"] = SFLUX_SOURCES["sflux-epseri.txt"]
+SFLUX_SOURCES["sflux-GJ1214.txt"] = SFLUX_SOURCES["sflux-epseri.txt"]
+
 # Host Teff per shipped UV spectrum, powering a SUGGESTION caption on custom
 # planets only ("nearest-Teff shipped template: ..."). It is never applied:
 # neither the GUI nor the archive fill selects a UV spectrum for the user
