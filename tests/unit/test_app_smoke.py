@@ -134,20 +134,23 @@ def test_fresh_boot_pre_run_contract():
     assert set(at.multiselect(key="n0_modes").value) == set(ins.DEFAULT_MODES)
     assert set(ins.DEFAULT_MODES) == {"nirspec_prism", "nirspec_g395h",
                                       "miri_lrs"}
-    labels = " ".join(e.label for e in at.expander)
-    assert "Data status" in labels
+    labels = [e.label for e in at.expander]
+    assert any(label == "Data" or label.startswith("Data (")
+               for label in labels)
+    assert "Opacity sources" not in labels
     ms = [w for w in at.multiselect if w.label == "Extra opacity molecules"]
     assert ms, "extra-molecule multiselect missing"
-    # Opacity sources: exactly one of {the sources table, a loud provenance
+    # Opacity data: exactly one of {the sources table, a loud provenance
     # warning} exists, depending on whether the fetcher's record is
     # installed; the picker's VALUES stay species tokens while its OPTIONS
     # name the dataset behind each one.
     from jwst_tool import datacheck, forward
     pp = datacheck.exomolop_provenance_path()
     have = bool(pp and pp.is_file())
-    srcs = [d for d in at.dataframe if "species" in list(d.value.columns)]
+    srcs = [d for d in at.dataframe if "component" in list(d.value.columns)
+            and "used in this setup" in list(d.value.columns)]
     warns = [w for w in at.warning
-             if "provenance" in w.value or "fetch_exomolop" in w.value]
+             if w.value.startswith("Opacity sources unavailable: ")]
     assert (len(srcs) == 1) == have and bool(warns) == (not have), \
         (have, len(srcs), [w.value for w in warns])
     assert set(ms[0].value) == set(forward.EXTRA_MOLECULES_DEFAULT)
@@ -155,8 +158,8 @@ def test_fresh_boot_pre_run_contract():
         df = srcs[0].value
         offered = (set(forward.MOLECULES)
                    | (set(forward.EXTRA_MOLECULES) - forward._NO_EXOMOLOP_TABLE))
-        assert offered <= set(df["species"])
-        assert (df.loc[df["species"].isin(offered), "source"] != "").all()
+        assert offered <= set(df["component"])
+        assert (df.loc[df["component"].isin(offered), "data set"] != "").all()
         assert all(" \u00b7 " in o for o in ms[0].options), ms[0].options
     sld = at.number_input(key="n0_noisescale")
     assert sld.value == 1.0 and sld.label == "Global noise multiplier", \

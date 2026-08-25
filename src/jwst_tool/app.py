@@ -294,8 +294,91 @@ with st.expander("Validation"):
 # Data availability -- detected live; the display adapts to what is installed
 # (missing data still fails loudly at run time; this is the up-front view)
 # ---------------------------------------------------------------------------
-_STATUS_LABEL = {datacheck.OK: "installed", datacheck.MISSING: "MISSING",
-                 datacheck.AUTO: "downloads on first use"}
+_STATUS_LABEL = {datacheck.OK: "Installed", datacheck.MISSING: "Missing",
+                 datacheck.AUTO: "Downloaded on first use"}
+
+_DATA_GROUP = {
+    "Python stack (this environment)": "Software",
+    "Chemistry / RT engine data": "Atmosphere model",
+    "Chemistry equilibrium initializer": "Atmosphere model",
+    "Stellar UV spectra (photochemistry)": "Stellar UV",
+    f"Pandeia noise backend ({ins.JWST_TOOL_BACKEND})": "JWST noise",
+    "Star normalization data (synphot CDBS)": "Stellar spectrum",
+}
+
+
+def _data_use(it) -> str:
+    """Short statement of where one installed item enters a calculation."""
+    if it.key.startswith("pkg:"):
+        return "Runs the application" if it.required else "Runs this web interface"
+    if it.key == "engine:config":
+        return "Locates the opacity files used by the spectrum model"
+    if it.key.startswith("cia:"):
+        return "H2/He collision-induced absorption in every spectrum"
+    if it.key.startswith("ktable:"):
+        return ("Molecular absorption in the spectrum model" if
+                it.key != "ktable:provenance" else
+                "Identifies each molecular opacity file")
+    if it.key.startswith("fastchem:"):
+        return "Initial chemical-equilibrium abundances"
+    if it.key.startswith("uv:"):
+        return "Photolysis rates when this UV spectrum is selected"
+    if it.key == "pandeia:python":
+        return "Runs the JWST exposure and noise calculation"
+    if it.key == "pandeia:refdata":
+        return "JWST instrument throughput and detector model"
+    if it.key == "pandeia:psf":
+        return "JWST point-spread functions and extraction"
+    if it.key == "cdbs:phoenix":
+        return "Stellar spectrum selected from Teff, log(g), and [Fe/H]"
+    if "2mass" in it.key.lower():
+        return "Scales the stellar spectrum to the entered 2MASS Ks magnitude"
+    if "alpha_lyr" in it.key:
+        return "Reference Vega spectrum for local stellar-flux calculations"
+    return "Model input"
+
+
+def _data_label(it) -> str:
+    """Public name without installation details or parenthetical clauses."""
+    if it.key.startswith("pkg:"):
+        return f"{it.key.removeprefix('pkg:')} Python package"
+    labels = {
+        "engine:config": "Opacity data folder",
+        "cia:H2-H2": "H2-H2 absorption table",
+        "cia:H2-He": "H2-He absorption table",
+        "ktable:provenance": "ExoMolOP source record",
+        "fastchem:binary": "FastChem equilibrium solver",
+        "uv:package": "Stellar UV data folder",
+        "pandeia:python": "Pandeia engine",
+        "pandeia:refdata": "Pandeia JWST reference data",
+        "pandeia:psf": "Pandeia PSF data",
+        "cdbs:phoenix": "PHOENIX stellar spectra",
+    }
+    if it.key in labels:
+        return labels[it.key]
+    if it.key.startswith("ktable:"):
+        return f"{it.key.removeprefix('ktable:')} ExoMolOP opacity table"
+    return it.label.split(" (")[0]
+
+
+def _data_status_rows(report: dict) -> list[dict]:
+    rows = []
+    for it in datacheck.all_items(report):
+        location = it.detail
+        if location.startswith("found: "):
+            location = location.removeprefix("found: ")
+        elif location == "importable":
+            location = "current Python environment"
+        rows.append({
+            "group": _DATA_GROUP.get(it.section, it.section),
+            "item": _data_label(it),
+            "used for": _data_use(it),
+            "required": "yes" if it.required else "optional",
+            "status": _STATUS_LABEL[it.status],
+            "file or environment": location,
+            "if unavailable": it.remedy if it.status != datacheck.OK else "",
+        })
+    return rows
 
 
 @st.cache_data(ttl=3600, show_spinner="Checking installed data ...")
@@ -326,35 +409,18 @@ _data_report = _cached_full_report(
 _missing_req = datacheck.missing_required(_data_report)
 if _missing_req:
     st.error(
-        f"**Missing required data ({len(_missing_req)} item"
-        f"{'s' if len(_missing_req) > 1 else ''}).** The affected steps will "
-        "stop with an error until it is installed (nothing degrades "
-        "silently):\n\n"
-        + "\n".join(f"- **{it.label}** -- {it.detail}. How to get it: "
-                    f"{it.remedy}" for it in _missing_req)
+        f"**Required data missing ({len(_missing_req)} item"
+        f"{'s' if len(_missing_req) > 1 else ''}).** A run stops if it needs "
+        "one of these files:\n\n"
+        + "\n".join(f"- **{_data_label(it)}**  \n  Location: {it.detail}  \n"
+                    f"  Install: {it.remedy}" for it in _missing_req)
         # on the hosted Space the visitor cannot install anything; the CLI
         # remedies are for local installs (SPACE_ID is set by Hugging Face)
         + ("\n\nThis hosted deployment is missing data it should ship "
            "with; please report it to isaacmalsky@gmail.com."
            if os.environ.get("SPACE_ID") else
-           "\n\nInstall commands are in the README's *Install* section. "
-           "Console commands: `jwst-tool data` (status report) and "
-           "`jwst-tool fetch` (download)."))
-with st.expander("Data status: what this machine has installed"
-                 + (f"  ({len(_missing_req)} required item(s) missing)"
-                    if _missing_req else "")):
-    st.dataframe(
-        [{"component": it.label,
-          "status": (_STATUS_LABEL[it.status]
-                     + ("" if it.required else " (optional)")),
-          "detail": it.detail,
-          "how to get it": it.remedy if it.status != datacheck.OK else ""}
-         for it in datacheck.all_items(_data_report)],
-        width="stretch", hide_index=True)
-    st.button("Refresh data status", on_click=_bump_data_nonce,
-              key="data_refresh_btn")
-
-
+           "\n\nUse `jwst-tool data` to check files and `jwst-tool fetch` "
+           "to download supported data."))
 # ---------------------------------------------------------------------------
 # Opacity sources: the fetcher's provenance record + each k-table's header
 # ---------------------------------------------------------------------------
@@ -372,6 +438,9 @@ try:
     _ksrc_err = None
 except (ImportError, RuntimeError, FileNotFoundError) as exc:
     _ksrc, _ksrc_err = {}, str(exc)   # the engine's text carries the remedy
+# fixed prefix: the smoke test recognises the warning by it, whatever the
+# engine's wording (no data root, no provenance.json, no table)
+_KSRC_WARN = "Opacity sources unavailable: "
 
 
 def _mol_label(m: str) -> str:
@@ -392,36 +461,55 @@ def _opacity_rows(base_set, extra_set, extra_on, rayleigh_on, cloud_on):
         tr, pr, wr = (r.get("t_range_K"), r.get("p_range_bar"),
                       r.get("wl_range_um"))
         rows.append({
-            "species": m,
-            "on": m in base_set or m in extra_on,
-            "source": r.get("dataset", ""),
+            "component": m,
+            "used in this setup": m in base_set or m in extra_on,
+            "data set": r.get("dataset", ""),
             "isotopologue": ("natural abundance"
                              if r.get("natural_abundance") else r.get("iso", "")),
-            "coverage": (f"{tr[0]:g}-{tr[1]:g} K · {pr[0]:g}-{pr[1]:g} bar · "
-                         f"{wr[0]:.2g}-{wr[1]:.3g} µm") if tr else "",
-            "DOI": r.get("doi") or "",
-            "ExoMol page": r.get("url", ""),
-            "file": r.get("file", "")})
+            "table range": (f"T {tr[0]:g}-{tr[1]:g} K; "
+                            f"P {pr[0]:g}-{pr[1]:g} bar; "
+                            f"λ {wr[0]:.2g}-{wr[1]:.3g} µm") if tr else "",
+            "source DOI": r.get("doi") or "",
+            "source page": r.get("url", ""),
+            "local file": r.get("file", "")})
     try:
         from jwst_tool import engine_config as _ecfg
         _cia = (Path(_ecfg.CIA_H2H2_FILE).name, Path(_ecfg.CIA_H2HE_FILE).name)
     except (ImportError, RuntimeError):
         _cia = ("", "")
     rows += [
-        {"species": "H2-H2 CIA", "on": True, "source": "HITRAN CIA 2011",
-         "isotopologue": "", "coverage": "", "DOI": "", "ExoMol page": "",
-         "file": _cia[0]},
-        {"species": "H2-He CIA", "on": True, "source": "HITRAN CIA 2011",
-         "isotopologue": "", "coverage": "", "DOI": "", "ExoMol page": "",
-         "file": _cia[1]},
-        {"species": "Rayleigh (H2, He)", "on": bool(rayleigh_on),
-         "source": "exojax (H2, He polarizabilities)", "isotopologue": "",
-         "coverage": "", "DOI": "", "ExoMol page": "", "file": ""},
-        {"species": "power-law cloud", "on": bool(cloud_on),
-         "source": "nuisance (kappa, alpha)", "isotopologue": "",
-         "coverage": "", "DOI": "", "ExoMol page": "", "file": ""},
+        {"component": "H2-H2 CIA", "used in this setup": True,
+         "data set": "HITRAN CIA 2011", "isotopologue": "",
+         "table range": "", "source DOI": "", "source page": "",
+         "local file": _cia[0]},
+        {"component": "H2-He CIA", "used in this setup": True,
+         "data set": "HITRAN CIA 2011", "isotopologue": "",
+         "table range": "", "source DOI": "", "source page": "",
+         "local file": _cia[1]},
+        {"component": "Rayleigh scattering (H2, He)",
+         "used in this setup": bool(rayleigh_on),
+         "data set": "ExoJAX H2/He polarizabilities", "isotopologue": "",
+         "table range": "", "source DOI": "", "source page": "",
+         "local file": ""},
+        {"component": "Power-law cloud/haze",
+         "used in this setup": bool(cloud_on),
+         "data set": "Analytic model: kappa_cloud and alpha",
+         "isotopologue": "", "table range": "", "source DOI": "",
+         "source page": "", "local file": ""},
     ]
     return rows
+
+
+with st.expander("Data" +
+                 (f" ({len(_missing_req)} required item(s) missing)"
+                  if _missing_req else "")):
+    st.markdown("#### Files and software")
+    st.dataframe(_data_status_rows(_data_report), width="stretch",
+                 hide_index=True)
+    st.button("Check again", on_click=_bump_data_nonce,
+              key="data_refresh_btn")
+    st.divider()
+    _opacity_slot = st.container()
 
 # Measured AD Fisher-row wall time (WASP-39b defaults), threaded through the
 # GUI mention below so a re-measurement updates one place. (FD costs come
@@ -1258,8 +1346,8 @@ with st.sidebar:
                           if m not in forward._S_MOLECULES]
         st.caption("Correlated-k on ExoMolOP k-tables (R = 1000, "
                    "16 g-points, 1-15 µm), scored on the analysis bins "
-                   "(default R = 100). Sources per species: the Opacity "
-                   "sources panel.")
+                   "(default R = 100). Sources per species are in the Data "
+                   "panel.")
         st.caption(
             f"The base set **{' · '.join(_base_set)}** is always on.")
         # Species with no published k-table are not in EXTRA_MOLECULES;
@@ -1269,10 +1357,10 @@ with st.sidebar:
         _unattributed = [m for m in list(_base_set) + list(_extra_set)
                          if m not in _ksrc]
         if _ksrc_err or _unattributed:
-            st.warning(_ksrc_err or (
-                "No provenance record for " + ", ".join(_unattributed)
+            st.warning(_KSRC_WARN + (_ksrc_err or (
+                "no provenance record for " + ", ".join(_unattributed)
                 + "; run python -m vulcan_forward.fetch_exomolop "
-                "--molecules " + ",".join(_unattributed)))
+                "--molecules " + ",".join(_unattributed))))
         # Preselect the MEASURED-relevant subset, not everything with a
         # table: most species contribute under 1 ppm, and each default-on
         # molecule pays a leave-one-out spectrum. The ppm measurements are
@@ -1730,24 +1818,21 @@ except (ValueError, RuntimeError) as e:  # stale widget combo mid-rerun, or a
 if tp_mode == "file" and not tp_file_ok and params_error is None:
     params_error = "file-mode T-P selected but no valid table is loaded"
 
-with st.expander("Opacity sources"):
+with _opacity_slot:
+    st.markdown("#### Opacity used in this setup")
     if _ksrc_err:
-        st.warning(_ksrc_err)
+        st.warning(_KSRC_WARN + _ksrc_err)
     else:
         st.dataframe(
             _opacity_rows(_base_set, _extra_set, extra_mols, use_rayleigh
                           and science_mode == "transmission", cloud_on),
             column_config={
-                "on": st.column_config.CheckboxColumn("on"),
-                "ExoMol page": st.column_config.LinkColumn(
-                    "ExoMol page",
+                "used in this setup": st.column_config.CheckboxColumn(
+                    "used in this setup"),
+                "source page": st.column_config.LinkColumn(
+                    "source page",
                     display_text=r"https://www\.exomol\.com/db/(.+)/[^/]+$")},
             width="stretch", hide_index=True)
-        st.caption("ExoMolOP: Chubb et al. 2021, A&A 646, A21 -- "
-                   "petitRADTRANS format, 16 g-points (split 8+8), R = 1000; "
-                   "outside a table's T or P range the nearest entry is "
-                   "used; DOIs are the file headers verbatim (some upstream "
-                   "placeholders).")
 
 # rough runtime hint keyed off the resolution settings
 base_min = 0.1 + 0.010 * nz
