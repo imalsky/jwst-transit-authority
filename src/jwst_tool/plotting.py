@@ -139,10 +139,15 @@ def build_structure_figure(p_bar, T_K, columns):
         _thin_log_axis(ax_v, "x")
         ax_v.set_xlabel("volume mixing ratio")
 
-        # ONE pressure axis for both panels (sharey), inverted once.
+        # ONE pressure axis for both panels (sharey), inverted once -- but
+        # drawn on BOTH: plt.subplots(sharey=True) hides the right panel's
+        # tick labels, which left the mixing-ratio panel with no visible
+        # pressure axis across the gap between the panels.
         ax_t.set_yscale("log")
         ax_t.invert_yaxis()
         _thin_log_axis(ax_t, "y")
+        ax_v.tick_params(axis="y", labelleft=True)
+        ax_v.set_ylabel("pressure (bar)")
         for ax in (ax_t, ax_v):
             ax.grid(alpha=0.25)
         # Legend in the strip STRUCT_AXES_RECT leaves free to the RIGHT, so

@@ -179,6 +179,26 @@ def test_builders_block_while_the_render_lock_is_held():
         plt.close(box["fig"])
 
 
+def test_structure_panels_share_one_pressure_axis_drawn_on_both():
+    """The two structure panels lock their pressure axis together (sharey),
+    but the axis must be VISIBLE on both: plt.subplots hides the right
+    panel's tick labels, which left the mixing-ratio panel floating with no
+    pressure scale across the gap between the panels."""
+    p, T = _tp()
+    fig = plotting.build_structure_figure(p, T, _vmr_cols(p))
+    try:
+        ax_t, ax_v = fig.axes[:2]
+        assert ax_t.get_shared_y_axes().joined(ax_t, ax_v)
+        lo, hi = ax_t.get_ylim()
+        assert lo > hi, "pressure must increase downward"
+        for ax in (ax_t, ax_v):
+            assert ax.get_ylabel() == "pressure (bar)", ax.get_ylabel()
+            assert ax.yaxis.get_tick_params()["labelleft"], \
+                "pressure tick labels hidden on a panel"
+    finally:
+        plt.close(fig)
+
+
 def test_app_materializes_figures_only_through_locked_helpers():
     """STRUCTURAL: no unlocked layout/export/render call survives in app.py.
 

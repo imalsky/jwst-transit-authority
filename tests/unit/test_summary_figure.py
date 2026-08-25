@@ -91,7 +91,7 @@ def test_truncated_co_panel_window_clamps_at_zero():
     center, sigma = 0.55, 0.479          # weakly constrained C/O
     curve = posteriors.truncated_gaussian_curve(center, sigma)
     pan = dict(axis_label="C/O", notes=[], center=center,
-               curves=[dict(label="one draw", theta=curve["theta"],
+               curves=[dict(label="fitted", theta=curve["theta"],
                             pdf=curve["pdf"], mu=center, sigma=sigma,
                             curve_family="gaussian_truncated_positive",
                             color="#2a78d6")])
