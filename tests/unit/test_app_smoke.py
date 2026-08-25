@@ -295,9 +295,12 @@ def test_source_pins_fig_width_fisher_table_and_noise_recording():
         "the global scale is not recorded, so a run cannot be reproduced"
     assert "st.pyplot(fig, width=_FIG_DISPLAY_PX)" in src, \
         "the tight branch no longer pins the display width"
-    assert "st.pyplot(fig, width=_FIG_DISPLAY_PX,\n" in src, \
-        "the full-canvas branch no longer pins the display width"
+    assert "st.image(_fig_png(fig, tight=False), width=_FIG_DISPLAY_PX)" \
+        in src, "the full-canvas branch no longer pins the display width"
     assert 'st.pyplot(fig, width="stretch"' not in src
+    assert not [ln for ln in src.splitlines()
+                if "st.pyplot(" in ln and "bbox_inches" in ln], \
+        "st.pyplot takes no savefig keywords (deprecated in Streamlit)"
     lines = src.splitlines()
     define = next(i for i, l in enumerate(lines)
                   if l.startswith("_FIG_DISPLAY_PX"))

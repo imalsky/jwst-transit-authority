@@ -124,7 +124,7 @@ def _fig_png(fig, dpi: int = 200, tight: bool = True) -> bytes:
     buf = io.BytesIO()
     with plotting.render_lock:
         fig.savefig(buf, format="png", dpi=dpi,
-                    bbox_inches=("tight" if tight else None),
+                    bbox_inches=("tight" if tight else _full_bbox(fig)),
                     facecolor="white")
     return buf.getvalue()
 
@@ -134,7 +134,7 @@ def _fig_pdf(fig, tight: bool = True) -> bytes:
     buf = io.BytesIO()
     with plotting.render_lock:
         fig.savefig(buf, format="pdf",
-                    bbox_inches=("tight" if tight else None),
+                    bbox_inches=("tight" if tight else _full_bbox(fig)),
                     facecolor="white")
     return buf.getvalue()
 
@@ -145,8 +145,9 @@ def _show_fig(fig, tight: bool = True) -> None:
     st.pyplot rasterizes, so it enters the same shared mathtext parser as
     layout does -- it belongs inside the lock like every other
     materialization (plotting.py has the full argument). ``tight=False``
-    forwards the figure's own bbox so the full canvas is shown at a fixed
-    size.
+    shows the full canvas at a fixed size: st.pyplot accepts no savefig
+    keywords any more, so that branch rasterizes through ``_fig_png`` (the
+    same dpi 200 as st.pyplot's default) and displays the PNG with st.image.
 
     FIXED DISPLAY WIDTH: st.pyplot's width defaults to "stretch", which
     re-scales the figure on every window resize while its text stays at
@@ -154,13 +155,12 @@ def _show_fig(fig, tight: bool = True) -> None:
     Streamlit still caps the element at the container width on a narrower
     screen.
     """
-    with plotting.render_lock:
-        if tight:
+    if tight:
+        with plotting.render_lock:
             st.pyplot(fig, width=_FIG_DISPLAY_PX)
-        else:
-            st.pyplot(fig, width=_FIG_DISPLAY_PX,
-                      bbox_inches=_full_bbox(fig))
-        plt.close(fig)
+    else:
+        st.image(_fig_png(fig, tight=False), width=_FIG_DISPLAY_PX)
+    plt.close(fig)
 
 
 def _csv_bytes(df: pd.DataFrame) -> bytes:
@@ -351,15 +351,6 @@ with st.expander("Data status: what this machine has installed"
           "how to get it": it.remedy if it.status != datacheck.OK else ""}
          for it in datacheck.all_items(_data_report)],
         width="stretch", hide_index=True)
-    _c = _data_report["caches"]
-    st.caption(
-        "\"Downloads on first use\" items are fetched automatically the "
-        "first time a run needs them (network required at that moment). "
-        f"Generated caches: {_c['model_cache']['n']} model spectra "
-        f"({_c['model_cache']['mb']} MB), {_c['noise_cache']['n']} noise "
-        f"results ({_c['noise_cache']['mb']} MB). Safe to delete, rebuilt "
-        "on demand. Console equivalent: `jwst-tool data` (add `--deep` to "
-        "probe the Pandeia env's engine version).")
     st.button("Refresh data status", on_click=_bump_data_nonce,
               key="data_refresh_btn")
 
@@ -1887,7 +1878,6 @@ with st.expander("Run summary & configuration"):
                            if tp_file_path else None),
             floor_table=(np.asarray(floor_table).tolist()
                          if floor_table is not None else None))
-        st.json(_share["provenance"], expanded=False)
         # deferred: sits right above the progress box, the natural thing to
         # click during a multi-minute wait
         _deferred_download(
@@ -2264,12 +2254,6 @@ else:
             st.warning(verdict + f"  >{detect.N_TRANSITS_CAP} {_ev}s "
                        "(scan limit).")
 
-# The ranking compares science information only. It does not check APT
-# feasibility (data volume, schedulability, calibration warnings), so that
-# caveat renders as a caption under the mode-details table below -- an
-# operationally unsupportable configuration can otherwise be presented as
-# "Best".
-
 # --- spectrum data (rendered ONCE, on the summary figure below) -------------
 wl = model["wl_um"]
 order = np.argsort(wl)
@@ -2522,15 +2506,6 @@ with st.expander("Mode details"):
     st.download_button("Mode details (CSV)", _csv_bytes(pd.DataFrame(rows)),
                        f"{_fname_base}_mode_details.csv", "text/csv",
                        key=K("dl_modes_csv"))
-    if goal_r == "detect":
-        st.caption(
-            "Nuisance-profiled: the per-segment depth offsets float, plus "
-            "the local T-P, reference-radius and cloud directions when "
-            "available. Calibration-only: only the depth offsets float.")
-    st.caption(
-        "The ranking compares science information only. It does not check "
-        "target acquisition, scheduling, data volume, or other program "
-        "limits. Check those in APT.")
 
 
 with st.expander("Add a custom mode set"):
