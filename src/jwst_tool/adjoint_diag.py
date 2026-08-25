@@ -64,14 +64,12 @@ UQ_CLASS_DEX = 0.65
 def adjoint_key(params: dict, species: str) -> str:
     cp = forward.canonical_params(params)
     payload = {k: v for k, v in cp.items()
-               if k not in ("fisher_params", "jac_method", "nu_pts",
-                            "use_rayleigh", "broadening", "cloud_on",
+               if k not in ("fisher_params", "jac_method",
+                            "use_rayleigh", "cloud_on",
                             "log_kappa_cloud", "alpha_cloud", "extra_mols",
                             "wo_mols",
-                            "rt_ptop_bar", "rt_integration", "rt_dit_res",
-                            "opacity_mode",
-                            "mie_condensate", "mie_log_rg", "mie_sigmag",
-                            "mie_log_mmr", "science_mode", "star_teff",
+                            "rt_ptop_bar", "rt_integration",
+                            "science_mode", "star_teff",
                             "star_logg", "star_feh")}
     # RT/observable-only knobs are dropped: the adjoint runs on the chemistry
     # state alone, and leaving them in re-triggered the multi-hour adjoint on

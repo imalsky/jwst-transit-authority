@@ -182,26 +182,6 @@ needs_engine = pytest.mark.skipif(
     reason="engine data root not configured here (set VULCAN_FORWARD_DATA)")
 
 
-@needs_engine
-def test_linelist_status_and_broadening_path_layout():
-    status = datacheck.molecule_linelist_status(
-        forward.MOLECULES + forward.EXTRA_MOLECULES)
-    assert set(status) == set(forward.MOLECULES + forward.EXTRA_MOLECULES)
-    assert all(v in (datacheck.OK, datacheck.AUTO, datacheck.MISSING)
-               for v in status.values())
-    # an unknown molecule is MISSING, never silently OK
-    assert datacheck.molecule_linelist_status(["NOT_A_MOL"]) == {
-        "NOT_A_MOL": datacheck.MISSING}
-    p_air = datacheck.linelist_path("H2O", "air")
-    p_h2he = datacheck.linelist_path("H2O", "h2he")
-    assert p_air is not None and p_air.name == "H2O.h5"
-    # h2he caches live in an h2he/ SUBDIR with a radis-parseable stem (the
-    # "<db>_h2he" suffix layout broke MdbHitran; pinned in the engine repo)
-    assert p_h2he is not None and p_h2he.name == "H2O.h5"
-    assert p_h2he.parent.name == "h2he"
-    assert datacheck.linelist_path("CO") is None      # cached ExoMol, not HITRAN
-
-
 def test_engine_data_unavailable_is_one_loud_item(monkeypatch):
     monkeypatch.setattr(datacheck, "_engine_config",
                         lambda: RuntimeError("tree not found"))
@@ -219,12 +199,8 @@ class _FakeEngineCfg:
     def __init__(self, root):
         self.DATA_DIR = root
         self.EXOMOLOP_DIR = root / "exomolop"
-        self.DEMO_DATABASE = root / "exojax_linelists"
         self.CIA_H2H2_FILE = root / "opacity_cache" / "H2-H2_2011.cia"
         self.CIA_H2HE_FILE = root / "opacity_cache" / "H2-He_2011.cia"
-        self.CO_CACHED_DIR = root / "opacity_cache" / "CO"
-        self.MOLECULES = {m: {"source": "hitran", "db": m}
-                          for m in ("H2O", "CO2", "SO2", "HCN")}
 
 
 def _fake_root(tmp_path, ktables=()):
@@ -245,8 +221,7 @@ def test_exomolop_status_never_auto(tmp_path, monkeypatch):
 def test_missing_ktables_are_required_items_with_the_fetch_command(
         tmp_path, monkeypatch):
     # The false green this check exists to prevent: `jwst-tool data`
-    # reporting green while the data behind the DEFAULT opacity_mode is
-    # entirely absent.
+    # reporting green while the data behind every run is entirely absent.
     cfg = _FakeEngineCfg(_fake_root(tmp_path, ["H2O"]))
     monkeypatch.setattr(datacheck, "_engine_config", lambda: cfg)
     items = {i.key: i for i in datacheck.check_engine_data(
@@ -260,6 +235,11 @@ def test_missing_ktables_are_required_items_with_the_fetch_command(
     # CS2 has no published table and is refused upstream: no item for it
     assert "ktable:CS2" not in items
     assert "fetch_exomolop --molecules CO2,HCN" in items["ktable:CO2"].remedy
+    # the fetcher's provenance record is reported (optional, with the fetch
+    # command that backfills it without re-downloading)
+    prov = items["ktable:provenance"]
+    assert prov.status == datacheck.MISSING and not prov.required
+    assert "fetch_exomolop" in prov.remedy
 
 
 @needs_engine

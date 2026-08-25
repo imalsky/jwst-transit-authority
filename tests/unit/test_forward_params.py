@@ -204,39 +204,38 @@ def test_tp_table_gates_are_grid_scoped_and_require_the_bottom(tmp_path):
 
 
 def test_resolution_knobs_defaults_ranges_and_refusals():
-    # there is no fidelity "quality" tier: nz/nu_pts/yconv are explicit and
-    # the RT layer count is derived, not cache-keyed
+    # there is no fidelity "quality" tier: nz/yconv are explicit and the RT
+    # layer count is derived, not cache-keyed; the spectral grid is the
+    # k-tables' own (no knob)
     cp = forward.canonical_params(_p())
     assert cp["nz"] == forward.NZ_DEFAULT == 100
-    assert cp["nu_pts"] == forward.NU_PTS_DEFAULT == 4000
     assert cp["yconv_cri"] == forward.YCONV_DEFAULT == 1.0e-2
     assert "quality" not in cp        # retired
     assert "art_nlayer" not in cp     # locked to nz in run_model, not cache-keyed
     # explicit in-range values accepted; the yconv ladder reaches its 1e-4
-    # floor. nu_pts is INERT under the default correlated-k mode (the model
-    # grid comes from the published k-tables) and is normalized to its default
-    # there (Kzz precedent); it stays live in lbl mode.
-    cp = forward.canonical_params(_p(nz=150, nu_pts=8000, yconv_cri=1.0e-4))
-    assert (cp["nz"], cp["nu_pts"], cp["yconv_cri"]) == (150, 4000, 1.0e-4)
-    cp = forward.canonical_params(_p(opacity_mode="lbl", nu_pts=8000))
-    assert cp["nu_pts"] == 8000
+    # floor
+    cp = forward.canonical_params(_p(nz=150, yconv_cri=1.0e-4))
+    assert (cp["nz"], cp["yconv_cri"]) == (150, 1.0e-4)
     assert forward.YCONV_RANGE == (1.0e-4, 1.0e-2)
-    # the nu_pts cap must stay ABOVE the model resolving power that NIRSpec
-    # G395H's line-spread function needs, or opacity convergence cannot be
-    # demonstrated inside the allowed range
-    for bad in (dict(nz=40), dict(nz=200), dict(nu_pts=1000),
-                dict(nu_pts=40000), dict(yconv_cri=1.0),
+    for bad in (dict(nz=40), dict(nz=200), dict(yconv_cri=1.0),
                 dict(yconv_cri=5.0e-5)):
         with pytest.raises(ValueError):
             forward.canonical_params(_p(**bad))
+    # the removed line-by-line / Mie keys refuse BY NAME (an old config says
+    # what was dropped), never fall through to the generic unknown-key text
+    for key in sorted(forward._REMOVED_PARAM_KEYS):
+        with pytest.raises(ValueError, match="removed in 0.48.0"):
+            forward.canonical_params(_p(**{key: 1}))
 
 
 def test_extra_molecules_resolve_in_engine_and_unknown_refused():
     # Shami Tsai request: CS2 photochemical sulfur + the CH4-photolysis
     # hydrocarbons. Import-light: vulcan_forward.constants is pure constants.
     from vulcan_forward import constants as _vfc
-    for mol in ("CS2", "C2H4", "C2H6"):
-        assert mol in forward.EXTRA_MOLECULES
+    assert "C2H4" in forward.EXTRA_MOLECULES
+    # CS2/C2H6 have no published ExoMolOP k-table: refused, never offered
+    assert forward._NO_EXOMOLOP_TABLE == {"CS2", "C2H6"}
+    assert not (forward._NO_EXOMOLOP_TABLE & set(forward.EXTRA_MOLECULES))
     # EVERY extra must resolve in the shared engine's molecule table -- a
     # token listed here but absent there would only fail at run time.
     for mol in forward.EXTRA_MOLECULES:
@@ -321,39 +320,22 @@ def test_fisher_names_and_jac_method_matrix():
 
 
 def test_rt_knobs_defaults_validation_and_cache_key():
-    # three ExoJAX RT knobs are canonical (cache-keyed)
+    # two ExoJAX RT knobs are canonical (cache-keyed)
     cp = forward.canonical_params(_p())
     assert cp["rt_ptop_bar"] == 1.0e-8
     assert cp["rt_integration"] == "simpson"
-    assert cp["rt_dit_res"] == 1.0
-    # rt_dit_res is INERT under the default correlated-k mode (PreMODIT
-    # never runs) and normalized to its default there, like nu_pts; it stays
-    # live -- and key-live -- in lbl mode. Out-of-range values still refuse
-    # in both modes (validation precedes normalization).
     cp = forward.canonical_params(_p(rt_ptop_bar=1.0e-6,
-                                     rt_integration="trapezoid",
-                                     rt_dit_res=0.2))
-    assert (cp["rt_ptop_bar"], cp["rt_integration"], cp["rt_dit_res"]) == \
-        (1.0e-6, "trapezoid", 1.0)
-    cp = forward.canonical_params(_p(opacity_mode="lbl", rt_dit_res=0.2))
-    assert cp["rt_dit_res"] == 0.2
+                                     rt_integration="trapezoid"))
+    assert (cp["rt_ptop_bar"], cp["rt_integration"]) == (1.0e-6, "trapezoid")
     for bad, match in ((dict(rt_ptop_bar=1.0e-5), "rt_ptop_bar"),
                        (dict(rt_ptop_bar=1.0e-10), "rt_ptop_bar"),
-                       (dict(rt_integration="euler"), "rt_integration"),
-                       (dict(rt_dit_res=0.01), "rt_dit_res"),
-                       (dict(rt_dit_res=2.0), "rt_dit_res")):
+                       (dict(rt_integration="euler"), "rt_integration")):
         with pytest.raises(ValueError, match=match):
             forward.canonical_params(_p(**bad))
-    # a LIVE RT knob must change the cache key (different physics); an inert
-    # one must NOT (editing it would force a bit-identical recompute)
+    # a LIVE RT knob must change the cache key (different physics)
     k0 = forward.params_key(_p())
     assert forward.params_key(_p(rt_ptop_bar=1.0e-7)) != k0
     assert forward.params_key(_p(rt_integration="trapezoid")) != k0
-    assert forward.params_key(_p(rt_dit_res=0.5)) == k0
-    assert forward.params_key(_p(nu_pts=8000)) == k0
-    kl = forward.params_key(_p(opacity_mode="lbl"))
-    assert forward.params_key(_p(opacity_mode="lbl", rt_dit_res=0.5)) != kl
-    assert forward.params_key(_p(opacity_mode="lbl", nu_pts=8000)) != kl
 
 
 def test_chem_key_separates_chemistry_from_rt_only_edits():
@@ -536,10 +518,10 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # published 4.5-4.8 -- that gap is real and open). Both need a full
     # run; SO2 also needs the pandeia backend. Full history: notes.md.
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b", tp_mode="file"))) == "874d580abb25e870"
+        dict(planet="wasp39b", tp_mode="file"))) == "cfbd05c618ea643c"
     # ... and the bare DEFAULT run is that same atmosphere
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "874d580abb25e870"
+        dict(planet="wasp39b"))) == "cfbd05c618ea643c"
     # the sha1 pin is only meaningful re-derived from the file the run
     # actually reads -- this catches the table itself being swapped
     path = forward._shipped_tp_file("wasp39b")
@@ -665,27 +647,9 @@ def test_boundary_conditions_canonicalized_and_gated():
             forward.canonical_params(_p(**bad))
 
 
-# --- cloud + Mie decks ------------------------------------------------------
+# --- cloud deck -------------------------------------------------------------
 
-def test_mie_deck_defaults_validation_and_cache():
-    cp = forward.canonical_params(_p())
-    assert cp["mie_condensate"] == ""
-    # the three continuous knobs are zeroed when the deck is off (cache hygiene)
-    assert cp["mie_log_rg"] == cp["mie_sigmag"] == cp["mie_log_mmr"] == 0.0
-    # a set deck keys the cache; two condensates never collide
-    on = forward.params_key(_p(mie_condensate="MgSiO3"))
-    assert on != forward.params_key(_p())
-    assert on != forward.params_key(_p(mie_condensate="Fe"))
-    for bad, match in (
-            (dict(mie_condensate="Diamond"), "mie_condensate"),
-            (dict(mie_condensate="MgSiO3", mie_log_rg=-1.0), "mie_log_rg"),
-            (dict(mie_condensate="MgSiO3", mie_sigmag=5.0), "mie_sigmag"),
-            (dict(mie_condensate="MgSiO3", mie_log_mmr=0.0), "mie_log_mmr")):
-        with pytest.raises(ValueError, match=match):
-            forward.canonical_params(_p(**bad))
-
-
-def test_cloud_and_mie_fisher_rows_require_their_deck(tmp_path):
+def test_cloud_fisher_rows_require_their_deck(tmp_path):
     cp = forward.canonical_params(_p(cloud_on=True,
                                      fisher_params=["lnZ",
                                                     "log_kappa_cloud",
@@ -694,23 +658,11 @@ def test_cloud_and_mie_fisher_rows_require_their_deck(tmp_path):
                                         "log_kappa_cloud"}
     with pytest.raises(ValueError, match="cloud"):
         forward.canonical_params(_p(fisher_params=["log_kappa_cloud"]))
-    cp = forward.canonical_params(_p(
-        mie_condensate="MgSiO3",
-        fisher_params=["lnZ", "mie_log_rg", "mie_sigmag", "mie_log_mmr"]))
-    assert set(cp["fisher_params"]) == {"lnZ", "mie_log_rg", "mie_sigmag",
-                                        "mie_log_mmr"}
-    with pytest.raises(ValueError, match="require a mie_condensate"):
-        forward.canonical_params(_p(fisher_params=["mie_log_rg"]))
-    # Mie and the power-law deck are independent (both freeable together)
-    cp2 = forward.canonical_params(_p(
-        cloud_on=True, mie_condensate="Fe",
-        fisher_params=["log_kappa_cloud", "mie_log_mmr"]))
-    assert {"log_kappa_cloud", "mie_log_mmr"} <= set(cp2["fisher_params"])
-    # both decks stay freeable in file mode (no parametric T-P required)
+    # the deck stays freeable in file mode (no parametric T-P required)
     cp3 = forward.canonical_params(_pf(
-        _table(tmp_path), cloud_on=True, mie_condensate="MgSiO3",
-        fisher_params=["lnZ", "log_kappa_cloud", "mie_log_rg"]))
-    assert {"log_kappa_cloud", "mie_log_rg"} <= set(cp3["fisher_params"])
+        _table(tmp_path), cloud_on=True,
+        fisher_params=["lnZ", "log_kappa_cloud"]))
+    assert {"log_kappa_cloud"} <= set(cp3["fisher_params"])
 
 
 def test_every_freeable_param_has_display_metadata():
@@ -718,7 +670,6 @@ def test_every_freeable_param_has_display_metadata():
     # constraint goal and a Jacobian row, so it must carry a display label,
     # unit, symbol, and an FD step -- a missing entry KeyErrors the GUI/run.
     freeable = (set(forward.CHEM_PARAM_NAMES) | set(forward.CLOUD_FISHER_PARAMS)
-                | set(forward.MIE_FISHER_PARAMS)
                 | {p for ns in forward.TP_PARAM_NAMES.values() for p in ns})
     for m in (forward.PARAM_LABELS, forward.PARAM_UNITS, forward.PARAM_SYMBOLS,
               forward.FD_STEPS):
@@ -828,8 +779,6 @@ def test_unknown_keys_refuse_with_a_hint_and_output_round_trips():
     # eclipse data (chi2/N ~ 5e5). Unknown keys must refuse, never drop.
     with pytest.raises(ValueError, match="science_mode"):
         forward.canonical_params(_p(mode="emission"))
-    with pytest.raises(ValueError, match="opacity_mode"):
-        forward.canonical_params(_p(opacity="exomolop"))
     with pytest.raises(ValueError, match="unknown parameter"):
         forward.canonical_params(_p(totally_made_up=1))
     # ... while share_config validates a SAVED canonical payload by feeding
@@ -850,7 +799,7 @@ def test_param_keys_read_matches_the_source():
     src = inspect.getsource(forward)
     tree = ast.parse(src)
     funcs = {"canonical_params", "_resolve_tp_file", "default_p_btm_bar",
-             "default_opacity_mode", "_default_tp_mode"}
+             "_default_tp_mode"}
     keys = set()
 
     class V(ast.NodeVisitor):
@@ -890,15 +839,12 @@ def test_param_keys_read_matches_the_source():
 
 # --- ExoMolOP no-table gate ------------------------------------------------
 
-def test_species_without_an_exomolop_table_refuse_early_under_the_default():
-    # ExoMolOP publishes no CS2/C2H6 k-table: under the default opacity_mode
-    # the run must refuse at the API, not minutes later inside the RT build.
+def test_species_without_an_exomolop_table_refuse_early():
+    # ExoMolOP publishes no CS2/C2H6 k-table: the run must refuse at the
+    # API with the pointed reason, not minutes later inside the RT build.
     for mol in sorted(forward._NO_EXOMOLOP_TABLE):
         with pytest.raises(ValueError, match="no published ExoMolOP k-table"):
             forward.canonical_params(_p(extra_mols=[mol]))
-        cp = forward.canonical_params(_p(extra_mols=[mol],
-                                         opacity_mode="lbl"))
-        assert mol in cp["extra_mols"]
 
 
 def test_molecule_list_invariants():

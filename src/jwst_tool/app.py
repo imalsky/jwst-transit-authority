@@ -363,6 +363,75 @@ with st.expander("Data status: what this machine has installed"
     st.button("Refresh data status", on_click=_bump_data_nonce,
               key="data_refresh_btn")
 
+
+# ---------------------------------------------------------------------------
+# Opacity sources: the fetcher's provenance record + each k-table's header
+# ---------------------------------------------------------------------------
+@st.cache_data(show_spinner=False)
+def _ktable_sources(_stamp: int) -> dict:
+    # _stamp = provenance.json mtime_ns, so a re-fetch invalidates the cache;
+    # exceptions are not cached, so an absent file re-raises on every rerun.
+    return provenance.ktable_sources()
+
+
+_prov_path = datacheck.exomolop_provenance_path()
+try:
+    _ksrc = _ktable_sources(_prov_path.stat().st_mtime_ns
+                            if _prov_path and _prov_path.is_file() else 0)
+    _ksrc_err = None
+except (ImportError, RuntimeError, FileNotFoundError) as exc:
+    _ksrc, _ksrc_err = {}, str(exc)   # the engine's text carries the remedy
+
+
+def _mol_label(m: str) -> str:
+    r = _ksrc.get(m)
+    if r is None:
+        return m
+    return f"{m} · {r['dataset']} " + (
+        "(natural abundance)" if r["natural_abundance"] else f"({r['iso']})")
+
+
+def _opacity_rows(base_set, extra_set, extra_on, rayleigh_on, cloud_on):
+    """One row per offered molecule (base first) plus the continuum terms.
+    DOIs are the k-table headers verbatim (some upstream placeholders), so
+    they are never linked; the ExoMol page is."""
+    rows = []
+    for m in list(base_set) + list(extra_set):
+        r = _ksrc.get(m, {})
+        tr, pr, wr = (r.get("t_range_K"), r.get("p_range_bar"),
+                      r.get("wl_range_um"))
+        rows.append({
+            "species": m,
+            "on": m in base_set or m in extra_on,
+            "source": r.get("dataset", ""),
+            "isotopologue": ("natural abundance"
+                             if r.get("natural_abundance") else r.get("iso", "")),
+            "coverage": (f"{tr[0]:g}-{tr[1]:g} K · {pr[0]:g}-{pr[1]:g} bar · "
+                         f"{wr[0]:.2g}-{wr[1]:.3g} µm") if tr else "",
+            "DOI": r.get("doi") or "",
+            "ExoMol page": r.get("url", ""),
+            "file": r.get("file", "")})
+    try:
+        from jwst_tool import engine_config as _ecfg
+        _cia = (Path(_ecfg.CIA_H2H2_FILE).name, Path(_ecfg.CIA_H2HE_FILE).name)
+    except (ImportError, RuntimeError):
+        _cia = ("", "")
+    rows += [
+        {"species": "H2-H2 CIA", "on": True, "source": "HITRAN CIA 2011",
+         "isotopologue": "", "coverage": "", "DOI": "", "ExoMol page": "",
+         "file": _cia[0]},
+        {"species": "H2-He CIA", "on": True, "source": "HITRAN CIA 2011",
+         "isotopologue": "", "coverage": "", "DOI": "", "ExoMol page": "",
+         "file": _cia[1]},
+        {"species": "Rayleigh (H2, He)", "on": bool(rayleigh_on),
+         "source": "exojax (H2, He polarizabilities)", "isotopologue": "",
+         "coverage": "", "DOI": "", "ExoMol page": "", "file": ""},
+        {"species": "power-law cloud", "on": bool(cloud_on),
+         "source": "nuisance (kappa, alpha)", "isotopologue": "",
+         "coverage": "", "DOI": "", "ExoMol page": "", "file": ""},
+    ]
+    return rows
+
 # Measured AD Fisher-row wall time (WASP-39b defaults), threaded through the
 # GUI mention below so a re-measurement updates one place. (FD costs come
 # from the run-time estimator's own model -- "Jacobian-row cost model".)
@@ -541,14 +610,11 @@ _TARGET_DEFAULT = {"lnZ": 0.10, "dlnCO": 0.10, "lnKzz": 0.30,
                    "Tirr": 50.0, "Tint": 50.0,
                    "Tint_cl": 50.0,
                    "log_kappa": 0.30, "log_gamma": 0.30,
-                   "log_kappa_cloud": 0.30, "alpha_cloud": 0.50,
-                   "mie_log_rg": 0.30, "mie_sigmag": 0.20,
-                   "mie_log_mmr": 0.50}
+                   "log_kappa_cloud": 0.30, "alpha_cloud": 0.50}
 # Every freeable Fisher parameter can be the constraint goal and looks up
 # _TARGET_DEFAULT[goal_param]; guard for missing entries at import, not at
 # click time.
 _FREEABLE = (set(forward.CHEM_PARAM_NAMES) | set(forward.CLOUD_FISHER_PARAMS)
-             | set(forward.MIE_FISHER_PARAMS)
              | {p for ns in forward.TP_PARAM_NAMES.values() for p in ns})
 _missing_target = _FREEABLE - set(_TARGET_DEFAULT)
 if _missing_target:
@@ -1199,20 +1265,23 @@ with st.sidebar:
                          if m not in forward._S_MOLECULES]
             _extra_set = [m for m in _extra_set
                           if m not in forward._S_MOLECULES]
-        st.caption("The model spectrum is computed at R = 1000 "
-                   "(correlated-k) on the published ExoMolOP k-tables "
-                   "(1-15 µm) and scored on the analysis bins "
-                   "(default R = 100).")
+        st.caption("Correlated-k on ExoMolOP k-tables (R = 1000, "
+                   "16 g-points, 1-15 µm), scored on the analysis bins "
+                   "(default R = 100). Sources per species: the Opacity "
+                   "sources panel.")
         st.caption(
             f"The base set **{' · '.join(_base_set)}** is always on.")
-        # Species with no published k-table are NOT offered: the GUI has no
-        # opacity_mode control and the mode defaults to "exomolop", so a
-        # picker entry would be a dead end that only fails at run time. They
-        # stay in EXTRA_MOLECULES for API callers on opacity_mode="lbl"
-        # (which a Mie deck derives -- a Mie-deck user who wants CS2/C2H6
-        # goes through the API; the Mie widget instantiates below this one).
+        # Species with no published k-table are not in EXTRA_MOLECULES;
+        # this filter only guards a future widening of that list.
         _extra_set = [m for m in _extra_set
                       if m not in forward._NO_EXOMOLOP_TABLE]
+        _unattributed = [m for m in list(_base_set) + list(_extra_set)
+                         if m not in _ksrc]
+        if _ksrc_err or _unattributed:
+            st.warning(_ksrc_err or (
+                "No provenance record for " + ", ".join(_unattributed)
+                + "; run python -m vulcan_forward.fetch_exomolop "
+                "--molecules " + ",".join(_unattributed)))
         # Preselect the MEASURED-relevant subset, not everything with a
         # table: most species contribute under 1 ppm, and each default-on
         # molecule pays a leave-one-out spectrum. The ppm measurements are
@@ -1221,10 +1290,7 @@ with st.sidebar:
             "Extra opacity molecules", list(_extra_set),
             default=[m for m in _extra_set
                      if m in forward.EXTRA_MOLECULES_DEFAULT],
-            key=K(f"xmols_vulcan{_net_sfx}"))
-        # The line-by-line-only widgets (broadening gas, native grid points,
-        # line-wing grid) live in the Clouds expander: they act only when a
-        # Mie deck forces line-by-line mode, and render only then.
+            key=K(f"xmols_vulcan{_net_sfx}"), format_func=_mol_label)
 
     with st.expander("Clouds & scattering (ExoJAX)"):
         if science_mode == "emission":
@@ -1245,55 +1311,6 @@ with st.sidebar:
                 0.0, 4.0, 0.0, 0.25, key=K("ca"))
         else:
             log_kappa_cloud, alpha_cloud = -1.0, 0.0
-        # Mie condensate deck: condensate optics from an exojax miegrid.
-        _mie_opts = [""] + list(forward.MIE_CONDENSATES)
-        # non-empty options carry the experimental marker: a Mie deck
-        # switches the GAS opacity to the sampled line-by-line path, which
-        # has no resolution-convergence certificate yet
-        mie_condensate = st.selectbox(
-            "Mie condensate cloud", _mie_opts, index=0, key=K("miec"),
-            format_func=lambda c: ("off" if not c else
-                                   f"{c} (experimental: gas opacity "
-                                   "switches to sampled line-by-line)"))
-        mie_log_rg, mie_sigmag, mie_log_mmr = -5.0, 2.0, -6.0
-        # The three line-by-line settings are pinned to their validated
-        # defaults unless a Mie deck is selected -- the one case the engine
-        # runs line-by-line (forward.default_opacity_mode) and they act.
-        # Under the default correlated-k mode canonical_params normalizes
-        # them out of the cache key, so hiding them changes nothing.
-        broadening, nu_pts, rt_dit_res = "air", forward.NU_PTS_DEFAULT, 1.0
-        if mie_condensate:
-            if datacheck.miegrid_status([mie_condensate])[mie_condensate] \
-                    != datacheck.OK:
-                st.warning(
-                    f"No Mie grid for {mie_condensate} yet. Generate it once "
-                    f"with 'python tools/generate_miegrid.py {mie_condensate}' "
-                    "(~1 h), or the run will stop with an error.")
-            mie_log_rg = st.number_input(
-                "log10 mean radius r_g (cm)", float(forward.MIE_LOG_RG_RANGE[0]),
-                float(forward.MIE_LOG_RG_RANGE[1]), -5.0, 0.1, key=K("mierg"))
-            mie_sigmag = st.number_input(
-                "Size dispersion sigma_g", float(forward.MIE_SIGMAG_RANGE[0]),
-                float(forward.MIE_SIGMAG_RANGE[1]), 2.0, 0.05, key=K("miesg"))
-            mie_log_mmr = st.number_input(
-                "log10 condensate mass mixing ratio",
-                float(forward.MIE_LOG_MMR_RANGE[0]),
-                float(forward.MIE_LOG_MMR_RANGE[1]), -6.0, 0.25, key=K("miemmr"))
-            st.caption("A Mie deck computes opacity line-by-line, not on "
-                       "the R = 1000 k-tables; the native R is about the "
-                       "grid points below divided by 2.7.")
-            broadening = st.selectbox(
-                "Pressure-broadening gas",
-                ["air", "h2he"], index=0, key=K("broad"),
-                format_func={"air": "air (HITRAN terrestrial widths, default)",
-                             "h2he": "H2/He blend (planetary)"}.get)
-            nu_pts = st.number_input(
-                "Native spectral grid points",
-                *forward.NU_PTS_RANGE,
-                forward.NU_PTS_DEFAULT, 500, key=K("nupts"))
-            rt_dit_res = st.number_input(
-                "Line-wing (broadening) grid resolution",
-                0.1, 1.0, 1.0, 0.1, format="%.1f", key=K("rtdit"))
 
     # -----------------------------------------------------------------------
     # Step 3: Science goal (only the controls the selected goal needs)
@@ -1303,8 +1320,6 @@ with st.sidebar:
     avail_free = list(forward.CHEM_PARAM_NAMES) + forward.TP_PARAM_NAMES[tp_mode]
     if cloud_on:
         avail_free = avail_free + list(forward.CLOUD_FISHER_PARAMS)
-    if mie_condensate:
-        avail_free = avail_free + list(forward.MIE_FISHER_PARAMS)
     mol_options = forward.active_molecules(
         {"network": network, "extra_mols": extra_mols})
 
@@ -1333,8 +1348,7 @@ with st.sidebar:
             target_mol = None
             goal_param = st.selectbox(
                 "Parameter to constrain", avail_free,
-                key=K(f"gp_vulcan_{tp_mode}_{int(cloud_on)}_"
-                      f"{int(bool(mie_condensate))}"),
+                key=K(f"gp_vulcan_{tp_mode}_{int(cloud_on)}"),
                 format_func=lambda n: forward.PARAM_LABELS[n])
             marginalize = st.checkbox(
                 "Marginalize over the other parameters", value=True,
@@ -1377,8 +1391,7 @@ with st.sidebar:
                     # sigmas toward the conditional bound.
                     default=[p for p in ("lnZ", "dlnCO")
                              if p in avail_free],
-                    key=K(f"fx_vulcan_{tp_mode}_{int(cloud_on)}_"
-                          f"{int(bool(mie_condensate))}"),
+                    key=K(f"fx_vulcan_{tp_mode}_{int(cloud_on)}"),
                     format_func=lambda n: forward.PARAM_LABELS[n])
                 fisher_params = sorted(set(fisher_extra) | {goal_param})
             elif goal == "constrain":
@@ -1389,8 +1402,7 @@ with st.sidebar:
             else:
                 fisher_params = st.multiselect(
                     "Free parameters", avail_free,
-                    key=K(f"fp_vulcan_{tp_mode}_{int(cloud_on)}_"
-                          f"{int(bool(mie_condensate))}"),
+                    key=K(f"fp_vulcan_{tp_mode}_{int(cloud_on)}"),
                     default=[p for p in ("lnZ", "dlnCO")
                              if p in avail_free],
                     format_func=lambda n: forward.PARAM_LABELS[n])
@@ -1525,10 +1537,8 @@ with st.sidebar:
         # native R over the mode's measured width at mid-band,
         # instruments.LSF_WIDTH); the median classifies all shipped modes the
         # same way the binding MIN does (only PRISM and MIRI LRS fall on the
-        # resolved side either way). Line-by-line (Mie)
-        # runs are excluded: nu_pts moves the model R there, and the
-        # run-level LSF warning discloses per mode either way.
-        if int(r_bin) >= 250 and not mie_condensate:
+        # resolved side either way).
+        if int(r_bin) >= 250:
             _coarse = [ins.MODES[k]["label"] for k in mode_keys
                        if 2.3548 * float(ins.lsf_r(
                            k, 0.5 * (ins.MODES[k]["wl_min"] + ins.MODES[k]["wl_max"]),
@@ -1686,7 +1696,7 @@ with st.sidebar:
 params = dict(planet=planet_key, science_mode=science_mode,
               network=network,
               star_teff=teff, star_logg=logg, star_feh=feh,
-              nz=nz, nu_pts=nu_pts, yconv_cri=yconv_cri,
+              nz=nz, yconv_cri=yconv_cri,
               rp_rjup=rp, gs_cgs=g_ms2 * 100.0, rstar_rsun=rstar,
               orbit_au=orbit_au, sflux=sflux,
               met_x_solar=met, co_ratio=float(co_ratio),
@@ -1701,14 +1711,12 @@ params = dict(planet=planet_key, science_mode=science_mode,
               use_condense=use_condense,
               use_settling=use_settling, diff_esc=diff_esc,
               top_flux=top_flux, bot_flux=bot_flux,
-              use_rayleigh=use_rayleigh, broadening=broadening,
+              use_rayleigh=use_rayleigh,
               rt_ptop_bar=float(rt_ptop_bar), rt_integration=rt_integration,
-              rt_dit_res=float(rt_dit_res), p_ref_bar=float(p_ref_bar),
+              p_ref_bar=float(p_ref_bar),
               p_btm_bar=float(p_btm_bar),
               cloud_on=cloud_on,
               log_kappa_cloud=log_kappa_cloud, alpha_cloud=alpha_cloud,
-              mie_condensate=mie_condensate, mie_log_rg=mie_log_rg,
-              mie_sigmag=mie_sigmag, mie_log_mmr=mie_log_mmr,
               # Detect computes the removed-molecule spectrum for the TARGET
               # only (the score reads exactly one row; the full block was the
               # largest cost of a cold run). Accepted trade: wo_mols is
@@ -1731,25 +1739,30 @@ except (ValueError, RuntimeError) as e:  # stale widget combo mid-rerun, or a
 if tp_mode == "file" and not tp_file_ok and params_error is None:
     params_error = "file-mode T-P selected but no valid table is loaded"
 
-# Which opacity path this run will take. Read from the canonical params when
-# they resolved, else from the same chooser the engine uses -- never assumed,
-# because nu_pts and rt_dit_res are inert under correlated-k and every label
-# built from them is wrong there.
-_lbl_mode = (str((_canon or {}).get("opacity_mode")
-                 or forward.default_opacity_mode(params)) == "lbl")
+with st.expander("Opacity sources"):
+    if _ksrc_err:
+        st.warning(_ksrc_err)
+    else:
+        st.dataframe(
+            _opacity_rows(_base_set, _extra_set, extra_mols, use_rayleigh
+                          and science_mode == "transmission", cloud_on),
+            column_config={
+                "on": st.column_config.CheckboxColumn("on"),
+                "ExoMol page": st.column_config.LinkColumn(
+                    "ExoMol page",
+                    display_text=r"https://www\.exomol\.com/db/(.+)/[^/]+$")},
+            width="stretch", hide_index=True)
+        st.caption("ExoMolOP: Chubb et al. 2021, A&A 646, A21 -- "
+                   "petitRADTRANS format, 16 g-points (split 8+8), R = 1000; "
+                   "outside a table's T or P range the nearest entry is "
+                   "used; DOIs are the file headers verbatim (some upstream "
+                   "placeholders).")
 
 # rough runtime hint keyed off the resolution settings
 base_min = 0.1 + 0.010 * nz
-if _lbl_mode:                        # nu_pts sets the grid only on this path
-    base_min += 0.00005 * (nu_pts - forward.NU_PTS_DEFAULT)
 if yconv_cri <= 1.5e-3:              # strict convergence costs extra iterations
     base_min += 0.5
 base_min += 0.25 * len(extra_mols)   # k-table load + one more overlap fold
-# A finer broadening grid slows the premodit opacity builds -- but ONLY in
-# line-by-line mode; under correlated-k the k-tables carry the line opacity
-# and _build_opa is skipped entirely.
-if rt_dit_res < 1.0 and _lbl_mode:
-    base_min += 0.3 * (5 + len(extra_mols))
 # cool columns (<~900 K) converge much more slowly (a W107b run took ~5 min)
 t_char = {"guillot": tp_kwargs.get("Tirr", 1560.0) / np.sqrt(2.0),
           "file": float(teq)}.get(tp_mode, 1100.0)
@@ -1757,11 +1770,11 @@ if t_char < 900.0:
     base_min += 2.5
 # condensing solves carry the window + pin + stricter gate overhead
 
-# Jacobian-row cost model: fd = 4 solves per row; cloud and Mie rows are
-# RT-only (~seconds); ad = ONE shared warm primal plus a batched tangent
-# per row (measured 80 s for 2 rows on the default case)
+# Jacobian-row cost model: fd = 4 solves per row; cloud rows are RT-only
+# (~seconds); ad = ONE shared warm primal plus a batched tangent per row
+# (measured 80 s for 2 rows on the default case)
 _solve_min = max(1.0, base_min * 0.5)
-_rt_only = set(forward.CLOUD_FISHER_PARAMS) | set(forward.MIE_FISHER_PARAMS)
+_rt_only = set(forward.CLOUD_FISHER_PARAMS)
 n_cloud_rows = sum(1 for n in fisher_params if n in _rt_only)
 _solve_rows = [n for n in fisher_params if n not in _rt_only]
 if jac_method == "ad":
@@ -1780,14 +1793,8 @@ _n_mols_est = len(_base_set) + len(extra_mols)
 _wo_min = ((0.05 * _n_mols_est * (nz / forward.NZ_DEFAULT))
            if goal == "detect" else 0.0)
 
-# Report the resolving power the run will ACTUALLY use: under correlated-k
-# (the default) that is the k-tables' own band grid, R=1000, and nu_pts is
-# inert.
-if _lbl_mode:
-    grid_lbl = (f"{nz}-layer, line-by-line R≈"
-                f"{int(round(nu_pts * 2950 / 8000 / 50) * 50)}")
-else:
-    grid_lbl = f"{nz}-layer, correlated-k R=1000"
+# The resolving power the run uses: the k-tables' own band grid, R=1000.
+grid_lbl = f"{nz}-layer, correlated-k R=1000"
 # One scaled total feeds the estimate string AND the progress-bar prior,
 # so the number the user reads is the number the bar starts from.
 _est_total_min = (base_min + _wo_min + fd_min) * _RUNTIME_SCALE
@@ -2270,7 +2277,7 @@ wl_s, d_s = wl[order], model["depth"][order] * 1e6
 _fname_base = f"jwst_tool_{_slug(meta.get('planet', 'planet'))}"
 
 # DISPLAY smoothing: at the model's own resolving power (R = 1000 on the
-# correlated-k band grid, ~nu_pts/2.7 line-by-line) the unresolved line
+# correlated-k band grid) the unresolved line
 # forest renders as one-sample spikes, so the PLOT is convolved to a
 # constant display R (>= 3x the analysis R, floor 300) with the SAME tested
 # LSF operator the science path uses (flat weight). That operator no-ops
@@ -2737,8 +2744,7 @@ def _param_center(name: str, cpj: dict):
     direct = {"Tirr": "Tirr", "Tint": "Tint", "log_kappa": "log_kappa",
               "log_gamma": "log_gamma", "Tint_cl": "tint_cl",
               "log_kappa_cloud": "log_kappa_cloud",
-              "alpha_cloud": "alpha_cloud", "mie_log_rg": "mie_log_rg",
-              "mie_sigmag": "mie_sigmag", "mie_log_mmr": "mie_log_mmr"}
+              "alpha_cloud": "alpha_cloud"}
     k = direct.get(name)
     if k is not None and cpj.get(k) is not None:
         return float(cpj[k])

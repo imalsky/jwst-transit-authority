@@ -45,10 +45,12 @@ dependencies = [
     # (they are siblings over one engine). 0.1.0 is the extraction
     # release, carrying the same physics as vulcan-retrieval 0.12.1:
     # the inverse-square g(r) in the shared transmission dtau that
-    # forward v24 labels, the emission tau_bottom diagnostic, the Mie
-    # condensate deck, and the profile-overridable RT knobs -- all
-    # echo-verified by run_model.
-    "vulcan-forward>=0.10.0",
+    # forward v24 labels, the emission tau_bottom diagnostic, and the
+    # profile-overridable RT knobs -- all echo-verified by run_model.
+    # 0.11.0 is correlated-k only (line-by-line + Mie deck removed) and adds
+    # exomolop.provenance()/table_info(), read by the opacity-sources panel
+    # and the provenance snapshot.
+    "vulcan-forward>=0.11.0",
     # 0.2.0 added the named ChemParams primitive this module builds its vector
     # with; 0.2.1 added paths.ensure_layout(), which `jwst-tool fetch` needs;
     # 0.2.2 adds CS2/C2H4/C2H6 to the molecule table (the v25 extras resolve

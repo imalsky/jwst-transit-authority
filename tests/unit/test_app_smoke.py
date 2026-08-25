@@ -138,8 +138,26 @@ def test_fresh_boot_pre_run_contract():
     assert "Data status" in labels
     ms = [w for w in at.multiselect if w.label == "Extra opacity molecules"]
     assert ms, "extra-molecule multiselect missing"
-    # (the molecule_linelist_status contract itself is pinned in
-    # test_datacheck.py; here only the annotated widget's presence matters)
+    # Opacity sources: exactly one of {the sources table, a loud provenance
+    # warning} exists, depending on whether the fetcher's record is
+    # installed; the picker's VALUES stay species tokens while its OPTIONS
+    # name the dataset behind each one.
+    from jwst_tool import datacheck, forward
+    pp = datacheck.exomolop_provenance_path()
+    have = bool(pp and pp.is_file())
+    srcs = [d for d in at.dataframe if "species" in list(d.value.columns)]
+    warns = [w for w in at.warning
+             if "provenance" in w.value or "fetch_exomolop" in w.value]
+    assert (len(srcs) == 1) == have and bool(warns) == (not have), \
+        (have, len(srcs), [w.value for w in warns])
+    assert set(ms[0].value) == set(forward.EXTRA_MOLECULES_DEFAULT)
+    if have:
+        df = srcs[0].value
+        offered = (set(forward.MOLECULES)
+                   | (set(forward.EXTRA_MOLECULES) - forward._NO_EXOMOLOP_TABLE))
+        assert offered <= set(df["species"])
+        assert (df.loc[df["species"].isin(offered), "source"] != "").all()
+        assert all(" \u00b7 " in o for o in ms[0].options), ms[0].options
     sld = at.number_input(key="n0_noisescale")
     assert sld.value == 1.0 and sld.label == "Global noise multiplier", \
         (sld.label, sld.value)
@@ -323,30 +341,10 @@ def test_gap_band_labels_match_the_registry_bands():
             f"{m['wl_min']}-{m['wl_max']}")
 
 
-def test_lbl_widgets_render_only_with_mie_deck():
-    """The broadening gas, native grid points, and line-wing grid widgets act
-    only when a Mie deck forces line-by-line mode, so they render only then;
-    the default-boot absence is pinned in the removals test
-    above. Keys are the shipped contract and must not change. Also pins the
-    mode picker's measured native-R labels (r_native_med: display metadata
-    measured from the 2026.7 refdata dispersion files -- re-measure on any
-    refdata change, never edit the numbers freehand)."""
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.session_state["n0_miec"] = "MgSiO3"
-    at.session_state["n0_rbin"] = 300
-    at.run()
-    assert not at.exception, at.exception
-    keys = {w.key for w in at.get("number_input")} | {
-        w.key for w in at.get("selectbox")}
-    for key in ("n0_broad", "n0_nupts", "n0_rtdit"):
-        assert key in keys, f"{key} missing with a Mie deck selected"
-    caps = " ".join(c.value for c in at.get("caption"))
-    assert "line-by-line" in caps, "the Mie line-by-line caption is gone"
-    # The R = 1000 bin-edge caption is about the k-table grid, so it must
-    # stay OFF in line-by-line mode even at a fine analysis R.
-    assert "opacity resolution on" not in caps, \
-        "the R = 1000 bin-edge caption fired on a line-by-line (Mie) boot"
-
+def test_mode_picker_native_r_labels_are_measured():
+    """Pins the mode picker's measured native-R labels (r_native_med: display
+    metadata measured from the 2026.7 refdata dispersion files -- re-measure
+    on any refdata change, never edit the numbers freehand)."""
     from jwst_tool import instruments as ins
     for k, m in ins.MODES.items():
         assert int(m["r_native_med"]) > 0, f"{k} lacks r_native_med"

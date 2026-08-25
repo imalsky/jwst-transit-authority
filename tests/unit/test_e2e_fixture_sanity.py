@@ -22,7 +22,7 @@ import pytest
 from jwst_tool import forward
 
 FIXTURE = (Path(__file__).parent.parent / "live" / "data"
-           / "w39b_v35_reference.npz")
+           / "w39b_v36_reference.npz")
 
 
 @pytest.fixture(scope="module")
@@ -52,7 +52,6 @@ def test_recorded_keys_recompute_today(fixture, mode):
         f"{mode}: the canonical parameter set moved since the fixture was "
         "generated -- regenerate it")
     assert cp["science_mode"] == mode
-    assert cp["opacity_mode"] == "exomolop"
 
 
 @pytest.mark.parametrize("mode", ["transmission", "emission"])

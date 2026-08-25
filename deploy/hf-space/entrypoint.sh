@@ -34,12 +34,11 @@ export HDF5_USE_FILE_LOCKING=FALSE
 
 if [ -d /srv/hub-data/jwst-data ]; then
     echo "[entrypoint] dataset volume found at /srv/hub-data (no download)"
-    # jwst-data is a pure READ consumer (cdbs/refdata/PSFs/mie): serve it
+    # jwst-data is a pure READ consumer (cdbs/refdata/PSFs): serve it
     # straight from the read-only mount.
     export JWST_TOOL_DATA_DIR=/srv/hub-data/jwst-data
-    # the engine's data tree must be WRITABLE: radis creates a tempdir + lock files
-    # inside exojax_linelists even for pure cache reads, and h2he line
-    # lists download on first use. Sync the mount to the bucket (~360 MB
+    # the engine's data tree must be WRITABLE (exojax writes CIA caches
+    # beside its inputs). Sync the mount to the bucket (~360 MB
     # once); cp -au makes later boots a cheap stat pass that also picks up
     # dataset files that landed AFTER an earlier partial sync (the mount
     # live-updates as commits land).
@@ -51,7 +50,7 @@ if [ -d /srv/hub-data/jwst-data ]; then
         if [ "$name" = "exomolop" ]; then continue; fi
         cp -au "$entry" "$STATE/retrieval-data/"
         # cp -a preserves the mount's read-only modes -- restore owner-write
-        # (radis mkdirs its tempdir inside exojax_linelists at import).
+        # (exojax writes its CIA caches beside the inputs).
         chmod -R u+wX "$STATE/retrieval-data/$name"
     done
     # The ExoMolOP k-tables are the one tree that is NOT copied: 4.3 GB of
@@ -66,7 +65,7 @@ if [ -d /srv/hub-data/jwst-data ]; then
         echo "[entrypoint] exomolop k-tables served from the read-only mount"
     else
         echo "[entrypoint] WARNING: no exomolop/ in the dataset volume --" \
-             "the default opacity_mode has no tables and every model step" \
+             "the gas opacity has no tables and every model step" \
              "will stop with an error (upload them: deploy/hf-space/" \
              "upload_data.sh, or see 'jwst-tool data')"
     fi

@@ -36,8 +36,6 @@ WIDE = {
     "molecules": ["H2O", "CO2", "CO", "CH4", "SO2"],
     "nu_min": _fwd.WIDE_BAND_NU_MIN,    # 667 cm^-1 = 15 um
     "nu_max": _fwd.WIDE_BAND_NU_MAX,    # 10000 cm^-1 = 1 um (H2-H2 CIA edge)
-    "nu_pts": 8000,                     # native R ~ 2950 -- LINE-BY-LINE mode
-                                        # only; correlated-k uses the k-tables' R=1000 grid
     "art_nlayer": 60,
     "display_R": 100,
 }
@@ -48,13 +46,10 @@ WIDE = {
 # one without a configured root raises RuntimeError naming the remedy.
 _LAZY = {
     "DATA_DIR": lambda: _fwd_paths.data_root(),
-    "DEMO_DATABASE": lambda: _fwd_paths.linelist_dir(),
     "OPACITY_CACHE": lambda: _fwd_paths.opacity_cache_dir(),
-    "CO_CACHED_DIR": lambda: (_fwd_paths.opacity_cache_dir()
-                              / MOLECULES["CO"]["db"]),
     "CIA_H2H2_FILE": lambda: _fwd_paths.cia_h2h2_file(),
     "CIA_H2HE_FILE": lambda: _fwd_paths.cia_h2he_file(),
-    # ExoMolOP k-table tree (the DEFAULT opacity_mode reads it). No existence
+    # ExoMolOP k-table tree (the gas opacity every run reads). No existence
     # check in the engine accessor, so datacheck can report per-molecule
     # MISSING items even when the whole tree is absent.
     "EXOMOLOP_DIR": lambda: _fwd_paths.exomolop_dir(),

@@ -40,10 +40,8 @@ _GLOBAL_BOUNDS = {
     "sza": (0.0, 89.0), "fdiur": (0.1, 1.0),
     "yconv": (1.0e-4, 1.0e-2),
     "ck": (-4.0, 2.0), "ca": (0.0, 4.0),
-    "mierg": forward.MIE_LOG_RG_RANGE, "miesg": forward.MIE_SIGMAG_RANGE,
-    "miemmr": forward.MIE_LOG_MMR_RANGE,
-    "nupts": forward.NU_PTS_RANGE, "nz": forward.NZ_RANGE,
-    "rtptop": (1.0e-9, 1.0e-6), "rtdit": (0.1, 1.0),
+    "nz": forward.NZ_RANGE,
+    "rtptop": (1.0e-9, 1.0e-6),
     "pref": (1.0e-6, 7.0),
     "tsig": (1.0, 10.0),
     "ntr": (1, 10), "sat": (0.5, 0.95), "rbin": (25, 500),
@@ -208,13 +206,10 @@ def _resolve_embedded_tp(cp: dict, cfg: dict, tp_mode: str) -> str | None:
 def _restore_goal(state: dict, cp: dict, goal: dict, key,
                   tp_mode: str, notes: list[str]) -> None:
     cloud_i = int(bool(cp["cloud_on"]))
-    mie_i = int(bool(state[key("miec")]))
-    suffix = f"vulcan_{tp_mode}_{cloud_i}_{mie_i}"
+    suffix = f"vulcan_{tp_mode}_{cloud_i}"
     avail = list(forward.CHEM_PARAM_NAMES) + list(forward.TP_PARAM_NAMES[tp_mode])
     if cp["cloud_on"]:
         avail += list(forward.CLOUD_FISHER_PARAMS)
-    if mie_i:
-        avail += list(forward.MIE_FISHER_PARAMS)
     requested = [str(p) for p in (goal.get("fisher_params")
                                   or cp.get("fisher_params") or [])]
     fisher = [p for p in requested if p in avail]
@@ -464,23 +459,14 @@ def _restore_rt_state(state: dict, cp: dict, key) -> None:
     if cp["cloud_on"]:
         state[key("ck")] = float(cp["log_kappa_cloud"])
         state[key("ca")] = float(cp["alpha_cloud"])
-    mie = str(cp.get("mie_condensate", "") or "")
-    state[key("miec")] = mie if mie in forward.MIE_CONDENSATES else ""
-    if state[key("miec")]:
-        state[key("mierg")] = float(cp["mie_log_rg"])
-        state[key("miesg")] = float(cp["mie_sigmag"])
-        state[key("miemmr")] = float(cp["mie_log_mmr"])
     extras_all = list(forward.EXTRA_MOLECULES)
     state[key(f"xmols_vulcan{_network_suffix(cp)}")] = [
         molecule for molecule in (cp.get("extra_mols") or [])
         if molecule in extras_all]
     state.update({
-        key("broad"): str(cp.get("broadening", "air")),
-        key("nupts"): int(cp["nu_pts"]),
         key("nz"): int(cp["nz"]),
         key("rtptop"): float(cp["rt_ptop_bar"]),
         key("rtint"): str(cp["rt_integration"]),
-        key("rtdit"): float(cp["rt_dit_res"]),
         # p_ref_bar (v26). .get with the default so a configuration downloaded
         # before v26 still loads: those runs were anchored at the grid bottom,
         # but restoring them onto the 1 mbar default is the CORRECT physics and
@@ -505,6 +491,14 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
             "(chem_provider='picaso' or tp_mode='picaso_climate'); the "
             "subsystem was removed in 0.43.0 because it was disabled and "
             "uncertified. Re-create the run with the VULCAN engine.")
+    if str(cp.get("mie_condensate", "") or "") or \
+            str(cp.get("opacity_mode", "exomolop")) == "lbl":
+        raise ValueError(
+            "this configuration uses the Mie condensate deck or the sampled "
+            "line-by-line opacity mode (mie_condensate / opacity_mode='lbl'), "
+            "both removed in 0.48.0: correlated-k over the published ExoMolOP "
+            "k-tables is the only opacity path. Re-create the run with the "
+            "correlated-k default (the power-law cloud deck stays).")
 
     def pk(name: str) -> str:            # per-planet widget keys
         return key(f"{planet}_{name}")

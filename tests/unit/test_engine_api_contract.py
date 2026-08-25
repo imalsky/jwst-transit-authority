@@ -34,7 +34,8 @@ EXPECTED = {
     "vulcan_forward.exojax_rt": ["build_rt_model", "build_emis_model"],
     "vulcan_forward.vulcan_chem": ["build_chem_model", "ChemParams"],
     "vulcan_forward.interp_map": ["make_to_art"],
-    "vulcan_forward.paths": ["linelist_dir", "opacity_cache_dir"],
+    "vulcan_forward.paths": ["opacity_cache_dir"],
+    "vulcan_forward.exomolop": ["table_path", "provenance", "table_info"],
     "vulcan_forward.constants": [
         "MOLECULES", "ATOM_COLS", "ATOMIC_MASSES", "BULK_H2_VULCAN",
         "ART_PTOP_BAR", "ART_PBTM_BAR", "T_OPA_MIN_K", "T_OPA_MAX_K",
@@ -100,8 +101,8 @@ def test_the_profile_keys_the_tool_sets_are_ones_the_engine_reads():
     src = (Path(importlib.import_module("vulcan_forward.exojax_rt").__file__)
            .read_text())
     for key in ("art_ptop_bar", "art_pbtm_bar", "rt_integration",
-                "dit_grid_resolution", "p_ref_bar", "p_ref_emission_bar",
-                "mie_condensate", "art_nlayer", "nu_pts", "broadening"):
+                "p_ref_bar", "p_ref_emission_bar", "opacity_mode",
+                "art_nlayer"):
         assert f'"{key}"' in src, (
             f"the engine never reads profile[{key!r}], so the tool sets a knob "
             "that does nothing")

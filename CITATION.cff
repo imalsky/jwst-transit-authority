@@ -5,8 +5,8 @@ title: "vulcan-jwst-tool: a JWST exoplanet observation planner with a live photo
 authors:
   - family-names: Malsky
     given-names: Isaac
-version: 0.47.4
-date-released: "2026-08-18"
+version: 0.48.0
+date-released: "2026-08-24"
 license: GPL-3.0-only
 repository-code: "https://github.com/imalsky/vulcan-jwst-tool"
 url: "https://github.com/imalsky/vulcan-jwst-tool"

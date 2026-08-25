@@ -58,9 +58,9 @@ def test_round_trip_restores_the_full_run():
     assert state["n0_cloud"] is True and state["n0_ck"] == -2.0
     # science goal (dynamic widget-key suffixes)
     assert state["n0_goal"] == "constrain"
-    assert state["n0_gp_vulcan_guillot_1_0"] == "lnZ"
+    assert state["n0_gp_vulcan_guillot_1"] == "lnZ"
     assert state["n0_tgt_lnZ"] == 0.1
-    assert state["n0_fx_vulcan_guillot_1_0"] == ["lnKzz"]
+    assert state["n0_fx_vulcan_guillot_1"] == ["lnKzz"]
     # observation
     assert state["n0_modes"] == ["nirspec_g395h"]
     assert state["n0_ntr"] == 2 and state["n0_rbin"] == 100
@@ -165,6 +165,7 @@ def test_provenance_block_is_complete_and_portable(tmp_path):
     assert set(prov["cache_schema"]) == {"model", "pandeia_worker"}
     assert "vulcan-jwst-tool" in prov["software"]
     assert "pandeia_stack" in prov and "datasets" in prov
+    assert "ktables" in prov["datasets"]
     serialized = __import__("json").dumps(prov)
     assert "/Users/" not in serialized and "\\Users\\" not in serialized
     repos = prov["repositories"]
@@ -393,8 +394,7 @@ def test_restore_bounds_match_the_widgets():
             if lo is not None and hi is not None:
                 found.setdefault(suffix, set()).add((lo, hi))
 
-    shared = ({"mierg", "miesg", "miemmr", "nupts", "nz"}
-              | set(planets.CUSTOM_FIELD_RANGES))
+    shared = {"nz"} | set(planets.CUSTOM_FIELD_RANGES)
     for table in (share_config._GLOBAL_BOUNDS, share_config._PLANET_BOUNDS):
         for widget, (lo, hi) in table.items():
             if widget in shared:
@@ -409,6 +409,47 @@ def test_restore_bounds_match_the_widgets():
     assert found.get("infl_*") == {share_config._INFL_BOUNDS}
     assert found.get("tgt_*") == {share_config._TGT_BOUNDS_K,
                                   share_config._TGT_BOUNDS}
+
+
+def test_provenance_snapshot_records_the_ktables(tmp_path, monkeypatch):
+    """The exported provenance names the k-tables a run actually reads
+    (dataset, isotopologue, file, DOI per species), path-free; an absent
+    provenance record is an explicit 'absent' entry with the remedy, never
+    a silent omission."""
+    import json
+    from jwst_tool import provenance
+    from vulcan_forward import exomolop
+    root = tmp_path / "data"
+    (root / "exomolop").mkdir(parents=True)
+    (root / "exomolop" / "provenance.json").write_text(json.dumps({
+        "H2O": {"dataset": "POKAZATEL", "iso": "1H2-16O",
+                "natural_abundance": False, "url": "https://x/H2O",
+                "file": "1H2-16O__POKAZATEL.h5"},
+        "CO2": {"dataset": "Dozen", "iso": "12C-16O2",
+                "natural_abundance": True, "url": "https://x/CO2",
+                "file": "CO2-all__Dozen.h5"}}))
+    monkeypatch.setenv("VULCAN_FORWARD_DATA", str(root))
+    monkeypatch.setattr(exomolop, "table_info", lambda m: {
+        "doi": "x.xxxx/yyyyy", "date_id": None, "ngauss": 16,
+        "t_range_k": [100.0, 3400.0], "p_range_bar": [1e-5, 100.0],
+        "wl_range_um": [0.3, 50.0]})
+    provenance._base_snapshot.cache_clear()
+    try:
+        snap = provenance.snapshot()
+        kt = snap["datasets"]["ktables"]
+        assert kt["status"] == "ok" and set(kt["tables"]) == {"H2O", "CO2"}
+        assert kt["tables"]["CO2"]["natural_abundance"] is True
+        assert kt["tables"]["H2O"]["doi"] == "x.xxxx/yyyyy"   # verbatim
+        assert kt["tables"]["H2O"]["file"] == "1H2-16O__POKAZATEL.h5"
+        assert str(tmp_path) not in json.dumps(snap)
+        monkeypatch.setenv("VULCAN_FORWARD_DATA", str(tmp_path / "empty"))
+        (tmp_path / "empty").mkdir()
+        provenance._base_snapshot.cache_clear()
+        kt = provenance.snapshot()["datasets"]["ktables"]
+        assert kt["status"] == "absent" and "fetch_exomolop" in kt["remedy"]
+        assert str(tmp_path) not in json.dumps(kt)
+    finally:
+        provenance._base_snapshot.cache_clear()
 
 
 def test_gui_removed_physics_defaults_load_and_nondefaults_refuse():
@@ -440,4 +481,10 @@ def test_gui_removed_physics_defaults_load_and_nondefaults_refuse():
         with pytest.raises(ValueError, match=needle):
             share_config.widget_state(canon, _key)
         with pytest.raises(ValueError, match="programmatic interface"):
+            share_config.widget_state(canon, _key)
+    # a saved configuration carrying the deleted Mie deck / line-by-line
+    # mode refuses with the removal message (never loads under correlated-k)
+    for stale in (dict(mie_condensate="MgSiO3"), dict(opacity_mode="lbl")):
+        canon = dict(_canon(), **stale)
+        with pytest.raises(ValueError, match="removed in 0.48.0"):
             share_config.widget_state(canon, _key)

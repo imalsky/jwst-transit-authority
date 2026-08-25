@@ -37,15 +37,15 @@ fi
 # Known limit: this adds MISSING entries, it does not refresh changed files
 # inside an entry already present. Delete the entry (or the stage) to re-copy.
 # -RL: follow symlinks so the staged copy is self-contained.
-stage_tree() {                  # stage_tree <src-dir> <dst-dir> <label> [skip]
-    local src="$1" dst="$2" label="$3" skip="${4:-}" entry base added=0
+stage_tree() {                  # stage_tree <src-dir> <dst-dir> <label> [skip...]
+    local src="$1" dst="$2" label="$3" entry base added=0
+    shift 3
+    local skip=" $* "
     mkdir -p "$dst"
     for entry in "$src"/*; do
         [ -e "$entry" ] || continue          # unmatched glob
         base="$(basename "$entry")"
-        if [ -n "$skip" ] && [ "$base" = "$skip" ]; then
-            continue                         # staged separately below
-        fi
+        case "$skip" in *" $base "*) continue ;; esac   # staged separately, or unused
         if [ ! -e "$dst/$base" ]; then
             echo "Staging $label/$base ..."
             cp -RL "$entry" "$dst/"
@@ -60,12 +60,13 @@ stage_tree() {                  # stage_tree <src-dir> <dst-dir> <label> [skip]
 
 echo "Staging jwst-data (first run copies ~7 GB, needs the disk space) ..."
 stage_tree "$ROOT/vulcan-jwst-tool/data" "$STAGE/jwst-data" jwst-data
-# The engine's line lists + opacity cache still live in the retrieval
-# checkout on the maintainer's machine; the dataset folder keeps the
-# name "retrieval-data" deliberately, because renaming it would mean
-# re-uploading gigabytes. $VULCAN_FORWARD_DATA points at it at boot.
+# The engine's opacity cache (CIA) still lives in the retrieval checkout
+# on the maintainer's machine; the dataset folder keeps the name
+# "retrieval-data" deliberately, because renaming it would mean
+# re-uploading gigabytes. $VULCAN_FORWARD_DATA points at it at boot. The
+# exojax_linelists tree fed the deleted line-by-line mode; nothing reads it.
 stage_tree "$ROOT/vulcan-retrieval/data" "$STAGE/retrieval-data" retrieval-data \
-    exomolop
+    exomolop exojax_linelists
 
 # ExoMolOP k-tables are staged SELECTIVELY (~371 MiB each): only the species
 # the planner can actually select, so the dataset repo does not carry
@@ -114,7 +115,7 @@ PYEOF
     echo "exomolop: staged $(echo "$KTABLE_MOLS" | wc -w | tr -d ' ') tables."
 else
     echo "NOTE: no exomolop/ tree at $KTABLE_SRC -- skipping the k-tables."
-    echo "      The Space's default opacity_mode will stop with an error."
+    echo "      Every model step on the Space will stop with an error."
 fi
 
 # Resumable uploader (safe to re-run after an interrupted upload). Uploads the

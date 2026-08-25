@@ -25,7 +25,7 @@ is held at the specified state, and a retrieval that frees more parameters
 under the same model and noise assumptions will usually report a lower
 significance (a best-case comparison under those conditions, not a universal
 bound). When a Fisher Jacobian is available, ``sigma_detect_proj``
-additionally projects out the available T-P, lnR0, AND cloud/Mie derivative
+additionally projects out the available T-P, lnR0, AND cloud derivative
 directions (_NUISANCE_JAC below; still conditional) and is the number to
 prefer for narrow margins -- any caption describing it must include the
 cloud directions.
@@ -47,14 +47,13 @@ from . import noise as noise_mod
 N_TRANSITS_CAP = 500
 
 # Nuisance directions for sigma_detect_proj: T-P parameters, the reference
-# radius, and both cloud decks (an uncertain deck absorbs broadband signal
+# radius, and the cloud deck (an uncertain deck absorbs broadband signal
 # like an offset). Never add the chemistry rows (lnZ, dlnCO, lnKzz) -- they
 # ARE the signal being scored. Must track forward.TP_PARAM_NAMES +
-# forward.CLOUD_FISHER_PARAMS + forward.MIE_FISHER_PARAMS.
+# forward.CLOUD_FISHER_PARAMS.
 _NUISANCE_JAC = frozenset(
     {"Tirr", "Tint", "Tint_cl", "log_kappa", "log_gamma", "lnR0",
-     "log_kappa_cloud", "alpha_cloud",
-     "mie_log_rg", "mie_sigmag", "mie_log_mmr"})
+     "log_kappa_cloud", "alpha_cloud"})
 
 
 def _segment_rows(seg: np.ndarray) -> list[np.ndarray]:
@@ -171,7 +170,7 @@ def detection_score(result: dict, sigma: np.ndarray | None = None,
 
     ``projected=False`` preserves the historical calibration-profiled score.
     ``projected=True`` additionally profiles the available local T-P,
-    reference-radius, and cloud/Mie Jacobian directions. The latter is the
+    reference-radius, and cloud Jacobian directions. The latter is the
     collaborator-facing score whenever those Jacobians are available.
     """
     if result.get("depth_wo") is None:
@@ -362,9 +361,8 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
     order = np.argsort(wl_model)
     wl_model = wl_model[order]
     depth = model["depth"][order]
-    # The model's own resolving power, measured from its grid (the two
-    # opacity modes set it differently: correlated-k is fixed at the
-    # published k-tables' R = 1000, line-by-line scales with nu_pts).
+    # The model's own resolving power, measured from its grid (correlated-k
+    # is fixed at the published k-tables' R = 1000 band grid).
     _lnw = np.log(wl_model)
     r_model = (1.0 / float(np.median(np.diff(_lnw)))
                if _lnw.size > 2 else float("inf"))
@@ -374,10 +372,8 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
             f"finer than the model spectrum's own resolving power "
             f"(R = {r_model:.0f}). Bins narrower than the model grid would "
             "report interpolated structure the model does not contain. Lower "
-            "R_bin to at most the model resolving power; under the default "
-            "correlated-k opacity the grid is the published k-tables' "
-            "R = 1000 band grid and cannot be raised, in line-by-line mode "
-            "nu_pts can raise it.")
+            "R_bin to at most the model resolving power: the grid is the "
+            "published k-tables' R = 1000 band grid and cannot be raised.")
     mols = [str(x) for x in model["mols"]]
     depth_wo = _removed_spectrum(model, mols, target_mol, order)
 
@@ -438,9 +434,8 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
             # A Gaussian kernel needs R_model >= 2.3548 * R_native to be
             # resolved at all, and the binding R_native is the SMALLEST in
             # band (the widest kernel), matching smooth_to_native_r's test.
-            # r_model is measured from the model grid itself rather than a
-            # named setting, because "raise nu_pts" is advice that does
-            # nothing under the default correlated-k mode.
+            # r_model is measured from the model grid itself: the band
+            # grid is fixed by the published k-tables.
             _rn = float(np.nanmin(r_curve)) if np.isfinite(r_curve).any() else 0.0
             _lsf_skip_note = (
                 f"native-R LSF is a NO-OP here: the model spectrum's own "
@@ -448,9 +443,8 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
                 f"mode's line-spread function (response R down to {_rn:.0f}, "
                 "which needs about 2.35x that in model resolving power). The "
                 "model's own opacity sampling sets the effective width "
-                "instead. Under the default correlated-k opacity mode the "
-                "model grid is the published k-tables' band grid and cannot "
-                "be raised; the line-by-line mode's nu_pts can.")
+                "instead. The model grid is the published k-tables' band "
+                "grid and cannot be raised.")
         if depth_wo is not None:
             depth_wo = binning.smooth_to_native_r(wl_model, depth_wo, wl_r,
                                                   r_curve, b_lo, b_hi,

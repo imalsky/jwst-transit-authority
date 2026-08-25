@@ -37,7 +37,7 @@ if importlib.util.find_spec("exojax") is None or \
         importlib.util.find_spec("vulcan_jax") is None:
     pytest.skip("RT stack not installed", allow_module_level=True)
 
-FIXTURE = Path(__file__).parent / "data" / "w39b_v35_reference.npz"
+FIXTURE = Path(__file__).parent / "data" / "w39b_v36_reference.npz"
 
 WL_LO, WL_HI, R_BIN = 1.02, 5.26, 100.0
 
@@ -108,7 +108,6 @@ def test_full_chain_reproduces_the_verified_reference(mode):
     out = np.load(forward.run_model(params, log=lambda *a: None),
                   allow_pickle=False)
     got_cp = json.loads(str(out["params_json"]))
-    assert got_cp["opacity_mode"] == "exomolop"
     assert got_cp["science_mode"] == mode
     assert str(out["science_mode"]) == mode
 

@@ -46,16 +46,13 @@ def test_adjoint_key_ignores_rt_only_knobs():
     # must not fragment the cache
     k0 = adjoint_diag.adjoint_key(_p(), "SO2")
     assert adjoint_diag.adjoint_key(
-        _p(nu_pts=8000, broadening="h2he", cloud_on=True,
+        _p(cloud_on=True,
            extra_mols=["HCN"], fisher_params=["lnZ"], jac_method="ad",
            use_photo=True), "SO2") == k0
     # RT/observable-only knobs are stripped too: an RT top-pressure change
     # once re-triggered the multi-hour adjoint on an identical chemistry state
     assert adjoint_diag.adjoint_key(
-        _p(rt_ptop_bar=1.0e-9, rt_integration="trapezoid", rt_dit_res=0.5,
-           opacity_mode="lbl",
-           mie_condensate="MgSiO3", mie_log_rg=-5.0, mie_sigmag=2.0,
-           mie_log_mmr=-6.0), "SO2") == k0
+        _p(rt_ptop_bar=1.0e-9, rt_integration="trapezoid"), "SO2") == k0
 
 
 def test_adjoint_key_tracks_chemistry_and_species():

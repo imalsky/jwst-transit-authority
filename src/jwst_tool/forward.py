@@ -22,7 +22,7 @@ fix-species pin freezes the reservoir at a step-sequence-dependent
 transient, so no derivative through it is trustworthy (measured jvp-vs-FD
 relative error ~0.91, order-unity wrong). ``canonical_params`` refuses
 use_condense with fisher_params, with photo off, and with use_moldiff off.
-For aerosol opacity in a forecast use the differentiable cloud/Mie decks.
+For aerosol opacity in a forecast use the differentiable cloud deck.
 
 Fisher machinery: with ``fisher_params`` set the runner computes the
 spectrum Jacobian row by row, method recorded per row in the npz
@@ -63,11 +63,10 @@ MOLECULES = ["H2O", "CO2", "CO", "CH4", "SO2"]   # always-on WIDE-profile set
 # RT additions beyond the base set. The SNCHO network already solves these;
 # extra_mols only exposes them to the RT and the detection scores. Complete:
 # every network species with a published ExoMolOP table on the R1000
-# 0.3-50um grid; what is absent cannot be added (reasons:
-# vulcan_forward.constants.MOLECULES). CS2/C2H6 stay listed so selecting one
-# raises the explanatory refusal below rather than a bare KeyError.
-EXTRA_MOLECULES = ["C2", "C2H2", "C2H4", "C2H6", "CH", "CH3", "CN", "CS",
-                   "CS2", "H2CO", "H2O2", "H2S", "HCN", "N2O", "NH", "NH3",
+# 0.3-50um grid; what is absent cannot be added (CS2 and C2H6 have no
+# published table: _NO_EXOMOLOP_TABLE below).
+EXTRA_MOLECULES = ["C2", "C2H2", "C2H4", "CH", "CH3", "CN", "CS",
+                   "H2CO", "H2O2", "H2S", "HCN", "N2O", "NH", "NH3",
                    "NO", "NS", "OCS", "OH", "SH", "SO"]
 
 # Which of them the GUI preselects: MEASURED leave-one-out impact >= ~10 ppm
@@ -89,13 +88,14 @@ NETWORKS = {
 # them rather than dropping them silently. MUST list every S-bearing member
 # of MOLECULES + EXTRA_MOLECULES -- a species missing here would be modelled
 # at whatever the elemental repair left behind rather than refused.
-_S_MOLECULES = frozenset({"SO2", "H2S", "CS2", "OCS", "SO", "SH", "CS", "NS"})
-# Species ExoMolOP publishes no k-table for: refused EARLY under the default
-# opacity_mode (canonical_params), instead of failing minutes later inside
-# exomolop.load_tables. Cross-checked against exomolop.available() by a
-# data-gated test so this set cannot rot when ExoMolOP adds a species.
+_S_MOLECULES = frozenset({"SO2", "H2S", "OCS", "SO", "SH", "CS", "NS"})
+# Network species ExoMolOP publishes no k-table for. They are not offered
+# anywhere (correlated-k over the published tables is the only opacity
+# path); canonical_params names them in its refusal. Cross-checked against
+# exomolop.available() by a data-gated test so this set cannot rot when
+# ExoMolOP adds a species.
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
-_VERSION = 35  # model_cache buster: bump whenever the physics or the canonical
+_VERSION = 36  # model_cache buster: bump whenever the physics or the canonical
                # key set changes. Version history: notes.md.
                # DELIBERATE (reviews keep re-finding it): the cache identity
                # is canonical params + this hand-bumped version, NOT content
@@ -122,11 +122,7 @@ CO_DEFAULT = 0.55
 FD_STEPS = {"lnZ": 0.10, "dlnCO": 0.10, "lnKzz": 0.10,      # ln-space steps
             "Tirr": 10.0, "Tint": 10.0,                     # Kelvin
             "log_kappa": 0.05, "log_gamma": 0.05,           # dex
-            "log_kappa_cloud": 0.05, "alpha_cloud": 0.05,   # dex / slope
-            # Mie rows: rg/sigmag steps stay inside one miegrid cell (grid
-            # spacing ~0.1 dex / ~0.33), so the FD row is the local slope.
-            # MMR is not gridded (dtau linear in it).
-            "mie_log_rg": 0.03, "mie_sigmag": 0.05, "mie_log_mmr": 0.05}
+            "log_kappa_cloud": 0.05, "alpha_cloud": 0.05}   # dex / slope
 FD_COMP_PARAMS = ("lnZ", "dlnCO")     # need a chemistry re-init per FD point
 FD_CONSISTENCY_TOL = 0.25
 FD_LNR0_STEP = 0.01                   # lnR0 is RT-only (smooth, analytic)
@@ -146,24 +142,6 @@ CLOUD_FISHER_PARAMS = ("log_kappa_cloud", "alpha_cloud")
 # share ONE warm primal (vmap over basis tangents); set this env var to
 # restore the per-row jvp loop if the batched tangent carry does not fit.
 _AD_ROW_LOOP = bool(os.environ.get("JWST_TOOL_AD_ROW_LOOP"))
-
-# Mie cloud deck: condensate cloud from the exojax PdbCloud/OpaMie miegrid,
-# an alternative (or addition) to the analytic power-law deck. mie_condensate
-# selects the species ("" = off); the three knobs are one column-uniform
-# lognormal size distribution (mie_log_rg / mie_sigmag ride the miegrid
-# interp; mie_log_mmr is not gridded -- dtau is linear in it). Curated to the
-# condensates exojax 2.2.3 ships indices AND a density for (must match
-# tools/generate_miegrid.py SUPPORTED); grids are generated once, loaded at
-# run time.
-MIE_CONDENSATES = ("NH3", "H2O", "MgSiO3", "Mg2SiO4", "Fe", "Al2O3", "TiO2")
-MIE_FISHER_PARAMS = ("mie_log_rg", "mie_sigmag", "mie_log_mmr")
-# Ranges for the gridded knobs stay inside the miegrid edges with margin for
-# the +-2h FD stencil (getix edge-clamps; a clamped stencil would silently
-# zero the row). MMR is not gridded (generous physical envelope).
-MIE_LOG_RG_RANGE = (-6.5, -3.5)      # ~3 nm to ~3 um mean radius
-MIE_SIGMAG_RANGE = (1.15, 3.85)      # inset from [1.0001, 4.0] by > 2h (0.10)
-MIE_LOG_MMR_RANGE = (-12.0, -2.0)
-MIE_DATA_SUBDIR = "exojax_mie"       # under DATA_DIR (miegrids + virga archive)
 
 # Kzz profile modes. "file" requires tp_mode="file" with a Kzz column
 # (the upstream constraint: the tabulated Kzz lives in the atm table).
@@ -207,28 +185,6 @@ P_BTM_RANGE = (1.0, 300.0)
 # an ART grid reaching below the chemistry (deep clamping would fabricate
 # chemistry). The shipped pair was 7.0 / 7.6 bar; keep that ratio at any depth.
 ART_PBTM_FRACTION = 7.0 / 7.6
-
-
-def default_opacity_mode(params: dict) -> str:
-    """The published ExoMolOP opacities, correlated-k, for both observables.
-
-    Two modes exist. "exomolop" (the default) is correlated-k over the
-    published ExoMol/HITEMP high-temperature k-tables. "lbl" samples the
-    cross section directly on the output grid, far below exojax's critical
-    resolution, and is measurably biased in BOTH observables -- worst in
-    emission, where it suppressed more than half the emergent flux
-    (measurements: vulcan-forward notes.md, the two Opacity sections).
-
-    ONE case keeps "lbl", and it is physics, not preference: a MIE CONDENSATE
-    DECK. Mie extinction has structure across a band, so it cannot be folded
-    into a k-distribution built from line opacity.
-
-    Choosing the mode from the inputs is a default, not a fallback: asking
-    for a correlated-k mode explicitly alongside a Mie deck still raises.
-    """
-    if str(params.get("mie_condensate", "") or ""):
-        return "lbl"
-    return "exomolop"
 
 
 def default_p_btm_bar(params: dict) -> float:
@@ -357,31 +313,19 @@ def active_molecules(cp: dict) -> list[str]:
 
 # Numerical-resolution knobs layered on the base RT profile in
 # engine_config.WIDE (1-15 um band unchanged). The RT layer count is locked
-# equal to nz in run_model, so there is no separate RT-layer knob. These
-# knobs are LIVE only in lbl mode (canonical_params pins them under the
-# default correlated-k mode).
-#
-# The lbl grid is ESLOG over 667-10000 cm^-1, so the resolving power is
-# constant: R = nu_pts / 2.708. Resolving an instrument LSF needs R_model >=
-# 2.3548 * R_native (nu_pts >= ~12,300 for G395H; detect.py discloses the
-# no-op below that). The 32,000 cap lets convergence be DEMONSTRATED in
-# range, not a claim that it converges: line cores are Doppler-limited at
-# R ~ 3e5-7e5, unreachable as built (measurements: notes.md); correlated-k
-# is the durable answer and the default.
-NZ_DEFAULT, NU_PTS_DEFAULT, YCONV_DEFAULT = 100, 4000, 1.0e-2
+# equal to nz in run_model, so there is no separate RT-layer knob. The
+# spectral grid is the k-tables' own R = 1000 band grid (no knob).
+NZ_DEFAULT, YCONV_DEFAULT = 100, 1.0e-2
 NZ_RANGE = (60, 150)            # chemistry (= RT) layers
-NU_PTS_RANGE = (4000, 32000)    # native wavenumber points (R = nu_pts / 2.708)
 YCONV_RANGE = (1.0e-4, 1.0e-2)  # steady-state convergence tolerance (1e-3 is the
                                 # validated "high" tier; below it costs runtime
                                 # but is safe -- the longdy gate rejects loudly)
 
-# Modelable temperature window -- reject, never clip. The numbers are the
-# PreMODIT table range with a 20 K inset, which set the limit when
-# line-by-line was the only opacity mode. Under the default correlated-k
-# mode the published ExoMolOP tables span 100-3400 K, so this window is
-# CONSERVATIVE there; it is kept as-is because nothing above 2980 K has been
-# validated (the H2-H2 CIA table also ends near 3000 K). Widening it is a
-# physics decision backed by a run, not a constant edit.
+# Modelable temperature window -- reject, never clip. The published ExoMolOP
+# tables span 100-3400 K, so this window is CONSERVATIVE; it is kept because
+# nothing above 2980 K has been validated (the H2-H2 CIA table also ends
+# near 3000 K). Widening it is a physics decision backed by a run, not a
+# constant edit.
 T_WINDOW = (320.0, 2980.0)
 
 # Parameters that can be freed in the Fisher forecast, per tp_mode. "file" is
@@ -400,24 +344,18 @@ TP_PARAM_NAMES = {
 PARAM_SYMBOLS = {"lnZ": "[M/H]", "dlnCO": "C/O", "lnKzz": "log Kzz",
                  "Tirr": "T_irr", "Tint": "T_int",
                  "log_kappa": "log κ_IR", "log_gamma": "log γ",
-                 "log_kappa_cloud": "log κ_cloud", "alpha_cloud": "α_cloud",
-                 "mie_log_rg": "log r_g", "mie_sigmag": "σ_g",
-                 "mie_log_mmr": "log MMR"}
+                 "log_kappa_cloud": "log κ_cloud", "alpha_cloud": "α_cloud"}
 PARAM_UNITS = {"lnZ": "dex", "dlnCO": "", "lnKzz": "dex",
                "Tirr": "K", "Tint": "K",
                "log_kappa": "dex", "log_gamma": "dex",
-               "log_kappa_cloud": "dex", "alpha_cloud": "",
-               "mie_log_rg": "dex(cm)", "mie_sigmag": "", "mie_log_mmr": "dex"}
+               "log_kappa_cloud": "dex", "alpha_cloud": ""}
 PARAM_LABELS = {"lnZ": "Metallicity", "dlnCO": "C/O ratio",
                 "lnKzz": "Vertical mixing (Kzz)",
                 "Tirr": "Guillot T_irr",
                 "Tint": "Guillot T_int", "log_kappa": "Guillot log κ_IR",
                 "log_gamma": "Guillot log γ",
                 "log_kappa_cloud": "Cloud deck log κ (at 3.5 um)",
-                "alpha_cloud": "Cloud deck slope α",
-                "mie_log_rg": "Mie particle radius (log r_g)",
-                "mie_sigmag": "Mie size dispersion (σ_g)",
-                "mie_log_mmr": "Mie condensate abundance (log MMR)"}
+                "alpha_cloud": "Cloud deck slope α"}
 
 
 def param_axis(name: str) -> str:
@@ -745,15 +683,13 @@ CONDEN_CFG = {
 # Pinned by an AST-walking test (test_forward_params) that re-derives this set
 # from the source, so it cannot rot when a parameter is added.
 _PARAM_KEYS_READ = frozenset({
-    "Tint", "Tirr", "alpha_cloud", "bot_flux", "broadening", "chem_provider",
+    "Tint", "Tirr", "alpha_cloud", "bot_flux", "chem_provider",
     "cloud_on", "co_ratio", "diff_esc", "extra_mols",
     "f_diurnal", "fisher_params", "gs_cgs", "jac_method", "kzz_const",
     "kzz_kdeep", "kzz_kmax", "kzz_mode", "kzz_plev", "kzz_x", "log_gamma",
-    "log_kappa", "log_kappa_cloud", "met_x_solar", "mie_condensate",
-    "mie_log_mmr", "mie_log_rg", "mie_sigmag", "network", "nu_pts", "nz",
-    "opacity_mode",
+    "log_kappa", "log_kappa_cloud", "met_x_solar", "network", "nz",
     "orbit_au", "p_btm_bar", "p_ref_bar", "planet", "rp_rjup",
-    "rstar_rsun", "rt_dit_res", "rt_integration", "rt_ptop_bar",
+    "rstar_rsun", "rt_integration", "rt_ptop_bar",
     "science_mode", "sflux", "sl_angle_deg", "star_feh", "star_logg",
     "star_teff", "top_flux", "tp_file", "tp_file_path",
     "tp_file_sha1", "tp_mode", "use_condense", "use_moldiff", "use_photo",
@@ -769,11 +705,24 @@ _KNOWN_PARAM_KEYS = _PARAM_KEYS_READ | _PARAM_KEYS_ECHOED
 # driver passed {"mode": "emission"}, the key was silently ignored, and a
 # TRANSMISSION spectrum was scored against eclipse data (chi2/N ~ 5e5). An
 # unknown key must never be dropped quietly (standing fail-loud rule).
-_PARAM_KEY_HINTS = {"mode": "science_mode", "opacity": "opacity_mode",
+_PARAM_KEY_HINTS = {"mode": "science_mode",
                     "metallicity": "met_x_solar", "co": "co_ratio"}
+# Keys of the removed line-by-line opacity mode and Mie condensate deck
+# (0.48.0): refused by name so an old config says what was dropped.
+_REMOVED_PARAM_KEYS = frozenset({
+    "opacity_mode", "nu_pts", "rt_dit_res", "broadening", "mie_condensate",
+    "mie_log_rg", "mie_sigmag", "mie_log_mmr"})
 
 
 def canonical_params(params: dict) -> dict:
+    removed = sorted(set(params) & _REMOVED_PARAM_KEYS)
+    if removed:
+        raise ValueError(
+            f"parameter key(s) {removed} were removed in 0.48.0 with the "
+            "sampled line-by-line opacity mode and the Mie condensate deck: "
+            "correlated-k over the published ExoMolOP k-tables is the only "
+            "opacity path. Drop the keys (the power-law cloud deck, "
+            "cloud_on, stays).")
     unknown = sorted(set(params) - _KNOWN_PARAM_KEYS)
     if unknown:
         hints = "".join(
@@ -843,10 +792,6 @@ def canonical_params(params: dict) -> dict:
     if not NZ_RANGE[0] <= nz <= NZ_RANGE[1]:
         raise ValueError(f"nz={nz} outside the validated layer range {NZ_RANGE} "
                          "(chemistry layers, also used for the RT grid)")
-    nu_pts = int(params.get("nu_pts", NU_PTS_DEFAULT))
-    if not NU_PTS_RANGE[0] <= nu_pts <= NU_PTS_RANGE[1]:
-        raise ValueError(f"nu_pts={nu_pts} outside the validated range {NU_PTS_RANGE} "
-                         "(native wavenumber points; native R ~ nu_pts/2.7)")
     yconv_cri = float(params.get("yconv_cri", YCONV_DEFAULT))
     if not YCONV_RANGE[0] <= yconv_cri <= YCONV_RANGE[1]:
         raise ValueError(f"yconv_cri={yconv_cri:g} outside the validated range "
@@ -872,7 +817,6 @@ def canonical_params(params: dict) -> dict:
         "star_feh": round(float(params.get("star_feh",
                                            star_ref["metallicity"])), 2),
         "nz": nz,
-        "nu_pts": nu_pts,
         "yconv_cri": round(yconv_cri, 6),
         "rp_rjup": round(float(params.get("rp_rjup", sysd["rp_rjup"])), 4),
         "gs_cgs": round(float(params.get("gs_cgs", sysd["gs_cgs"])), 1),
@@ -924,26 +868,14 @@ def canonical_params(params: dict) -> dict:
         # Rayleigh is known zero-parameter physics, ON by default (off it
         # biases the <1.5 um slope); the power-law cloud deck is OFF by default.
         "use_rayleigh": bool(params.get("use_rayleigh", True)),
-        # line-broadening perturber: "air" (HITRAN terrestrial widths, the
-        # validated default) or "h2he" (planetary H2/He blend; downloads
-        # separate h2he/<db> line-list caches on first use, and exojax_rt
-        # RAISES for a molecule with no H2/He coverage rather than silently
-        # falling back)
-        "broadening": str(params.get("broadening", "air")),
         # ExoJAX RT knobs. rt_ptop_bar: the RT column top; above VULCAN's
         # chemistry top the topmost VMR/T are clamped constant (standard
         # transmission convention); too low a top saturates strong bands into
         # a flat wall. rt_integration: exojax ArtTransPure chord-integration
-        # scheme. rt_dit_res: PreMODIT broadening-grid spacing (1.0 = the
-        # validated default here, 0.2 = exojax's own).
+        # scheme. Opacity is correlated-k over the published ExoMolOP
+        # k-tables (the engine's only mode; no key).
         "rt_ptop_bar": float(f"{float(params.get('rt_ptop_bar', 1.0e-8)):.6e}"),
         "rt_integration": str(params.get("rt_integration", "simpson")),
-        "rt_dit_res": round(float(params.get("rt_dit_res", 1.0)), 3),
-        # "exomolop" = correlated-k over the published k-tables; "lbl" = direct
-        # sampling, kept only for the Mie deck (measurably biased in both
-        # observables -- vulcan-forward notes.md, Opacity sections).
-        "opacity_mode": str(params.get("opacity_mode",
-                                       default_opacity_mode(params))),
         # The pressure at which rp_rjup and gs_cgs apply. A catalogue radius
         # is the transit radius at roughly the terminator photosphere, NOT
         # the RT-grid bottom where exojax wants it; anchoring it at the
@@ -956,12 +888,6 @@ def canonical_params(params: dict) -> dict:
         "cloud_on": bool(params.get("cloud_on", False)),
         "log_kappa_cloud": round(float(params.get("log_kappa_cloud", -1.0)), 3),
         "alpha_cloud": round(float(params.get("alpha_cloud", 0.0)), 2),
-        # Mie condensate deck: "" = off. The three continuous knobs key the
-        # cache only when a condensate is set (zeroed below otherwise).
-        "mie_condensate": str(params.get("mie_condensate", "") or ""),
-        "mie_log_rg": round(float(params.get("mie_log_rg", -5.0)), 3),
-        "mie_sigmag": round(float(params.get("mie_sigmag", 2.0)), 3),
-        "mie_log_mmr": round(float(params.get("mie_log_mmr", -6.0)), 3),
         # Detection-only condensation: the certified S8 forward recipe. The
         # compatibility matrix below refuses it with ANY derivative.
         "use_condense": bool(params.get("use_condense", False)),
@@ -990,8 +916,6 @@ def canonical_params(params: dict) -> dict:
         raise ValueError(f"sl_angle_deg={cp['sl_angle_deg']} outside [0, 89] deg")
     if not 0.0 < cp["f_diurnal"] <= 1.0:
         raise ValueError(f"f_diurnal={cp['f_diurnal']} outside (0, 1]")
-    if cp["broadening"] not in ("air", "h2he"):
-        raise ValueError(f"broadening={cp['broadening']!r} (choose 'air' or 'h2he')")
     if not 1.0e-9 <= cp["rt_ptop_bar"] <= 1.0e-6:
         raise ValueError(
             f"rt_ptop_bar={cp['rt_ptop_bar']:g} outside [1e-9, 1e-6] bar (the "
@@ -1004,36 +928,16 @@ def canonical_params(params: dict) -> dict:
             "at which rp_rjup and gs_cgs are defined, so the grid has to "
             "cover it. 1e-3 bar is the validated default for a "
             "transit-derived radius.")
-    if cp["opacity_mode"] not in ("exomolop", "lbl"):
-        raise ValueError(
-            f"opacity_mode={cp['opacity_mode']!r}: choose 'exomolop' "
-            "(correlated-k over the published ExoMolOP high-temperature "
-            "tables -- the default and the only one whose line data suits a "
-            "hot hydrogen atmosphere) or 'lbl' (direct sampling, kept for "
-            "the Mie deck). The interim 'ckd' mode was removed.")
-    if cp["opacity_mode"] == "exomolop" and cp["mie_condensate"]:
-        raise ValueError(
-            "a Mie condensate deck needs opacity_mode='lbl': Mie extinction "
-            "has structure across a band, so folding it into a k-distribution "
-            "built from line opacity would be wrong. Set opacity_mode='lbl' "
-            "knowingly, and read the resolution warning it prints.")
     if cp["rt_integration"] not in ("simpson", "trapezoid"):
         raise ValueError(
             f"rt_integration={cp['rt_integration']!r}: exojax ArtTransPure "
             "supports 'simpson' (default) or 'trapezoid'")
-    if not 0.1 <= cp["rt_dit_res"] <= 1.0:
+    no_table = sorted(set(cp["extra_mols"]) & _NO_EXOMOLOP_TABLE)
+    if no_table:   # before the universe check: the pointed reason wins
         raise ValueError(
-            f"rt_dit_res={cp['rt_dit_res']:g} outside [0.1, 1.0] (PreMODIT "
-            "broadening-grid spacing; 1.0 = this tool's validated default, "
-            "0.2 = exojax's own default)")
-    if cp["opacity_mode"] == "exomolop":
-        # Inert-knob normalization (cache hygiene, Kzz precedent): under
-        # correlated-k the wavelength grid comes from the published k-tables
-        # and PreMODIT never runs, so nu_pts and rt_dit_res cannot reach the
-        # physics -- pin them to the defaults so editing either does not force
-        # a recompute of a bit-identical spectrum. Both stay live in lbl mode.
-        cp["nu_pts"] = NU_PTS_DEFAULT
-        cp["rt_dit_res"] = 1.0
+            f"extra_mols {no_table} have no published ExoMolOP k-table and "
+            "cannot be modelled (correlated-k over the published tables is "
+            "the only opacity path). Drop them.")
     bad_mols = set(cp["extra_mols"]) - set(EXTRA_MOLECULES)
     if bad_mols:
         raise ValueError(
@@ -1044,7 +948,8 @@ def canonical_params(params: dict) -> dict:
             "add an entry to the engine's molecule table (pass your own via "
             "profile['molecule_table'], or extend "
             "vulcan_forward.constants.MOLECULES) "
-            "(HITRAN db id, molmass, VULCAN species name), make sure the SNCHO "
+            "(molmass, VULCAN species name) and fetch its ExoMolOP k-table, "
+            "make sure the SNCHO "
             "network actually solves that species, then list it here in "
             "forward.EXTRA_MOLECULES.")
     if network == "ncho":
@@ -1055,20 +960,6 @@ def canonical_params(params: dict) -> dict:
                 "the ncho network. Drop them, or keep network='sncho'. "
                 "(Sulfur species are refused rather than dropped, so the "
                 "model computed is always the model asked for.)")
-    if cp["opacity_mode"] == "exomolop":
-        # Fail HERE, not minutes later inside exomolop.load_tables. (After
-        # the molecule-universe checks above, so an unknown species keeps its
-        # more fundamental error.) These species stay in EXTRA_MOLECULES
-        # because opacity_mode="lbl" CAN run them; the GUI drops them from
-        # its options because it has no opacity_mode control (see app.py).
-        no_table = sorted(set(cp["extra_mols"]) & _NO_EXOMOLOP_TABLE)
-        if no_table:
-            raise ValueError(
-                f"extra_mols {no_table} have no published ExoMolOP k-table, "
-                "so they cannot run under opacity_mode='exomolop' (the "
-                "default). Drop them, or set opacity_mode='lbl' knowingly "
-                "(sampled line-by-line, measurably biased -- vulcan-forward "
-                "notes.md, Opacity sections).")
     # --- leave-one-out spectrum set -----------------------------------------
     # After the molecule-universe checks, so the RT set is final. Canonical
     # form: a subset of active_molecules(cp) in fold order (deduped), which
@@ -1098,8 +989,6 @@ def canonical_params(params: dict) -> dict:
     allowed_fp = {"lnZ", "dlnCO", "lnKzz"} | set(TP_PARAM_NAMES[tp_mode])
     if cp["cloud_on"]:
         allowed_fp |= set(CLOUD_FISHER_PARAMS)
-    if cp["mie_condensate"]:
-        allowed_fp |= set(MIE_FISHER_PARAMS)
     bad_fp = set(cp["fisher_params"]) - allowed_fp
     if bad_fp:
         raise ValueError(
@@ -1107,11 +996,9 @@ def canonical_params(params: dict) -> dict:
             f"{tp_mode!r}: choose from {CHEM_PARAM_NAMES} + "
             f"{TP_PARAM_NAMES[tp_mode]}"
             + (f" + {list(CLOUD_FISHER_PARAMS)}" if cp["cloud_on"] else "")
-            + (f" + {list(MIE_FISHER_PARAMS)}" if cp["mie_condensate"] else "")
             + (". (tp_mode='file' has NO T-P Fisher rows by design; the "
-               f"cloud parameters {list(CLOUD_FISHER_PARAMS)} require cloud_on; "
-               f"the Mie parameters {list(MIE_FISHER_PARAMS)} require a "
-               "mie_condensate.)"))
+               f"cloud parameters {list(CLOUD_FISHER_PARAMS)} require "
+               "cloud_on.)"))
     if cp["jac_method"] not in JAC_METHODS:
         raise ValueError(
             f"jac_method={cp['jac_method']!r}: choose 'fd' (certified central "
@@ -1129,8 +1016,7 @@ def canonical_params(params: dict) -> dict:
     # Composition FD stencils must stay inside the validated envelope: the
     # central stencil evaluates at +-2h in ln-space, so a row requested AT a
     # range edge would silently solve the chemistry outside it. T-P rows
-    # window-check every stencil point and the Mie ranges are inset by > 2h
-    # for the same reason.
+    # window-check every stencil point for the same reason.
     if cp["jac_method"] == "fd" and cp["fisher_params"]:
         _steps = FD_STEPS
         _met_rng = (0.1, 100.0)
@@ -1240,42 +1126,6 @@ def canonical_params(params: dict) -> dict:
     if not cp["cloud_on"]:             # cloud knobs are inert when the deck is off
         cp["log_kappa_cloud"] = 0.0
         cp["alpha_cloud"] = 0.0
-    # --- Mie condensate deck -----------------------------------------------
-    if cp["mie_condensate"]:
-        if cp["mie_condensate"] not in MIE_CONDENSATES:
-            raise ValueError(
-                f"mie_condensate={cp['mie_condensate']!r} not supported: "
-                f"choose '' (off) or one of {list(MIE_CONDENSATES)} (the "
-                "condensates exojax ships refractive indices + a substance "
-                "density for; a miegrid is generated once per condensate with "
-                "tools/generate_miegrid.py).")
-        if not MIE_LOG_RG_RANGE[0] <= cp["mie_log_rg"] <= MIE_LOG_RG_RANGE[1]:
-            raise ValueError(
-                f"mie_log_rg={cp['mie_log_rg']} outside {MIE_LOG_RG_RANGE} "
-                "(log10 mean radius in cm, kept inside the miegrid edges so the "
-                "derivative is never a silently edge-clamped zero)")
-        if not MIE_SIGMAG_RANGE[0] <= cp["mie_sigmag"] <= MIE_SIGMAG_RANGE[1]:
-            raise ValueError(
-                f"mie_sigmag={cp['mie_sigmag']} outside {MIE_SIGMAG_RANGE} "
-                "(lognormal geometric std dev, inside the miegrid edges)")
-        if not MIE_LOG_MMR_RANGE[0] <= cp["mie_log_mmr"] <= MIE_LOG_MMR_RANGE[1]:
-            raise ValueError(
-                f"mie_log_mmr={cp['mie_log_mmr']} outside {MIE_LOG_MMR_RANGE} "
-                "(log10 condensate mass mixing ratio)")
-        if science_mode == "emission":
-            # The ExoJAX emission solver (ArtEmisPure) is pure-absorption, so a
-            # Mie deck's scattering extinction would be counted as thermal
-            # absorption -- a conservative-scattering cloud would radiate like a
-            # blackbody instead of zero, faking a thermal source in a cloudy
-            # eclipse. Refuse upfront (loud) rather than return a wrong flux.
-            raise ValueError(
-                "mie_condensate is not supported with science_mode='emission': "
-                "Mie scattering cannot be treated by the pure-absorption "
-                "emission solver (it violates the conservative-scattering "
-                "zero-emission limit). Use transmission, or the absorbing "
-                "power-law cloud for emission.")
-    else:                              # deck off: zero the knobs (cache hygiene)
-        cp["mie_log_rg"] = cp["mie_sigmag"] = cp["mie_log_mmr"] = 0.0
     # --- science-mode hygiene + gating --------------------------------------
     if science_mode == "emission":
         if not 3000.0 <= cp["star_teff"] <= 7000.0:
@@ -1368,10 +1218,9 @@ def cache_path(params: dict) -> Path:
 # (forward._VERSION) rides inside canonical_params, so a version bump busts
 # this cache too.
 CHEM_IRRELEVANT_PARAMS = (
-    "fisher_params", "jac_method", "nu_pts", "use_rayleigh", "broadening",
+    "fisher_params", "jac_method", "use_rayleigh",
     "cloud_on", "log_kappa_cloud", "alpha_cloud", "extra_mols", "wo_mols",
-    "rt_ptop_bar", "rt_integration", "rt_dit_res", "opacity_mode",
-    "mie_condensate", "mie_log_rg", "mie_sigmag", "mie_log_mmr",
+    "rt_ptop_bar", "rt_integration",
     "science_mode", "star_teff", "star_logg", "star_feh", "p_ref_bar",
 )
 
@@ -1499,7 +1348,7 @@ def _make_progress(cp: dict, log):
     _ad = cp["jac_method"] == "ad"
 
     def _row_stage(n):
-        if n in CLOUD_FISHER_PARAMS or n in MIE_FISHER_PARAMS:
+        if n in CLOUD_FISHER_PARAMS:
             return (f"{'AD' if _ad else 'FD'} Jacobian d/d({n})", 8.0)
         if _ad:
             return (f"AD Jacobian d/d({n})", 110.0)
@@ -1510,13 +1359,12 @@ def _make_progress(cp: dict, log):
         # chemistry-theta rows share one warm primal (single stage); the
         # RT-only deck rows keep their own per-row stages
         _chem_rows = [n for n in cp["fisher_params"]
-                      if n not in CLOUD_FISHER_PARAMS
-                      and n not in MIE_FISHER_PARAMS]
+                      if n not in CLOUD_FISHER_PARAMS]
         if _chem_rows:
             stages += [(f"AD Jacobian ({len(_chem_rows)} rows, shared "
                         "primal)", 110.0 + 30.0 * (len(_chem_rows) - 1))]
         stages += [_row_stage(n) for n in cp["fisher_params"]
-                   if n in CLOUD_FISHER_PARAMS or n in MIE_FISHER_PARAMS]
+                   if n in CLOUD_FISHER_PARAMS]
     else:
         stages += [_row_stage(n) for n in cp["fisher_params"]]
     if cp["fisher_params"]:
@@ -1544,8 +1392,6 @@ def _rt_profile_common(cp: dict, config) -> dict:
     # chemistry layer count -- chemistry and RT share one grid.
     profile["nz"] = cp["nz"]
     profile["art_nlayer"] = cp["nz"]
-    profile["nu_pts"] = cp["nu_pts"]
-    profile["broadening"] = cp["broadening"]   # canonical (cache-keyed) knob
     # ExoJAX RT knobs: the engine validates and ECHOES them on the built rt
     # namespace; run_model verifies the echo so an older engine that ignores
     # unknown profile keys can never return a spectrum that differs from
@@ -1555,17 +1401,10 @@ def _rt_profile_common(cp: dict, config) -> dict:
     # grid reaching below the chemistry). Emission is why this moves at all.
     profile["art_pbtm_bar"] = cp["p_btm_bar"] * ART_PBTM_FRACTION
     profile["rt_integration"] = cp["rt_integration"]
-    profile["dit_grid_resolution"] = cp["rt_dit_res"]
     profile["p_ref_bar"] = cp["p_ref_bar"]
-    profile["opacity_mode"] = cp["opacity_mode"]
-    # Mie condensate deck: the engine builds the OpaMie deck from a
-    # pre-generated miegrid under DATA_DIR/exojax_mie and ECHOES
-    # mie_condensate on the rt namespace (echo-verified in run_model). The
-    # absolute data dir is pinned so exojax never scatters caches into the
-    # launch directory.
-    if cp["mie_condensate"]:
-        profile["mie_condensate"] = cp["mie_condensate"]
-        profile["mie_data_dir"] = str(_ins.DATA_DIR / MIE_DATA_SUBDIR)
+    # Correlated-k over the published ExoMolOP k-tables is the engine's only
+    # opacity path; stated explicitly so the engine's echo is verifiable.
+    profile["opacity_mode"] = "exomolop"
     profile["molecules"] = active_molecules(cp)
     profile["use_photo"] = cp["use_photo"]        # build_chem_model reads this key
     profile["use_rayleigh"] = cp["use_rayleigh"]  # exojax_rt reads this flag
@@ -1881,26 +1720,15 @@ def run_model(params: dict, log=print) -> Path:
     _echo = {"art_ptop_bar": cp["rt_ptop_bar"],
              "art_pbtm_bar": profile["art_pbtm_bar"],
              "rt_integration": cp["rt_integration"],
-             "dit_grid_resolution": cp["rt_dit_res"],
              "p_ref_bar": cp["p_ref_bar"],
-             "opacity_mode": cp["opacity_mode"]}
+             "opacity_mode": profile["opacity_mode"]}
     for k, want in _echo.items():
         got = getattr(rt, k, None)
         if got != want:
             raise RuntimeError(
                 f"RT engine did not honor {k}={want!r} (echoed {got!r}). "
                 "The installed vulcan-forward engine predates the "
-                "profile-overridable RT knobs -- upgrade to >= 0.10.1.")
-    # Mie deck echo: the engine echoes mie_condensate ("" when no deck).
-    # A mismatch means the engine ignored the profile key (too old to know it),
-    # so the spectrum would be cached under a Mie key without the Mie opacity.
-    _mie_echo = getattr(rt, "mie_condensate", None)
-    if _mie_echo != cp["mie_condensate"]:
-        raise RuntimeError(
-            f"RT engine did not honor mie_condensate="
-            f"{cp['mie_condensate']!r} (echoed {_mie_echo!r}). The installed "
-            "vulcan-forward predates the Mie cloud deck -- upgrade to "
-            ">= 0.11.0.")
+                "profile-overridable RT knobs -- upgrade to >= 0.11.0.")
 
     # --- emission mode: day-side model + stellar SED ------------------------
     emis, fs_j = None, None
@@ -1959,12 +1787,6 @@ def run_model(params: dict, log=print) -> Path:
     # around this vector (None when the deck is off).
     cloud_vec = (jnp.asarray([cp["log_kappa_cloud"], cp["alpha_cloud"]])
                  if cp["cloud_on"] else None)
-    # Mie condensate deck [log10 rg (cm), sigmag, log10 MMR]: same pattern -- the
-    # baseline vector the mie= Fisher rows differentiate around (None when off).
-    # Independent of the power-law deck; the engine sums both if both are set.
-    mie_vec = (jnp.asarray([cp["mie_log_rg"], cp["mie_sigmag"],
-                            cp["mie_log_mmr"]])
-               if cp["mie_condensate"] else None)
 
     def make_depth_fn(chem_b):
         """Depth function bound to ONE chemistry build: the interpolation map
@@ -1985,7 +1807,7 @@ def run_model(params: dict, log=print) -> Path:
         # network's *_l_s columns) are particles, not gas -- counting them
         # dilutes every gas VMR and inflates the RT mean molecular weight as
         # if the condensate were vapor. The condensate's aerosol OPACITY
-        # stays deliberately excluded (use the cloud/Mie decks for that).
+        # stays deliberately excluded (use the cloud deck for that).
         _gas = np.ones(int(np.asarray(chem_b.species_masses).size))
         for _s, _i in chem_b.sidx.items():
             if _s.endswith("_l_s"):
@@ -2001,17 +1823,16 @@ def run_model(params: dict, log=print) -> Path:
             return (vmr, to_art_b(ymix[:, h2_b]), T_art, mmw_art,
                     to_art_b(ymix[:, he_b]))
 
-        def depth_fn(y, th, lnR0=0.0, cloud=None, mie=None, wo_mols=None):
-            # cloud=/mie=None -> the baseline decks; an explicit vector
-            # overrides it (the cloud/Mie Fisher rows differentiate through
-            # these arguments, one deck at a time). wo_mols (transmission
+        def depth_fn(y, th, lnR0=0.0, cloud=None, wo_mols=None):
+            # cloud=None -> the baseline deck; an explicit vector overrides
+            # it (the cloud Fisher rows differentiate through this
+            # argument). wo_mols (transmission
             # only): a list returns (depth, depth_wo) from the engine's
             # leave-one-out batch; emission gets its batch via
             # emis.emission_flux_tau in run_model (the tau-bottom gate needs
             # the same optical depth).
             vmr, vmr_h2, T_art, mmw_art, vmr_he = _art_profiles(y, th)
             cl = cloud_vec if cloud is None else cloud
-            mi = mie_vec if mie is None else mie
             if emis is not None:
                 if wo_mols is not None:
                     raise ValueError(
@@ -2019,13 +1840,13 @@ def run_model(params: dict, log=print) -> Path:
                         "removed-molecule spectra come from "
                         "emis.emission_flux_tau (run_model owns that call).")
                 fp = emis.emission_flux(vmr, vmr_h2, T_art, mmw_art,
-                                        vmr_he=vmr_he, cloud=cl, mie=mi)
+                                        vmr_he=vmr_he, cloud=cl)
                 rp_em = emis.emission_radius(T_art, mmw_art)
                 return (fp / fs_j) * (rp_em ** 2 / _rstar_cm_sq) * jnp.exp(
                     2.0 * jnp.asarray(lnR0))
             return rt.transmission_depth_r(
                 vmr, vmr_h2, T_art, mmw_art,
-                jnp.asarray(lnR0), vmr_he=vmr_he, cloud=cl, mie=mi,
+                jnp.asarray(lnR0), vmr_he=vmr_he, cloud=cl,
                 wo_mols=wo_mols)
         depth_fn._art_profiles = _art_profiles   # reused by the tau-bottom gate
         return depth_fn
@@ -2172,10 +1993,9 @@ def run_model(params: dict, log=print) -> Path:
         # saved on every healthy run are not.
         if wo_list:
             _fp_j, _tau_j, _fp_wo_j, _tau_wo_j = emis.emission_flux_tau(
-                *_prof0, cloud=cloud_vec, mie=mie_vec, wo_mols=wo_list)
+                *_prof0, cloud=cloud_vec, wo_mols=wo_list)
         else:
-            _fp_j, _tau_j = emis.emission_flux_tau(*_prof0, cloud=cloud_vec,
-                                                   mie=mie_vec)
+            _fp_j, _tau_j = emis.emission_flux_tau(*_prof0, cloud=cloud_vec)
         _tau_b = np.asarray(_tau_j)
         emis_tau_min = float(_tau_b.min())
         _wl_thin = float(rt.wl_um[int(np.argmin(_tau_b))])
@@ -2353,8 +2173,7 @@ def run_model(params: dict, log=print) -> Path:
                     "the chemistry and is valid at any composition.")
 
         _ad_chem_rows = ([n for n in jac_names
-                          if n not in CLOUD_FISHER_PARAMS
-                          and n not in MIE_FISHER_PARAMS]
+                          if n not in CLOUD_FISHER_PARAMS]
                          if cp["jac_method"] == "ad" else [])
         _ad_cols = {}
         if _ad_chem_rows and not _AD_ROW_LOOP:
@@ -2390,17 +2209,14 @@ def run_model(params: dict, log=print) -> Path:
                 return_conv_diag=True)
             _check_converged(_diag_w, "AD warm re-converge (primal)")
 
-        def _rt_deck_row(name, base_vec, idx, kwarg, gated):
-            """RT-only Jacobian row for a cloud/Mie deck parameter (no chemistry
-            re-solve). AD -> one jvp along `idx`. FD -> central difference: the
-            analytic power-law deck is smooth (no solver noise), so gated=False
-            rows take a SINGLE central difference -- which still carries the
-            usual O(h^2) truncation error (~(h ln10)^2/6 ~ 0.2% at h=0.05 dex),
-            just no h-vs-2h measurement of it, so fd_err is reported NaN
-            (unmeasured), never 0. The Mie rg/sigmag rows ride the
-            piecewise-linear miegrid, so they carry the same h-vs-2h consistency
-            gate the theta rows use (gated=True) and REFUSE a step straddling a
-            grid knot. Returns (row, h, err, method)."""
+        def _rt_deck_row(name, base_vec, idx, kwarg):
+            """RT-only Jacobian row for a cloud-deck parameter (no chemistry
+            re-solve). AD -> one jvp along `idx`. FD -> a SINGLE central
+            difference: the analytic power-law deck is smooth (no solver
+            noise), so the row still carries the usual O(h^2) truncation
+            error (~(h ln10)^2/6 ~ 0.2% at h=0.05 dex) but no h-vs-2h
+            measurement of it, so fd_err is reported NaN (unmeasured), never
+            0. Returns (row, h, err, method)."""
             base_vec = np.asarray(base_vec, dtype=np.float64)
             if cp["jac_method"] == "ad":
                 e = np.zeros(base_vec.size)
@@ -2417,53 +2233,26 @@ def run_model(params: dict, log=print) -> Path:
                 return np.asarray(depth_from_y(y_sol, th0,
                                                **{kwarg: jnp.asarray(v)}))
             j1 = (_d(h) - _d(-h)) / (2.0 * h)
-            if not gated:
-                return j1, h, np.nan, "fd-rt"   # truncation unmeasured, not 0
-            j2 = (_d(2.0 * h) - _d(-2.0 * h)) / (4.0 * h)
-            scale = float(np.max(np.abs(j1)))
-            if scale == 0.0:
-                return j1, h, 0.0, "fd-rt"       # no spectral response
-            err = float(np.max(np.abs(j1 - j2)) / scale)
-            if err > FD_CONSISTENCY_TOL:
-                raise RuntimeError(
-                    f"Mie Jacobian for {name} FAILED the step-size consistency "
-                    f"check: max|J(h) - J(2h)| / max|J(h)| = {err:.3f} > "
-                    f"{FD_CONSISTENCY_TOL} (h = {h:g}). The FD step straddles a "
-                    "miegrid knot (rg/sigmag interpolation is piecewise linear), "
-                    "so the row is not a clean local slope. Move the parameter "
-                    "off the grid node, shrink forward.FD_STEPS, or use "
-                    "jac_method='ad' (the exact local-cell tangent). An "
-                    "uncertified derivative is never reported.")
-            return (4.0 * j1 - j2) / 3.0, h, err, "fd-rt"
+            return j1, h, np.nan, "fd-rt"   # truncation unmeasured, not 0
 
         for j, name in enumerate(jac_names):
             t1 = time.time()
             if name not in _ad_cols:
                 advance()        # batched AD rows advanced once, above
-            if name in CLOUD_FISHER_PARAMS or name in MIE_FISHER_PARAMS:
-                # RT-only deck row, no chemistry re-solve: power-law deck and
-                # MMR are smooth (ungated); Mie rg/sigmag ride the miegrid
-                # (gated).
-                if name in CLOUD_FISHER_PARAMS:
-                    jac[j], _h, _err, _m = _rt_deck_row(
-                        name, [cp["log_kappa_cloud"], cp["alpha_cloud"]],
-                        CLOUD_FISHER_PARAMS.index(name), "cloud", gated=False)
-                    _kind = "cloud"
-                else:
-                    jac[j], _h, _err, _m = _rt_deck_row(
-                        name, [cp["mie_log_rg"], cp["mie_sigmag"],
-                               cp["mie_log_mmr"]],
-                        MIE_FISHER_PARAMS.index(name), "mie",
-                        gated=(name != "mie_log_mmr"))
-                    _kind = "Mie"
+            if name in CLOUD_FISHER_PARAMS:
+                # RT-only deck row, no chemistry re-solve (the power-law
+                # deck is smooth, so the row is ungated).
+                jac[j], _h, _err, _m = _rt_deck_row(
+                    name, [cp["log_kappa_cloud"], cp["alpha_cloud"]],
+                    CLOUD_FISHER_PARAMS.index(name), "cloud")
                 fd_h.append(_h)
                 fd_err.append(_err)
                 row_method.append(_m)
                 if not np.isfinite(jac[j]).all():
                     raise RuntimeError(
-                        f"{_kind} Jacobian for {name}: non-finite entries")
+                        f"cloud Jacobian for {name}: non-finite entries")
                 log(f"[fwd] {cp['jac_method'].upper()} Jacobian "
-                    f"d(depth)/d({name}) [RT-only {_kind} row] in "
+                    f"d(depth)/d({name}) [RT-only cloud row] in "
                     f"{time.time()-t1:.0f} s")
                 continue
             if cp["jac_method"] == "ad":

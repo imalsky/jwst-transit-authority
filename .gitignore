@@ -47,5 +47,3 @@ tests/live/RESULTS_v18_1.md
 # obtain the PHOENIX grid via `jwst-tool fetch`; `jwst-tool data` reports status.
 data/cdbs/grid/phoenix
 
-# Generated Mie lookup grids + virga refractive-index archive (regenerate with tools/generate_miegrid.py)
-data/exojax_mie/

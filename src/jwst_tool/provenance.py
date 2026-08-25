@@ -131,16 +131,37 @@ print(json.dumps({"engine": out["pandeia.engine"],
                 "pandexo_commit": None}
 
 
-def _line_lists() -> dict:
+def ktable_sources() -> dict:
+    """{molecule: record} for every ExoMolOP k-table the engine's fetcher
+    recorded, merged with each table's own header. Path-free (exportable).
+    Raises the engine's own error when the data root or provenance.json is
+    absent -- callers decide how loud."""
+    from vulcan_forward import exomolop
+    out = {}
+    for mol, rec in sorted(exomolop.provenance().items()):
+        info = exomolop.table_info(mol)
+        out[mol] = {
+            "dataset": rec["dataset"], "iso": rec["iso"],
+            "natural_abundance": bool(rec["natural_abundance"]),
+            "file": rec["file"], "url": rec["url"],
+            "doi": info.get("doi"), "date_id": info.get("date_id"),
+            "ngauss": int(info["ngauss"]),
+            "t_range_K": [float(v) for v in info["t_range_k"]],
+            "p_range_bar": [float(v) for v in info["p_range_bar"]],
+            "wl_range_um": [float(v) for v in info["wl_range_um"]],
+        }
+    return out
+
+
+def _ktables() -> dict:
     try:
-        from vulcan_forward.paths import linelist_dir
-        root = Path(linelist_dir())
-    except (ImportError, RuntimeError):
-        return {}
-    return {
-        path.name: {"bytes": path.stat().st_size, "sha256": _sha256(path)}
-        for path in sorted(root.glob("*.h5"))
-    }
+        return {"status": "ok", "tables": ktable_sources()}
+    except (ImportError, RuntimeError, FileNotFoundError):
+        # explicit absence, kept PATH-FREE: the engine's message names the
+        # absolute data directory, which must never enter an export
+        return {"status": "absent",
+                "remedy": "python -m vulcan_forward.fetch_exomolop "
+                          "--molecules <species>"}
 
 
 @lru_cache(maxsize=1)
@@ -167,7 +188,7 @@ def _base_snapshot() -> dict:
         "datasets": {
             "phoenix_catalog": _file(
                 Path(ins.PYSYN_CDBS) / "grid" / "phoenix" / "catalog.fits"),
-            "line_lists": _line_lists(),
+            "ktables": _ktables(),
         },
         "cache_schema": {
             "model": forward._VERSION,
