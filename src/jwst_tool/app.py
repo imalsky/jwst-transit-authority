@@ -1648,11 +1648,16 @@ with st.sidebar:
     st.markdown("### More settings")
 
     with st.expander("Solver & vertical grid"):
-        # The chemistry AND the ExoJAX RT share this one grid (art_nlayer is
-        # LOCKED to nz).
+        # One control sets both layer COUNTS; the two pressure grids stay
+        # distinct (interp_map regrids chemistry onto the RT grid).
         nz = st.number_input(
-            "Vertical layers (chemistry + RT)", *forward.NZ_RANGE,
-            forward.NZ_DEFAULT, 10, key=K("nz"))
+            "Layers per grid (chemistry and RT)", *forward.NZ_RANGE,
+            forward.NZ_DEFAULT, 10, key=K("nz"),
+            help="Chemistry and RT use separate log-pressure grids with "
+                 "this many layers each. Abundances and mean molecular "
+                 "weight are regridded onto the RT grid; T is evaluated on "
+                 "the RT grid (file mode: interpolated). RT layers above "
+                 "the chemistry top are constant-extended.")
         yconv_cri = st.number_input(
             "Solver convergence tolerance", 1.0e-4, 1.0e-2,
             forward.YCONV_DEFAULT, 1.0e-4,
@@ -1756,19 +1761,22 @@ with _opacity_slot:
                 # pages span ExoMol, HITRAN, STScI and others.
                 "source page": st.column_config.LinkColumn("source page")},
             width="stretch", hide_index=True)
-        # Replaces a per-row "table range" column: every installed k-table
-        # shares one grid, so 25 identical cells said it 25 times. Derived,
-        # not asserted -- a mixed release widens these into a visible span.
+        # A shared range is valid only when the full numerical grid signatures
+        # agree. Never turn incompatible table domains into a plausible union.
         if _ksrc:
-            _tr = [r["t_range_K"] for r in _ksrc.values()]
-            _pr = [r["p_range_bar"] for r in _ksrc.values()]
-            _wr = [r["wl_range_um"] for r in _ksrc.values()]
-            st.caption(
-                f"k-tables valid over T {min(t[0] for t in _tr):g}-"
-                f"{max(t[1] for t in _tr):g} K, "
-                f"P {min(p[0] for p in _pr):g}-{max(p[1] for p in _pr):g} bar, "
-                f"λ {min(w[0] for w in _wr):.2g}-"
-                f"{max(w[1] for w in _wr):.3g} µm.")
+            _signatures = {r["grid_sha256"] for r in _ksrc.values()}
+            if len(_signatures) != 1:
+                st.error(
+                    "Installed k-tables use incompatible numerical grids. "
+                    "They cannot be mixed; re-fetch all species from one release.")
+            else:
+                _one = next(iter(_ksrc.values()))
+                _tr, _pr, _wr = (_one[k] for k in
+                                 ("t_range_K", "p_range_bar", "wl_range_um"))
+                st.caption(
+                    f"Common k-table grid: T {_tr[0]:g}-{_tr[1]:g} K, "
+                    f"P {_pr[0]:g}-{_pr[1]:g} bar, "
+                    f"λ {_wr[0]:.2g}-{_wr[1]:.3g} µm.")
 
 # rough runtime hint keyed off the resolution settings
 base_min = 0.1 + 0.010 * nz

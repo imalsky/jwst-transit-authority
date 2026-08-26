@@ -110,6 +110,18 @@ def test_jacobian_lsf_does_not_depend_on_baseline_shape():
     assert np.max(np.abs(r_none["jac_bins"][0] - r_flat["jac_bins"][0])) > 5e-6
 
 
+def test_duplicate_pixel_wavelengths_are_masked_not_raised():
+    """Exact-duplicate pixel wavelengths (the G395H red-edge pileup) are
+    dropped as degenerate by the measurement operator, never rejected."""
+    mr, model = _lsf_mode_inputs(lambda wl: np.zeros(wl.size))
+    mr["wl"][10] = mr["wl"][9]
+    r = detect.evaluate_mode(
+        "nirspec_prism", mr, model, target_mol=None, R_bin=200.0,
+        t_in_s=3600.0, t_out_s=3600.0, n_transits=1, floor_spec=None)
+    assert r["n_pix_degenerate_dropped"] == 2
+    assert np.isfinite(r["median_sigma_ppm"])
+
+
 def test_lsf_width_is_applied_as_r_over_width(monkeypatch):
     """detect blurs with R_refdata / instruments.LSF_WIDTH: bit-identical to
     handing the operator the divided curve with the table off, and broader

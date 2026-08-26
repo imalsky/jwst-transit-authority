@@ -140,6 +140,12 @@ def ktable_sources() -> dict:
     out = {}
     for mol, rec in sorted(exomolop.provenance().items()):
         info = exomolop.table_info(mol)
+        try:
+            grid_sha, band_r = info["grid_sha256"], info["band_resolution"]
+        except KeyError as exc:
+            raise RuntimeError(
+                f"vulcan-forward >= 0.11.1 required: table_info lacks {exc}"
+            ) from exc
         out[mol] = {
             "dataset": rec["dataset"], "iso": rec["iso"],
             "natural_abundance": bool(rec["natural_abundance"]),
@@ -153,6 +159,7 @@ def ktable_sources() -> dict:
             "t_range_K": [float(v) for v in info["t_range_k"]],
             "p_range_bar": [float(v) for v in info["p_range_bar"]],
             "wl_range_um": [float(v) for v in info["wl_range_um"]],
+            "grid_sha256": grid_sha, "band_resolution": float(band_r),
         }
     return out
 

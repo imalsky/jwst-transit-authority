@@ -316,7 +316,7 @@ def active_molecules(cp: dict) -> list[str]:
 # equal to nz in run_model, so there is no separate RT-layer knob. The
 # spectral grid is the k-tables' own R = 1000 band grid (no knob).
 NZ_DEFAULT, YCONV_DEFAULT = 100, 1.0e-2
-NZ_RANGE = (60, 150)            # chemistry (= RT) layers
+NZ_RANGE = (60, 150)            # equal counts on distinct chemistry and RT grids
 YCONV_RANGE = (1.0e-4, 1.0e-2)  # steady-state convergence tolerance (1e-3 is the
                                 # validated "high" tier; below it costs runtime
                                 # but is safe -- the longdy gate rejects loudly)
@@ -496,8 +496,8 @@ def _read_tp_table(path: Path, span: tuple | None = None) -> dict:
             f"({span[0]:g}-{span[1]:g} dyn/cm^2) the "
             f"profile spans [{T_grid.min():.0f}, {T_grid.max():.0f}] K, which "
             f"leaves the modelable window [{T_WINDOW[0]:.0f}, "
-            f"{T_WINDOW[1]:.0f}] K{_extra}. Opacity tables end there; "
-            "out-of-window profiles are rejected, never clipped.")
+            f"{T_WINDOW[1]:.0f}] K{_extra} (the raw k-tables span a wider "
+            "range); out-of-window profiles are rejected, never clipped.")
     Kzz = None
     if "Kzz" in names:
         Kzz = np.asarray(tab["Kzz"], dtype=np.float64)
@@ -773,7 +773,7 @@ def canonical_params(params: dict) -> dict:
             "chemistry and RT column bottom; below the low end the deep "
             "quench region is cut off, and above the high end no shipped "
             "profile stays inside the modelable temperature window "
-            f"{T_WINDOW} K, where the opacity tables end.")
+            f"{T_WINDOW} K (the raw k-tables span a wider range).")
     _span = (CHEM_P_SPAN_DYN[0], p_btm_bar * 1.0e6)
     tp_file, tp_file_sha1, tp_table = "", "", None
     if tp_mode == "file":
@@ -790,8 +790,8 @@ def canonical_params(params: dict) -> dict:
     sysd = planets.system_fields(planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS))
     nz = int(params.get("nz", NZ_DEFAULT))
     if not NZ_RANGE[0] <= nz <= NZ_RANGE[1]:
-        raise ValueError(f"nz={nz} outside the validated layer range {NZ_RANGE} "
-                         "(chemistry layers, also used for the RT grid)")
+        raise ValueError(f"nz={nz} outside the validated layer-count range {NZ_RANGE} "
+                         "(applied to the distinct chemistry and RT grids)")
     yconv_cri = float(params.get("yconv_cri", YCONV_DEFAULT))
     if not YCONV_RANGE[0] <= yconv_cri <= YCONV_RANGE[1]:
         raise ValueError(f"yconv_cri={yconv_cri:g} outside the validated range "
@@ -1388,8 +1388,8 @@ def _rt_profile_common(cp: dict, config) -> dict:
     """The RT-facing profile keys (exojax_rt / build_emis_model read exactly
     these); the dict is pinned by the golden regression test."""
     profile = dict(config.WIDE)
-    # numerical resolution: the ExoJAX RT layer count is LOCKED equal to the
-    # chemistry layer count -- chemistry and RT share one grid.
+    # The COUNTS are locked equal for one resolution control; ExoJAX builds
+    # different pressure coordinates and interp_map maps chemistry onto them.
     profile["nz"] = cp["nz"]
     profile["art_nlayer"] = cp["nz"]
     # ExoJAX RT knobs: the engine validates and ECHOES them on the built rt
@@ -1653,7 +1653,7 @@ def _check_t_window(tp_eval, theta, p_bar, log, T_base=None):
             f"T-P profile leaves the modelable window [{T_WINDOW[0]:.0f}, "
             f"{T_WINDOW[1]:.0f}] K (min {tmin:.0f} K, max {tmax:.0f} K). "
             "Adjust the profile parameters -- out-of-window layers are rejected, "
-            "not clipped (opacity tables end there).")
+            "not clipped (the raw k-tables span a wider temperature range).")
     log(f"[fwd] T-P in window: [{tmin:.0f}, {tmax:.0f}] K")
     return T_check
 

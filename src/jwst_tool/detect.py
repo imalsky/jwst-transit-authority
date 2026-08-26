@@ -329,10 +329,16 @@ def _mode_warnings(mode: dict, mode_result: dict, t_in_s: float,
 
 
 def _usable_pixels(mode_key: str, mode_result: dict) -> tuple:
-    wl = np.asarray(mode_result["wl"])
-    flux = np.asarray(mode_result["flux"])
+    wl = binning._validate_wl(mode_result["wl"], f"{mode_key}: wl")
+    flux = np.asarray(mode_result["flux"], dtype=float)
     full = np.asarray(mode_result.get("n_full_sat", np.zeros(wl.size)))
     partial = np.asarray(mode_result.get("n_part_sat", np.zeros(wl.size)))
+    if wl.size < 2 or flux.shape != wl.shape:
+        raise ValueError(f"{mode_key}: pixel wavelength and flux must be aligned 1-D arrays")
+    if not np.all(np.isfinite(flux)) or np.any(flux < 0.0):
+        raise ValueError(f"{mode_key}: pixel flux must be finite and non-negative")
+    if full.shape != wl.shape or partial.shape != wl.shape:
+        raise ValueError(f"{mode_key}: saturation arrays must match the pixel grid")
     degenerate = binning.degenerate_wl_mask(wl)
     usable = (full == 0) & ~degenerate
     if not usable.any():
@@ -357,10 +363,15 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
     ``sigma_detect`` comes back NaN and ``depth_wo`` None.
     """
     m = ins.MODES[mode_key]
-    wl_model = model["wl_um"]
+    wl_model = binning._validate_wl(model["wl_um"], f"{mode_key}: wl_model")
+    depth_raw = np.asarray(model["depth"], dtype=float)
+    if wl_model.size < 3 or depth_raw.shape != wl_model.shape:
+        raise ValueError("model wavelength and depth must be aligned 1-D arrays with >=3 points")
+    if not np.all(np.isfinite(depth_raw)):
+        raise ValueError("model depth must be finite")
     order = np.argsort(wl_model)
     wl_model = wl_model[order]
-    depth = model["depth"][order]
+    depth = depth_raw[order]
     # The model's own resolving power, measured from its grid (correlated-k
     # is fixed at the published k-tables' R = 1000 band grid).
     _lnw = np.log(wl_model)
@@ -401,8 +412,11 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         b_hi = min(float(wl_model.max()), hi * 1.03)
         # stellar flux weights the LSF so it forms the observed count ratio
         # L[F d]/L[F], never the flat depth blur L[d]; same weight for depth,
-        # removed-molecule, and Jacobian rows (operator stays linear in depth)
-        po = np.argsort(wl_pix)
+        # removed-molecule, and Jacobian rows (operator stays linear in depth).
+        # Degenerate (duplicate-wavelength) pixels are masked out of the
+        # operator; the R(lambda) table excludes them too, since a repeated
+        # abscissa is not a strictly ascending curve.
+        po = np.flatnonzero(~degen)[np.argsort(wl_pix[~degen])]
         flux_model = np.maximum(np.interp(wl_model, wl_pix[po], flux_pix[po]), 0.0)
         # R(lambda) must go in ASCENDING wavelength order: the pandeia pixel
         # grid is dispersion order, not wavelength order, and MIRI LRS ships

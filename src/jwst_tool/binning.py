@@ -46,18 +46,21 @@ DEGENERATE_WL_FRAC = 0.02
 
 
 def _validate_wl(wl, name: str) -> np.ndarray:
-    """Finite, non-empty wavelength array or ValueError; invalid samples are
-    never silently dropped (a NaN would poison every gap statistic).
-    Returns float array."""
+    """Finite, positive, non-empty 1-D wavelength array or ValueError;
+    invalid samples are never silently dropped (a NaN would poison every
+    gap statistic). Duplicates are NOT rejected here: degenerate_wl_mask
+    masks them by design. Returns float array."""
     wl = np.asarray(wl, float)
-    if wl.size == 0:
-        raise ValueError(f"{name}: empty wavelength array")
+    if wl.ndim != 1 or wl.size == 0:
+        raise ValueError(f"{name}: wavelength must be a non-empty 1-D array")
     bad = ~np.isfinite(wl)
     if bad.any():
         raise ValueError(
             f"{name}: {int(bad.sum())}/{wl.size} non-finite wavelength(s) "
             f"(first at index {int(np.argmax(bad))}) -- fix the upstream "
             "grid; invalid samples are never silently dropped")
+    if np.any(wl <= 0.0):
+        raise ValueError(f"{name}: non-positive wavelength(s)")
     return wl
 
 

@@ -434,7 +434,8 @@ def test_provenance_snapshot_records_the_ktables(tmp_path, monkeypatch):
     monkeypatch.setattr(exomolop, "table_info", lambda m: {
         "doi": "x.xxxx/yyyyy", "date_id": None, "ngauss": 16,
         "t_range_k": [100.0, 3400.0], "p_range_bar": [1e-5, 100.0],
-        "wl_range_um": [0.3, 50.0]})
+        "wl_range_um": [0.3, 50.0], "grid_sha256": "a" * 64,
+        "band_resolution": 1000.0})
     provenance._base_snapshot.cache_clear()
     try:
         snap = provenance.snapshot()
