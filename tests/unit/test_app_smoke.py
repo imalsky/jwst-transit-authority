@@ -160,7 +160,9 @@ def test_fresh_boot_pre_run_contract():
                    | (set(forward.EXTRA_MOLECULES) - forward._NO_EXOMOLOP_TABLE))
         assert offered <= set(df["component"])
         assert (df.loc[df["component"].isin(offered), "data set"] != "").all()
-        assert all(" \u00b7 " in o for o in ms[0].options), ms[0].options
+        # The picker shows the bare formula; the line list, isotopologue, DOI
+        # and page each have a column in the Data table, checked just above.
+        assert set(ms[0].options) <= set(forward.EXTRA_MOLECULES), ms[0].options
         # Every row is citable: a real DOI AND a real page, on the opacity
         # rows and the non-opacity data files alike. The regex also rejects
         # the four ExoMolOP placeholder headers -- note the LOWERCASE x in

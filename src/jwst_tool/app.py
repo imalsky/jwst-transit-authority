@@ -341,14 +341,6 @@ except (ImportError, RuntimeError, FileNotFoundError) as exc:
 _KSRC_WARN = "Opacity sources unavailable: "
 
 
-def _mol_label(m: str) -> str:
-    r = _ksrc.get(m)
-    if r is None:
-        return m
-    return f"{m} · {r['dataset']} " + (
-        "(natural abundance)" if r["natural_abundance"] else f"({r['iso']})")
-
-
 # Every non-k-table source the tool reads, with the paper that defines it.
 # DOI + page are both REQUIRED here: a row with either one blank is a citation
 # the user cannot follow, and test_app_smoke pins that none is. Every DOI was
@@ -1292,7 +1284,7 @@ with st.sidebar:
             "Extra opacity molecules", list(_extra_set),
             default=[m for m in _extra_set
                      if m in forward.EXTRA_MOLECULES_DEFAULT],
-            key=K(f"xmols_vulcan{_net_sfx}"), format_func=_mol_label)
+            key=K(f"xmols_vulcan{_net_sfx}"))
 
     with st.expander("Clouds & scattering (ExoJAX)"):
         if science_mode == "emission":
@@ -1535,8 +1527,6 @@ with st.sidebar:
                  "the saturation level, which is 0.50 here.")
         r_bin = st.number_input(
             "Analysis resolving power, R", 25, 500, 100, 25, key=K("rbin"))
-        st.caption("Sets the final bins for every score and figure; it does "
-                   "not change the instrument's native resolution.")
         # Past R ~ 250 the analysis bins are four or fewer of the model's
         # R = 1000 k-table bands wide, so sub-band structure the high-R
         # gratings record starts to matter at bin edges. Affected = the mode's
