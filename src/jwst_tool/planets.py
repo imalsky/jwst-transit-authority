@@ -114,8 +114,10 @@ def nearest_sflux(teff_k: float) -> str:
 # Shipping a table is not evidence the tool converges on it (HD 189733 b's
 # bundled profile stall-exits at the default settings, so it is offered, not
 # imposed); tp_table_note carries the reason in both directions. A table only
-# has to be valid across the fixed chemistry span (forward.CHEM_P_SPAN_DYN);
-# HD 209458 b's thermosphere is already inside that span, which disqualifies it.
+# has to be valid across the RUN's chemistry span (forward.chem_p_span_dyn:
+# the top follows rt_ptop_bar); HD 209458 b's thermosphere is already inside
+# the shipped span, which disqualifies it, and HD 189733 b's enters the grid
+# below 1e-7 bar, so its file mode needs rt_ptop_bar >= 1e-7.
 PLANETS = {
     "wasp39b": dict(
         label="WASP-39 b",

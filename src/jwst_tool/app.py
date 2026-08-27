@@ -1121,7 +1121,7 @@ with st.sidebar:
     # (shipped key contract).
     with st.expander("Pressure limits & reference radius"):
         rt_ptop_bar = st.number_input(
-            "RT top pressure (bar)",
+            "Model top pressure (bar)",
             1.0e-9, 1.0e-6, 1.0e-8, 1.0e-9,
             format="%.1e", key=K("rtptop"))
         p_ref_bar = st.number_input(
@@ -1650,10 +1650,10 @@ with st.sidebar:
             "Layers per grid (chemistry and RT)", *forward.NZ_RANGE,
             forward.NZ_DEFAULT, 10, key=K("nz"),
             help="Chemistry and RT use separate log-pressure grids with "
-                 "this many layers each. Abundances and mean molecular "
-                 "weight are regridded onto the RT grid; T is evaluated on "
-                 "the RT grid (file mode: interpolated). RT layers above "
-                 "the chemistry top are constant-extended.")
+                 "this many layers each, both ending at the model top "
+                 "pressure above. Abundances and mean molecular weight are "
+                 "regridded onto the RT grid; T is evaluated on the RT grid "
+                 "(file mode: interpolated).")
         yconv_cri = st.number_input(
             "Solver convergence tolerance", 1.0e-4, 1.0e-2,
             forward.YCONV_DEFAULT, 1.0e-4,

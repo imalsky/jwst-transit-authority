@@ -68,12 +68,12 @@ def adjoint_key(params: dict, species: str) -> str:
                             "use_rayleigh", "cloud_on",
                             "log_kappa_cloud", "alpha_cloud", "extra_mols",
                             "wo_mols",
-                            "rt_ptop_bar", "rt_integration",
+                            "rt_integration",
                             "science_mode", "star_teff",
                             "star_logg", "star_feh")}
     # RT/observable-only knobs are dropped: the adjoint runs on the chemistry
     # state alone, and leaving them in re-triggered the multi-hour adjoint on
-    # RT-only changes.
+    # RT-only changes. rt_ptop_bar stays: the chemistry top follows it.
     payload["adjoint_species"] = str(species)
     payload["adjoint_version"] = _ADJ_VERSION
     s = json.dumps(payload, sort_keys=True)

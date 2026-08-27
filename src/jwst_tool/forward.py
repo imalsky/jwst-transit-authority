@@ -95,7 +95,7 @@ _S_MOLECULES = frozenset({"SO2", "H2S", "OCS", "SO", "SH", "CS", "NS"})
 # exomolop.available() by a data-gated test so this set cannot rot when
 # ExoMolOP adds a species.
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
-_VERSION = 38  # model_cache buster: bump whenever the physics or the canonical
+_VERSION = 39  # model_cache buster: bump whenever the physics or the canonical
                # key set changes. Version history: notes.md.
                # DELIBERATE (reviews keep re-finding it): the cache identity
                # is canonical params + this hand-bumped version, NOT content
@@ -162,12 +162,15 @@ TP_FILE_SHIPPED = "shipped"       # the cfg's own atm_file (W39b evening termina
 TP_FILE_UPLOAD = "upload"         # user-supplied table; content-addressed copy
                                   # under <output>/uploads/<sha1>.txt
 
-# Chemistry-grid pressure span (dyn/cm^2) of the shipped W39b cfg. The engine
-# re-grids a tabulated T-P onto this FIXED span with a constant-value clamp
-# outside the table, so a table that stops above P_b would silently run the
-# CO/CH4/NH3 quench region isothermal -- _read_tp_table REFUSES that. A
-# clamped TOP is the standard upstream convention (logged, not refused).
-# run_model cross-checks these constants against the LIVE cfg.
+# Chemistry-grid pressure span (dyn/cm^2) of the SHIPPED W39b cfg, cross-checked
+# against the live cfg in run_model. The RUN's span differs: its top follows
+# rt_ptop_bar (vulcan_chem sets P_t from the profile's art_ptop_bar, so the
+# chemistry always covers the RT grid) and its bottom p_btm_bar -- ask
+# chem_p_span_dyn(cp), never this constant, for anything per-run. The engine
+# re-grids a tabulated T-P onto the run's span with a constant-value clamp
+# outside the table: a table that stops above P_b would silently run the
+# CO/CH4/NH3 quench region isothermal, so _read_tp_table REFUSES that; a
+# clamped T-P TOP is the standard upstream convention (logged, not refused).
 CHEM_P_SPAN_DYN = (0.1, 7.6e6)
 
 # Column bottom: STRUCTURE-AWARE defaults. A measured T-P table caps honest
@@ -256,14 +259,9 @@ def thin_flux_fraction(tau, flux) -> float:
 
 
 def chem_p_span_dyn(cp: dict) -> tuple:
-    """The RUN's chemistry span (P_t, P_b) in dyn/cm^2.
-
-    CHEM_P_SPAN_DYN is the shipped cfg's OWN span and stays the constant the
-    live-cfg cross-check compares against; the bottom is overridden per run
-    through cfg_overrides["P_b"], so every gate that asks "does this profile
-    cover the chemistry grid" must ask THIS, not the module constant.
-    """
-    return (CHEM_P_SPAN_DYN[0],
+    """The RUN's chemistry span (P_t, P_b) in dyn/cm^2: the top follows
+    rt_ptop_bar, the bottom p_btm_bar (CHEM_P_SPAN_DYN is the shipped cfg's)."""
+    return (float(cp.get("rt_ptop_bar") or 1.0e-8) * 1.0e6,
             float(cp.get("p_btm_bar") or default_p_btm_bar(cp)) * 1.0e6)
 
 # Structure default: where vulcan_jax bundles a MEASURED T-P/Kzz table
@@ -774,7 +772,7 @@ def canonical_params(params: dict) -> dict:
             "quench region is cut off, and above the high end no shipped "
             "profile stays inside the modelable temperature window "
             f"{T_WINDOW} K (the raw k-tables span a wider range).")
-    _span = (CHEM_P_SPAN_DYN[0], p_btm_bar * 1.0e6)
+    _span = (float(params.get("rt_ptop_bar", 1.0e-8)) * 1.0e6, p_btm_bar * 1.0e6)
     tp_file, tp_file_sha1, tp_table = "", "", None
     if tp_mode == "file":
         tp_path, tp_file_sha1 = _resolve_tp_file(params)
@@ -870,10 +868,10 @@ def canonical_params(params: dict) -> dict:
         # Rayleigh is known zero-parameter physics, ON by default (off it
         # biases the <1.5 um slope); the power-law cloud deck is OFF by default.
         "use_rayleigh": bool(params.get("use_rayleigh", True)),
-        # ExoJAX RT knobs. rt_ptop_bar: the RT column top; above VULCAN's
-        # chemistry top the topmost VMR/T are clamped constant (standard
-        # transmission convention); too low a top saturates strong bands into
-        # a flat wall. rt_integration: exojax ArtTransPure chord-integration
+        # ExoJAX RT knobs. rt_ptop_bar: the MODEL top -- the chemistry grid
+        # follows it (engine rule), so no RT layer is ever clamped above the
+        # chemistry; too low a top saturates strong bands into a flat wall.
+        # rt_integration: exojax ArtTransPure chord-integration
         # scheme. Opacity is correlated-k over the published ExoMolOP
         # k-tables (the engine's only mode; no key).
         "rt_ptop_bar": float(f"{float(params.get('rt_ptop_bar', 1.0e-8)):.6e}"),
@@ -1216,13 +1214,14 @@ def cache_path(params: dict) -> Path:
 # re-running the chemistry. Superset of adjoint_diag.adjoint_key's proven
 # strip list: p_ref_bar is also RT-only (it reaches only the RT geometry /
 # profile["p_ref_bar"], never a cfg override). Dual-use keys (nz, p_btm_bar,
-# rp_rjup, gs_cgs, T-P, composition, Kzz, ...) stay in the key. "version"
+# rt_ptop_bar -- the chemistry top follows it -- rp_rjup, gs_cgs, T-P,
+# composition, Kzz, ...) stay in the key. "version"
 # (forward._VERSION) rides inside canonical_params, so a version bump busts
 # this cache too.
 CHEM_IRRELEVANT_PARAMS = (
     "fisher_params", "jac_method", "use_rayleigh",
     "cloud_on", "log_kappa_cloud", "alpha_cloud", "extra_mols", "wo_mols",
-    "rt_ptop_bar", "rt_integration",
+    "rt_integration",
     "science_mode", "star_teff", "star_logg", "star_feh", "p_ref_bar",
 )
 
@@ -1561,7 +1560,7 @@ def _assemble_chem(cp: dict, log):
         log(f"[fwd] chemistry grid bottom {cp['p_btm_bar']:g} bar "
             f"(cfg default {P_BTM_FILE_BAR:g} bar), RT bottom "
             f"{cp['p_btm_bar'] * ART_PBTM_FRACTION:g} bar; "
-            f"{cp['nz'] / np.log10(cp['p_btm_bar'] * 1e6 / CHEM_P_SPAN_DYN[0]):.0f} "
+            f"{cp['nz'] / np.log10(cp['p_btm_bar'] / cp['rt_ptop_bar']):.0f} "
             "layers per decade")
     profile["cfg_overrides"] = ovr
 
@@ -1590,11 +1589,12 @@ def _assemble_chem(cp: dict, log):
         # Log the conventional TOP clamp loudly (the bottom was hard-gated
         # at the API).
         _P_tab = _read_tp_table(tp_path, span=chem_p_span_dyn(cp))["P_dyn"]
-        _dec = float(np.log10(_P_tab.min() / CHEM_P_SPAN_DYN[0]))
+        _p_top_run = chem_p_span_dyn(cp)[0]
+        _dec = float(np.log10(_P_tab.min() / _p_top_run))
         if _dec > 0.0:
             log(f"[fwd] NOTE: T-P table top ({_P_tab.min():.3g} dyn/cm^2) "
                 f"sits {_dec:.1f} decades below the chemistry-grid top "
-                f"({CHEM_P_SPAN_DYN[0]:g}): the topmost tabulated T is held "
+                f"({_p_top_run:g}): the topmost tabulated T is held "
                 "constant over that range (the standard upstream file-mode "
                 "convention; the shipped profile does the same).")
 
@@ -1764,9 +1764,8 @@ def run_model(params: dict, log=print) -> Path:
 
     def _t_art_const_from(chem_b):
         """Tabulated-mode RT temperature: the build's T_base interpolated in
-        ln P onto the ART grid, constant-extended at the edges (the standard
-        clamp above the chemistry top -- same convention the VMR
-        interpolation uses)."""
+        ln P onto the ART grid. The chemistry grid covers the RT grid, so
+        np.interp's edge clamp is inert."""
         _pb = np.asarray(chem_b.p_bar)
         _Tb = np.asarray(chem_b.T_base, dtype=np.float64)
         _order = np.argsort(_pb)

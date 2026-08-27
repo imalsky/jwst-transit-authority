@@ -49,10 +49,10 @@ def test_adjoint_key_ignores_rt_only_knobs():
         _p(cloud_on=True,
            extra_mols=["HCN"], fisher_params=["lnZ"], jac_method="ad",
            use_photo=True), "SO2") == k0
-    # RT/observable-only knobs are stripped too: an RT top-pressure change
-    # once re-triggered the multi-hour adjoint on an identical chemistry state
-    assert adjoint_diag.adjoint_key(
-        _p(rt_ptop_bar=1.0e-9, rt_integration="trapezoid"), "SO2") == k0
+    # RT-only knobs are stripped too; rt_ptop_bar is NOT one of them any more
+    # (the chemistry top follows it, so the adjoint state depends on it)
+    assert adjoint_diag.adjoint_key(_p(rt_integration="trapezoid"), "SO2") == k0
+    assert adjoint_diag.adjoint_key(_p(rt_ptop_bar=1.0e-9), "SO2") != k0
 
 
 def test_adjoint_key_tracks_chemistry_and_species():

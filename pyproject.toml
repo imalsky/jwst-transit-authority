@@ -51,7 +51,7 @@ dependencies = [
     # exomolop.provenance()/table_info(), read by the opacity-sources panel
     # and the provenance snapshot; 0.11.1 adds table_info's grid_sha256 and
     # band_resolution, which the snapshot records.
-    "vulcan-forward>=0.11.1",
+    "vulcan-forward>=0.12.0",
     # 0.2.0 added the named ChemParams primitive this module builds its vector
     # with; 0.2.1 added paths.ensure_layout(), which `jwst-tool fetch` needs;
     # 0.2.2 adds CS2/C2H4/C2H6 to the molecule table (the v25 extras resolve

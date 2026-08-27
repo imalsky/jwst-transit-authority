@@ -135,8 +135,13 @@ def test_shipped_tables_gate_defaults_and_are_never_substituted():
     assert [k for k in planets.PLANETS
             if forward.shipped_tp_table_is_default(k)] == ["wasp39b"]
     assert forward.shipped_tp_table_name("hd189733b")
-    cp = forward.canonical_params(dict(planet="hd189733b", tp_mode="file"))
+    # its table carries a 6000 K thermosphere above 0.1 dyn/cm^2, outside the
+    # modelable window, so file mode needs a model top at or below 1e-7 bar
+    cp = forward.canonical_params(dict(planet="hd189733b", tp_mode="file",
+                                       rt_ptop_bar=1.0e-7))
     assert cp["tp_mode"] == "file" and cp["kzz_mode"] == "file"
+    with pytest.raises(ValueError, match="modelable window"):
+        forward.canonical_params(dict(planet="hd189733b", tp_mode="file"))
     assert forward._default_tp_mode(dict(planet="wasp39b")) == "file"
 
 
@@ -353,12 +358,13 @@ def test_chem_key_separates_chemistry_from_rt_only_edits():
                dict(wo_mols=["H2O"]),
                dict(fisher_params=["lnZ"], jac_method="ad"),
                dict(star_teff=5300.0),
-               dict(rt_ptop_bar=1.0e-7)):
+               dict(rt_integration="trapezoid")):
         assert forward.chem_key(_p(**kw)) == k0, kw
         # the flat key must still see live RT knobs (pinned above); the
         # chem key must not
+    # rt_ptop_bar is dual-use: the chemistry grid top follows it
     for kw in (dict(met_x_solar=5.0), dict(co_ratio=0.3),
-               dict(p_btm_bar=50.0), dict(nz=110)):
+               dict(p_btm_bar=50.0), dict(nz=110), dict(rt_ptop_bar=1.0e-7)):
         assert forward.chem_key(_p(**kw)) != k0, kw
 
 
@@ -519,15 +525,16 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # v28-v29) and the G395H SO2 significance (2.89 at v27, BELOW the
     # published 4.5-4.8 -- that gap is real and open). Both need a full
     # run; SO2 also needs the pandeia backend. Full history: notes.md.
-    # v38 re-pin: _VERSION 37 -> 38 when the API default log_kappa moved to
-    # the GUI's -2.0. The key carries _VERSION, so it moved; the TRANSMISSION
-    # spectrum did not (max|diff| vs v37 = 0 ppm: tp_mode=file zeroes
-    # log_kappa). Emission moved 164 ppm, which is the intended change.
+    # v39 re-pin: _VERSION 38 -> 39 when the chemistry grid was extended to
+    # the RT top (vulcan-forward 0.12.0 sets P_t from art_ptop_bar = rt_ptop_bar,
+    # 1e-8 bar, and refuses a clamped top; the former constant-VMR clamp
+    # measured 73 ppm on W39b). Transmission moved 26.8 ppm vs v38, emission
+    # 0.003 ppm (Guillot mode, isothermal structure), which is the intended change.
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b", tp_mode="file"))) == "d881cd02b8448f03"
+        dict(planet="wasp39b", tp_mode="file"))) == "07e011dd5a3023ef"
     # ... and the bare DEFAULT run is that same atmosphere
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "d881cd02b8448f03"
+        dict(planet="wasp39b"))) == "07e011dd5a3023ef"
     # the sha1 pin is only meaningful re-derived from the file the run
     # actually reads -- this catches the table itself being swapped
     path = forward._shipped_tp_file("wasp39b")
