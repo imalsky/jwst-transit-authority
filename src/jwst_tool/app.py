@@ -2268,19 +2268,6 @@ else:
             st.warning(verdict + f"  >{detect.N_TRANSITS_CAP} {_ev}s "
                        "(scan limit).")
 
-# --- per-mode operational notes -------------------------------------------
-# detect._mode_warnings builds these (degraded measurement operator, over-long
-# ramp, sub-three-cycle transit, shared order-2 readout); without a renderer
-# no run discloses any of them.
-_notes = [(r["label"], [w for w in (r.get("warnings") or {})])
-          for r in results]
-_notes = [(lbl, ws) for lbl, ws in _notes if ws]
-if _notes:
-    with st.expander(f"Notes on {len(_notes)} mode"
-                     f"{'s' if len(_notes) > 1 else ''}"):
-        for lbl, ws in _notes:
-            st.markdown(f"**{lbl}**\n" + "\n".join(f"- {w}" for w in ws))
-
 # --- spectrum data (rendered ONCE, on the summary figure below) -------------
 wl = model["wl_um"]
 order = np.argsort(wl)
