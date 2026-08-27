@@ -73,10 +73,9 @@ Repository = "https://github.com/imalsky/vulcan-jwst-tool"
 # streamlit floor: app.py uses the width="stretch" API on st.button/st.pyplot/
 # st.dataframe, introduced for those widgets by 1.49.0 (2025-08-26).
 gui = ["streamlit>=1.49", "pandas"]
-# PICASO is deliberately not an install extra in this release: PICASO 4.0.1
-# requires NumPy >=2 while ExoJAX 2.2.3 requires NumPy <2. The retained
-# maintainer-only code path is disabled unless explicitly enabled and is not
-# part of collaborator-certified results.
+# PICASO is not an install extra: PICASO 4.0.1 requires NumPy >=2 while
+# ExoJAX 2.2.3 requires NumPy <2. The PICASO code path itself was removed
+# in 0.43.0; canonical_params and share_config refuse its keys.
 dev = ["ruff>=0.11", "build>=1.2", "twine>=5"]
 
 [project.scripts]

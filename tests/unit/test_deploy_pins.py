@@ -1,7 +1,11 @@
 """deploy/pins.env and the Space Dockerfile must name the same sibling
 commits: pins.env is the manifest CI installs from, the Dockerfile ARG
 defaults are what the Space image enforces at build time. Drift between
-them means CI validates different sibling code than the deployment ships."""
+them means CI validates different sibling code than the deployment ships.
+
+CITATION.cff is pinned here for the same reason: it is release metadata that
+nothing else checks. `cffconvert --validate` in CI checks the CFF schema, not
+that the advertised version is the one the package ships."""
 from __future__ import annotations
 
 import re
@@ -46,3 +50,21 @@ def test_dockerfile_pins_the_deployed_tool_commit():
     assert "JWST_TOOL_SHA" in args, (
         "the Dockerfile must pin the deployed vulcan-jwst-tool commit by "
         "full SHA (no unqualified branch clones)")
+
+
+def test_citation_version_matches_the_package():
+    """CITATION.cff advertises the version a citer will quote.
+
+    It drifted six releases (0.48.2 while the package was 0.48.8) because CI
+    validates only the CFF schema. Pin the value, not just the syntax.
+    """
+    import sys
+    sys.path.insert(0, str(REPO / "src"))
+    from jwst_tool import __version__
+
+    cff = (REPO / "CITATION.cff").read_text()
+    m = re.search(r"^version:\s*(\S+)\s*$", cff, re.MULTILINE)
+    assert m, "CITATION.cff has no version field"
+    assert m.group(1) == __version__, (
+        f"CITATION.cff says version {m.group(1)} but the package is "
+        f"{__version__}; bump CITATION.cff in the release commit")
