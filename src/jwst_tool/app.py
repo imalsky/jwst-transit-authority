@@ -1225,10 +1225,6 @@ with st.sidebar:
             kzz_kdeep = 10.0 ** st.number_input(
                 "log10 deep-floor Kzz (cm^2 s^-1)", 4.0, 11.0, 5.0, 0.25,
                 key=_k("kzkdeep"))
-        else:
-            st.caption("Kzz comes from the Kzz column of the T-P "
-                       "table. A table without that column stops with "
-                       "an error.")
         if kzz_mode != "const":
             kzz_x = 10.0 ** st.number_input(
                 "Kzz profile multiplier, log10(f)", -1.0, 1.0, 0.0, 0.05,
