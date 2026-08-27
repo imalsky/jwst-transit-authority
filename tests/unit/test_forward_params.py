@@ -329,7 +329,7 @@ def test_fisher_names_and_jac_method_matrix():
 def test_rt_knobs_defaults_validation_and_cache_key():
     # two ExoJAX RT knobs are canonical (cache-keyed)
     cp = forward.canonical_params(_p())
-    assert cp["rt_ptop_bar"] == 1.0e-8
+    assert cp["rt_ptop_bar"] == 1.0e-9
     assert cp["rt_integration"] == "simpson"
     cp = forward.canonical_params(_p(rt_ptop_bar=1.0e-6,
                                      rt_integration="trapezoid"))
@@ -525,16 +525,18 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # v28-v29) and the G395H SO2 significance (2.89 at v27, BELOW the
     # published 4.5-4.8 -- that gap is real and open). Both need a full
     # run; SO2 also needs the pandeia backend. Full history: notes.md.
-    # v39 re-pin: _VERSION 38 -> 39 when the chemistry grid was extended to
-    # the RT top (vulcan-forward 0.12.0 sets P_t from art_ptop_bar = rt_ptop_bar,
-    # 1e-8 bar, and refuses a clamped top; the former constant-VMR clamp
-    # measured 73 ppm on W39b). Transmission moved 26.8 ppm vs v38, emission
-    # 0.003 ppm (Guillot mode, isothermal structure), which is the intended change.
+    # v39 re-pin: the chemistry grid extended to the RT top (vulcan-forward
+    # 0.12.0 sets P_t from art_ptop_bar = rt_ptop_bar and refuses a clamped
+    # top; the former constant-VMR clamp measured 73 ppm on W39b): transmission
+    # moved 26.8 ppm vs v38, emission 0.003 ppm. v40 re-pin: the model top
+    # moved 1e-8 -> 1e-9 bar (converged: one decade higher moves the depth
+    # 1.1 ppm, against 14.65 ppm at 1e-8): transmission moved 14.8 ppm vs v39,
+    # emission 0.09 ppm. Both are the intended changes.
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b", tp_mode="file"))) == "07e011dd5a3023ef"
+        dict(planet="wasp39b", tp_mode="file"))) == "b20c914a721f74b5"
     # ... and the bare DEFAULT run is that same atmosphere
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "07e011dd5a3023ef"
+        dict(planet="wasp39b"))) == "b20c914a721f74b5"
     # the sha1 pin is only meaningful re-derived from the file the run
     # actually reads -- this catches the table itself being swapped
     path = forward._shipped_tp_file("wasp39b")

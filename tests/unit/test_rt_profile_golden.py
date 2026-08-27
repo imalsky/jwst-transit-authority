@@ -27,7 +27,7 @@ def test_rt_profile_common_golden_default():
     assert prof["some_engine_default"] == "kept"
     # ...plus exactly the pre-refactor RT-facing overrides
     assert prof["nz"] == 100 and prof["art_nlayer"] == 100
-    assert prof["art_ptop_bar"] == 1.0e-8
+    assert prof["art_ptop_bar"] == 1.0e-9
     assert prof["rt_integration"] == "simpson"
     assert prof["opacity_mode"] == "exomolop"
     assert prof["molecules"] == ["H2O", "CO2", "CO", "CH4", "SO2"]

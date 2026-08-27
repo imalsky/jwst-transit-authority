@@ -95,7 +95,7 @@ _S_MOLECULES = frozenset({"SO2", "H2S", "OCS", "SO", "SH", "CS", "NS"})
 # exomolop.available() by a data-gated test so this set cannot rot when
 # ExoMolOP adds a species.
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
-_VERSION = 39  # model_cache buster: bump whenever the physics or the canonical
+_VERSION = 40  # model_cache buster: bump whenever the physics or the canonical
                # key set changes. Version history: notes.md.
                # DELIBERATE (reviews keep re-finding it): the cache identity
                # is canonical params + this hand-bumped version, NOT content
@@ -261,7 +261,7 @@ def thin_flux_fraction(tau, flux) -> float:
 def chem_p_span_dyn(cp: dict) -> tuple:
     """The RUN's chemistry span (P_t, P_b) in dyn/cm^2: the top follows
     rt_ptop_bar, the bottom p_btm_bar (CHEM_P_SPAN_DYN is the shipped cfg's)."""
-    return (float(cp.get("rt_ptop_bar") or 1.0e-8) * 1.0e6,
+    return (float(cp.get("rt_ptop_bar") or 1.0e-9) * 1.0e6,
             float(cp.get("p_btm_bar") or default_p_btm_bar(cp)) * 1.0e6)
 
 # Structure default: where vulcan_jax bundles a MEASURED T-P/Kzz table
@@ -772,7 +772,7 @@ def canonical_params(params: dict) -> dict:
             "quench region is cut off, and above the high end no shipped "
             "profile stays inside the modelable temperature window "
             f"{T_WINDOW} K (the raw k-tables span a wider range).")
-    _span = (float(params.get("rt_ptop_bar", 1.0e-8)) * 1.0e6, p_btm_bar * 1.0e6)
+    _span = (float(params.get("rt_ptop_bar", 1.0e-9)) * 1.0e6, p_btm_bar * 1.0e6)
     tp_file, tp_file_sha1, tp_table = "", "", None
     if tp_mode == "file":
         tp_path, tp_file_sha1 = _resolve_tp_file(params)
@@ -874,7 +874,7 @@ def canonical_params(params: dict) -> dict:
         # rt_integration: exojax ArtTransPure chord-integration
         # scheme. Opacity is correlated-k over the published ExoMolOP
         # k-tables (the engine's only mode; no key).
-        "rt_ptop_bar": float(f"{float(params.get('rt_ptop_bar', 1.0e-8)):.6e}"),
+        "rt_ptop_bar": float(f"{float(params.get('rt_ptop_bar', 1.0e-9)):.6e}"),
         "rt_integration": str(params.get("rt_integration", "simpson")),
         # The pressure at which rp_rjup and gs_cgs apply. A catalogue radius
         # is the transit radius at roughly the terminator photosphere, NOT
@@ -919,7 +919,7 @@ def canonical_params(params: dict) -> dict:
     if not 1.0e-9 <= cp["rt_ptop_bar"] <= 1.0e-6:
         raise ValueError(
             f"rt_ptop_bar={cp['rt_ptop_bar']:g} outside [1e-9, 1e-6] bar (the "
-            "exercised RT-top range; 1e-8 is the validated default)")
+            "exercised RT-top range; 1e-9 is the validated default)")
     _art_pbtm = cp["p_btm_bar"] * ART_PBTM_FRACTION
     if not cp["rt_ptop_bar"] <= cp["p_ref_bar"] <= _art_pbtm:
         raise ValueError(
@@ -1596,7 +1596,9 @@ def _assemble_chem(cp: dict, log):
                 f"sits {_dec:.1f} decades below the chemistry-grid top "
                 f"({_p_top_run:g}): the topmost tabulated T is held "
                 "constant over that range (the standard upstream file-mode "
-                "convention; the shipped profile does the same).")
+                "convention). Measured on the shipped W39b table: a +200 / "
+                "-200 K ramp over that range moves the R=100 depth by 18 / "
+                "68 ppm.")
 
     def _abundance_overrides(met_x_solar: float, co_ratio: float) -> dict:
         # Structural composition: scale the cfg metals together (He fixed),
