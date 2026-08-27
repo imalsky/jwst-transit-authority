@@ -4,8 +4,10 @@ The GUI's "Download configuration (JSON)" button writes the dict `build_share`
 assembles: the canonical model parameters (the same dictionary every result
 stores as provenance) plus the science-goal and observation settings, and --
 when the run uses uploaded tables -- the table content itself. That is every
-INPUT the tool takes, so the same tool version reproduces the run from the
-file alone. Exact code revisions, science-data checksums, cache schemas,
+input the GUI takes -- condensation, settling, escape and the boundary-condition
+fluxes are API-only, pinned off in the GUI and REFUSED on load -- so the same
+tool version reproduces a GUI run from the file alone. Exact code revisions,
+science-data checksums, cache schemas,
 Pandeia/PandExo identity, and the random seed are recorded in ``provenance``.
 They remain informational on load so old configurations stay portable, but a
 collaborator can compare them before claiming an exact reproduction.

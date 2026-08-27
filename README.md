@@ -133,7 +133,7 @@ used in the analysis:
 - VULCAN: [Tsai et al. (2017)](https://doi.org/10.3847/1538-4365/228/2/20)
   and [Tsai et al. (2021)](https://doi.org/10.3847/1538-4357/ac29bc)
 - ExoJAX: [Kawahara et al. (2022)](https://arxiv.org/abs/2105.14782) and
-  [Kawahara et al. (2025)](https://arxiv.org/abs/2410.06900)
+  [Kawahara et al. (2025)](https://doi.org/10.3847/1538-4357/adcba2)
 - Pandeia: [Pontoppidan et al. (2016)](https://doi.org/10.1117/12.2231768)
 - PandExo comparison: [Batalha et al. (2017)](https://doi.org/10.1088/1538-3873/aa65b0)
 - ExoMolOP tables: [Chubb et al. (2021)](https://doi.org/10.1051/0004-6361/202038350)
