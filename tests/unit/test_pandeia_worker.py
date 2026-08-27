@@ -174,21 +174,6 @@ def test_missing_psf_tree_is_refused(tmp_path):
             pw._check_backend_match("2026.7", ref, psf_dir)
 
 
-# --- backend registry --------------------------------------------------------
-
-def test_backend_registry_is_the_single_supported_triple():
-    """One backend: current = 2026.7 matched triple; unvalidated archival
-    backends are not selectable."""
-    assert ins.JWST_TOOL_BACKEND in ins._BACKENDS
-    cur = ins._BACKENDS["current"]
-    assert cur["release"] == ins._SUPPORTED_PANDEIA_RELEASE == "2026.7"
-    assert cur["supported"] is True
-    assert "pandeia_data-2026.7-jwst" in cur["refdata"]
-    assert "pandeia_psfs-2026.7-jwst" in cur["psf"]
-    assert set(ins._BACKENDS) == {"current"}
-    assert set(ins._MODE_RENAMES) == {"current"}
-
-
 def test_no_backend_carries_a_personal_absolute_path():
     """No checked-in SOURCE literal may point into one person's home (checks
     source text, not resolved values: refdata/psf legitimately resolve under
@@ -199,11 +184,6 @@ def test_no_backend_carries_a_personal_absolute_path():
     offenders = [ln.strip() for ln in src.splitlines()
                  if "/Users/" in ln and not ln.strip().startswith("#")]
     assert not offenders, offenders
-
-    for token, be in ins._BACKENDS.items():
-        assert be["python"] is None, (
-            f"{token}: the backend interpreter is machine-specific and must "
-            "come from JWST_TOOL_PANDEIA_PYTHON, not a baked-in path")
 
 
 def test_missing_backend_python_gives_one_actionable_error(monkeypatch):

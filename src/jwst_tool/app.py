@@ -1680,8 +1680,6 @@ with st.sidebar:
             key=K("rtint"), disabled=(science_mode == "emission"),
             format_func={"simpson": "Simpson (ExoJAX default)",
                          "trapezoid": "Trapezoid"}.get)
-        # No help= here: the Advanced RT widgets are pinned tooltip-free
-        # (test_removed_gui_prose_sections_and_tooltips_stay_gone).
 
     # Reset sits behind a confirmation step: one click must not clear a long
     # configuration and the current results.

@@ -27,10 +27,6 @@ data/cdbs/calspec/
 # `git add -A` away from the history.
 data/pandeia_data-*/
 data/pandeia_psfs-*/
-# PandExo-side scratch from the 2026-07-12 parity run (cdbs symlink shim +
-# noise cache + a pickled single run) -- machine-local, never tracked
-pandeia_2026_refdata/
-
 # Internal working documents. Reference content and dev logs live in the
 # gitignored root notes.md; README.md carries current usage only.
 CLAUDE.md

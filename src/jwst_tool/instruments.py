@@ -4,9 +4,8 @@ Each ``MODES`` entry carries the Pandeia configuration used by
 ``pandeia_worker.py`` (running in the selected backend's conda env), display
 metadata, and an illustrative systematic noise floor.
 
-Mode tokens are the engine mode names of the supported (2026-era) releases;
-``engine_mode()`` applies any per-backend renames (none at present), and both
-the production path (``noise.noise_job``) and the parity harness go through it.
+Mode tokens are the engine mode names of the supported (2026-era) release
+and are submitted verbatim by ``noise.noise_job`` and the parity harness alike.
 
 Noise floors (``floor_ppm_suggested``) are ILLUSTRATIVE planning values, not
 measured calibrations: ``detect.evaluate_mode`` and ``noise.depth_error_bins``
@@ -128,50 +127,33 @@ def atomic_write(path: Path, writer) -> None:
 
 # Pandeia backend environment (the real STScI ETC engine, PandExo's core).
 # The worker runs in its own conda env; noise.run_pandeia refuses loudly if
-# the python is missing.
-#
-# BACKEND SELECTION (JWST_TOOL_BACKEND): DEFAULT "current" = the supported
-# STScI release as a MATCHED TRIPLE (pandeia.engine == 2026.7 +
+# the python is missing. There is exactly ONE backend, "current" = the
+# supported STScI release as a MATCHED TRIPLE (pandeia.engine == 2026.7 +
 # pandeia_data-2026.7-jwst + pandeia_psfs-2026.7-jwst), enforced by
 # `pandeia_worker._check_backend_match` and recorded in "__provenance__" and
-# the cache fingerprint. Older backends are deliberately not selectable: this
-# release neither ships nor validates their complete matched data triples.
-# Switching a future validated backend would self-invalidate caches.
+# the cache fingerprint. Older releases are not selectable: this release
+# neither ships nor validates their matched data triples.
 #
 # PORTABILITY: refdata/psf default under DATA_DIR. There is deliberately NO
 # baked-in interpreter path: the backend env is machine-specific and must come
 # from JWST_TOOL_PANDEIA_PYTHON. JWST_TOOL_PANDEIA_{PYTHON,REFDATA,PSF_DIR}
 # override any path per-machine.
 _SUPPORTED_PANDEIA_RELEASE = "2026.7"
-
-_BACKENDS = {
-    "current": dict(
-        python=None,          # no baked-in path: see JWST_TOOL_PANDEIA_PYTHON
-        refdata=str(DATA_DIR / "pandeia_data-2026.7-jwst"),
-        psf=str(DATA_DIR / "pandeia_psfs-2026.7-jwst"),
-        release="2026.7",
-        supported=True,
-        status="Pandeia 2026.7 / pandeia_data-2026.7-jwst / "
-               "pandeia_psfs-2026.7-jwst (the STScI-supported release, "
-               "enforced as a matched triple)"),
-}
-JWST_TOOL_BACKEND = os.environ.get("JWST_TOOL_BACKEND", "current").lower()
-if JWST_TOOL_BACKEND not in _BACKENDS:
+JWST_TOOL_BACKEND = "current"
+if os.environ.get("JWST_TOOL_BACKEND", JWST_TOOL_BACKEND).lower() != JWST_TOOL_BACKEND:
     raise RuntimeError(
-        f"JWST_TOOL_BACKEND={JWST_TOOL_BACKEND!r} unknown; choose "
-        f"{sorted(_BACKENDS)}. This release validates only the supported "
-        f"{_SUPPORTED_PANDEIA_RELEASE} matched triple; archival backends are "
-        "not selectable.")
-_BE = _BACKENDS[JWST_TOOL_BACKEND]
-BACKEND_STATUS = _BE["status"]
-BACKEND_RELEASE = _BE["release"]
-# (no BACKEND_IS_SUPPORTED export. The "supported" flag stays in _BACKENDS so
-# a future entry can declare itself unsupported.)
+        f"JWST_TOOL_BACKEND={os.environ['JWST_TOOL_BACKEND']!r} unknown; this "
+        f"release validates only the supported {_SUPPORTED_PANDEIA_RELEASE} "
+        "matched triple ('current'); archival backends are not selectable.")
+BACKEND_RELEASE = _SUPPORTED_PANDEIA_RELEASE
+BACKEND_STATUS = ("Pandeia 2026.7 / pandeia_data-2026.7-jwst / "
+                  "pandeia_psfs-2026.7-jwst (the STScI-supported release, "
+                  "enforced as a matched triple)")
 
 # The PANDEIA backend interpreter (machine-specific, no portable default;
 # require_pandeia_python() turns a missing setting into one actionable
 # message).
-PANDEIA_PYTHON = os.environ.get("JWST_TOOL_PANDEIA_PYTHON", _BE["python"])
+PANDEIA_PYTHON = os.environ.get("JWST_TOOL_PANDEIA_PYTHON")
 
 
 def require_pandeia_python() -> str:
@@ -183,52 +165,28 @@ def require_pandeia_python() -> str:
         "environment (heavy dependencies), and its path is machine-specific, so "
         "there is no default to fall back on.\n"
         f"  Set JWST_TOOL_PANDEIA_PYTHON to the python of an environment with "
-        f"pandeia.engine=={_BE['release']} installed, e.g.\n"
+        f"pandeia.engine=={BACKEND_RELEASE} installed, e.g.\n"
         "    export JWST_TOOL_PANDEIA_PYTHON=/path/to/envs/pandeia/bin/python\n"
         f"  Backend '{JWST_TOOL_BACKEND}' also expects\n"
-        f"    refdata: {_BE['refdata']}\n"
-        f"    PSFs:    {_BE['psf'] or '(none: this backend carries its own)'}\n"
+        f"    refdata: {PANDEIA_REFDATA}\n"
+        f"    PSFs:    {PANDEIA_PSF_DIR}\n"
         "  See the README's Install section and `jwst-tool data` for the setup "
         "steps.")
 
 
-PANDEIA_REFDATA = os.environ.get("JWST_TOOL_PANDEIA_REFDATA", _BE["refdata"])
+PANDEIA_REFDATA = os.environ.get("JWST_TOOL_PANDEIA_REFDATA",
+                                 str(DATA_DIR / "pandeia_data-2026.7-jwst"))
 # pandeia_data >= 2026 splits the PSF library out of the refdata tree; the
 # engine reads it from $PSF_DIR. Passed to the worker, preflighted, and joins
 # the cache key.
-PANDEIA_PSF_DIR = os.environ.get("JWST_TOOL_PANDEIA_PSF_DIR", _BE["psf"])
+PANDEIA_PSF_DIR = os.environ.get("JWST_TOOL_PANDEIA_PSF_DIR",
+                                 str(DATA_DIR / "pandeia_psfs-2026.7-jwst"))
 # Minimal synphot CDBS assembled for this tool: phoenix grid, 2MASS Ks
 # bandpass, CALSPEC Vega. The Vega copy is only an OFFLINE pin for the
 # tool-side synphot/stsynphot (stellar.py + the worker); the engine
 # normalizes against its OWN refdata Vega (the two agree to 0.08 mmag in
 # Ks). `jwst-tool data` reports each piece.
 PYSYN_CDBS = str(DATA_DIR / "cdbs")
-
-# Engine-generation mode-name renames, keyed by backend; every path resolves
-# through engine_mode() -- one source of truth, never a parity-only rename.
-# Every supported backend speaks the same 2026-era tokens, so the maps are
-# empty. The machinery stays: the next engine generation that renames a mode
-# gets one entry here, and the assert below forces a decision for every
-# backend.
-_MODE_RENAMES = {
-    "current": {},
-}
-# Every backend token MUST appear above: a missing entry would submit an
-# unresolved token to an engine that may hard-reject it mid-run.
-assert set(_MODE_RENAMES) == set(_BACKENDS), (
-    f"mode-rename map {sorted(_MODE_RENAMES)} does not cover the backend "
-    f"tokens {sorted(_BACKENDS)}")
-ENGINE_MODE_RENAMES = _MODE_RENAMES[JWST_TOOL_BACKEND]
-
-
-def engine_mode(instrument: str, mode: str) -> str:
-    """Resolve a registry mode token to the name the ACTIVE backend accepts.
-
-    Returns ``mode`` unchanged when the active backend needs no rename. Both
-    ``noise.noise_job`` and ``tests/parity`` go through here.
-    """
-    return ENGINE_MODE_RENAMES.get(instrument, {}).get(mode, mode)
-
 
 # Star normalization is band-integrated 2MASS Ks vegamag inside the worker
 # (the web-ETC convention) -- never the retired monochromatic at_lambda

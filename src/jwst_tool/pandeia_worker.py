@@ -1,5 +1,5 @@
 """Pandeia ETC worker -- runs INSIDE the selected backend's conda env
-(see instruments._BACKENDS). Standalone on purpose: no imports from the rest
+(see instruments.BACKEND_STATUS). Standalone on purpose: no imports from the rest
 of the tool, stdlib + pandeia only.
 
     python pandeia_worker.py job.json result.json

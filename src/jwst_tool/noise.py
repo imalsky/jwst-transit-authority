@@ -142,11 +142,7 @@ def noise_job(star: dict, mode_keys: list[str], sat_limit: float = 0.80) -> dict
     for key in mode_keys:
         m = dict(ins.MODES[key])
         modes.append({
-            # engine_mode() applies any per-backend mode renames (none at
-            # present). The parity harness relies on the same resolution --
-            # never a parity-only rename.
-            "key": key, "instrument": m["instrument"],
-            "mode": ins.engine_mode(m["instrument"], m["mode"]),
+            "key": key, "instrument": m["instrument"], "mode": m["mode"],
             "config": m.get("config", {}), "strategy": m.get("strategy", {}),
             "background": m.get("background"),
             "background_level": m.get("background_level"),

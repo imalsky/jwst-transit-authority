@@ -154,11 +154,9 @@ assert set(PANDEXO_MODES) == set(pg.MODE_KEYS), (
 
 
 def run_ours(star: dict, keys: list[str], star_spectrum: dict) -> dict:
-    # noise_job resolves any engine-generation mode renames via
-    # instruments.engine_mode(), so parity exercises the SAME production path
-    # as a normal run -- never a parity-only rename (that was the bug: a
-    # parity-only patch let NIRCam pass the gate while the production path
-    # silently sent a rejected token).
+    # Parity submits the SAME job noise_job builds for a normal run -- never a
+    # parity-only mode rename (that was the bug: a parity-only patch let NIRCam
+    # pass the gate while the production path silently sent a rejected token).
     job = noise.noise_job(star, keys, sat_limit=SAT_LIMIT)
     job["star_spectrum"] = star_spectrum
     eng = noise.backend_fingerprint()["engine_version"]

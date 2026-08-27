@@ -519,15 +519,15 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # v28-v29) and the G395H SO2 significance (2.89 at v27, BELOW the
     # published 4.5-4.8 -- that gap is real and open). Both need a full
     # run; SO2 also needs the pandeia backend. Full history: notes.md.
-    # v37 re-pin: _VERSION 36 -> 37 for the T_eq derivation change. The key
-    # carries _VERSION, so it moved; the TRANSMISSION spectrum did not
-    # (max|diff| vs v36 = 0.0 ppm, this run uses the shipped T-P table).
-    # Emission moved 145 ppm, which is the intended change.
+    # v38 re-pin: _VERSION 37 -> 38 when the API default log_kappa moved to
+    # the GUI's -2.0. The key carries _VERSION, so it moved; the TRANSMISSION
+    # spectrum did not (max|diff| vs v37 = 0 ppm: tp_mode=file zeroes
+    # log_kappa). Emission moved 164 ppm, which is the intended change.
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b", tp_mode="file"))) == "7a2c401fef0602ef"
+        dict(planet="wasp39b", tp_mode="file"))) == "d881cd02b8448f03"
     # ... and the bare DEFAULT run is that same atmosphere
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "7a2c401fef0602ef"
+        dict(planet="wasp39b"))) == "d881cd02b8448f03"
     # the sha1 pin is only meaningful re-derived from the file the run
     # actually reads -- this catches the table itself being swapped
     path = forward._shipped_tp_file("wasp39b")

@@ -95,7 +95,7 @@ _S_MOLECULES = frozenset({"SO2", "H2S", "OCS", "SO", "SH", "CS", "NS"})
 # exomolop.available() by a data-gated test so this set cannot rot when
 # ExoMolOP adds a species.
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
-_VERSION = 37  # model_cache buster: bump whenever the physics or the canonical
+_VERSION = 38  # model_cache buster: bump whenever the physics or the canonical
                # key set changes. Version history: notes.md.
                # DELIBERATE (reviews keep re-finding it): the cache identity
                # is canonical params + this hand-bumped version, NOT content
@@ -852,7 +852,9 @@ def canonical_params(params: dict) -> dict:
                                 orbit_au=_orbit),
             science_mode=science_mode))), 2),
         "Tint": round(float(params.get("Tint", 100.0)), 2),
-        "log_kappa": round(float(params.get("log_kappa", -2.3)), 3),
+        # 0.01 cm^2/g, Guillot (2010): the GUI default (app.py) and this one
+        # must agree for the same reason as Tirr above
+        "log_kappa": round(float(params.get("log_kappa", -2.0)), 3),
         "log_gamma": round(float(params.get("log_gamma", -1.0)), 3),
         # physical VULCAN knobs (all flow through the validated cfg_overrides
         # hook; the defaults are the W39b cfg values)
