@@ -160,8 +160,14 @@ def widget_state(cfg: dict, key) -> tuple[dict, list[str]]:
             "from a current tool version") from e
 
 
-def _resolve_embedded_tp(cp: dict, cfg: dict, tp_mode: str) -> str | None:
-    """Validate the full canonical payload and atomically archive its T-P upload."""
+def _resolve_embedded_tp(cp: dict, cfg: dict, tp_mode: str):
+    """Validate the canonical payload and STAGE its T-P upload.
+
+    Returns ``(path, pending)``. The staged file is not committed here: the
+    caller finishes validating the rest of the restore first, then commits or
+    discards, so a later failure leaves nothing behind (``_widget_state``
+    promises that nothing is partially applied).
+    """
     restored = None
     pending = None
     validate = dict(cp)
@@ -197,10 +203,7 @@ def _resolve_embedded_tp(cp: dict, cfg: dict, tp_mode: str) -> str | None:
         if pending is not None:
             pending[0].unlink(missing_ok=True)
         raise
-    if pending is not None:
-        os.replace(pending[0], pending[1])
-        restored = str(pending[1])
-    return restored
+    return restored, pending
 
 
 def _restore_goal(state: dict, cp: dict, goal: dict, key,
@@ -503,26 +506,33 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
     def pk(name: str) -> str:            # per-planet widget keys
         return key(f"{planet}_{name}")
 
-    restored_tp = _resolve_embedded_tp(cp, cfg, tp_mode)
+    restored_tp, pending_tp = _resolve_embedded_tp(cp, cfg, tp_mode)
+    try:
+        state = _restore_system_profile(
+            cp, key, pk, planet, tp_mode, restored_tp, notes)
 
-    state = _restore_system_profile(
-        cp, key, pk, planet, tp_mode, restored_tp, notes)
+        _restore_vulcan_physics(state, cp, key, pk)
 
-    _restore_vulcan_physics(state, cp, key, pk)
+        _restore_rt_state(state, cp, key)
+        _restore_goal(state, cp, goal, key, tp_mode, notes)
+        _restore_observation(state, obs, cfg, key, pk, notes)
 
-    _restore_rt_state(state, cp, key)
-    _restore_goal(state, cp, goal, key, tp_mode, notes)
-    _restore_observation(state, obs, cfg, key, pk, notes)
+        # A transmission-mode file that predates the observation block's star
+        # record: the Pandeia noise simulation still needs Teff/log g/[Fe/H],
+        # so the fields keeping their current values must be said, not silent.
+        if obs and pk("teff") not in state:
+            notes.append(
+                "this file does not record the stellar parameters used for the "
+                "noise simulation (Teff, log g, [Fe/H]); those fields keep "
+                "their current values")
 
-    # A transmission-mode file that predates the observation block's star
-    # record: the Pandeia noise simulation still needs Teff/log g/[Fe/H],
-    # so the fields keeping their current values must be said, not silent.
-    if obs and pk("teff") not in state:
-        notes.append(
-            "this file does not record the stellar parameters used for the "
-            "noise simulation (Teff, log g, [Fe/H]); those fields keep "
-            "their current values")
-
-    _check_widget_ranges(state, key, pk,
-                         str(cp.get("science_mode", "transmission")))
+        _check_widget_ranges(state, key, pk,
+                             str(cp.get("science_mode", "transmission")))
+    except Exception:
+        if pending_tp is not None:
+            pending_tp[0].unlink(missing_ok=True)
+        raise
+    if pending_tp is not None:
+        os.replace(pending_tp[0], pending_tp[1])
+        state["restored_tp_path"] = str(pending_tp[1])
     return state, notes

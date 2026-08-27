@@ -276,7 +276,7 @@ def _removed_spectrum(model: dict, mols: list[str], target_mol,
 
 
 def _mode_warnings(mode: dict, mode_result: dict, t_in_s: float,
-                   lsf_skip_note: str | None) -> dict:
+                   lsf_skip_note: str | None, mode_key: str = "") -> dict:
     warnings = dict(mode_result.get("warnings", {}))
     t_cycle = float(mode_result["t_cycle_s"])
     n_cycles = t_in_s / t_cycle
@@ -295,6 +295,11 @@ def _mode_warnings(mode: dict, mode_result: dict, t_in_s: float,
                  "it in APT"] = True
     if lsf_skip_note:
         warnings[lsf_skip_note] = True
+    resp = ins.response_factor(mode_key)
+    if resp != 1.0:
+        warnings[f"this mode's extraction recovers only {100.0 * resp:.0f}% of a "
+                 "narrow feature's amplitude (measured against Pandeia); the "
+                 "detection score is scaled down accordingly"] = True
     ngroup = int(mode_result["ngroup"])
     if ngroup < int(mode["ngroup_warn_below"]):
         reason = ins.NGROUP_WARN_REASON[mode["instrument"]]
@@ -501,7 +506,12 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
                              for row in jac_rows])
     if depth_wo is not None:
         d_wo_b = binning.bin_model(op, wl_model, depth_wo)
-        s_b = d_full_b - d_wo_b
+        # The signal is built with the TOOL's operator while sigma comes from
+        # Pandeia's own extraction for this mode. Where the two disagree on how
+        # much of a narrow feature survives extraction, scale the signal to the
+        # measured response -- detection_significance is homogeneous of degree
+        # one in s, so the mismatch does not cancel.
+        s_b = (d_full_b - d_wo_b) * ins.response_factor(mode_key)
         sigma_detect = detection_significance(s_b, nz["sigma"], nuisance=steps)
         # also profile the T-P/cloud/lnR0 Jacobian directions (conditional)
         sigma_detect_proj = float("nan")
@@ -513,7 +523,7 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
     else:
         d_wo_b, sigma_detect, sigma_detect_proj = None, float("nan"), float("nan")
 
-    warnings = _mode_warnings(m, mode_result, t_in_s, _lsf_skip_note)
+    warnings = _mode_warnings(m, mode_result, t_in_s, _lsf_skip_note, mode_key)
 
     keep = op["keep"]
     return dict(

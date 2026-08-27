@@ -24,7 +24,8 @@ note them here on GitHub or email me please.
 
 This is the tool's default case: detect SO2 on WASP-39 b in transmission,
 with one transit per mode. Left: the VULCAN x ExoJAX model, the same model
-without SO2, and one seeded mock realization per mode; each legend entry
+with SO2 removed from the opacity (the chemistry is not re-solved), and one
+seeded mock realization per mode; each legend entry
 carries that mode's conditional template S/N for SO2. Right: per-mode
 marginalized Fisher constraints on C/O and [M/H], drawn recentered on the
 same noise draw. These are linearized forecasts, not sampled posteriors.
@@ -99,6 +100,16 @@ the current JWST ETC and APT.
   time-correlated systematics, stellar heterogeneity, or visit-long trends.
 - A noise floor can be added, but one fixed floor cannot represent every
   target, mode, and reduction method.
+- The comparison curve is the same model with the target species removed from
+  the OPACITY. The chemistry is not re-solved, so the T-P profile, mean
+  molecular weight, gravity, continuum, and every other species are unchanged.
+- Eclipse depths use a single planet radius (the emission photosphere near
+  0.1 bar), not the wavelength-dependent tau = 2/3 radius. Fortney et al.
+  (2019) put the resulting eclipse-depth error at 10-25% for a hot Jupiter,
+  wavelength-dependent and largest in the deepest bands.
+- The depth uncertainty counts all of T14 as full depth (a box transit). For a
+  typical hot Jupiter that is optimistic by roughly 5% in sigma, partly offset
+  by the conservatism of the symmetric in/out variance term.
 - Models and cached outputs are evidence, not observational ground truth.
 
 ## Validation

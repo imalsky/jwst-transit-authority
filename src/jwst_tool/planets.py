@@ -121,7 +121,7 @@ PLANETS = {
         label="WASP-39 b",
         star=dict(teff=5485.0, log_g=4.5, metallicity=0.0, ks_mag=10.20),
         rstar_rsun=0.932, rp_rjup=1.279, gs_cgs=422.0,
-        orbit_au=0.04828, teq_k=1120.0, t14_hr=2.80,
+        orbit_au=0.04828, t14_hr=2.80,
         sflux="sflux-W39b_Tsai2023.txt",
         tp_table="atm_W39b_evening_TP_Kzz.txt", tp_table_default=True,
         tp_table_note="",
@@ -132,7 +132,7 @@ PLANETS = {
         label="HD 189733 b",
         star=dict(teff=5040.0, log_g=4.5, metallicity=0.0, ks_mag=5.54),
         rstar_rsun=0.756, rp_rjup=1.138, gs_cgs=2190.0,
-        orbit_au=0.0313, teq_k=1200.0, t14_hr=1.80,
+        orbit_au=0.0313, t14_hr=1.80,
         sflux="sflux-HD189_Moses11.txt",
         tp_table="atm_HD189_Kzz.txt", tp_table_default=False,
         tp_table_note=(
@@ -154,7 +154,7 @@ PLANETS = {
         label="HD 209458 b",
         star=dict(teff=6065.0, log_g=4.4, metallicity=0.0, ks_mag=6.31),
         rstar_rsun=1.155, rp_rjup=1.359, gs_cgs=930.0,
-        orbit_au=0.0475, teq_k=1450.0, t14_hr=3.07,
+        orbit_au=0.0475, t14_hr=3.07,
         sflux="Gueymard_solar.txt",
         tp_table=None, tp_table_default=False,
         tp_table_note=(
@@ -170,7 +170,7 @@ PLANETS = {
         label="WASP-107 b",
         star=dict(teff=4430.0, log_g=4.6, metallicity=0.0, ks_mag=8.64),
         rstar_rsun=0.67, rp_rjup=0.94, gs_cgs=270.0,
-        orbit_au=0.0553, teq_k=740.0, t14_hr=2.74,
+        orbit_au=0.0553, t14_hr=2.74,
         sflux="sflux-epseri.txt",
         tp_table=None, tp_table_default=False,
         tp_table_note="vulcan_jax bundles no measured T-P/Kzz table for this planet.",
@@ -232,10 +232,13 @@ def default_tirr(planet: dict, system: dict | None = None,
     """Guillot T_irr default: sqrt(2) * T_eq, on the GUI's 20 K step grid and
     clipped to the widget range.
 
-    Registry entries use their literature ``teq_k``. For the CUSTOM planet
-    the caller passes ``system`` (star_teff, rstar_rsun, orbit_au) and T_eq
-    is DERIVED from it -- otherwise an untouched custom T_irr silently keeps
-    WASP-39 b's temperature.
+    T_eq is always DERIVED from the star and orbit -- for registry entries from
+    their own ``star["teff"]``/``rstar_rsun``/``orbit_au``, for the CUSTOM
+    planet from the ``system`` the caller passes (otherwise an untouched custom
+    T_irr silently keeps WASP-39 b's temperature). A stored literature value is
+    a second source of truth that goes stale: WASP-39 b's carried 1120 K from
+    the Faedi et al. 2011 stellar parameters after Teff and R_star had been
+    refreshed to the JWST-ERS values, 3.8 % below what its own entry implies.
 
     EMISSION takes the DAYSIDE value, T_eq * 2**0.25. A published
     equilibrium temperature assumes full redistribution, which is a
@@ -249,7 +252,9 @@ def default_tirr(planet: dict, system: dict | None = None,
     split default built different profiles per planet (history: notes.md)."""
     teq = (system_teq(system["star_teff"], system["rstar_rsun"],
                       system["orbit_au"])
-           if system is not None else planet["teq_k"])
+           if system is not None else
+           system_teq(planet["star"]["teff"], planet["rstar_rsun"],
+                      planet["orbit_au"]))
     if str(science_mode) == "emission":
         teq *= DAYSIDE_TEQ_FACTOR
     return min(max(round(teq * math.sqrt(2.0) / 20.0) * 20.0, 800.0), 2500.0)

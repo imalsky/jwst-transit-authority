@@ -150,6 +150,29 @@ def test_embedded_tp_table_is_all_or_nothing(tmp_path):
     assert p.suffix == ".txt" and p.exists()
     assert p.read_text() == text
 
+    # ...and a failure LATER in the restore, after the payload itself
+    # validates, must leave nothing behind either: the upload is staged and
+    # committed only once the whole restore has validated.
+    before = set(up.glob("*"))
+    other = tmp_path / "other.txt"
+    other.write_text(text + "# distinct content so the sha differs\n")
+    canon2 = forward.canonical_params(dict(
+        planet="wasp39b", tp_mode="file", tp_file=forward.TP_FILE_UPLOAD,
+        tp_file_path=str(other)))
+    def _boom(*a, **k):
+        raise ValueError("a later restore step refused")
+
+    real = share_config._check_widget_ranges
+    share_config._check_widget_ranges = _boom
+    try:
+        with pytest.raises(ValueError, match="later restore step"):
+            share_config.widget_state(
+                {"canonical_params": canon2, "tp_table_text": other.read_text()},
+                _key)
+    finally:
+        share_config._check_widget_ranges = real
+    assert set(up.glob("*")) == before, "a late failure left a staged upload"
+
 
 def test_provenance_block_is_complete_and_portable(tmp_path):
     """Release provenance carries no machine paths and reports EVERY declared

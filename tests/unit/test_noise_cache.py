@@ -84,3 +84,23 @@ def test_per_mode_files_carry_their_own_provenance(stub, tmp_path):
     payloads = [json.loads(f.read_text()) for f in files
                 if "nirspec_prism" in f.read_text()]
     assert payloads and all("__provenance__" in p for p in payloads)
+
+
+def test_a_failed_mode_is_not_cached(stub, tmp_path, monkeypatch):
+    """A per-mode pandeia failure comes back as {"error": ...}. Caching it
+    would serve that failure forever, and _read_cached_json only checks that
+    the JSON parses."""
+    def failing_worker(job, progress=None):
+        keys = [m["key"] for m in job["modes"]]
+        out = {k: ({"error": "boom"} if k == "miri_lrs"
+                   else {"ngroup": 5, "payload_for": k}) for k in keys}
+        out["__provenance__"] = {"worker_version": job["worker_version"]}
+        return out
+
+    monkeypatch.setattr(noise, "_run_worker", failing_worker)
+    out = noise.run_modes(STAR, ["nirspec_prism", "miri_lrs"])
+    assert "error" in out["miri_lrs"]            # still surfaced to the caller
+    # the cache filename is an opaque job key, so read the payloads back
+    cached = [json.loads(p.read_text()) for p in tmp_path.glob("*.json")]
+    assert [c for c in cached if "nirspec_prism" in c], "the good mode must cache"
+    assert not [c for c in cached if "miri_lrs" in c], cached

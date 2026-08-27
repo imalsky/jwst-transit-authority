@@ -240,11 +240,15 @@ def run_modes(star: dict, mode_keys: list[str], sat_limit: float = 0.80,
                              progress)
         prov = result.get("__provenance__")
         for k in todo:
+            out[k] = result[k]
+            # A per-mode pandeia failure comes back as {"error": traceback}.
+            # Caching it would serve that failure forever; let it recompute.
+            if isinstance(result[k], dict) and "error" in result[k]:
+                continue
             single = {k: result[k], "__provenance__": prov}
             ins.atomic_write(
                 ins.NOISE_CACHE / f"{_mode_key(star, k, sat_limit)}.json",
                 lambda fh, s=single: fh.write(json.dumps(s).encode()))
-            out[k] = result[k]
         out["__provenance__"] = prov
     return out
 

@@ -677,6 +677,26 @@ LSF_WIDTH = {
 }
 
 
+# Amplitude of the extracted line response relative to what the tool's own
+# LSF + binning operator predicts, per mode: obs(Pandeia)/pred(tool) for a
+# narrow line at R=100 (parity_summary.json ["lsf_impulse"][mode][line]
+# ["applied"]["r100_bin_ratio"]). The width fit above is amplitude-free and
+# cannot absorb this. 34 of 35 measured mode/wavelength entries sit at
+# 0.95-1.004 and need no correction; NIRISS SOSS order 2 recovers only 0.83,
+# because its order-2 extraction is not the primary trace. Without this the
+# detection signal comes from the tool's operator while sigma comes from
+# Pandeia's extraction, and the score is inflated by 1/0.83 = 1.20x.
+# RE-MEASURE ON ANY REFDATA OR PSF CHANGE.
+RESPONSE_FACTOR = {
+    "niriss_soss_ord2": 0.832,
+}
+
+
+def response_factor(key: str) -> float:
+    """Measured amplitude response of `key`'s extraction; 1.0 where unmeasured."""
+    return float(RESPONSE_FACTOR.get(key, 1.0))
+
+
 def lsf_r(key: str, wl, r_native):
     """Effective resolving power of the extracted response, R_refdata /
     width, on the caller's wavelength grid; ``r_native`` unchanged for a

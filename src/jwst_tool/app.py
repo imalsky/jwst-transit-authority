@@ -182,6 +182,13 @@ def _has_floor(r: dict) -> bool:
     return bool(np.any(np.asarray(r["floor"]) > 0.0))
 
 
+# Which statistic a template S/N actually is. They are not interchangeable:
+# the projected one additionally profiles the T-P / cloud / lnR0 directions, so
+# it answers "after those are fitted away", and a bare number that could be
+# either is not a reportable quantity.
+_METRIC_LABEL = {True: "T-P + cloud projected", False: "calibration profiled"}
+
+
 def _detection_metric(r: dict) -> tuple[float, bool]:
     """Collaborator-facing score and whether physical nuisances were used."""
     projected = float(r.get("sigma_detect_proj", float("nan")))
@@ -936,16 +943,14 @@ with st.sidebar:
                 + ("" if _near == sflux
                    else " A different spectrum is currently selected."))
 
-    # Registry planets carry a literature T_eq; the CUSTOM planet derives it
-    # from the entered star and orbit so it does not inherit WASP-39 b's
-    # temperature scale.
+    # T_eq is derived from the star and orbit for every planet, registry or
+    # custom: a stored literature value is a second source of truth that goes
+    # stale when the star parameters are refreshed.
+    teq = planets.system_teq(teff, rstar, orbit_au)
     if planet_key == "custom":
-        teq = planets.system_teq(teff, rstar, orbit_au)
         st.caption(f"T_eq derived from the star and orbit above: "
                    f"{teq:.0f} K (zero albedo, full redistribution). It "
                    "sets the default Guillot T_irr in step 2.")
-    else:
-        teq = float(pdef["teq_k"])
 
     # -----------------------------------------------------------------------
     # Step 2: Atmosphere
@@ -1338,6 +1343,11 @@ with st.sidebar:
             target_mol = st.selectbox(
                 "Molecule to detect", mol_options,
                 index=mol_options.index(_mol_default),
+                help="The comparison spectrum zeroes this species in the "
+                     "OPACITY only. The chemistry is not re-solved, so the "
+                     "T-P profile, mean molecular weight, gravity, continuum "
+                     "and every other species are unchanged -- it is not a "
+                     "model of an atmosphere that lacks the species.",
                 key=K(f"mol_vulcan{_net_sfx}_"
                       + "_".join(sorted(extra_mols))))
             target_sig = st.number_input(
@@ -1459,8 +1469,8 @@ with st.sidebar:
             "Instrument modes",
             options=list(ins.MODES),
             default=ins.DEFAULT_MODES, key=K("modes"),
-            help="One fixed detector configuration per mode (see the mode "
-                 "details table); noise is computed once per star, so adding "
+            help="One fixed detector configuration per mode; noise is "
+                 "computed once per star, so adding "
                  "modes later is instant. Ranges are the modelled bands, not "
                  "the full instrument coverage; R is the median native "
                  "resolving power from the Pandeia reference data.",
@@ -2192,13 +2202,16 @@ if goal_r == "detect":
         ranked = sorted(ok, key=lambda r: -_detection_metric(r)[0])
         best = ranked[0]
         bsig, _best_projected = _detection_metric(best)
-        # "template S/N" stays: a bare sigma reads as a retrieval claim.
-        # The profiled-vs-calibration disclosure lives in the mode table.
-        verdict = (f"**{best['label']}**: template S/N {bsig:.1f}σ in {ntr} "
+        # "template S/N" stays: a bare sigma reads as a retrieval claim. And
+        # SAY WHICH ONE: the projected score profiles the T-P/cloud/lnR0
+        # directions as well as the per-segment calibration offsets, so the two
+        # are different statistics and must never share one bare label.
+        verdict = (f"**{best['label']}**: template S/N {bsig:.1f}σ "
+                   f"({_METRIC_LABEL[_best_projected]}) in {ntr} "
                    f"{_ev}{'s' if ntr > 1 else ''} (target {tsig:g}σ).")
         if bsig >= tsig:
             # No banner when the target is met: the
-            # figure and the mode table already carry the number, and a green
+            # figure and the verdict already carry the number, and a green
             # bar restating it is the redundant UI prose the house policy
             # forbids. A SHORTFALL still gets a bar -- the transit count it
             # quotes is information that appears nowhere else.
@@ -2271,6 +2284,19 @@ else:
             st.warning(verdict + f"  >{detect.N_TRANSITS_CAP} {_ev}s "
                        "(scan limit).")
 
+# --- per-mode operational notes -------------------------------------------
+# detect._mode_warnings builds these (degraded measurement operator, over-long
+# ramp, sub-three-cycle transit, shared order-2 readout); without a renderer
+# no run discloses any of them.
+_notes = [(r["label"], [w for w in (r.get("warnings") or {})])
+          for r in results]
+_notes = [(lbl, ws) for lbl, ws in _notes if ws]
+if _notes:
+    with st.expander(f"Notes on {len(_notes)} mode"
+                     f"{'s' if len(_notes) > 1 else ''}"):
+        for lbl, ws in _notes:
+            st.markdown(f"**{lbl}**\n" + "\n".join(f"- {w}" for w in ws))
+
 # --- spectrum data (rendered ONCE, on the summary figure below) -------------
 wl = model["wl_um"]
 order = np.argsort(wl)
@@ -2327,7 +2353,7 @@ _bin_df = pd.concat([
     }) for r in results], ignore_index=True)
 _native = {"wl_um": wl_s, "depth_ppm": d_s}
 if d_wo_s is not None:
-    _native[f"depth_without_{meta['target']}_ppm"] = d_wo_s
+    _native[f"depth_{meta['target']}_opacity_removed_ppm"] = d_wo_s
 
 with st.expander("Physical structure (T-P profile, mixing ratios)"):
     # ONE two-panel figure (plotting.build_structure_figure, pure and
@@ -2855,10 +2881,12 @@ _leg_num: dict = {}
 if goal_r == "detect":
     # saturated modes carry no usable data anywhere else (rankings,
     # combinations, forecasts); they get no score in the legend either
+    _leg_projected = set()
     for r in results:
-        _score, _ = _detection_metric(r)
+        _score, _proj = _detection_metric(r)
         if not r["saturated"] and np.isfinite(_score):
             _leg_num[r["mode_key"]] = f"S/N {_score:.1f}σ"
+            _leg_projected.add(_proj)
 elif _have_fisher:
     _rk_key = K("sum_rank_param_" + "_".join(fisher_names))
     if st.session_state.get(_rk_key) not in fisher_names:
@@ -3002,7 +3030,9 @@ if _leg_num:
     # model label, which made that entry multi-line and broke the legend's
     # row spacing). Says what the per-mode numbers are, nothing more.
     _leg_note = (
-        f"{meta['target']} template S/N per mode, {meta['n_transits']} {_ev}"
+        f"{meta['target']} template S/N per mode "
+        f"({'/'.join(_METRIC_LABEL[p] for p in sorted(_leg_projected))}), "
+        f"{meta['n_transits']} {_ev}"
         f"{'s' if meta['n_transits'] > 1 else ''}"
         if goal_r == "detect" else
         f"Fisher ±{forward.param_axis(_rk_param)} per mode "
@@ -3042,7 +3072,7 @@ if d_wo_s is not None:
     # detect goal: the same without-target comparison curve the old
     # standalone spectrum carried (smoothed identically for display)
     _sum_spectrum["depth2_ppm"] = _display_smooth(d_wo_s)
-    _sum_spectrum["depth2_label"] = f"model without {meta['target']}"
+    _sum_spectrum["depth2_label"] = f"{meta['target']} removed from the opacity"
 
 _sum_foot = None
 

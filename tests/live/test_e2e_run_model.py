@@ -37,7 +37,7 @@ if importlib.util.find_spec("exojax") is None or \
         importlib.util.find_spec("vulcan_jax") is None:
     pytest.skip("RT stack not installed", allow_module_level=True)
 
-FIXTURE = Path(__file__).parent / "data" / "w39b_v36_reference.npz"
+FIXTURE = Path(__file__).parent / "data" / "w39b_v37_reference.npz"
 
 WL_LO, WL_HI, R_BIN = 1.02, 5.26, 100.0
 
@@ -101,9 +101,12 @@ def test_full_chain_reproduces_the_verified_reference(mode):
     assert key == ref["params_key"], (
         "the canonical parameter set moved since the fixture was generated")
 
-    cache = forward.cache_path(params)
-    if os.environ.get("JWST_TOOL_E2E_ALLOW_CACHE") != "1" and cache.exists():
-        cache.unlink()                      # force a REAL chemistry solve
+    if os.environ.get("JWST_TOOL_E2E_ALLOW_CACHE") != "1":
+        # BOTH caches: cache_path is the SPECTRUM, chem_cache_path the converged
+        # CHEMISTRY. Clearing only the first re-runs the RT off a cached column,
+        # which is not the full-chain solve this test exists to exercise.
+        for cache in (forward.cache_path(params), forward.chem_cache_path(params)):
+            cache.unlink(missing_ok=True)
 
     out = np.load(forward.run_model(params, log=lambda *a: None),
                   allow_pickle=False)

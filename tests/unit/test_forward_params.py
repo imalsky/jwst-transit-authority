@@ -144,16 +144,18 @@ def test_guillot_default_tirr_follows_planet_and_custom_system():
     """T_irr default = sqrt(2) * T_eq of the SELECTED planet on the GUI's
     20 K step grid (the widget step); a bare constant makes API and GUI
     defaults diverge. The custom planet derives T_eq from the entered star
-    and orbit (T_eq = Teff sqrt(Rstar/2a)), never WASP-39 b's literature
-    value."""
+    and orbit (T_eq = Teff sqrt(Rstar/2a)) -- as does every registry planet, so
+    a refreshed stellar parameter can never leave a stale T_eq behind."""
     for key, p in planets.PLANETS.items():
-        expect = min(max(round(p["teq_k"] * math.sqrt(2.0) / 20.0) * 20.0,
+        teq = planets.system_teq(p["star"]["teff"], p["rstar_rsun"],
+                                 p["orbit_au"])
+        expect = min(max(round(teq * math.sqrt(2.0) / 20.0) * 20.0,
                          800.0), 2500.0)
         cp = forward.canonical_params(dict(planet=key, tp_mode="guillot"))
         assert cp["Tirr"] == expect, key
     # per-planet values, pinned explicitly
-    assert forward.default_tirr("wasp39b") == 1580.0
-    assert forward.default_tirr("hd209458b") == 2060.0
+    assert forward.default_tirr("wasp39b") == 1640.0
+    assert forward.default_tirr("hd209458b") == 2040.0
     sys_cool = dict(star_teff=3300.0, rstar_rsun=0.30, orbit_au=0.05)
     teq = planets.system_teq(**sys_cool)                    # ~350 K
     expect = min(max(round(teq * math.sqrt(2.0) / 20.0) * 20.0, 800.0), 2500.0)
@@ -517,11 +519,15 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # v28-v29) and the G395H SO2 significance (2.89 at v27, BELOW the
     # published 4.5-4.8 -- that gap is real and open). Both need a full
     # run; SO2 also needs the pandeia backend. Full history: notes.md.
+    # v37 re-pin: _VERSION 36 -> 37 for the T_eq derivation change. The key
+    # carries _VERSION, so it moved; the TRANSMISSION spectrum did not
+    # (max|diff| vs v36 = 0.0 ppm, this run uses the shipped T-P table).
+    # Emission moved 145 ppm, which is the intended change.
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b", tp_mode="file"))) == "cfbd05c618ea643c"
+        dict(planet="wasp39b", tp_mode="file"))) == "7a2c401fef0602ef"
     # ... and the bare DEFAULT run is that same atmosphere
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "cfbd05c618ea643c"
+        dict(planet="wasp39b"))) == "7a2c401fef0602ef"
     # the sha1 pin is only meaningful re-derived from the file the run
     # actually reads -- this catches the table itself being swapped
     path = forward._shipped_tp_file("wasp39b")

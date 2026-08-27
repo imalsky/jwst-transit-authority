@@ -480,3 +480,53 @@ def test_a_secondary_order_declares_its_shared_readout_and_saturation():
     assert any(shared in w for w in sat2) and any(verdict in w for w in sat2)
     ord1 = _notes("niriss_soss", True)
     assert not any(shared in w or verdict in w for w in ord1)
+
+
+def test_measured_response_deficit_scales_the_detection_signal():
+    """Signal and sigma must come from the same effective extraction.
+
+    The signal is built with the tool's own LSF+binning operator; sigma comes
+    from Pandeia's extraction for that mode. NIRISS SOSS order 2 recovers only
+    0.83 of a narrow feature's amplitude there, and detection_significance is
+    homogeneous of degree one in s, so the mismatch does not cancel.
+    """
+    kw = dict(target_mol="X", R_bin=100.0, t_in_s=3600.0, t_out_s=3600.0,
+              n_transits=1, floor_spec=None)
+
+    def _score(mode_key):
+        m = ins.MODES[mode_key]
+        wl_pix = np.linspace(m["wl_min"] * 1.001, m["wl_max"] * 0.999, 400)
+        mr = dict(wl=wl_pix.tolist(), flux=np.full(wl_pix.size, 1e6).tolist(),
+                  noise_1int=np.full(wl_pix.size, 1e3).tolist(),
+                  t_cycle_s=20.0, r_native=None,
+                  n_full_sat=np.zeros(wl_pix.size).tolist(),
+                  n_part_sat=np.zeros(wl_pix.size).tolist(),
+                  ngroup=5, sat_frac=0.5, saturated=False)
+        wl_model = np.linspace(m["wl_min"] * 0.95, m["wl_max"] * 1.05, 4000)
+        # a localized band, not a constant offset: a flat difference is
+        # profiled away by the per-segment calibration nuisance
+        mid = 0.5 * (m["wl_min"] + m["wl_max"])
+        band = 1e-4 * np.exp(-0.5 * ((wl_model - mid) / (0.02 * mid)) ** 2)
+        depth = np.full(wl_model.size, 0.01) + band
+        model = dict(wl_um=wl_model, depth=depth,
+                     depth_wo=np.stack([depth - band]), mols=["X"],
+                     wo_mols=["X"])
+        return detect.evaluate_mode(mode_key, mr, model, **kw)["sigma_detect"]
+
+    factor = ins.response_factor("niriss_soss_ord2")
+    assert factor < 0.9, "order 2's measured deficit is what this guards"
+    assert ins.response_factor("nirspec_prism") == 1.0
+
+    from unittest.mock import patch
+    scored = _score("niriss_soss_ord2")
+    with patch.dict(ins.RESPONSE_FACTOR, {"niriss_soss_ord2": 1.0}):
+        uncorrected = _score("niriss_soss_ord2")
+    assert scored == pytest.approx(uncorrected * factor, rel=1e-9)
+
+
+def test_the_response_deficit_is_disclosed_on_the_mode_it_applies_to():
+    for key in ins.MODES:
+        note = "of a narrow feature's amplitude"
+        warned = any(note in w for w in detect._mode_warnings(
+            ins.MODES[key], dict(t_cycle_s=20.0, ngroup=5), 3600.0, None, key))
+        assert warned == (ins.response_factor(key) != 1.0), key

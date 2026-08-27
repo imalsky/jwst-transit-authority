@@ -95,7 +95,7 @@ _S_MOLECULES = frozenset({"SO2", "H2S", "OCS", "SO", "SH", "CS", "NS"})
 # exomolop.available() by a data-gated test so this set cannot rot when
 # ExoMolOP adds a species.
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
-_VERSION = 36  # model_cache buster: bump whenever the physics or the canonical
+_VERSION = 37  # model_cache buster: bump whenever the physics or the canonical
                # key set changes. Version history: notes.md.
                # DELIBERATE (reviews keep re-finding it): the cache identity
                # is canonical params + this hand-bumped version, NOT content
