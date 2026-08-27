@@ -25,7 +25,7 @@ REPOSITORIES = {
     "vulcan-jwst-tool": ("vulcan-jwst-tool",),
     "vulcan-retrieval": ("vulcan-retrieval",),
     "VULCAN-master": ("VULCAN-master",),
-    "VULCAN-vm-branch": ("VULCAN-vm-branch",),
+    "VULCAN-vm-branch": ("VULCAN-vm-branch", ".oracles/vulcan3_vm_branch"),
 }
 
 
