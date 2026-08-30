@@ -117,9 +117,7 @@ def ok_rows(summary, star):
             if m.get("status") == "OK"}
 
 
-# =============================================================================
 # Configuration & timing parity: ours vs PandExo on the 1:1 line
-# =============================================================================
 def fig_config_parity(summary, release):
     quantities = [
         ("ngroup_pandexo", "ngroup_ours", "groups / integration"),
@@ -187,9 +185,7 @@ def fig_config_parity(summary, release):
     return out
 
 
-# =============================================================================
 # Extracted stellar flux parity (the engine product agreeing 1:1)
-# =============================================================================
 def _require_raw_matches_summary(summary, star, o_all, p_all, of, pf):
     """Refuse to plot raw per-wavelength data from a DIFFERENT run.
 

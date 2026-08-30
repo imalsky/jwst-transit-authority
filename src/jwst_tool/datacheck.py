@@ -25,9 +25,7 @@ from pathlib import Path
 from jwst_tool import instruments as ins
 from jwst_tool import planets
 
-# ---------------------------------------------------------------------------
 # Report structure
-# ---------------------------------------------------------------------------
 
 #: OK = present; MISSING = absent, manual fetch; AUTO = fetched
 #: automatically on first use (network required then)
@@ -49,9 +47,7 @@ def _found(path: Path) -> str:
     return f"found: {path}"
 
 
-# ---------------------------------------------------------------------------
 # Python stack (this environment)
-# ---------------------------------------------------------------------------
 
 _STACK = (
     ("vulcan_jax", True,
@@ -83,9 +79,7 @@ def check_python_stack() -> list[Item]:
     return items
 
 
-# ---------------------------------------------------------------------------
 # Chemistry / RT engine data (the shared vulcan-forward engine's data trees)
-# ---------------------------------------------------------------------------
 
 def _engine_config():
     """The engine-config view, or an exception instance whose text is the
@@ -197,9 +191,7 @@ def check_engine_data(base_mols: list[str], extra_mols: list[str]) -> list[Item]
     return items
 
 
-# ---------------------------------------------------------------------------
 # VULCAN-JAX stellar UV spectra (ship inside the vulcan_jax package)
-# ---------------------------------------------------------------------------
 
 def _vulcan_pkg_dir() -> Path | None:
     try:
@@ -261,9 +253,7 @@ def check_stellar_uv() -> list[Item]:
     return items
 
 
-# ---------------------------------------------------------------------------
 # Pandeia noise backend + synphot CDBS
-# ---------------------------------------------------------------------------
 
 def _refdata_version(refdata: Path) -> str | None:
     for name in ("VERSION", "VERSION_DATA"):
@@ -428,9 +418,7 @@ def check_synphot_cdbs(cdbs: str | Path = None) -> list[Item]:
     return items
 
 
-# ---------------------------------------------------------------------------
 # Generated caches (informational)
-# ---------------------------------------------------------------------------
 
 def cache_stats() -> dict:
     def _stat(d: Path, glob: str):
@@ -441,9 +429,7 @@ def cache_stats() -> dict:
             "noise_cache": _stat(ins.NOISE_CACHE, "*.json")}
 
 
-# ---------------------------------------------------------------------------
 # Full report + rendering
-# ---------------------------------------------------------------------------
 
 def full_report(base_mols: list[str] = None, extra_mols: list[str] = None,
                 deep: bool = False) -> dict:
@@ -526,9 +512,7 @@ def format_report(report: dict) -> str:
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
 # Disk-persisted report cache
-# ---------------------------------------------------------------------------
 # The full report walks every external dataset (slow on remote volumes), so
 # it is persisted: the GUI serves the file when fresh, the Space entrypoint
 # warms it in the background at boot, and the refresh button rebuilds.

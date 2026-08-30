@@ -185,7 +185,6 @@ def test_r_native_med_still_matches_the_refdata_over_the_registry_band():
     R ~ 2,700 / 1,000 for the NIRSpec gratings, tight enough to catch a band
     change that moved the median."""
     fits = pytest.importorskip("astropy.io.fits")
-    import numpy as np
 
     root = ins.DATA_DIR / f"pandeia_data-{ins.BACKEND_RELEASE}-jwst" / "jwst"
     if not root.is_dir():

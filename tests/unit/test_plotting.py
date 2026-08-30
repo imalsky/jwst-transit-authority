@@ -95,16 +95,8 @@ def _assert_no_overlaps(boxes, what):
         assert not u.overlaps(v), f"{what}: tick labels overlap"
 
 
-def _png_size(data: bytes) -> tuple[int, int]:
-    """(width, height) from a PNG IHDR -- avoids a Pillow dependency."""
-    assert data[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"
-    return (int.from_bytes(data[16:20], "big"),
-            int.from_bytes(data[20:24], "big"))
 
-
-# ---------------------------------------------------------------------------
 # The render lock: mathtext ParseException under concurrent renders
-# ---------------------------------------------------------------------------
 
 def test_concurrent_renders_do_not_raise():
     """Eight threads through the real builders: no mathtext ParseException.
@@ -247,8 +239,6 @@ def test_app_materializes_figures_only_through_locked_helpers():
         "the lock must be entered no later than the style context"
 
 
-
-
 def test_summary_legends_sit_inside_their_axes_and_cover_no_data():
     """Summary-figure legends sit INSIDE the axes (maintainer; the paired
     T-P/mixing-ratio panels keep external legends). "Inside" alone is not
@@ -380,8 +370,6 @@ def test_a_fitted_panel_is_not_labelled_a_forecast():
         assert forecast == "relative forecast density", forecast
     finally:
         plt.close(fig)
-
-
 
 
 def _log_spec(depth, points=()):

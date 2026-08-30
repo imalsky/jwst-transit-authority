@@ -90,9 +90,7 @@ def load_result(params: dict, species: str):
     return forward._load_cached_npz(cache_path(params, species))
 
 
-# ---------------------------------------------------------------------------
 # Heavy path (script mode only below this line)
-# ---------------------------------------------------------------------------
 
 def _pair_physical(g: np.ndarray, network) -> list[dict]:
     """Collapse the directional dL/dlnk rows into physical reaction

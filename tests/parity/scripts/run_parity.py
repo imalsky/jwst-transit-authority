@@ -302,7 +302,6 @@ def compare_mode(key: str, ours: dict, px: dict) -> dict:
         out["ngroup_ours"] = int(ours["ngroup"])
         out["sat_frac_ours"] = float(ours["sat_frac"])
         out["ngroup_pandexo"] = px.get("ngroup")
-        out["pandexo_ngroup"] = px.get("ngroup")   # legacy alias
         out["pandexo_warnings"] = px.get("warnings")
         return out
 

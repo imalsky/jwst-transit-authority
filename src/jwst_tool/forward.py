@@ -364,9 +364,7 @@ def param_axis(name: str) -> str:
     return f"{PARAM_SYMBOLS[name]} [{u}]" if u else PARAM_SYMBOLS[name]
 
 
-# ---------------------------------------------------------------------------
 # tp_mode="file" helpers (light path: no vulcan_jax/jax imports)
-# ---------------------------------------------------------------------------
 
 def shipped_tp_table_name(planet: str) -> str:
     """Filename of the MEASURED structure table bundled for ``planet``, or ""
@@ -563,9 +561,7 @@ def _tp_file_from_cp(cp: dict) -> Path:
     return path
 
 
-# ---------------------------------------------------------------------------
 # Boundary-condition helpers
-# ---------------------------------------------------------------------------
 
 def _canon_bc_entries(raw, *, kind: str) -> list:
     """Canonicalize boundary-flux entries for the cache key.
@@ -1276,9 +1272,7 @@ def load_result(params: dict):
     return _load_cached_npz(cache_path(params))
 
 
-# ---------------------------------------------------------------------------
 # Heavy path (script mode only below this line)
-# ---------------------------------------------------------------------------
 
 def _build_tp(cp: dict, gs_cgs: float):
     """(tp_eval, n_tp, tp_values, theta_names) for the chosen T-P mode.
@@ -2424,14 +2418,12 @@ def main():
     # line-buffer stdout: the GUI pipes this process, which makes Python
     # BLOCK-buffer prints from libraries (their progress lines would sit
     # invisible in the buffer while the GUI shows nothing)
-    import sys as _sys
-    _sys.stdout.reconfigure(line_buffering=True)
+    sys.stdout.reconfigure(line_buffering=True)
     # vulcan_jax's legacy IO creates RELATIVE output/ + plot/ directories in
     # the process CWD (legacy_io.py) -- junk wherever the app was launched
     # from. Run the subprocess from a dedicated scratch cwd instead (the
     # same fix the Space entrypoint uses). Library callers of run_model are
     # unaffected: only this subprocess entrypoint changes directory.
-    import os
     _cwd = Path(_ins.OUTPUT_DIR) / "cwd"
     _cwd.mkdir(parents=True, exist_ok=True)
     os.chdir(_cwd)

@@ -15,9 +15,7 @@ from jwst_tool import datacheck
 from jwst_tool import forward
 
 
-# ---------------------------------------------------------------------------
 # Pandeia backend path checks (tmp-path injected; mirrors the worker preflight)
-# ---------------------------------------------------------------------------
 
 def _backend_release():
     from jwst_tool import instruments as ins
@@ -99,9 +97,7 @@ def test_pandeia_backend_missing_and_misconfigured(tmp_path):
     assert by["pandeia:psf"].required is True
 
 
-# ---------------------------------------------------------------------------
 # synphot CDBS checks
-# ---------------------------------------------------------------------------
 
 def _make_cdbs(tmp_path):
     cdbs = tmp_path / "cdbs"
@@ -135,9 +131,7 @@ def test_cdbs_tree_states(tmp_path):
     assert "dangling" in by["cdbs:phoenix"].detail
 
 
-# ---------------------------------------------------------------------------
 # Report plumbing (no external deps at all)
-# ---------------------------------------------------------------------------
 
 def test_full_report_structure_formatting_and_cache_stats():
     rep = datacheck.full_report(base_mols=forward.MOLECULES,
@@ -172,9 +166,7 @@ def test_cli_data_subcommand(capsys):
     assert rc_bad == 2
 
 
-# ---------------------------------------------------------------------------
 # Engine-config-backed checks (skip when the engine data root is unset)
-# ---------------------------------------------------------------------------
 
 _engine = datacheck._engine_config()
 needs_engine = pytest.mark.skipif(

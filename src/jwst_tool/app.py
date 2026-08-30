@@ -196,28 +196,13 @@ def _detection_metric(r: dict) -> tuple[float, bool]:
         return projected, True
     return float(r["sigma_detect"]), False
 
-
-def _transits_cell(tt: dict, val_never: str, floored: bool) -> str:
-    """'events to target' table cell.
-
-    "unreachable" is reserved for a floor-proven result (sig_inf is an exact
-    ceiling there); a scan that only ran out of events reads ">N (scan
-    limit)", never "never"."""
-    if not tt["reachable"]:
-        if not floored:
-            return f">{detect.N_TRANSITS_CAP} (scan limit; no floor set)"
-        return f"unreachable (noise floor caps it at {val_never})"
-    return str(tt["n"])
-
 # initial_sidebar_state: the default ("auto") starts the sidebar COLLAPSED
 # on a narrow viewport -- the huggingface.co iframe is one -- hiding every
 # input behind a small toggle, which reads as "half the tool is missing".
 st.set_page_config(page_title="JWST Exoplanet Observation Planner",
                    layout="wide", initial_sidebar_state="expanded")
 
-# ---------------------------------------------------------------------------
 # Header: short orientation, no acknowledgment gate
-# ---------------------------------------------------------------------------
 st.title("How to use this tool")
 st.subheader("Warning: This tool is in beta mode. That means if you find "
              "a bug, you beta email isaacmalsky@gmail.com")
@@ -263,10 +248,8 @@ with st.expander("Validation"):
         "[JWST ERS carbon dioxide paper](https://doi.org/10.5281/zenodo."
         "6959427), and VULCAN 2.0 and petitRADTRANS on identical inputs.")
 
-# ---------------------------------------------------------------------------
 # Data availability -- detected live. The GUI reports only what BLOCKS a run;
 # the full install inventory is `jwst-tool data`.
-# ---------------------------------------------------------------------------
 def _data_label(it) -> str:
     """Public name without installation details or parenthetical clauses."""
     if it.key.startswith("pkg:"):
@@ -319,9 +302,7 @@ if _missing_req:
            if os.environ.get("SPACE_ID") else
            "\n\nUse `jwst-tool data` to check files and `jwst-tool fetch` "
            "to download supported data."))
-# ---------------------------------------------------------------------------
 # Opacity sources: the fetcher's provenance record + each k-table's header
-# ---------------------------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def _ktable_sources(_stamp: int) -> dict:
     # _stamp = provenance.json mtime_ns, so a re-fetch invalidates the cache;
@@ -620,9 +601,7 @@ if _missing_target:
                        "every freeable Fisher parameter needs a target default.")
 
 
-# ---------------------------------------------------------------------------
 # Sidebar controls
-# ---------------------------------------------------------------------------
 # Reset = bump a nonce that namespaces EVERY widget key: session_state.clear()
 # alone does not reset keyless widgets.
 _NONCE = st.session_state.setdefault("reset_nonce", 0)
@@ -812,10 +791,8 @@ def _combo_remove(i: int) -> None:
 
 
 with st.sidebar:
-    # -----------------------------------------------------------------------
     # Step 0: Load a configuration. The file was already APPLIED by
     # _apply_pending_config(); this is the widget plus the outcome messages.
-    # -----------------------------------------------------------------------
     st.markdown("### 0 · Configuration")
     # Every step's controls sit behind an expander,
     # so the sidebar reads as a short list of titled sections. The
@@ -834,9 +811,7 @@ with st.sidebar:
             st.warning(f"Not restored: {_n}")
     st.divider()
 
-    # -----------------------------------------------------------------------
     # Step 1: Target
-    # -----------------------------------------------------------------------
     st.markdown("### 1 · Target")
     with st.expander("Planet & observation type", expanded=True):
         planet_key = st.selectbox(
@@ -944,9 +919,7 @@ with st.sidebar:
                    f"{teq:.0f} K (zero albedo, full redistribution). It "
                    "sets the default Guillot T_irr in step 2.")
 
-    # -----------------------------------------------------------------------
     # Step 2: Atmosphere
-    # -----------------------------------------------------------------------
     st.divider()
     st.markdown("### 2 · Atmosphere")
 
@@ -1306,9 +1279,7 @@ with st.sidebar:
         else:
             log_kappa_cloud, alpha_cloud = -1.0, 0.0
 
-    # -----------------------------------------------------------------------
     # Step 3: Science goal (only the controls the selected goal needs)
-    # -----------------------------------------------------------------------
     st.divider()
     st.markdown("### 3 · Science goal")
     avail_free = list(forward.CHEM_PARAM_NAMES) + forward.TP_PARAM_NAMES[tp_mode]
@@ -1433,9 +1404,7 @@ with st.sidebar:
                         "photochemistry locked on) or free fewer "
                         "parameters.")
 
-    # -----------------------------------------------------------------------
     # Step 4: Observation
-    # -----------------------------------------------------------------------
     st.divider()
     st.markdown("### 4 · Observation")
     # Display-only band strings: the modelled band (registry envelope
@@ -1635,11 +1604,9 @@ with st.sidebar:
                 + ", ".join(f"{ins.MODES[k]['label']} {infl[k]:.2f}x"
                             for k in mode_keys) + ".")
 
-    # -----------------------------------------------------------------------
     # More settings: solver grid and advanced RT, behind one entry point.
     # No help tooltips in here: the labels stand on their own and the
     # reference material lives in README.md.
-    # -----------------------------------------------------------------------
     st.divider()
     st.markdown("### More settings")
 
@@ -1912,9 +1879,7 @@ else:
 _render_deferred_downloads(busy=run_clicked)
 
 
-# ---------------------------------------------------------------------------
 # Compute on click
-# ---------------------------------------------------------------------------
 def compute():
     if params_error:
         st.error(f"Cannot run with the current settings: {params_error}")
@@ -2067,11 +2032,9 @@ if run_clicked:
             # the COMPLETE non-canonical input set, for the staleness guard
             run_sig=_run_sig)
 
-# ---------------------------------------------------------------------------
 # Render order: staleness/failure notices, the VERDICT, then spectrum /
 # ranking / mode details / forecast, then the collapsed certificates, then
 # the adjoint diagnostics.
-# ---------------------------------------------------------------------------
 if "out" not in st.session_state:
     st.stop()
 
@@ -2086,7 +2049,6 @@ _cpj = json.loads(str(model["params_json"]))
 # since the run; the stored canonical params are the truth for this output).
 _ev = ("eclipse" if str(_cpj.get("science_mode", "transmission")) == "emission"
        else "transit")
-_tt_col = f"{_ev}s to target"
 co_eval = float(_cpj.get("co_ratio", forward.CO_BASELINE))
 
 # Staleness guard: results persist in session_state across sidebar edits, so

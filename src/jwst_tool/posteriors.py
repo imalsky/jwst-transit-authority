@@ -285,9 +285,7 @@ def marginalized_posteriors(results, free_names: list[str], centers: dict,
                 params=out_params)
 
 
-# ---------------------------------------------------------------------------
 # Named mode combinations
-# ---------------------------------------------------------------------------
 
 def combo_forecast(name: str, mode_keys: list[str], results_by_mode: dict,
                    free_names: list[str], centers: dict | None = None,
@@ -382,11 +380,9 @@ def combo_forecast(name: str, mode_keys: list[str], results_by_mode: dict,
     )
 
 
-# ---------------------------------------------------------------------------
 # Mock-observation layer: generated AFTER the forward model and the noise
 # model, never inside them. mock_realization draws it; mock_recovery fits it
 # (the forecast itself never sees the draw).
-# ---------------------------------------------------------------------------
 
 MOCK_KIND = "mock_observation_realization"
 # The disclosure exists in exactly two forms, reused everywhere it is
