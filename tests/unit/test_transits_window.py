@@ -35,7 +35,7 @@ def test_floor_ceiling_short_circuits_and_smallest_n_is_returned():
     r = _result()
     sig_inf = detect.transits_to_target(r, 1e-9)["sig_inf"]
     tt = detect.transits_to_target(r, sig_inf * 1.01)
-    assert tt == dict(n=None, reachable=False, sig_inf=tt["sig_inf"])
+    assert tt == dict(n=None, reachable=False, sig_inf=sig_inf)
     # a reachable target straddles: score(n) >= target > score(n-1)
     target = _score(r, 6) * 0.999
     tt2 = detect.transits_to_target(r, target)

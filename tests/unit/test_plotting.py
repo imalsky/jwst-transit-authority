@@ -407,9 +407,12 @@ def test_log_depth_axis_refusals_whisker_clip_and_tick_spacing():
             ("mixed-sign point centers", 50.0 + 900.0 * (wl / 12.0) ** 3,
              _log_points(np.linspace(-200.0, 600.0, 25), 20.0)),
     ):
-        with pytest.raises(ValueError, match="positive depth range"):
-            summary_figure.compose_summary_figure(
-                _log_spec(depth, points)), name
+        try:
+            summary_figure.compose_summary_figure(_log_spec(depth, points))
+        except ValueError as e:
+            assert "positive depth range" in str(e), name
+        else:
+            pytest.fail(f"{name}: non-positive depths did not raise")
 
     w = np.linspace(0.85, 5.2, 25)
     depth = 50.0 + 900.0 * (wl / 12.0) ** 3

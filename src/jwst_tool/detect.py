@@ -106,7 +106,6 @@ def detection_significance(signal: np.ndarray, sigma: np.ndarray,
         U = np.stack(rows)
         A = (U * w) @ U.T
         b = (U * w) @ signal
-    if rows:
         # normalize to correlation form so the rank decision depends on the
         # nuisance SPAN, not on row amplitudes/units
         d = np.sqrt(np.clip(np.diag(A), 0.0, None))

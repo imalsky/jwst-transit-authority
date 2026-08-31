@@ -15,7 +15,8 @@ a fully custom system).
 
 Layout: four numbered sidebar steps (Target, Atmosphere, Science goal,
 Observation) plus one "More settings" group; the result page leads with the
-verdict and collapses certificates/provenance. Widget KEYS must never change
+verdict, then physical structure, the constraint forecast, and the summary
+figure. Widget KEYS must never change
 (tests and cached session state rely on them); only placement, labels, and
 help text may move. A downloaded configuration JSON is a complete, shareable
 run setup; "Load a configuration" (share_config.py) restores it into the
@@ -274,11 +275,14 @@ def _data_label(it) -> str:
 
 
 @st.cache_data(ttl=3600, show_spinner="Checking installed data ...")
-def _cached_full_report(_nonce: int, _backend: str):
+def _cached_full_report(backend: str):
     # Disk-persisted (the Space entrypoint warms it at boot) on top of the
     # in-process st.cache. The manifest check is sampled, not exhaustive
-    # (full pass: `jwst-tool data --deep`). Invalidation is the two 1-hour
-    # TTLs -- this one and datacheck.REPORT_CACHE_MAX_AGE_S.
+    # (full pass: `jwst-tool data --deep`). Invalidation: the two 1-hour TTLs
+    # (this one and datacheck.REPORT_CACHE_MAX_AGE_S) plus `backend` in the
+    # cache key. NO leading underscore on the param: Streamlit skips
+    # underscore-prefixed args when hashing, which silently made this a
+    # single shared entry across backends.
     cached = datacheck.load_cached_report()
     if cached is not None:
         return cached
@@ -286,7 +290,7 @@ def _cached_full_report(_nonce: int, _backend: str):
                                        extra_mols=forward.EXTRA_MOLECULES)
 
 
-_data_report = _cached_full_report(0, ins.JWST_TOOL_BACKEND)
+_data_report = _cached_full_report(ins.JWST_TOOL_BACKEND)
 _missing_req = datacheck.missing_required(_data_report)
 if _missing_req:
     st.error(
@@ -304,9 +308,11 @@ if _missing_req:
            "to download supported data."))
 # Opacity sources: the fetcher's provenance record + each k-table's header
 @st.cache_data(show_spinner=False)
-def _ktable_sources(_stamp: int) -> dict:
-    # _stamp = provenance.json mtime_ns, so a re-fetch invalidates the cache;
+def _ktable_sources(stamp: int) -> dict:
+    # stamp = provenance.json mtime_ns, so a re-fetch invalidates the cache;
     # exceptions are not cached, so an absent file re-raises on every rerun.
+    # NO leading underscore: Streamlit skips underscore-prefixed args when
+    # hashing, which made this cache permanent for the process lifetime.
     return provenance.ktable_sources()
 
 
@@ -970,8 +976,11 @@ with st.sidebar:
                         and st.session_state.get(_k("tirr")) == _prev_auto):
                     st.session_state[_k("tirr")] = tirr0
                 st.session_state[_k("tirr_auto")] = tirr0
+            # key always seeded, so no value= default (see the _k("tp") note)
+            if _k("tirr") not in st.session_state:
+                st.session_state[_k("tirr")] = tirr0
             tp_kwargs["Tirr"] = st.number_input(
-                "T_irr (K)", 800.0, 2500.0, tirr0, 20.0, key=_k("tirr"))
+                "T_irr (K)", 800.0, 2500.0, step=20.0, key=_k("tirr"))
             tp_kwargs["Tint"] = st.number_input(
                 "T_int (K)", 50.0, 500.0, 100.0, 25.0, key=_k("tint"))
             # default 0.01 cm^2/g, Guillot (2010)'s canonical thermal opacity
@@ -1112,13 +1121,15 @@ with st.sidebar:
         _pbtm_key = K(f"pbtm_{science_mode}")
         _pbtm_default = forward.default_p_btm_bar(dict(tp_mode=tp_mode))
         _pbtm_now = st.session_state.get(_pbtm_key)
-        if (_pbtm_now in (forward.P_BTM_FILE_BAR, forward.P_BTM_PARAMETRIC_BAR)
-                and _pbtm_now != _pbtm_default):
+        if (_pbtm_now is None
+                or (_pbtm_now in (forward.P_BTM_FILE_BAR,
+                                  forward.P_BTM_PARAMETRIC_BAR)
+                    and _pbtm_now != _pbtm_default)):
             st.session_state[_pbtm_key] = _pbtm_default
+        # key always seeded above, so no value= default (see the _k("tp") note)
         p_btm_bar = st.number_input(
             "Column bottom pressure (bar)",
             *forward.P_BTM_RANGE,
-            value=_pbtm_default,
             step=1.0, format="%.4g", key=_pbtm_key)
 
     with st.expander("Composition"):
@@ -1158,15 +1169,13 @@ with st.sidebar:
             _kzz_opts.append("file")
             # Same rule as canonical_params: a table that carries Kzz
             # supplies the mixing profile, so "file" is the default.
-            # Seed session_state on first render (Streamlit ignores
-            # index= once the key exists).
             if _k("kzzmode") not in st.session_state:
                 st.session_state[_k("kzzmode")] = "file"
-        elif st.session_state.get(_k("kzzmode")) == "file":
+        elif st.session_state.get(_k("kzzmode")) in ("file", None):
             st.session_state[_k("kzzmode")] = "const"
+        # key always seeded above, so no index= default (see the _k("tp") note)
         kzz_mode = st.selectbox(
             "Vertical-mixing profile, Kzz", _kzz_opts,
-            index=_kzz_opts.index("file") if _kzz_file_ok else 0,
             key=_k("kzzmode"),
             format_func={"const": "Constant",
                          "Pfunc": "Power law in P (Pfunc)",
@@ -1201,10 +1210,11 @@ with st.sidebar:
             key=K("network"),
             format_func={"sncho": "S-N-C-H-O (full, default)",
                          "ncho": "N-C-H-O (no sulfur, faster)"}.get)
-        if _jac_hint == "ad":
+        if K("photo") not in st.session_state or _jac_hint == "ad":
             st.session_state[K("photo")] = True   # AD needs photolysis ON
+        # key always seeded above, so no value= default (see the _k("tp") note)
         use_photo = st.checkbox(
-            "Photochemistry (UV photolysis)", value=True, key=K("photo"),
+            "Photochemistry (UV photolysis)", key=K("photo"),
             disabled=(_jac_hint == "ad"))
         # default 83 deg = upstream VULCAN's dayside-average zenith angle
         sl_angle_deg = st.number_input(
@@ -1260,12 +1270,15 @@ with st.sidebar:
             key=K(f"xmols_vulcan{_net_sfx}"))
 
     with st.expander("Clouds & scattering (ExoJAX)"):
+        if K("rayl") not in st.session_state:
+            st.session_state[K("rayl")] = True
         if science_mode == "emission":
             # canonical_params forces Rayleigh OFF in emission (no scattering
             # channel); show the forced state, not a checked-but-ignored box
             st.session_state[K("rayl")] = False
+        # key always seeded above, so no value= default (see the _k("tp") note)
         use_rayleigh = st.checkbox(
-            "H2/He Rayleigh scattering", value=True, key=K("rayl"),
+            "H2/He Rayleigh scattering", key=K("rayl"),
             disabled=(science_mode == "emission"))
         cloud_on = st.checkbox(
             "Power-law cloud/haze opacity", value=False, key=K("cloud"))
@@ -1627,12 +1640,14 @@ with st.sidebar:
         # the pressure boundaries and the radius anchor live in step 2
         # ("Pressure limits & reference radius"); only the chord
         # integration choice stays advanced
-        if science_mode == "emission":
+        if (K("rtint") not in st.session_state
+                or science_mode == "emission"):
             # canonical_params pins simpson in emission (no transit chord);
             # show the pinned state, not a silently ignored choice
             st.session_state[K("rtint")] = "simpson"
+        # key always seeded above, so no index= default (see the _k("tp") note)
         rt_integration = st.selectbox(
-            "Transit chord integration", ["simpson", "trapezoid"], index=0,
+            "Transit chord integration", ["simpson", "trapezoid"],
             key=K("rtint"), disabled=(science_mode == "emission"),
             format_func={"simpson": "Simpson (ExoJAX default)",
                          "trapezoid": "Trapezoid"}.get)
@@ -2016,9 +2031,8 @@ if run_clicked:
             # the COMPLETE non-canonical input set, for the staleness guard
             run_sig=_run_sig)
 
-# Render order: staleness/failure notices, the VERDICT, then spectrum /
-# ranking / mode details / forecast, then the collapsed certificates, then
-# the adjoint diagnostics.
+# Render order: staleness/failure notices, the VERDICT, then physical
+# structure, the constraint forecast, and the summary figure.
 if "out" not in st.session_state:
     st.stop()
 
@@ -2139,6 +2153,8 @@ if goal_r == "detect":
         verdict = (f"**{best['label']}**: template S/N {bsig:.1f}σ "
                    f"({_METRIC_LABEL[_best_projected]}) in {ntr} "
                    f"{_ev}{'s' if ntr > 1 else ''} (target {tsig:g}σ).")
+        if best.get("warnings"):
+            verdict += "  Operational warnings — see the status table."
         if bsig >= tsig:
             # No banner when the target is met: the
             # figure and the verdict already carry the number, and a green
@@ -2196,6 +2212,8 @@ else:
     verdict = (f"**{ins.MODES[bk]['label']}**: ±{bs:.3g}{usp} at "
                f"{tsig:g}σ in {ntr} {_ev}{'s' if ntr > 1 else ''} "
                f"(target ±{target:g}{usp}).")
+    if next((r for r in usable_jac if r["mode_key"] == bk), {}).get("warnings"):
+        verdict += "  Operational warnings — see the status table."
     if bs <= target:
         pass                      # see the detect-goal note: no banner on success
     elif np.isfinite(comb) and comb <= target:
@@ -2213,6 +2231,26 @@ else:
         else:
             st.warning(verdict + f"  >{detect.N_TRANSITS_CAP} {_ev}s "
                        "(scan limit).")
+
+# --- operational status (the 2026-08-05 decision record's three-value
+# column; closes F-040). The tool checks saturation and relays the per-mode
+# observation warnings and checks nothing else, so no row can ever read
+# "recommended". st.table, not st.dataframe (same static-table rule as the
+# constraint table).
+def _op_status(r: dict) -> str:
+    if r["saturated"]:
+        return "saturated at the shortest ramp tried"
+    if r.get("warnings"):
+        return "warnings — verify in APT"
+    return "verify in APT"
+
+
+st.table(pd.DataFrame({
+    "mode": [r["label"] for r in results],
+    "operational status": [_op_status(r) for r in results]}))
+st.caption("Operational status covers saturation and the per-mode "
+           "observation warnings only; scheduling and APT feasibility are "
+           "not checked.")
 
 # --- spectrum data (rendered ONCE, on the summary figure below) -------------
 wl = model["wl_um"]

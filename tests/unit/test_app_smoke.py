@@ -532,6 +532,8 @@ def test_combo_builder_fisher_table_naming_and_reset():
 
     primed = dict(name="My set", modes=["nirspec_g395h", "nirspec_prism"])
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
+    out["results"][0]["warnings"] = ("subarray ramp is longer than the "
+                                     "STScI recommendation",)
     at = _run_with_result(out, out_meta, n0_combos=[dict(primed)])
     assert not at.exception, at.exception
     subs = [s.value for s in at.subheader]
@@ -550,6 +552,16 @@ def test_combo_builder_fisher_table_naming_and_reset():
     assert not any("forecast summary" in s for s in subs), subs
     assert "Figure (PDF, vector)" in {b.label
                                       for b in at.get("download_button")}
+
+    # the operational-status table (F-040): three honest values, never
+    # "recommended"; the warned mode's row says so
+    _status = [t.value for t in at.table
+               if "operational status" in getattr(t.value, "columns", [])]
+    assert _status, "no operational-status table rendered"
+    _svals = list(_status[0]["operational status"])
+    assert set(_svals) <= {"saturated at the shortest ramp tried",
+                           "warnings — verify in APT", "verify in APT"}, _svals
+    assert "warnings — verify in APT" in _svals, _svals
 
     # identify the CONSTRAINT table by its parameter column
     tables = [t.value for t in at.table

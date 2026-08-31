@@ -68,9 +68,11 @@ LABEL = {k: (_ins.MODES[k]["label"]
              .replace(" (slitless)", ""))
          for k in MODES}
 STAR_MARK = {"w39_like": "o", "bright_hot": "s", "faint_k": "^"}
-STAR_LABEL = {"w39_like": "W39-like (Ks 10.7)", "bright_hot": "bright (Ks 8.5)",
-              "faint_k": "faint (Ks 13)"}
-SAT_LIMIT = 0.80   # a mode with sat_frac_ours above this is saturated (unusable)
+# gate-owned data, never re-typed here (the MODES rule above applies)
+STAR_LABEL = {"w39_like": f"W39-like (Ks {pg.STARS['w39_like']['ks_mag']:.1f})",
+              "bright_hot": f"bright (Ks {pg.STARS['bright_hot']['ks_mag']:.1f})",
+              "faint_k": f"faint (Ks {pg.STARS['faint_k']['ks_mag']:.0f})"}
+SAT_LIMIT = pg.SAT_LIMIT   # a mode above this is saturated (unusable)
 
 plt.rcParams.update({
     "figure.facecolor": SURFACE, "axes.facecolor": SURFACE,
@@ -285,7 +287,7 @@ def fig_extracted_flux(summary, out_root, mode="nirspec_g395h",
     # spectrum difference
     ax.annotate("both sides receive the identical resampled stellar\n"
                 "spectrum; after the quantum-yield unfold the two\n"
-                "extractions agree per pixel (median ratio 1.0000)",
+                f"extractions agree per pixel (median ratio {med:.4f})",
                 xy=(0.985, 0.97), xycoords="axes fraction", ha="right",
                 va="top", fontsize=7.6, color=INK2)
     _style(ax)
