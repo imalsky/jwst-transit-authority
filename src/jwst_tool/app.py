@@ -247,7 +247,10 @@ with st.expander("Validation"):
         "validation/figures). This includes trying to recreate the results "
         "of [Tsai et al. 2023](https://doi.org/10.5281/zenodo.7542781), the "
         "[JWST ERS carbon dioxide paper](https://doi.org/10.5281/zenodo."
-        "6959427), and VULCAN 2.0 and petitRADTRANS on identical inputs.")
+        "6959427), and VULCAN 2.0 and petitRADTRANS on identical inputs. "
+        "The correlated-k binning validation is shown "
+        "[here](https://github.com/imalsky/vulcan-forward/blob/main/"
+        "validation/figures/ckd_verification_vs_exojax_exok.png).")
 
 # Data availability -- detected live. The GUI reports only what BLOCKS a run;
 # the full install inventory is `jwst-tool data`.

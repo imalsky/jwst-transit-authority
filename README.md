@@ -119,6 +119,9 @@ detection statistics, Fisher calculations, and full transmission and emission
 chains. Pandeia results are also compared with PandExo. Radiative-transfer
 checks against petitRADTRANS and science comparison figures are stored in
 [`vulcan-forward`](https://github.com/imalsky/vulcan-forward/tree/main/validation/figures).
+The correlated-k binning validation (this tool's only opacity path,
+cross-checked against ExoJAX and exo_k) is
+[`ckd_verification_vs_exojax_exok.png`](https://github.com/imalsky/vulcan-forward/blob/main/validation/figures/ckd_verification_vs_exojax_exok.png).
 
 ```bash
 python -m pip install -e ".[gui,dev]"
