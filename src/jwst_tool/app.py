@@ -1381,11 +1381,7 @@ with st.sidebar:
                 key=K("jacm"),
                 format_func={"fd": "Finite differences",
                              "ad": "Automatic differentiation "
-                                   "(forward-mode, default)"}.get,
-                help="Default here is AD (fast, photo-on only); the "
-                     "programmatic interface defaults to certified central "
-                     "finite differences, valid everywhere. Both are "
-                     "certified; the method used is recorded with the run.")
+                                   "(forward-mode, default)"}.get)
             # Loud slow-path flag: FD re-solves the chemistry per row, so
             # point the user at AD before a multi-hour run.
             if fisher_params and jac_method == "fd":
@@ -1516,9 +1512,7 @@ with st.sidebar:
                            "instrument but absent from the model.")
 
     with st.expander("Noise model (Pandeia)"):
-        st.markdown("**Minimum noise floor** (PandExo convention; the "
-                    "suggested values are planning assumptions, not measured "
-                    "instrument calibrations)")
+        st.markdown("**Minimum noise floor** (PandExo convention)")
         # DEFAULTS TO CONSTANT. A default is acceptable in ONE direction
         # only: preselecting "No floor" would claim undemonstrated precision
         # on the user's behalf, while a constant floor at the suggested
@@ -1615,12 +1609,7 @@ with st.sidebar:
         # distinct (interp_map regrids chemistry onto the RT grid).
         nz = st.number_input(
             "Layers per grid (chemistry and RT)", *forward.NZ_RANGE,
-            forward.NZ_DEFAULT, 10, key=K("nz"),
-            help="Chemistry and RT use separate log-pressure grids with "
-                 "this many layers each, both ending at the model top "
-                 "pressure above. Abundances and mean molecular weight are "
-                 "regridded onto the RT grid; T is evaluated on the RT grid "
-                 "(file mode: interpolated).")
+            forward.NZ_DEFAULT, 10, key=K("nz"))
         yconv_cri = st.number_input(
             "Solver convergence tolerance", 1.0e-4, 1.0e-2,
             forward.YCONV_DEFAULT, 1.0e-4,
@@ -1863,12 +1852,7 @@ if _canon is not None:
             "Download configuration (JSON)",
             json.dumps(_share, indent=2, default=str).encode(),
             f"jwst_tool_{_slug(planet_label)}_config.json",
-            "application/json", key=K("dl_config"),
-            help="The full setup of this run, uploaded tables included; "
-                 "load it in step 0, here or on another machine, to "
-                 "reproduce the run. Exact numerical reproduction also "
-                 "needs the same tool version; the software versions are "
-                 "recorded in the file.")
+            "application/json", key=K("dl_config"))
 else:
     with _cfg_col:
         st.caption("Configuration download is unavailable while the "
@@ -2450,9 +2434,7 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
             return [{"mode": mode_label,
                      "parameter": forward.PARAM_LABELS[n],
                      _marg_col: _cell(n, sig[n]),
-                     _cond_col: _cell(n, cond[n]),
-                     "unit": forward.PARAM_UNITS[n] or (
-                         "C/O ratio" if n == "dlnCO" else "dimensionless")}
+                     _cond_col: _cell(n, cond[n])}
                     for n in fisher_names]
 
         frows = []
@@ -2463,7 +2445,7 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
                 # data (same exclusion policy as the verdict + combined)
                 frows.append({"mode": r["label"],
                               "parameter": "(saturated, excluded)",
-                              _marg_col: "", _cond_col: "", "unit": ""})
+                              _marg_col: "", _cond_col: ""})
                 continue
             cond = {}
             sig = fisher_mod.mode_forecast(r, fisher_names, conditional=cond)
@@ -2490,9 +2472,7 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
                                 else f"{_sm:.3g}"),
                     _cond_col: ("unconstrained"
                                 if not np.isfinite(_sc) or _sc > 1e4
-                                else f"{_sc:.3g}"),
-                    "unit": forward.PARAM_UNITS[n] or (
-                        "C/O ratio" if n == "dlnCO" else "dimensionless")})
+                                else f"{_sc:.3g}")})
         # Custom combinations FIRST: they are what the user built, so they
         # lead the table. Order within each group is preserved.
         _combo_names = {str(_rec["name"]) for _rec in combo_recs}
