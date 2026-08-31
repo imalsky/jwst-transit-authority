@@ -36,9 +36,9 @@ RUN conda create -y -n app python=3.12 \
 # pins are also the cache-bust. The build FAILS on a pin/rev-parse mismatch;
 # BUILD_INFO records the enforced pins.
 # (History of these decisions: notes.md, Decision records.)
-ARG VULCAN_JAX_SHA=b5b506ebdd12c201bb9f75894b6f726ed27e5be0
-ARG VULCAN_FORWARD_SHA=57bd776ae1a593f2ba60c02976c34d675b044a36
-ARG JWST_TOOL_SHA=a1bdbbed72bca1808f90fedabfec4eff2bcc28d5
+ARG VULCAN_JAX_SHA=143b8458f20bccd54f9f600f4f96d131b9194d78
+ARG VULCAN_FORWARD_SHA=0250ce08ec2b4fa787e479feb2d5ecdcb9a65cd7
+ARG JWST_TOOL_SHA=cff81ab967ec68f2ab89a56afd76808990191dc4
 RUN set -e; \
     for spec in \
       "VULCAN-JAX https://github.com/imalsky/jax-vulcan.git ${VULCAN_JAX_SHA}" \
