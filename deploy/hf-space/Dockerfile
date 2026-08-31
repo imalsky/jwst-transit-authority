@@ -38,7 +38,7 @@ RUN conda create -y -n app python=3.12 \
 # (History of these decisions: notes.md, Decision records.)
 ARG VULCAN_JAX_SHA=b5b506ebdd12c201bb9f75894b6f726ed27e5be0
 ARG VULCAN_FORWARD_SHA=57bd776ae1a593f2ba60c02976c34d675b044a36
-ARG JWST_TOOL_SHA=0959ae195d4cde2817d1fc97be3a6d034a78763a
+ARG JWST_TOOL_SHA=a1bdbbed72bca1808f90fedabfec4eff2bcc28d5
 RUN set -e; \
     for spec in \
       "VULCAN-JAX https://github.com/imalsky/jax-vulcan.git ${VULCAN_JAX_SHA}" \
