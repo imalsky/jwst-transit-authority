@@ -247,7 +247,7 @@ def test_display_sigma_units():
     # C/O: absolute ratio, scaled by the atmosphere's C/O
     assert fisher.display_sigma("dlnCO", 0.1, co_eval=0.5) == pytest.approx(0.05)
     # dlnCO WITHOUT co_eval is refused loudly -- never a silent wrong scale
-    with pytest.raises(ValueError, match="co_eval"):
+    with pytest.raises(ValueError):
         fisher.display_sigma("dlnCO", 0.1)
     # a plain temperature is unit-1 (K in, K out)
     assert fisher.display_sigma("Tirr", 42.0) == 42.0

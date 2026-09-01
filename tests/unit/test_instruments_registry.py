@@ -42,6 +42,11 @@ def test_display_encodings_are_complete_and_unique():
     markers = list(ins.MODE_MARKER.values())
     assert len(set(colors)) == len(colors), "duplicate MODE_COLOR"
     assert len(set(markers)) == len(markers), "duplicate MODE_MARKER"
+    # MODE_COLOR/MODE_MARKER are built by enumerate(MODES), so a mode may
+    # only ever be APPENDED: inserting one recolors every mode after it
+    assert list(ins.MODES)[7] == "nirspec_g395m", (
+        "MODES was reordered -- every mode after the insertion point silently "
+        "changed color and marker")
 
 
 def test_ngroup_ordering_and_pandexo_caps_hold_for_every_mode():
