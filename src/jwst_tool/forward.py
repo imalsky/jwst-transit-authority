@@ -33,7 +33,8 @@ gate, lnR0 is RT-only. jac_method="ad" is one warm-started forward-mode
 jvp per row (photo-on required; the lnZ jvp is the fixed-structural-grid
 derivative and the dlnCO jvp is refused near O-exhaustion). Where the
 central dlnCO stencil would straddle C/O = 1, the FD row steps one-sided
-away from the boundary instead (``fd_stencil``); AD has no such escape.
+toward lower C/O instead (``fd_stencil``; refused at or above 1 in that
+band); AD has no such escape.
 ``fisher.py`` turns the Jacobian + Pandeia noise into forecasts.
 
 Per-molecule "removed" spectra zero that molecule's VMR in the RT only --
@@ -128,28 +129,40 @@ FD_COMP_PARAMS = ("lnZ", "dlnCO")     # need a chemistry re-init per FD point
 FD_CONSISTENCY_TOL = 0.25
 FD_LNR0_STEP = 0.01                   # lnR0 is RT-only (smooth, analytic)
 JAC_METHODS = ("fd", "ad")            # certified-FD default / warm-jvp opt-in
-# Minimum oxygen-reservoir bound b_z for the AD dlnCO row. co_bz_bound =
-# ln(1 + min_z(OO_z/OC_z)) is nonnegative by construction, so a "<= 0" refusal
-# can never fire; the reachable criterion is one FD stencil width (2h) from
-# the O-exhaustion boundary, below which the per-layer tangent factors are
-# ill-conditioned. FD re-initializes per stencil point and steps one-sided
-# away from C/O = 1 when the central stencil would cross it (fd_stencil).
-CO_BZ_MIN_AD = 2.0 * FD_STEPS["dlnCO"]   # = 0.2
+# Minimum positivity margin for the AD dlnCO row. The engine's co_bz_bound =
+# ln(1 + min_z(OO_z/OC_z)) is the largest ln C/O increment before some
+# layer's fixed-O factor b_z turns nonpositive (nonnegative by construction,
+# so a "<= 0" refusal could never fire); it is computed on the build's
+# initial column, a proxy for the warm state the tangent runs on. Below this
+# margin the per-layer tangent factors are ill-conditioned. Empirical, equal
+# to the central FD stencil's reach today; a literal so a step change cannot
+# move the AD gate silently. FD re-initializes per stencil point and steps
+# one-sided below C/O = 1 when the central stencil would cross it.
+CO_BZ_MIN_AD = 0.2
 
 
 def fd_stencil(name: str, value: float) -> tuple[tuple[int, ...], float]:
     """(step multiples, step) a composition row solves at. Central (+-h, +-2h)
     at h = FD_STEPS[name], unless the dlnCO stencil would straddle C/O = 1:
-    the C-rich side has no certified steady state (W39b at C/O 1.087
-    exhausts count_max at longdy 36), so the row uses the second-order
-    one-sided stencil (d, 2d, 4d) away from the boundary, at h/2 so its
-    reach equals the central stencil's 2h (at the full step the curvature
-    toward the boundary fails the h-vs-2h gate on a 1600 K hot Jupiter)."""
+    the C-rich side does not certify under the shipped solver settings (W39b
+    at C/O 1.087 exhausts count_max at longdy 36), so below 1 the row uses
+    the one-sided stencil (-1, -2, -4) toward lower C/O -- third order after
+    Richardson -- at h/2 so its reach equals the central stencil's 2h (at
+    the full step the curvature toward the boundary fails the h-vs-2h gate
+    on a 1600 K hot Jupiter). At or above 1 inside that band no stencil is
+    certified, so the row refuses."""
     h = FD_STEPS[name]
     if name == "dlnCO":
         m = float(np.exp(2.0 * h))
         if value / m <= 1.0 <= value * m:
-            return ((-1, -2, -4) if value <= 1.0 else (1, 2, 4)), h / 2.0
+            if value >= 1.0:
+                raise ValueError(
+                    f"co_ratio={value:g}: a dlnCO FD row at or above C/O = 1 "
+                    "within one stencil of the boundary is not certified "
+                    "(the C-rich side does not reach a certified steady "
+                    "state under the shipped settings). Drop dlnCO from "
+                    "fisher_params.")
+            return (-1, -2, -4), h / 2.0
     return (1, -1, 2, -2), h
 
 
@@ -1724,13 +1737,14 @@ def run_model(params: dict, log=print) -> Path:
         if float(_bz) <= CO_BZ_MIN_AD:
             raise RuntimeError(
                 "AD Jacobian for dlnCO refused at this composition: the "
-                f"fixed-O differential direction's oxygen-reservoir "
-                f"bound b_z = {float(_bz):.3g} <= {CO_BZ_MIN_AD:g} "
-                f"(C-rich composition, C/O = {cp['co_ratio']:g}: O-only "
-                "carriers are within one FD stencil of exhaustion, so "
-                "the tangent direction is ill-conditioned). Use "
-                "jac_method='fd': its dlnCO row steps one-sided away from "
-                "C/O = 1 and is certified by the h-vs-2h gate.")
+                "fixed-O differential direction's oxygen-reservoir "
+                f"positivity margin co_bz_bound = {float(_bz):.3g} <= "
+                f"{CO_BZ_MIN_AD:g} (high-C/O composition, C/O = "
+                f"{cp['co_ratio']:g}: O-only carriers are within one FD "
+                "stencil of exhaustion, so the tangent direction is "
+                "ill-conditioned). Use jac_method='fd': below C/O = 1 its "
+                "dlnCO row steps one-sided away from the boundary and is "
+                "certified by the h-vs-2h gate.")
 
     # BC flux species must exist in the solved network: the upstream
     # read_bc_flux SILENTLY skips unknown tokens, which would turn a typo'd

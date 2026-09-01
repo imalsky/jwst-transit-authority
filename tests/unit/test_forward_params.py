@@ -744,28 +744,43 @@ def test_composition_fd_stencil_envelope():
     at C/O 1.087 exhausts count_max at longdy 36). AD rows take no stencil
     and are exempt here (the dlnCO AD row has its own run-time b_z margin)."""
     forward.canonical_params(_p(met_x_solar=80.0, fisher_params=["lnZ"]))
-    for kw, fp in ((dict(met_x_solar=100.0), "lnZ"),
-                   (dict(met_x_solar=0.1), "lnZ"),
-                   (dict(co_ratio=2.0), "dlnCO"),
-                   (dict(co_ratio=0.12), "dlnCO")):
+    for kw, fp in (({"met_x_solar": 100.0}, "lnZ"),
+                   ({"met_x_solar": 0.1}, "lnZ"),
+                   ({"co_ratio": 2.0}, "dlnCO"),
+                   ({"co_ratio": 0.12}, "dlnCO")):
         with pytest.raises(ValueError, match="stencil"):
             forward.canonical_params(_p(fisher_params=[fp], **kw))
-    h = forward.FD_STEPS["dlnCO"]
-    assert forward.fd_stencil("dlnCO", 0.55) == ((1, -1, 2, -2), h)
-    assert forward.fd_stencil("dlnCO", 0.89) == ((-1, -2, -4), h / 2)
-    assert forward.fd_stencil("dlnCO", 1.1) == ((1, 2, 4), h / 2)
+    h0 = forward.FD_STEPS["dlnCO"]
+    assert forward.fd_stencil("dlnCO", 0.55) == ((1, -1, 2, -2), h0)
+    assert forward.fd_stencil("dlnCO", 0.89) == ((-1, -2, -4), h0 / 2)
     assert forward.fd_stencil("lnZ", 0.89) == ((1, -1, 2, -2),
                                                forward.FD_STEPS["lnZ"])
-    for co in (0.89, 1.0, 1.1, 1.6):
+    for co in (0.89, 1.6):
         forward.canonical_params(_p(co_ratio=co, fisher_params=["dlnCO"]))
+    # at or above 1 inside the band nothing is certified (exactly 1.0 must
+    # not fall to either side by floating-point accident)
+    for co in (1.0, 1.1):
+        with pytest.raises(ValueError, match="not certified"):
+            forward.canonical_params(_p(co_ratio=co, fisher_params=["dlnCO"]))
     # both schemes' Richardson rows are exact on a cubic (sign and
-    # coefficients of the one-sided stencil included)
+    # coefficients of the one-sided stencil included); the one-sided row is
+    # third order -- on a quartic its error is -f''''(x) h^3 / 3 exactly, so
+    # halving h divides it by 8 -- while the central row stays exact
     x0, h = 0.3, 0.1
     f = lambda x: x ** 3 - 2.0 * x
-    for offs in ((1, -1, 2, -2), (-1, -2, -4), (1, 2, 4)):
+    g = lambda x: x ** 4
+    for offs in ((1, -1, 2, -2), (-1, -2, -4)):
         j1, j2 = forward.fd_estimates(offs, {s: f(x0 + s * h) for s in offs},
                                       f(x0), h)
         assert abs((4.0 * j1 - j2) / 3.0 - (3.0 * x0 ** 2 - 2.0)) < 1e-12
+    err = {}
+    for offs, hh in (((-1, -2, -4), h), ((-1, -2, -4), h / 2),
+                     ((1, -1, 2, -2), h)):
+        j1, j2 = forward.fd_estimates(offs, {s: g(x0 + s * hh) for s in offs},
+                                      g(x0), hh)
+        err[offs, hh] = abs((4.0 * j1 - j2) / 3.0 - 4.0 * x0 ** 3)
+    assert abs(err[(-1, -2, -4), h] / err[(-1, -2, -4), h / 2] - 8.0) < 1e-6
+    assert err[(1, -1, 2, -2), h] < 1e-12
     # no stencil under AD; and without fisher_params the value is legal
     forward.canonical_params(_p(met_x_solar=100.0, fisher_params=["lnZ"],
                                 jac_method="ad"))
