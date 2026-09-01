@@ -62,19 +62,11 @@ def test_ramp_floors_equal_pandeia_mingroups():
     """The search floor is pandeia 2026.7's per-detector
     mingroups (jwst/<instrument>/config.json: nirspec 1, niriss 1,
     nircam 1, miri 2) -- the same field PandExo reads, so both tools search
-    the same ramp space. The warn thresholds are instrument-specific
-    (jwst-docs, verified 2026-08-09): NIRSpec/NIRISS warn at 1 group;
-    NIRCam TSO guidance says avoid saturating in fewer than 4 groups
-    (linearity-correction reliance); MIRI calls 2-5 group ramps very
-    difficult to calibrate (5+ recommended)."""
-    expected = {"nirspec": (1, 2), "niriss": (1, 2),
-                "nircam": (1, 4), "miri": (2, 6)}
+    the same ramp space."""
+    expected = {"nirspec": 1, "niriss": 1, "nircam": 1, "miri": 2}
     for key, m in ins.MODES.items():
-        floor, warn = expected[m["instrument"]]
-        assert m["ngroup_min"] == floor, key
-        assert m["ngroup_warn_below"] == warn, key
-        assert 1 <= m["ngroup_min"] <= m["ngroup_warn_below"] \
-            <= m["ngroup_max"], key
+        assert m["ngroup_min"] == expected[m["instrument"]], key
+        assert 1 <= m["ngroup_min"] <= m["ngroup_max"], key
 
 
 def test_release_segment():

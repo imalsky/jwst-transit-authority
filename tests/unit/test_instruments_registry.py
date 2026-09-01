@@ -49,14 +49,13 @@ def test_display_encodings_are_complete_and_unique():
 
 
 def test_ngroup_ordering_and_pandexo_caps_hold_for_every_mode():
-    """1 <= ngroup_min <= ngroup_warn_below <= ngroup_max, and the PandExo
-    per-instrument hard caps -- the same conditions the import guard raises
-    on, re-asserted here so the guard itself cannot be quietly deleted."""
+    """1 <= ngroup_min <= ngroup_max, and the PandExo per-instrument hard
+    caps -- the same conditions the import guard raises on, re-asserted here
+    so the guard itself cannot be quietly deleted."""
     for key, m in ins.MODES.items():
-        assert 1 <= m["ngroup_min"] <= m["ngroup_warn_below"] \
-            <= m["ngroup_max"], (
+        assert 1 <= m["ngroup_min"] <= m["ngroup_max"], (
             f"{key}: ngroup ordering broken "
-            f"({m['ngroup_min']}/{m['ngroup_warn_below']}/{m['ngroup_max']})")
+            f"({m['ngroup_min']}/{m['ngroup_max']})")
         cap = ins.PANDEXO_NGROUP_MAX.get(m["instrument"])
         if cap is not None:
             assert m["ngroup_max"] <= cap, (

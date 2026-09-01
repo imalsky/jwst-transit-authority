@@ -76,7 +76,7 @@ def _synthetic_out(science_mode="transmission", saturated=False,
             "depth": np.full(nb, 0.021), "sigma": np.full(nb, 1.5e-4),
             "floor": np.zeros(nb), "seg": np.zeros(nb, int),
             "median_sigma_ppm": 150.0, "n_bins": nb, "ngroup": 12,
-            "t_cycle_s": 11.0, "warnings": (),
+            "t_cycle_s": 11.0,
             "jac_bins": (rng.standard_normal((3, nb)) * 1e-4
                          if with_jac else None),
         }
@@ -439,6 +439,7 @@ def test_all_saturated_run_has_no_best_mode_score_or_points():
     assert not at.exception, at.exception
     warns = [w.value for w in at.warning]
     assert any("all selected modes saturate" in w for w in warns), warns
+    assert any("saturated at the shortest ramp" in w for w in warns), warns
     assert not at.success
     assert not any("Best mode" in w for w in warns)
     assert not any("Best mode" in e.value for e in at.error)
@@ -532,8 +533,6 @@ def test_combo_builder_fisher_table_naming_and_reset():
 
     primed = dict(name="My set", modes=["nirspec_g395h", "nirspec_prism"])
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    out["results"][0]["warnings"] = ("subarray ramp is longer than the "
-                                     "STScI recommendation",)
     at = _run_with_result(out, out_meta, n0_combos=[dict(primed)])
     assert not at.exception, at.exception
     subs = [s.value for s in at.subheader]
@@ -552,16 +551,6 @@ def test_combo_builder_fisher_table_naming_and_reset():
     assert not any("forecast summary" in s for s in subs), subs
     assert "Figure (PDF, vector)" in {b.label
                                       for b in at.get("download_button")}
-
-    # the operational-status table (F-040): three honest values, never
-    # "recommended"; the warned mode's row says so
-    _status = [t.value for t in at.table
-               if "operational status" in getattr(t.value, "columns", [])]
-    assert _status, "no operational-status table rendered"
-    _svals = list(_status[0]["operational status"])
-    assert set(_svals) <= {"saturated at the shortest ramp tried",
-                           "warnings — verify in APT", "verify in APT"}, _svals
-    assert "warnings — verify in APT" in _svals, _svals
 
     # identify the CONSTRAINT table by its parameter column
     tables = [t.value for t in at.table

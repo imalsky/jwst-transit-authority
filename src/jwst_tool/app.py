@@ -2111,6 +2111,10 @@ for k, reason in out["unusable"]:
     # same floor PandExo searches to), so "saturated at the shortest ramp"
     # is a real brightness limit, not a tool policy bound.
     st.warning(f"**{ins.MODES[k]['label']}**: unusable, {reason}.")
+for r in results:
+    if r["saturated"]:
+        st.warning(f"**{r['label']}**: saturated at the shortest ramp, "
+                   "excluded from the ranking.")
 
 if not results:
     st.stop()
@@ -2162,8 +2166,6 @@ if goal_r == "detect":
         verdict = (f"**{best['label']}**: template S/N {bsig:.1f}σ "
                    f"({_METRIC_LABEL[_best_projected]}) in {ntr} "
                    f"{_ev}{'s' if ntr > 1 else ''} (target {tsig:g}σ).")
-        if best.get("warnings"):
-            verdict += "  Operational warnings — see the status table."
         if bsig >= tsig:
             # No banner when the target is met: the
             # figure and the verdict already carry the number, and a green
@@ -2221,8 +2223,6 @@ else:
     verdict = (f"**{ins.MODES[bk]['label']}**: ±{bs:.3g}{usp} at "
                f"{tsig:g}σ in {ntr} {_ev}{'s' if ntr > 1 else ''} "
                f"(target ±{target:g}{usp}).")
-    if next((r for r in usable_jac if r["mode_key"] == bk), {}).get("warnings"):
-        verdict += "  Operational warnings — see the status table."
     if bs <= target:
         pass                      # see the detect-goal note: no banner on success
     elif np.isfinite(comb) and comb <= target:
@@ -2240,26 +2240,6 @@ else:
         else:
             st.warning(verdict + f"  >{detect.N_TRANSITS_CAP} {_ev}s "
                        "(scan limit).")
-
-# --- operational status (the 2026-08-05 decision record's three-value
-# column; closes F-040). The tool checks saturation and relays the per-mode
-# observation warnings and checks nothing else, so no row can ever read
-# "recommended". st.table, not st.dataframe (same static-table rule as the
-# constraint table).
-def _op_status(r: dict) -> str:
-    if r["saturated"]:
-        return "saturated at the shortest ramp tried"
-    if r.get("warnings"):
-        return "warnings — verify in APT"
-    return "verify in APT"
-
-
-st.table(pd.DataFrame({
-    "mode": [r["label"] for r in results],
-    "operational status": [_op_status(r) for r in results]}))
-st.caption("Operational status covers saturation and the per-mode "
-           "observation warnings only; scheduling and APT feasibility are "
-           "not checked.")
 
 # --- spectrum data (rendered ONCE, on the summary figure below) -------------
 wl = model["wl_um"]

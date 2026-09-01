@@ -169,72 +169,6 @@ def test_r_bin_beyond_model_resolution_refuses():
     assert np.isfinite(r["median_sigma_ppm"])
 
 
-def _miri_mode_inputs(ngroup):
-    """Minimal evaluate_mode inputs inside the MIRI LRS band (5-12 um)."""
-    wl_pix = np.linspace(5.0, 7.0, 300)
-    mode_result = dict(
-        wl=wl_pix.tolist(), flux=np.full(wl_pix.size, 1e6).tolist(),
-        noise_1int=np.full(wl_pix.size, 1e3).tolist(),
-        t_cycle_s=10.0, r_native=None,
-        n_full_sat=np.zeros(wl_pix.size).tolist(),
-        n_part_sat=np.zeros(wl_pix.size).tolist(),
-        ngroup=ngroup, sat_frac=0.5, saturated=False)
-    wl_model = np.linspace(4.9, 7.1, 2000)
-    model = dict(wl_um=wl_model, depth=np.zeros(wl_model.size),
-                 mols=["H2O"], jac=[np.zeros(wl_model.size)],
-                 jac_names=["p0"])
-    return mode_result, model
-
-
-def test_ramp_and_budget_disclosures():
-    """Short ramps and incomplete searches are DISCLOSED, never demoted.
-
-    A ramp below ngroup_warn_below (PRISM: 2) gets a warning naming both
-    group counts and never marks the row saturated; a worker payload with
-    ramp_search_complete=False carries a budget warning (absent field, older
-    payloads, stays silent); a 2-group MIRI selection is MIRI's shortest
-    permitted ramp and gets a DISTINCT operational warning telling the user
-    to confirm approval requirements in APT."""
-    kw = dict(target_mol=None, R_bin=200.0, t_in_s=3600.0, t_out_s=3600.0,
-              n_transits=1, floor_spec=None)
-    mr, model = _lsf_mode_inputs(lambda wl: np.zeros(wl.size))
-    mr["ngroup"] = 1
-    r = detect.evaluate_mode("nirspec_prism", mr, model, **kw)
-    hits = [w for w in r["warnings"]
-            if "below this mode's STScI-recommended ramp" in w]
-    assert len(hits) == 1
-    assert "1 group(s) per integration" in hits[0]
-    # the NIRSpec-specific reason, paraphrasing jwst-docs "NIRSpec Detector
-    # Recommended Strategies" (the minimum recommended ramp is 2 groups; 1 is
-    # for very bright BOTS targets). It must NOT be a generic short-ramp note.
-    assert "very bright BOTS target" in hits[0]
-    assert r["saturated"] is False
-    # at the threshold: no short-ramp warning
-    mr2, model2 = _lsf_mode_inputs(lambda wl: np.zeros(wl.size))
-    mr2["ngroup"] = 2
-    r2 = detect.evaluate_mode("nirspec_prism", mr2, model2, **kw)
-    assert not [w for w in r2["warnings"]
-                if "below this mode's STScI-recommended ramp" in w]
-    assert not any("calculation budget" in w for w in r2["warnings"])
-    # incomplete ramp search is disclosed
-    mr3, model3 = _lsf_mode_inputs(lambda wl: np.zeros(wl.size))
-    mr3["ramp_search_complete"] = False
-    r3 = detect.evaluate_mode("nirspec_prism", mr3, model3, **kw)
-    assert any("calculation budget" in w for w in r3["warnings"])
-    # MIRI floor ramp gets its own operational warning
-    kw_miri = dict(kw, R_bin=100.0)
-    mr4, model4 = _miri_mode_inputs(ngroup=2)
-    r4 = detect.evaluate_mode("miri_lrs", mr4, model4, **kw_miri)
-    hits4 = [w for w in r4["warnings"] if w.startswith("MIRI floor ramp")]
-    assert len(hits4) == 1 and "approval" in hits4[0]
-    # 3 groups: still below the recommended 6, but NOT the floor warning
-    mr5, model5 = _miri_mode_inputs(ngroup=3)
-    r5 = detect.evaluate_mode("miri_lrs", mr5, model5, **kw_miri)
-    assert not [w for w in r5["warnings"] if w.startswith("MIRI floor ramp")]
-    assert any("below this mode's STScI-recommended ramp" in w
-               for w in r5["warnings"])
-
-
 # --- fail-fast input validation ----------------------------------------------
 
 def test_detection_significance_rejects_bad_inputs():
@@ -412,76 +346,6 @@ def test_miri_lsf_uses_local_native_r_not_the_dispersion_order_end_value():
         "fixture is insensitive to R(lambda); the ordering test proves nothing"
 
 
-@pytest.mark.parametrize(
-    "mode_key,t_cycle,expect",
-    [("nirspec_prism", 1600.0, True),    # above STScI's 1500 s NIRSpec advice
-     ("nirspec_prism", 1400.0, False),
-     ("miri_lrs", 2100.0, True),         # above APT's 2000 s MIRI hard limit
-     ("miri_lrs", 1900.0, False),
-     ("niriss_soss", 5000.0, False),     # no entry: the 30-group cap binds
-     ("nircam_f444w", 5000.0, False)])   # no entry: the 100-group cap binds
-def test_over_long_integrations_are_disclosed(mode_key, t_cycle, expect):
-    """The ramp search maximizes groups, so on a faint target it can run past
-    what STScI advises (NIRSpec: 1,500 s) or APT allows (MIRI: 2,000 s). The
-    tool never shortens a ramp for the user, so it must say so instead.
-    NIRISS and NIRCam have no limit entry -- their group caps bind first."""
-    kw = dict(target_mol=None, R_bin=100.0, t_in_s=3.0e5, t_out_s=3.0e5,
-              n_transits=1, floor_spec=None)
-    m = ins.MODES[mode_key]
-    wl_pix = np.linspace(m["wl_min"] * 1.001, m["wl_max"] * 0.999, 600)
-    mr = dict(wl=wl_pix.tolist(), flux=np.full(wl_pix.size, 1e6).tolist(),
-              noise_1int=np.full(wl_pix.size, 1e3).tolist(),
-              t_cycle_s=t_cycle, r_native=None,
-              n_full_sat=np.zeros(wl_pix.size).tolist(),
-              n_part_sat=np.zeros(wl_pix.size).tolist(),
-              ngroup=int(1e4), sat_frac=0.79, saturated=False)
-    wl_model = np.linspace(m["wl_min"] * 0.95, m["wl_max"] * 1.05, 4000)
-    model = dict(wl_um=wl_model, depth=np.full(wl_model.size, 0.01),
-                 mols=[], wo_mols=[])
-    r = detect.evaluate_mode(mode_key, mr, model, **kw)
-    hits = [w for w in r["warnings"] if "integration is" in w]
-    assert bool(hits) is expect, (mode_key, t_cycle, hits)
-    if expect:
-        limit = ins.INT_LENGTH_LIMIT_S[m["instrument"]]
-        assert f"{limit[0]:.0f} s {limit[1]}" in hits[0]
-
-
-def test_a_secondary_order_declares_its_shared_readout_and_saturation():
-    """SOSS orders 1 and 2 are ONE readout of SUBSTRIP256, so the order-2 row
-    must say that selecting both costs one observation, and that its
-    saturation verdict comes from the brighter order-1 trace (Pandeia's
-    fraction_saturation is scene-wide). Order 1 gets neither note."""
-    kw = dict(target_mol=None, R_bin=100.0, t_in_s=3600.0, t_out_s=3600.0,
-              n_transits=1, floor_spec=None)
-
-    def _inputs(mode_key, saturated):
-        m = ins.MODES[mode_key]
-        wl_pix = np.linspace(m["wl_min"] * 1.001, m["wl_max"] * 0.999, 400)
-        mr = dict(wl=wl_pix.tolist(), flux=np.full(wl_pix.size, 1e6).tolist(),
-                  noise_1int=np.full(wl_pix.size, 1e3).tolist(),
-                  t_cycle_s=20.0, r_native=None,
-                  n_full_sat=np.zeros(wl_pix.size).tolist(),
-                  n_part_sat=np.zeros(wl_pix.size).tolist(),
-                  ngroup=5, sat_frac=1.4 if saturated else 0.5,
-                  saturated=saturated)
-        wl_model = np.linspace(m["wl_min"] * 0.95, m["wl_max"] * 1.05, 4000)
-        return mr, dict(wl_um=wl_model, depth=np.full(wl_model.size, 0.01),
-                        mols=[], wo_mols=[])
-
-    def _notes(mode_key, saturated):
-        mr, model = _inputs(mode_key, saturated)
-        return list(detect.evaluate_mode(mode_key, mr, model, **kw)["warnings"])
-
-    shared = "shares one detector readout with order 1"
-    verdict = "set by the brighter order-1 trace"
-    assert any(shared in w for w in _notes("niriss_soss_ord2", False))
-    assert not any(verdict in w for w in _notes("niriss_soss_ord2", False))
-    sat2 = _notes("niriss_soss_ord2", True)
-    assert any(shared in w for w in sat2) and any(verdict in w for w in sat2)
-    ord1 = _notes("niriss_soss", True)
-    assert not any(shared in w or verdict in w for w in ord1)
-
-
 def test_measured_response_deficit_scales_the_detection_signal():
     """Signal and sigma must come from the same effective extraction.
 
@@ -522,11 +386,3 @@ def test_measured_response_deficit_scales_the_detection_signal():
     with patch.dict(ins.RESPONSE_FACTOR, {"niriss_soss_ord2": 1.0}):
         uncorrected = _score("niriss_soss_ord2")
     assert scored == pytest.approx(uncorrected * factor, rel=1e-9)
-
-
-def test_the_response_deficit_is_disclosed_on_the_mode_it_applies_to():
-    for key in ins.MODES:
-        note = "of a narrow feature's amplitude"
-        warned = any(note in w for w in detect._mode_warnings(
-            ins.MODES[key], dict(t_cycle_s=20.0, ngroup=5), 3600.0, None, key))
-        assert warned == (ins.response_factor(key) != 1.0), key

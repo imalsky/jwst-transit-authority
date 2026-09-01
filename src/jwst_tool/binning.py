@@ -138,8 +138,7 @@ def smooth_to_native_r(wl_model: np.ndarray, y: np.ndarray,
     2.3548 x the smallest R in the band (MIRI LRS, PRISM, and SOSS order 1
     under the correlated-k default's R = 1000 grid); on higher-R modes the
     kernel is unresolved and the input is returned unchanged. NIRCam, SOSS
-    order 2, and the M gratings are not resolved under that default -- the
-    caller discloses the skip (detect._lsf_skip_note).
+    order 2, and the M gratings are not resolved under that default.
 
     ``wl_r``/``r_curve`` are the native resolving-power table. ``wl_r`` MUST
     be strictly ascending and is validated: the kernel width comes from

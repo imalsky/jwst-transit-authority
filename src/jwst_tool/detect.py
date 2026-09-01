@@ -274,64 +274,6 @@ def _removed_spectrum(model: dict, mols: list[str], target_mol,
     return np.asarray(model["depth_wo"])[index][order]
 
 
-def _mode_warnings(mode: dict, mode_result: dict, t_in_s: float,
-                   lsf_skip_note: str | None, mode_key: str = "") -> dict:
-    warnings = dict(mode_result.get("warnings", {}))
-    t_cycle = float(mode_result["t_cycle_s"])
-    n_cycles = t_in_s / t_cycle
-    if n_cycles < 3.0:
-        warnings[f"only {n_cycles:.1f} integration cycles fit in transit "
-                 "(PandExo enforces >= 3 by shortening the ramp)"] = True
-    # Long-ramp disclosure. The saturation search maximizes the ramp, which on
-    # a faint target can run far past what STScI advises or APT allows; the
-    # tool ranks configurations and never silently shortens one, so say so.
-    # t_cycle includes the between-integration reset, so this fires marginally
-    # early -- the conservative direction.
-    _limit = ins.INT_LENGTH_LIMIT_S.get(mode["instrument"])
-    if _limit is not None and t_cycle > _limit[0]:
-        warnings[f"integration is {t_cycle:.0f} s, above the "
-                 f"{_limit[0]:.0f} s {_limit[1]}; split the ramp or verify "
-                 "it in APT"] = True
-    if lsf_skip_note:
-        warnings[lsf_skip_note] = True
-    resp = ins.response_factor(mode_key)
-    if resp != 1.0:
-        warnings[f"this mode's extraction recovers only {100.0 * resp:.0f}% of a "
-                 "narrow feature's amplitude (measured against Pandeia); the "
-                 "detection score is scaled down accordingly"] = True
-    ngroup = int(mode_result["ngroup"])
-    if ngroup < int(mode["ngroup_warn_below"]):
-        reason = ins.NGROUP_WARN_REASON[mode["instrument"]]
-        warnings[f"ramp uses {ngroup} group(s) per integration, below this "
-                 f"mode's STScI-recommended ramp ({reason}); verify in APT"] = True
-    if mode_result.get("ramp_search_complete") is False:
-        warnings["the group search hit its calculation budget; the reported "
-                 "ramp is measured-safe but may not be the longest possible "
-                 "(costs sensitivity, never validity)"] = True
-    if (mode["instrument"] == "miri"
-            and ngroup == int(mode["ngroup_min"])
-            and not bool(mode_result.get("saturated", False))):
-        warnings["MIRI floor ramp: 2 groups/integration is MIRI's shortest "
-                 "permitted ramp and is very difficult to calibrate "
-                 "accurately; confirm in APT whether this configuration "
-                 "needs special approval before proposing"] = True
-    # A non-primary diffraction order is not a separate observation, and its
-    # saturation verdict is not its own. Both facts are easy to get wrong from
-    # the mode table alone, so state them on the row that carries the risk.
-    if int((mode.get("strategy") or {}).get("order", 1)) > 1:
-        warnings["this order shares one detector readout with order 1: "
-                 "selecting both orders costs one observation, not two, and "
-                 "both report the same ramp and cadence"] = True
-        if bool(mode_result.get("saturated", False)):
-            warnings["the saturation verdict here is set by the brighter "
-                     "order-1 trace (Pandeia measures saturation over the "
-                     "whole readout); STScI puts the SUBSTRIP256 bright limit "
-                     "about 2 magnitudes fainter in order 1 than in order 2 "
-                     "(J ~ 8.5 vs J ~ 6.3), so this order's own trace may "
-                     "still be usable -- check it in the ETC"] = True
-    return warnings
-
-
 def _usable_pixels(mode_key: str, mode_result: dict) -> tuple:
     wl = binning._validate_wl(mode_result["wl"], f"{mode_key}: wl")
     flux = np.asarray(mode_result["flux"], dtype=float)
@@ -406,7 +348,6 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
     # bin span, hence the margin.
     r_native = mode_result.get("r_native")
     lsf_applied = False
-    _lsf_skip_note = None
     jac_rows = None
     if "jac" in model:
         jac_rows = [np.asarray(row)[order] for row in model["jac"]]
@@ -443,26 +384,6 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         # feature is not (gating left Jacobians unsmoothed by ~59 ppm)
         lsf_applied = bool(np.any(depth_sm != depth))
         depth = depth_sm
-        if not lsf_applied:
-            # The operator auto-no-ops when the model grid cannot resolve the
-            # kernel. That is the more dangerous half and must be disclosed:
-            # the model's own opacity smearing then stands in for the
-            # instrument line-spread function, which is a different width set
-            # by a numerical knob.
-            # A Gaussian kernel needs R_model >= 2.3548 * R_native to be
-            # resolved at all, and the binding R_native is the SMALLEST in
-            # band (the widest kernel), matching smooth_to_native_r's test.
-            # r_model is measured from the model grid itself: the band
-            # grid is fixed by the published k-tables.
-            _rn = float(np.nanmin(r_curve)) if np.isfinite(r_curve).any() else 0.0
-            _lsf_skip_note = (
-                f"native-R LSF is a NO-OP here: the model spectrum's own "
-                f"resolving power (R = {r_model:.0f}) cannot resolve this "
-                f"mode's line-spread function (response R down to {_rn:.0f}, "
-                "which needs about 2.35x that in model resolving power). The "
-                "model's own opacity sampling sets the effective width "
-                "instead. The model grid is the published k-tables' band "
-                "grid and cannot be raised.")
         if depth_wo is not None:
             depth_wo = binning.smooth_to_native_r(wl_model, depth_wo, wl_r,
                                                   r_curve, b_lo, b_hi,
@@ -472,14 +393,8 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
                                                    r_curve, b_lo, b_hi,
                                                    weight=flux_model)
                         for row in jac_rows]
-    else:
-        # a missing native-R leaves depth and Jacobians UNBLURRED -- safe only
-        # for high-R modes (every shipped low-R mode has a dispersion file),
-        # so surface it loudly via the result's warning channel below
-        _reason = mode_result.get("r_native_source") or "no native-R exported"
-        _lsf_skip_note = (f"native-R LSF NOT applied ({_reason}); depth and "
-                          "Jacobians unblurred -- safe only for high-R modes, a "
-                          "refdata/config error on a low-R mode")
+    # else: no native-R exported, depth and Jacobians stay unblurred (every
+    # shipped low-R mode has a dispersion file)
 
     edges = noise_mod.make_bins(lo, hi, R_bin)
     op = binning.build_operator(wl_pix, flux_pix, edges,
@@ -522,8 +437,6 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
     else:
         d_wo_b, sigma_detect, sigma_detect_proj = None, float("nan"), float("nan")
 
-    warnings = _mode_warnings(m, mode_result, t_in_s, _lsf_skip_note, mode_key)
-
     keep = op["keep"]
     return dict(
         jac_bins=jac_bins, jac_names=jac_names,
@@ -553,5 +466,4 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         sat_ngroups=mode_result.get("sat_ngroups"),
         saturated=bool(mode_result.get("saturated", False)),
         t_cycle_s=float(mode_result["t_cycle_s"]),
-        warnings=warnings,
     )

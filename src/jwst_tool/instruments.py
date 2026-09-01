@@ -239,27 +239,9 @@ PANDEXO_NGROUP_MAX = {"nircam": 100, "niriss": 30}
 # ceiling: APT limits a MIRI integration to 2000 s, which is ~12,575 groups
 # on SLITLESSPRISM (tframe 0.15904 s). That limit is far above anything a
 # saturation-limited search reaches (MIRI's ramp is background-limited: the
-# faintest parity star lands at 1021 groups / 162 s), so it is DISCLOSED by
-# detect via INT_LENGTH_LIMIT_S rather than enforced here.
+# faintest parity star lands at 1021 groups / 162 s), so it is not enforced
+# here.
 PANDEXO_UNBOUNDED_NGROUP = 65535
-
-# Integration-length limits per instrument, checked against the SELECTED
-# ramp's cycle time and reported by detect as a DISCLOSURE, never a bound
-# (the tool ranks configurations; APT adjudicates them). Sources, jwst-docs:
-#   nirspec -- Detector Recommended Strategies: "The maximum recommended
-#     integration length is 1,500 seconds ... Longer integrations can be
-#     taken, but the benefits over taking 2 shorter integrations will be
-#     limited due to cosmic ray effects."
-#   miri    -- MIRI LRS TSOs: "MIRI integration duration may not be greater
-#     than 2000 seconds." (a hard APT limit, not advice)
-# NIRISS and NIRCam are bounded by their group caps (30 / 100) long before
-# any integration-length rule bites, so they have no entry.
-# The test uses t_cycle, which is the ramp plus the between-integration
-# reset, so it triggers marginally EARLY -- the conservative direction.
-INT_LENGTH_LIMIT_S = {
-    "nirspec": (1500.0, "STScI-recommended maximum integration length"),
-    "miri": (2000.0, "APT maximum MIRI integration duration"),
-}
 
 # Extraction strategy + sky background are pinned to PandExo's TSO conventions
 # (per-instrument apertures/annuli; background "ecliptic" + background_level
@@ -287,46 +269,9 @@ INT_LENGTH_LIMIT_S = {
 # very bright targets (2 recommended); NIRISS SOSS permits 1-group NISRAPID
 # (APT warns at 1); MIRI FASTR1 permits 2 groups with 5 recommended for
 # calibration accuracy.
-# ngroup_warn_below is a DISCLOSURE threshold, not a bound: a selected ramp
-# below it still ranks, with an instrument-specific warning from detect
-# (reasons in NGROUP_WARN_REASON). Do not restore floors above
-# pandeia's mingroups: that wrongly reported bright targets "saturated at
-# the shortest ramp" where PandExo passed (notes.md, Decision records).
-#
-# Instrument-specific reason a short ramp is cautioned (composed into the
-# detect warning). Each string paraphrases the quoted jwst-docs sentence
-# below it; re-verified 2026-08-18 against those pages.
-#   nirspec -- NIRSpec Detector Recommended Strategies: "The minimum
-#     recommended number of groups is 2, although 1 can be used if really
-#     necessary (e.g., very bright targets in BOTS observations)."
-#   niriss  -- NIRISS SOSS template parameters: "1 is likely to result in
-#     lower calibration accuracy. APT provides a warning if NUMBER OF
-#     GROUPS/INTEGRATION=1."
-#   nircam  -- NIRCam Time-Series Observation Recommended Strategies:
-#     "Observers should avoid saturation of any part of their data that
-#     occurs in less than 4 groups of their integrations. This will provide
-#     3 groups for determining the flux while avoiding undue reliance on the
-#     linearity correction." NOTE the rule is about the groups-to-saturation
-#     count, while the test below uses the SELECTED ramp; since the selected
-#     ramp is ~sat_limit x groups-to-saturation, this warns one step early.
-#   miri    -- MIRI LRS TSOs: "The minimum Ngroups required is 2. However,
-#     experience from early cycles shows that the quality of the calibration
-#     is sub-optimal for small numbers of groups. Integrations with 2-5
-#     groups are very difficult to calibrate accurately, due to the presence
-#     of persistence effects on the detector. Therefore, integrations should
-#     ideally use >5 or even >10 groups."
-NGROUP_WARN_REASON = {
-    "nirspec": ("STScI's minimum recommended NIRSpec ramp is 2 groups; 1 is "
-                "allowed only if really necessary, e.g. a very bright BOTS "
-                "target"),
-    "niriss": ("1-group NISRAPID ramps are likely to give lower calibration "
-               "accuracy, and APT warns on them"),
-    "nircam": ("STScI advises avoiding data that saturate in fewer than 4 "
-               "groups, to limit reliance on the linearity correction"),
-    "miri": ("STScI reports 2-5 group MIRI ramps are very difficult to "
-             "calibrate accurately because of detector persistence; more "
-             "than 5 groups is recommended, more than 10 preferred"),
-}
+# Do not restore floors above pandeia's mingroups: that wrongly reported
+# bright targets "saturated at the shortest ramp" where PandExo passed
+# (notes.md, Decision records).
 
 # r_native_med: the mode's typical native resolving power, shown in the GUI
 # mode picker. Median of R(lambda) from the mode's 2026.7 refdata dispersion
@@ -358,7 +303,7 @@ MODES = {
         wl_min=1.0, wl_max=5.30,
         r_native_med=110,
         floor_ppm_suggested=20.0, noise_infl=1.0, ngroup_min=1,
-        ngroup_warn_below=2, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
+        ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     "nirspec_g395h": dict(
         label="NIRSpec G395H",
@@ -373,7 +318,7 @@ MODES = {
         wl_min=2.87, wl_max=5.18,
         r_native_med=2700,
         floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=1,
-        ngroup_warn_below=2, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
+        ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     "nirspec_g235h": dict(
         label="NIRSpec G235H",
@@ -388,7 +333,7 @@ MODES = {
         wl_min=1.66, wl_max=3.07,
         r_native_med=2700,
         floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=1,
-        ngroup_warn_below=2, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
+        ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     "niriss_soss": dict(
         label="NIRISS SOSS (ord 1)",
@@ -404,7 +349,7 @@ MODES = {
         wl_min=1.0, wl_max=2.8,
         r_native_med=970,
         floor_ppm_suggested=20.0, noise_infl=1.0, ngroup_min=1,
-        ngroup_warn_below=2, ngroup_max=30,
+        ngroup_max=30,
     ),
     "nircam_f322w2": dict(
         label="NIRCam F322W2",
@@ -420,7 +365,7 @@ MODES = {
         wl_min=2.45, wl_max=4.00,
         r_native_med=1400,
         floor_ppm_suggested=25.0, noise_infl=1.0, ngroup_min=1,
-        ngroup_warn_below=4, ngroup_max=100,
+        ngroup_max=100,
     ),
     "nircam_f444w": dict(
         label="NIRCam F444W",
@@ -436,7 +381,7 @@ MODES = {
         wl_min=3.9, wl_max=5.00,
         r_native_med=1700,
         floor_ppm_suggested=25.0, noise_infl=1.0, ngroup_min=1,
-        ngroup_warn_below=4, ngroup_max=100,
+        ngroup_max=100,
     ),
     "miri_lrs": dict(
         label="MIRI LRS (slitless)",
@@ -455,7 +400,7 @@ MODES = {
         # 209 at 12 um) -- the opposite of the gratings.
         r_native_med=150,
         floor_ppm_suggested=40.0, noise_infl=1.0, ngroup_min=2,
-        ngroup_warn_below=6, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
+        ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     # Appended LAST on purpose: MODE_COLOR/MODE_MARKER key by
     # enumeration order, and per-mode colors are never re-assigned, so a new
@@ -482,7 +427,7 @@ MODES = {
         wl_min=2.87, wl_max=5.18,
         r_native_med=1000,
         floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=1,
-        ngroup_warn_below=2, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
+        ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     # Slots 9-12, appended in this order on purpose -- see the palette note
     # above. Tokens verified against pandeia_data-2026.7-jwst config.json
@@ -507,7 +452,7 @@ MODES = {
         wl_min=1.0, wl_max=1.83,
         r_native_med=2700,   # measured median 2734 over 1.0-1.83 um
         floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=1,
-        ngroup_warn_below=2, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
+        ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     # G235M: the medium-R companion to G235H (the same trade G395M offers
     # against G395H). Band 1.66-3.12: the measured good-bin grid
@@ -524,7 +469,7 @@ MODES = {
         wl_min=1.66, wl_max=3.12,
         r_native_med=1000,   # measured median 1018 over 1.66-3.12 um
         floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=1,
-        ngroup_warn_below=2, ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
+        ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     # SOSS order 2: same optics and subarray as order 1, extracted at
     # strategy order=2. Instrument order-2 band is 0.63-1.26 um
@@ -556,7 +501,7 @@ MODES = {
         wl_min=1.0, wl_max=1.26,
         r_native_med=1140,   # measured median 1137 over 1.0-1.26 um
         floor_ppm_suggested=20.0, noise_infl=1.0, ngroup_min=1,
-        ngroup_warn_below=2, ngroup_max=30,
+        ngroup_max=30,
     ),
     # F277W: the fourth NIRCam LW grism TSO filter this registry covers.
     # Band 2.45-3.1 = the filter's half-power points (2.419-3.130, measured
@@ -574,7 +519,7 @@ MODES = {
         wl_min=2.45, wl_max=3.1,
         r_native_med=1300,   # measured median 1276 over 2.45-3.1 um
         floor_ppm_suggested=25.0, noise_infl=1.0, ngroup_min=1,
-        ngroup_warn_below=4, ngroup_max=100,
+        ngroup_max=100,
     ),
 }
 
@@ -676,13 +621,11 @@ for _key, _m in MODES.items():
             f"PandExo-compatible maximum {_cap} for {_m['instrument']}; the "
             "optimizer would select an unsupported group count on faint "
             "targets.")
-    if not (1 <= _m["ngroup_min"] <= _m["ngroup_warn_below"]
-            <= _m["ngroup_max"]):
+    if not (1 <= _m["ngroup_min"] <= _m["ngroup_max"]):
         raise RuntimeError(
             f"mode {_key!r} breaks 1 <= ngroup_min={_m['ngroup_min']} <= "
-            f"ngroup_warn_below={_m['ngroup_warn_below']} <= "
-            f"ngroup_max={_m['ngroup_max']}; the ramp search and the "
-            "below-recommended-ramp warning both assume this ordering.")
+            f"ngroup_max={_m['ngroup_max']}; the ramp search assumes this "
+            "ordering.")
 
 MODE_COLOR = {key: _COLORS[i % len(_COLORS)] for i, key in enumerate(MODES)}
 MODE_MARKER = {key: _MARKERS[i % len(_MARKERS)] for i, key in enumerate(MODES)}
