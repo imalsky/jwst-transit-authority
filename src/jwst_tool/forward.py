@@ -137,17 +137,20 @@ JAC_METHODS = ("fd", "ad")            # certified-FD default / warm-jvp opt-in
 CO_BZ_MIN_AD = 2.0 * FD_STEPS["dlnCO"]   # = 0.2
 
 
-def fd_stencil(name: str, value: float) -> tuple[int, ...]:
-    """Step multiples of FD_STEPS[name] a composition row solves at. Central
-    (+-h, +-2h) unless the dlnCO stencil would straddle C/O = 1: the C-rich
-    side has no certified steady state (W39b at C/O 1.087 exhausts count_max
-    at longdy 36), so the row steps away from the boundary with the
-    second-order one-sided stencil (d, 2d, 4d) instead."""
+def fd_stencil(name: str, value: float) -> tuple[tuple[int, ...], float]:
+    """(step multiples, step) a composition row solves at. Central (+-h, +-2h)
+    at h = FD_STEPS[name], unless the dlnCO stencil would straddle C/O = 1:
+    the C-rich side has no certified steady state (W39b at C/O 1.087
+    exhausts count_max at longdy 36), so the row uses the second-order
+    one-sided stencil (d, 2d, 4d) away from the boundary, at h/2 so its
+    reach equals the central stencil's 2h (at the full step the curvature
+    toward the boundary fails the h-vs-2h gate on a 1600 K hot Jupiter)."""
+    h = FD_STEPS[name]
     if name == "dlnCO":
-        m = float(np.exp(2.0 * FD_STEPS[name]))
+        m = float(np.exp(2.0 * h))
         if value / m <= 1.0 <= value * m:
-            return (-1, -2, -4) if value <= 1.0 else (1, 2, 4)
-    return (1, -1, 2, -2)
+            return ((-1, -2, -4) if value <= 1.0 else (1, 2, 4)), h / 2.0
+    return (1, -1, 2, -2), h
 
 
 def fd_estimates(offs, dvals, f0, h):
@@ -1047,8 +1050,8 @@ def canonical_params(params: dict) -> dict:
                                ("dlnCO", "co_ratio", (0.1, 2.0))):
             if name not in cp["fisher_params"]:
                 continue
-            pts = [cp[key] * float(np.exp(s * FD_STEPS[name]))
-                   for s in fd_stencil(name, cp[key])]
+            offs, h = fd_stencil(name, cp[key])
+            pts = [cp[key] * float(np.exp(s * h)) for s in offs]
             if not all(rng[0] <= p <= rng[1] for p in pts):
                 raise ValueError(
                     f"{key}={cp[key]:g}: the {name} FD stencil would solve "
@@ -2293,15 +2296,14 @@ def run_model(params: dict, log=print) -> Path:
                     + ("from the shared-primal batch" if name in _ad_cols
                        else f"in {time.time()-t1:.0f} s (warm-started jvp)"))
                 continue
-            h = FD_STEPS[name]
+            offs, h = (1, -1, 2, -2), FD_STEPS[name]
             dvals = {}
-            offs = (1, -1, 2, -2)
             if name in FD_COMP_PARAMS:
                 # composition direction: FastChem re-init + certified cold
                 # solve per stencil point (central, or one-sided away from
                 # C/O = 1 -- see fd_stencil)
-                offs = fd_stencil(name, cp["met_x_solar" if name == "lnZ"
-                                           else "co_ratio"])
+                offs, h = fd_stencil(name, cp["met_x_solar" if name == "lnZ"
+                                              else "co_ratio"])
                 for s in offs:
                     f = float(np.exp(s * h))
                     if name == "lnZ":      # all metals together; C/O preserved

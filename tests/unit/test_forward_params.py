@@ -750,10 +750,12 @@ def test_composition_fd_stencil_envelope():
                    (dict(co_ratio=0.12), "dlnCO")):
         with pytest.raises(ValueError, match="stencil"):
             forward.canonical_params(_p(fisher_params=[fp], **kw))
-    assert forward.fd_stencil("dlnCO", 0.55) == (1, -1, 2, -2)
-    assert forward.fd_stencil("dlnCO", 0.89) == (-1, -2, -4)
-    assert forward.fd_stencil("dlnCO", 1.1) == (1, 2, 4)
-    assert forward.fd_stencil("lnZ", 0.89) == (1, -1, 2, -2)
+    h = forward.FD_STEPS["dlnCO"]
+    assert forward.fd_stencil("dlnCO", 0.55) == ((1, -1, 2, -2), h)
+    assert forward.fd_stencil("dlnCO", 0.89) == ((-1, -2, -4), h / 2)
+    assert forward.fd_stencil("dlnCO", 1.1) == ((1, 2, 4), h / 2)
+    assert forward.fd_stencil("lnZ", 0.89) == ((1, -1, 2, -2),
+                                               forward.FD_STEPS["lnZ"])
     for co in (0.89, 1.0, 1.1, 1.6):
         forward.canonical_params(_p(co_ratio=co, fisher_params=["dlnCO"]))
     # both schemes' Richardson rows are exact on a cubic (sign and
