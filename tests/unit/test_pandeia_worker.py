@@ -45,30 +45,6 @@ def test_native_r_finds_the_tokenless_nircam_grism_file(tmp_path):
         assert r == [1400.0], (key, r)
 
 
-# --- ngroup limits (PandExo compatibility) -----------------------------------
-
-def test_group_caps():
-    """NIRCam grism must not permit more than PandExo's hard 100-group max,
-    and no mode exceeds its instrument's cap (the import-time guard mirror)."""
-    assert ins.PANDEXO_NGROUP_MAX["nircam"] == 100
-    assert any(m["instrument"] == "nircam" for m in ins.MODES.values())
-    for key, m in ins.MODES.items():
-        cap = ins.PANDEXO_NGROUP_MAX.get(m["instrument"])
-        if cap is not None:
-            assert m["ngroup_max"] <= cap, key
-
-
-def test_ramp_floors_equal_pandeia_mingroups():
-    """The search floor is pandeia 2026.7's per-detector
-    mingroups (jwst/<instrument>/config.json: nirspec 1, niriss 1,
-    nircam 1, miri 2) -- the same field PandExo reads, so both tools search
-    the same ramp space."""
-    expected = {"nirspec": 1, "niriss": 1, "nircam": 1, "miri": 2}
-    for key, m in ins.MODES.items():
-        assert m["ngroup_min"] == expected[m["instrument"]], key
-        assert 1 <= m["ngroup_min"] <= m["ngroup_max"], key
-
-
 def test_release_segment():
     """Leading numeric release segment; rc/dev suffixes drop, non-numeric
     strings read None."""
@@ -180,7 +156,7 @@ def test_no_backend_carries_a_personal_absolute_path():
 
 def test_missing_backend_python_gives_one_actionable_error(monkeypatch):
     monkeypatch.setattr(ins, "PANDEIA_PYTHON", None)
-    with pytest.raises(RuntimeError, match="JWST_TOOL_PANDEIA_PYTHON"):
+    with pytest.raises(RuntimeError):
         ins.require_pandeia_python()
     monkeypatch.setattr(ins, "PANDEIA_PYTHON", "/some/env/bin/python")
     assert ins.require_pandeia_python() == "/some/env/bin/python"

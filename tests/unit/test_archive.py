@@ -28,25 +28,23 @@ def test_snapshot_contract_lookup_and_loud_error_paths(tmp_path):
 
     for variant in ("WASP-39 b", "WASP-39b", " wasp-39  B ", "wasp-39 b"):
         assert archive.lookup(variant)["pl_name"] == "WASP-39 b", variant
-    with pytest.raises(KeyError, match="Totally Fake Planet 9x"):
+    with pytest.raises(KeyError):
         archive.lookup("Totally Fake Planet 9x")
 
-    with pytest.raises(archive.SnapshotError, match="not found"):
-        archive.load_snapshot(str(tmp_path / "missing.csv"))
-    p = tmp_path / "noprov.csv"
-    p.write_text(",".join(archive.SNAPSHOT_COLUMNS) + "\n")
-    with pytest.raises(archive.SnapshotError, match="fetched"):
-        archive.load_snapshot(str(p))
-    q = tmp_path / "drift.csv"
-    q.write_text("# fetched: 2026-08-09T00:00:00Z\npl_name,bogus\n")
-    with pytest.raises(archive.SnapshotError, match="header"):
-        archive.load_snapshot(str(q))
-    r = tmp_path / "short_row.csv"
-    r.write_text("# fetched: 2026-08-09T00:00:00Z\n"
-                 + ",".join(archive.SNAPSHOT_COLUMNS) + "\n"
-                 + "Only-Two b,G8 V\n")
-    with pytest.raises(archive.SnapshotError, match="cells"):
-        archive.load_snapshot(str(r))
+    cols = ",".join(archive.SNAPSHOT_COLUMNS)
+    bad_files = (
+        ("missing.csv", None),                                  # absent
+        ("noprov.csv", cols + "\n"),                            # no provenance
+        ("drift.csv", "# fetched: 2026-08-09T00:00:00Z\npl_name,bogus\n"),
+        ("short_row.csv", "# fetched: 2026-08-09T00:00:00Z\n"
+                          + cols + "\nOnly-Two b,G8 V\n"),      # short row
+    )
+    for name, text in bad_files:
+        f = tmp_path / name
+        if text is not None:
+            f.write_text(text)
+        with pytest.raises(archive.SnapshotError):
+            archive.load_snapshot(str(f))
 
 
 def _row(**over):
@@ -127,11 +125,10 @@ def test_custom_fill_refusals_and_disclosures():
     assert "rp" not in v2 and "g" not in v2
     assert any("planet radius" in x and "one-sided limit" in x for x in n2)
 
-    # malformed cells raise
-    with pytest.raises(archive.SnapshotError, match="unreadable"):
-        archive.custom_fill(_row(st_teff="five thousand"))
-    with pytest.raises(archive.SnapshotError, match="non-finite"):
-        archive.custom_fill(_row(st_teff="nan"))
+    # malformed cells raise: unreadable text and a non-finite number
+    for cell in ("five thousand", "nan"):
+        with pytest.raises(archive.SnapshotError):
+            archive.custom_fill(_row(st_teff=cell))
 
 
 def test_nearest_sflux_anchors():

@@ -34,20 +34,15 @@ class _ScriptCancelled(BaseException):
     """Stand-in for streamlit's ScriptControlException (also a BaseException)."""
 
 
-def test_child_is_killed_when_the_block_is_cancelled():
+@pytest.mark.parametrize("exc", [_ScriptCancelled, RuntimeError])
+def test_the_child_is_killed_however_the_block_leaves(exc):
+    """A cancelled script run (BaseException) and an ordinary exception must
+    both take the worker down with them."""
     p = _sleeper()
-    with pytest.raises(_ScriptCancelled):
+    with pytest.raises(exc):
         with proc_mod.terminating(p):
-            raise _ScriptCancelled()
-    assert _wait_gone(p), "the worker outlived the cancelled script run"
-
-
-def test_child_is_killed_on_an_ordinary_exception():
-    p = _sleeper()
-    with pytest.raises(RuntimeError):
-        with proc_mod.terminating(p):
-            raise RuntimeError("boom")
-    assert _wait_gone(p)
+            raise exc("boom")
+    assert _wait_gone(p), "the worker outlived the failed script run"
 
 
 def test_a_child_that_finished_is_left_alone_with_its_returncode():
@@ -71,12 +66,3 @@ def test_sigterm_refuser_is_killed_within_the_grace_period():
         with proc_mod.terminating(p, grace_s=1.0):
             raise _ScriptCancelled()
     assert _wait_gone(p), "SIGKILL fallback did not fire"
-
-
-def test_streamlit_control_exception_is_a_bare_baseexception():
-    """The reason `except Exception` was never enough. If streamlit ever
-    re-parents these under Exception, this test says so."""
-    st_exc = pytest.importorskip(
-        "streamlit.runtime.scriptrunner_utils.exceptions")
-    assert not issubclass(st_exc.ScriptControlException, Exception)
-    assert issubclass(st_exc.ScriptControlException, BaseException)

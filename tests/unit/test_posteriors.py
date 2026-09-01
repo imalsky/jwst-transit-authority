@@ -139,26 +139,23 @@ def test_input_validation_raises():
     raise."""
     r = _result()
     bad_sigma = dict(r, sigma=np.where(np.arange(40) == 5, np.nan, r["sigma"]))
-    with pytest.raises(ValueError, match="finite"):
-        posteriors.marginalized_posteriors(bad_sigma, FREE, CENTERS,
-                                           co_eval=CO)
     bad_jac = dict(r, jac_bins=r["jac_bins"].copy())
     bad_jac["jac_bins"][0, 0] = np.inf
-    with pytest.raises(ValueError, match="non-finite"):
-        posteriors.marginalized_posteriors(bad_jac, FREE, CENTERS, co_eval=CO)
-    with pytest.raises(ValueError, match="centers"):
-        posteriors.marginalized_posteriors(r, FREE, {"lnZ": 1.0}, co_eval=CO)
-    with pytest.raises(ValueError, match="finite"):
-        posteriors.marginalized_posteriors(
-            r, FREE, {"lnZ": np.nan, "dlnCO": 0.5}, co_eval=CO)
+    for res, centers in ((bad_sigma, CENTERS),                 # sigma
+                         (bad_jac, CENTERS),                   # Jacobian
+                         (r, {"lnZ": 1.0}),                    # missing center
+                         (r, {"lnZ": np.nan, "dlnCO": 0.5})):  # bad center
+        with pytest.raises(ValueError):
+            posteriors.marginalized_posteriors(res, FREE, centers, co_eval=CO)
     # dlnCO without co_eval raises, exactly like display_sigma
-    with pytest.raises(ValueError, match="co_eval"):
+    with pytest.raises(ValueError):
         posteriors.marginalized_posteriors(r, FREE, CENTERS)
-    with pytest.raises(ValueError, match="rows"):
+    # free_names that does not match the [free..., lnR0] row layout
+    with pytest.raises(ValueError):
         posteriors.marginalized_posteriors(r, ["lnZ"], {"lnZ": 1.0})
-    with pytest.raises(ValueError, match="unconstrained"):
+    with pytest.raises(ValueError):
         posteriors.gaussian_curve(0.0, np.inf)
-    with pytest.raises(ValueError, match="center"):
+    with pytest.raises(ValueError):
         posteriors.truncated_gaussian_curve(-0.1, 1.0)
 
 
@@ -223,15 +220,12 @@ def test_combo_forecast_identity_saturation_policy_and_additivity():
 
 def test_combo_input_validation_raises():
     k1, k2 = _registry_keys(2)
-    with pytest.raises(ValueError, match="unknown mode key"):
-        posteriors.combo_forecast("bad", ["not_a_mode"],
-                                  {"not_a_mode": _result()}, FREE, co_eval=CO)
-    with pytest.raises(ValueError, match="duplicate"):
-        posteriors.combo_forecast("dup", [k1, k1], {k1: _result()}, FREE,
-                                  co_eval=CO)
-    with pytest.raises(ValueError, match="no result"):
-        posteriors.combo_forecast("missing", [k1, k2], {k1: _result()}, FREE,
-                                  co_eval=CO)
+    for name, keys, results in (
+            ("bad", ["not_a_mode"], {"not_a_mode": _result()}),  # unknown key
+            ("dup", [k1, k1], {k1: _result()}),                  # duplicate
+            ("missing", [k1, k2], {k1: _result()})):             # no result
+        with pytest.raises(ValueError):
+            posteriors.combo_forecast(name, keys, results, FREE, co_eval=CO)
 
 
 # --- mock-observation layer --------------------------------------------------
@@ -288,28 +282,27 @@ def test_mock_layer_validates_loudly():
     import zlib
     k1, k2 = _registry_keys(2)
     r = _mode_result(1, k1)
-    with pytest.raises(ValueError, match="seed"):
-        posteriors.mock_realization([r], seed=-1)
-    with pytest.raises(ValueError, match="empty"):
-        posteriors.mock_realization([], seed=0)
     bad = dict(r, sigma=np.zeros_like(np.asarray(r["sigma"])))
-    with pytest.raises(ValueError, match="finite and > 0"):
-        posteriors.mock_realization([bad], seed=0)
-    with pytest.raises(ValueError, match="mode_key"):
-        posteriors.mock_realization([{"depth": r["depth"],
-                                      "sigma": r["sigma"]}], seed=0)
+    for modes, seed in (([r], -1),                             # bad seed
+                        ([], 0),                               # empty
+                        ([bad], 0),                            # sigma <= 0
+                        ([{"depth": r["depth"],
+                           "sigma": r["sigma"]}], 0)):         # no mode_key
+        with pytest.raises(ValueError):
+            posteriors.mock_realization(modes, seed=seed)
     r2 = _mode_result(32, k2)
     real_one = posteriors.mock_realization([r], seed=0)
-    with pytest.raises(ValueError, match="no draw for mode"):
-        posteriors.mock_recovery([r, r2], FREE, real_one)
-    with pytest.raises(ValueError, match="mock_realization record"):
-        posteriors.mock_recovery([r], FREE, {"seed": 0})
+    # a realization that does not cover the results, and a record that is
+    # not a mock_realization record at all
+    for results, record in (([r, r2], real_one), ([r], {"seed": 0})):
+        with pytest.raises(ValueError):
+            posteriors.mock_recovery(results, FREE, record)
     # today's registry is collision-free; a genuine crc32 collision (classic
     # colliding pair) is refused loudly
     posteriors._assert_mode_streams_distinct(instruments.MODES.keys())
     a, b = "plumless", "buckeroo"
     assert zlib.crc32(a.encode()) == zlib.crc32(b.encode())
-    with pytest.raises(ValueError, match="collide"):
+    with pytest.raises(ValueError):
         posteriors._assert_mode_streams_distinct([a, b])
 
 

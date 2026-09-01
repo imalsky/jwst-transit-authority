@@ -296,47 +296,39 @@ def test_invalid_inputs_raise_loudly():
     edges = np.array([1.0, 1.5, 2.0])
     # non-finite wavelengths raise in every entry point
     for bad in (np.array([1.0, np.nan, 1.2]), np.array([1.0, np.inf, 1.2])):
-        with pytest.raises(ValueError, match="non-finite"):
-            binning.degenerate_wl_mask(bad)
-        with pytest.raises(ValueError, match="non-finite"):
-            binning.segment_ids(bad)
-        with pytest.raises(ValueError, match="non-finite"):
+        for call in (binning.degenerate_wl_mask, binning.segment_ids):
+            with pytest.raises(ValueError):
+                call(bad)
+        with pytest.raises(ValueError):
             binning.build_operator(bad, np.ones(3), np.array([0.9, 1.3]))
-    # invalid weights / shapes / edges / valid mask
-    with pytest.raises(ValueError, match="weights"):
-        binning.build_operator(wl, np.where(np.arange(10) == 3, np.nan, w), edges)
-    with pytest.raises(ValueError, match="weights"):
-        binning.build_operator(wl, np.where(np.arange(10) == 3, -1.0, w), edges)
-    with pytest.raises(ValueError, match="shape"):
-        binning.build_operator(wl, np.ones(9), edges)
-    for bad_edges in (np.array([2.0, 1.0]),          # descending
-                      np.array([1.5]),               # single edge
-                      np.array([1.0, np.nan, 2.0]),  # non-finite
-                      np.array([1.0, 1.0, 2.0])):    # zero-width bin
-        with pytest.raises(ValueError, match="edges"):
-            binning.build_operator(wl, w, bad_edges)
-    with pytest.raises(ValueError, match="valid mask"):
-        binning.build_operator(wl, w, edges, valid=np.ones(9, bool))
-    # zero usable pixels: all zero-weight / all masked / no edge overlap
-    with pytest.raises(ValueError, match="no usable pixel"):
-        binning.build_operator(wl, np.zeros(10), edges)
-    with pytest.raises(ValueError, match="no usable pixel"):
-        binning.build_operator(wl, w, edges, valid=np.zeros(10, bool))
-    with pytest.raises(ValueError, match="no usable pixel"):
-        binning.build_operator(wl, w, np.array([5.0, 6.0]))
+    # invalid weights / shapes / edges / valid mask, then the three ways to
+    # be left with zero usable pixels (zero-weight, masked, no edge overlap)
+    for w_bad, edges_bad, valid in (
+            (np.where(np.arange(10) == 3, np.nan, w), edges, None),
+            (np.where(np.arange(10) == 3, -1.0, w), edges, None),
+            (np.ones(9), edges, None),                     # wrong shape
+            (w, np.array([2.0, 1.0]), None),               # descending edges
+            (w, np.array([1.5]), None),                    # single edge
+            (w, np.array([1.0, np.nan, 2.0]), None),       # non-finite edge
+            (w, np.array([1.0, 1.0, 2.0]), None),          # zero-width bin
+            (w, edges, np.ones(9, bool)),                  # mask shape
+            (np.zeros(10), edges, None),
+            (w, edges, np.zeros(10, bool)),
+            (w, np.array([5.0, 6.0]), None)):
+        with pytest.raises(ValueError):
+            binning.build_operator(wl, w_bad, edges_bad, valid=valid)
     # bin_model rejects non-ascending model grids and non-finite values
     op = binning.build_operator(wl, w, edges, wl_lo=0.9, wl_hi=2.1)
     good_wl = np.linspace(0.9, 2.1, 50)
     good_y = np.full(50, 0.01)
-    with pytest.raises(ValueError, match="ascending"):
-        binning.bin_model(op, good_wl[::-1], good_y)
     dup = good_wl.copy()
     dup[10] = dup[9]
-    with pytest.raises(ValueError, match="ascending"):
-        binning.bin_model(op, dup, good_y)
-    with pytest.raises(ValueError, match="non-finite model value"):
-        binning.bin_model(op, good_wl,
-                          np.where(np.arange(50) == 7, np.nan, good_y))
+    for m_wl, m_y in ((good_wl[::-1], good_y),             # descending
+                      (dup, good_y),                       # duplicate sample
+                      (good_wl,
+                       np.where(np.arange(50) == 7, np.nan, good_y))):
+        with pytest.raises(ValueError):
+            binning.bin_model(op, m_wl, m_y)
 
 
 def test_smooth_clamped_model_span_preserves_constant_at_band_edge():

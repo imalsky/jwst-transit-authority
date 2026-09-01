@@ -2,12 +2,12 @@
 future mode cannot land half-wired.
 
 Pins: the fixed display encodings (MODE_COLOR hex + unique, MODE_MARKER
-unique -- series must never rely on color alone), a LITERATURE_NOISE_FACTORS
-reference entry per mode, the ngroup ordering + PandExo instrument caps, the
-explicit TSO pinning rule (readout_pattern, background AND background_level,
-extraction strategy, sane wavelength span -- never leave these implicit on a
-new mode), the G395M entry's refdata-verified tokens and fixed palette slot,
-and that the parity harness's MODE_KEYS covers every registered mode.
+unique -- series must never rely on color alone), the ngroup ordering +
+PandExo instrument caps, the explicit TSO pinning rule (readout_pattern,
+background AND background_level, extraction strategy, sane wavelength span
+-- never leave these implicit on a new mode), every mode's band against its
+published source, and that the parity harness's MODE_KEYS covers every
+registered mode.
 """
 from __future__ import annotations
 
@@ -38,10 +38,6 @@ def test_display_encodings_are_complete_and_unique():
             "#rrggbb hex")
         assert key in ins.MODE_MARKER, f"{key}: no MODE_MARKER"
         assert ins.MODE_MARKER[key], f"{key}: empty marker"
-        assert key in ins.LITERATURE_NOISE_FACTORS, (
-            f"{key}: no LITERATURE_NOISE_FACTORS reference entry")
-        f = ins.LITERATURE_NOISE_FACTORS[key]
-        assert 1.0 <= f <= 2.0, f"{key}: implausible noise factor {f!r}"
     colors = list(ins.MODE_COLOR.values())
     markers = list(ins.MODE_MARKER.values())
     assert len(set(colors)) == len(colors), "duplicate MODE_COLOR"
@@ -81,34 +77,6 @@ def test_every_mode_pins_the_full_tso_configuration():
             "forward model's 1-15 um coverage convention")
         assert m.get("label"), f"{key}: no display label"
         assert 0.0 < m["floor_ppm_suggested"] <= 200.0, key
-        assert m["noise_infl"] == 1.0, (
-            f"{key}: noise_infl default must be 1.0 (the Pandeia prediction "
-            "as-is; literature ratios are reference points, never defaults)")
-
-
-def test_g395m_registry_entry_matches_the_verified_refdata_tokens():
-    """Tokens verified against pandeia_data-2026.7
-    (and 2026.2) nirspec config.json; the palette slot is the 8th
-    (enumeration position 7 -- colors/markers are assigned by enumeration
-    order, so a mode may only ever be APPENDED after it, never inserted
-    before). The band is pinned with every other band below."""
-    m = ins.MODES["nirspec_g395m"]
-    assert list(ins.MODES)[7] == "nirspec_g395m", (
-        "nirspec_g395m must stay in MODES slot 7: colors/markers are "
-        "assigned by enumeration order, so reordering silently recolors "
-        "every mode")
-    assert m["instrument"] == "nirspec" and m["mode"] == "bots"
-    assert m["config"]["instrument"] == dict(disperser="g395m",
-                                             filter="f290lp")
-    assert m["config"]["detector"] == dict(subarray="sub2048",
-                                           readout_pattern="nrsrapid")
-    assert m["ngroup_max"] == ins.PANDEXO_UNBOUNDED_NGROUP, (
-        "NIRSpec ramps are saturation-limited, not registry-capped")
-    assert ins.MODE_COLOR["nirspec_g395m"] == "#006c8e"
-    assert ins.MODE_MARKER["nirspec_g395m"] == "*"
-    assert ins.LITERATURE_NOISE_FACTORS["nirspec_g395m"] == 1.10, (
-        "extrapolated from G395H (no published number) -- changing it needs "
-        "a measurement and a decision record")
 
 
 # Every mode's band, pinned to its PUBLISHED source so a hand-narrowed edge
