@@ -183,11 +183,6 @@ def fd_estimates(offs, dvals, f0, h):
 # gate). Only available with cloud_on.
 CLOUD_FISHER_PARAMS = ("log_kappa_cloud", "alpha_cloud")
 
-# Memory fallback for the AD Jacobian: the chemistry-theta rows normally
-# share ONE warm primal (vmap over basis tangents); set this env var to
-# restore the per-row jvp loop if the batched tangent carry does not fit.
-_AD_ROW_LOOP = bool(os.environ.get("JWST_TOOL_AD_ROW_LOOP"))
-
 # Kzz profile modes. "file" requires tp_mode="file" with a Kzz column
 # (the upstream constraint: the tabulated Kzz lives in the atm table).
 KZZ_MODES = ("const", "Pfunc", "JM16", "file")
@@ -510,10 +505,12 @@ def _read_tp_table(path: Path, span: tuple | None = None) -> dict:
             "silently biasing quenched abundances. Extend the table to at "
             "least the grid bottom, lower p_btm_bar, or (in emission) use the "
             "Guillot profile, which is defined at every depth.")
-    # The T window applies to what the engine actually evaluates: T re-gridded
-    # onto the chemistry span (log-P interp, edge clamp -- mirror it exactly),
-    # NOT every raw row. Checking raw rows wrongly rejects tables that merely
-    # extend past the span (e.g. a thermosphere above it).
+    # The T window applies to what the engine actually evaluates: the profile
+    # over the chemistry span with the edge clamp, NOT every raw row (raw rows
+    # wrongly reject a table that merely extends past the span, e.g. a
+    # thermosphere above it). Sampled here in log P while the engine
+    # interpolates T LINEARLY in P (VULCAN-JAX atm_setup); both are monotone
+    # between tabulated rows, so the span's min/max is the same either way.
     _o = np.argsort(P)
     _grid = np.logspace(np.log10(span[0]), np.log10(span[1]), 200)
     T_grid = np.interp(np.log10(_grid), np.log10(P[_o]), T[_o])
@@ -1251,33 +1248,26 @@ def _make_progress(cp: dict, log):
     _n_wo = len(cp["wo_mols"])
     _n_active = len(active_molecules(cp))
     _wo_w = 1.5 * _n_wo * (_n_active + 1)
-    if _emis:
-        # one stage: the baseline and removed-molecule optical depths come
-        # out of ONE engine batch (mirrors the transmission branch)
-        if _n_wo:
-            stages += [(f"full + removed-molecule spectra ({_n_wo} "
-                        "molecules)", 8.0 + _wo_w)]
-        else:
-            stages += [("full eclipse spectrum", 8.0)]
-    elif _n_wo:
+    # ONE stage either way: the baseline and the removed-molecule spectra
+    # come out of a single engine batch in both science modes.
+    if _n_wo:
         stages += [(f"full + removed-molecule spectra ({_n_wo} molecules)",
                     8.0 + _wo_w)]
     else:
-        stages += [("full transmission spectrum", 8.0)]
+        stages += [(f"full {'eclipse' if _emis else 'transmission'} spectrum",
+                    8.0)]
     # Jacobian rows: fd = 4 re-init build+solve cycles per composition row /
     # 4 cold solves per lnKzz/T-P row; cloud rows are RT-only (~seconds);
-    # ad = one warm jvp per row
+    # ad = ONE shared warm primal for every chemistry row
     _ad = cp["jac_method"] == "ad"
 
     def _row_stage(n):
         if n in CLOUD_FISHER_PARAMS:
             return (f"{'AD' if _ad else 'FD'} Jacobian d/d({n})", 8.0)
-        if _ad:
-            return (f"AD Jacobian d/d({n})", 110.0)
         return (f"FD Jacobian d/d({n})",
                 280.0 if n in FD_COMP_PARAMS else 260.0)
 
-    if _ad and not _AD_ROW_LOOP:
+    if _ad:
         # chemistry-theta rows share one warm primal (single stage); the
         # RT-only deck rows keep their own per-row stages
         _chem_rows = [n for n in cp["fisher_params"]
@@ -1285,10 +1275,8 @@ def _make_progress(cp: dict, log):
         if _chem_rows:
             stages += [(f"AD Jacobian ({len(_chem_rows)} rows, shared "
                         "primal)", 110.0 + 30.0 * (len(_chem_rows) - 1))]
-        stages += [_row_stage(n) for n in cp["fisher_params"]
-                   if n in CLOUD_FISHER_PARAMS]
-    else:
-        stages += [_row_stage(n) for n in cp["fisher_params"]]
+    stages += [_row_stage(n) for n in cp["fisher_params"]
+               if not _ad or n in CLOUD_FISHER_PARAMS]
     if cp["fisher_params"]:
         stages += [(("AD" if _ad else "FD") + " Jacobian d/d(lnR0)", 8.0)]
     total = sum(w for _, w in stages)
@@ -1456,7 +1444,7 @@ def _assemble_chem(cp: dict, log):
     # Chemistry-grid bottom. The cfg ships the shipped-planet span; a run that
     # needs a deeper column (emission -- see the P_BTM_* block at module top)
     # overrides P_b here rather than editing the YAML, so VULCAN-JAX and
-    # vulcan-retrieval keep the span they were validated on.
+    # vulcan-forward keep the span they were validated on.
     if abs(cp["p_btm_bar"] - P_BTM_FILE_BAR) > 1e-9:
         ovr["P_b"] = cp["p_btm_bar"] * 1.0e6
         log(f"[fwd] chemistry grid bottom {cp['p_btm_bar']:g} bar "
@@ -1657,18 +1645,7 @@ def run_model(params: dict, log=print) -> Path:
     if cp["science_mode"] == "emission":
         advance()
         log("[fwd] building emission model + stellar SED ...")
-        if not hasattr(exojax_rt, "build_emis_model"):
-            raise RuntimeError(
-                "the installed vulcan-forward engine has no "
-                "build_emis_model: emission mode needs the >= 0.11 sibling. "
-                "Upgrade vulcan-forward.")
         emis = exojax_rt.build_emis_model(rt, profile)
-        if not hasattr(emis, "tau_bottom"):
-            raise RuntimeError(
-                "the installed vulcan-retrieval engine predates the emission "
-                "tau_bottom diagnostic (>= 0.11): without it an optically-"
-                "thin RT bottom silently underestimates the day-side flux. "
-                "Upgrade vulcan-forward.")
         from jwst_tool import stellar as stellar_mod
         fs_j = jnp.asarray(stellar_mod.phoenix_surface_flux(
             rt.nu_grid, cp["star_teff"], cp["star_logg"], cp["star_feh"],
@@ -1776,15 +1753,6 @@ def run_model(params: dict, log=print) -> Path:
     # AND longdy < yconv_min), recomputed at the exit state. longdy alone
     # accepted budget-exhausted photo-on solves with drifting UV flux;
     # accept_count alone is weaker still. Never loosen this.
-    import inspect as _inspect
-    if "return_conv_diag" not in _inspect.signature(
-            chem.converged_y).parameters:
-        raise RuntimeError(
-            "the sibling forward engine's converged_y() does not support "
-            "return_conv_diag (ConvDiag canonical certification): "
-            "vulcan-retrieval is too old for this tool version. Upgrade the "
-            "sibling install -- an uncertifiable solve is never presented "
-            "as converged.")
 
     def _check_converged(diag, stage):
         ac = int(diag.accept_count)
@@ -2048,19 +2016,14 @@ def run_model(params: dict, log=print) -> Path:
             return (4.0 * j1 - j2) / 3.0, err   # Richardson: O(h^4) central,
             #                                      O(h^3) one-sided
 
-        def _ad_theta_depth(th):
+        def _ad_theta_depth_diag(th):
             # warm continuation from the converged column: the primal is a
             # warm re-converge (count_min accepted steps plus the full
             # spectrum -- real cost, hence the shared-primal batch below),
             # the jvp is the validated steady-state tangent (photo ON --
-            # gated in canonical_params)
-            y_w = chem.converged_y(th, warm_y=y_sol, lnZ_ref=0.0, c_o_ref=0.0)
-            return depth_from_y(y_w, th)
-
-        def _ad_theta_depth_diag(th):
-            # same map, with the primal's convergence certificate as a
-            # second output so the shared-primal batch certifies the
-            # linearization point from the SAME solve it differentiates
+            # gated in canonical_params). The primal's convergence
+            # certificate is a second output, so the batch certifies the
+            # linearization point from the SAME solve it differentiates.
             y_w, diag = chem.converged_y(th, warm_y=y_sol, lnZ_ref=0.0,
                                          c_o_ref=0.0, return_conv_diag=True)
             return depth_from_y(y_w, th), diag
@@ -2069,16 +2032,13 @@ def run_model(params: dict, log=print) -> Path:
                           if n not in CLOUD_FISHER_PARAMS]
                          if cp["jac_method"] == "ad" else [])
         _ad_cols = {}
-        if _ad_chem_rows and not _AD_ROW_LOOP:
+        if _ad_chem_rows:
             # ONE warm primal for every chemistry-theta AD row: vmap over
             # the basis tangents traces the primal unbatched (th0 carries
             # no batch axis), so the warm re-converge and the full spectrum
             # run once and only the tangent carry is batched. The
             # convergence certificate rides the same solve -- certified
             # from the exact primal the rows differentiate.
-            # JWST_TOOL_AD_ROW_LOOP=1 restores the per-row loop (memory
-            # fallback: the tangent carry is n_rows-fold through the
-            # chemistry state and the CKD tensors).
             t1 = time.time()
             advance()
             _E = np.zeros((len(_ad_chem_rows), theta.size))
@@ -2093,14 +2053,6 @@ def run_model(params: dict, log=print) -> Path:
                 _ad_cols[_n] = np.asarray(_dd_all[_i])
             log(f"[fwd] AD Jacobian: {len(_ad_chem_rows)} rows from one "
                 f"shared warm primal in {time.time()-t1:.0f} s")
-        elif _ad_chem_rows:
-            # per-row fallback: certify the rows' shared linearization
-            # point once (asserting it without checking let stall exits
-            # pass silently).
-            _, _diag_w = chem.converged_y(
-                th0, warm_y=y_sol, lnZ_ref=0.0, c_o_ref=0.0,
-                return_conv_diag=True)
-            _check_converged(_diag_w, "AD warm re-converge (primal)")
 
         def _rt_deck_row(name, base_vec, idx, kwarg):
             """RT-only Jacobian row for a cloud-deck parameter (no chemistry
@@ -2149,20 +2101,11 @@ def run_model(params: dict, log=print) -> Path:
                     f"{time.time()-t1:.0f} s")
                 continue
             if cp["jac_method"] == "ad":
-                # AD row: warm-started forward-mode jvp along this theta
-                # direction (composition directions included -- the
-                # cross-validated differential map; lnZ is the fixed-
-                # structural-grid derivative, see the module docstring).
-                # Normally already computed in the shared-primal batch.
-                if name in _ad_cols:
-                    jac[j] = _ad_cols[name]
-                else:
-                    i_par = theta_names.index(name)
-                    e = np.zeros_like(theta)
-                    e[i_par] = 1.0
-                    _, dd = jax.jvp(_ad_theta_depth, (th0,),
-                                    (jnp.asarray(e),))
-                    jac[j] = np.asarray(dd)
+                # AD row: warm-started jvp along this theta direction; lnZ
+                # is the fixed-structural-grid derivative and is not
+                # cross-checked against FD. Computed in the shared-primal
+                # batch above.
+                jac[j] = _ad_cols[name]
                 if not np.isfinite(jac[j]).all():
                     raise RuntimeError(
                         f"AD Jacobian for {name}: non-finite entries")
@@ -2170,8 +2113,7 @@ def run_model(params: dict, log=print) -> Path:
                 fd_err.append(np.nan)     # no h-vs-2h metric: AD row
                 row_method.append("ad-jvp")
                 log(f"[fwd] AD Jacobian d(depth)/d({name}) "
-                    + ("from the shared-primal batch" if name in _ad_cols
-                       else f"in {time.time()-t1:.0f} s (warm-started jvp)"))
+                    "from the shared-primal batch")
                 continue
             offs, h = (1, -1, 2, -2), FD_STEPS[name]
             dvals = {}
@@ -2315,19 +2257,9 @@ def run_model(params: dict, log=print) -> Path:
 
 
 def main():
+    from jwst_tool import proc
     params = json.load(open(sys.argv[1]))
-    # line-buffer stdout: the GUI pipes this process, which makes Python
-    # BLOCK-buffer prints from libraries (their progress lines would sit
-    # invisible in the buffer while the GUI shows nothing)
-    sys.stdout.reconfigure(line_buffering=True)
-    # vulcan_jax's legacy IO creates RELATIVE output/ + plot/ directories in
-    # the process CWD (legacy_io.py) -- junk wherever the app was launched
-    # from. Run the subprocess from a dedicated scratch cwd instead (the
-    # same fix the Space entrypoint uses). Library callers of run_model are
-    # unaffected: only this subprocess entrypoint changes directory.
-    _cwd = Path(_ins.OUTPUT_DIR) / "cwd"
-    _cwd.mkdir(parents=True, exist_ok=True)
-    os.chdir(_cwd)
+    proc.worker_prologue(_ins.OUTPUT_DIR)
     run_model(params, log=lambda *a: print(*a, flush=True))
     print("[fwd] DONE", flush=True)
 

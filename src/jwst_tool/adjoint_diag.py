@@ -72,8 +72,7 @@ def adjoint_key(params: dict, species: str) -> str:
                             "science_mode", "star_teff",
                             "star_logg", "star_feh")}
     # RT/observable-only knobs are dropped: the adjoint runs on the chemistry
-    # state alone, and leaving them in re-triggered the multi-hour adjoint on
-    # RT-only changes. rt_ptop_bar stays: the chemistry top follows it.
+    # state alone. rt_ptop_bar stays: the chemistry top follows it.
     payload["adjoint_species"] = str(species)
     payload["adjoint_version"] = _ADJ_VERSION
     s = json.dumps(payload, sort_keys=True)
@@ -416,19 +415,10 @@ def run_adjoint(params: dict, species: str, log=print) -> Path:
 
 
 def main():
+    from jwst_tool import proc
     params = json.load(open(sys.argv[1]))
     species = sys.argv[2]
-    # line-buffer stdout: the GUI pipes this process, and block-buffered
-    # library prints would sit invisible while the GUI shows nothing
-    import sys as _sys
-    _sys.stdout.reconfigure(line_buffering=True)
-    # vulcan_jax's legacy IO creates RELATIVE output/ + plot/ dirs in the
-    # process CWD; run this subprocess from a scratch cwd instead (library
-    # callers are unaffected).
-    import os
-    _cwd = __import__('pathlib').Path(_ins.OUTPUT_DIR) / "cwd"
-    _cwd.mkdir(parents=True, exist_ok=True)
-    os.chdir(_cwd)
+    proc.worker_prologue(_ins.OUTPUT_DIR)
     run_adjoint(params, species, log=lambda *a: print(*a, flush=True))
     print("[adj] DONE", flush=True)
 
