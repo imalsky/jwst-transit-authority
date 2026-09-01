@@ -250,7 +250,13 @@ with st.expander("Validation"):
         "6959427), and VULCAN 2.0 and petitRADTRANS on identical inputs. "
         "The correlated-k binning validation is shown "
         "[here](https://github.com/imalsky/vulcan-forward/blob/main/"
-        "validation/figures/ckd_verification_vs_exojax_exok.png).")
+        "validation/figures/ckd_verification_vs_exojax_exok.png). "
+        "The power-law cloud deck is checked against petitRADTRANS on "
+        "identical inputs, clear and cloudy, "
+        "[here](https://github.com/imalsky/vulcan-forward/blob/main/"
+        "validation/figures/cloud_verification_vs_petitradtrans.png); its "
+        "autodiff gradient is checked against the exact analytic derivative "
+        "in the test suite.")
 
 # Data availability -- detected live. The GUI reports only what BLOCKS a run;
 # the full install inventory is `jwst-tool data`.
