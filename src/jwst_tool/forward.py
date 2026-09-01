@@ -31,9 +31,10 @@ central finite differences: composition rows (lnZ, dlnCO) re-initialize
 the chemistry per FD point, every row must pass the h-vs-2h consistency
 gate, lnR0 is RT-only. jac_method="ad" is one warm-started forward-mode
 jvp per row (photo-on required; the lnZ jvp is the fixed-structural-grid
-derivative and the dlnCO jvp is refused near O-exhaustion -- FD is valid
-everywhere). ``fisher.py`` turns the Jacobian + Pandeia noise into
-forecasts.
+derivative and the dlnCO jvp is refused near O-exhaustion). The FD dlnCO
+row is refused when its +-2h stencil straddles C/O = 1, so neither method
+gives a dlnCO row for 0.82 <= C/O <= 1.22. ``fisher.py`` turns the
+Jacobian + Pandeia noise into forecasts.
 
 Per-molecule "removed" spectra zero that molecule's VMR in the RT only --
 structure (T, mmw) is kept: the standard nested-model comparison.
@@ -131,7 +132,8 @@ JAC_METHODS = ("fd", "ad")            # certified-FD default / warm-jvp opt-in
 # ln(1 + min_z(OO_z/OC_z)) is nonnegative by construction, so a "<= 0" refusal
 # can never fire; the reachable criterion is one FD stencil width (2h) from
 # the O-exhaustion boundary, below which the per-layer tangent factors are
-# ill-conditioned. FD re-initializes and is valid at any composition.
+# ill-conditioned. FD re-initializes per stencil point, but its +-2h stencil
+# must not cross C/O = 1 either (canonical_params refuses that).
 CO_BZ_MIN_AD = 2.0 * FD_STEPS["dlnCO"]   # = 0.2
 # Cloud-deck Fisher parameters: RT-only rows, evaluated like the lnR0 nuisance
 # (single central difference or RT jvp; no chemistry re-solve, no h-vs-2h
@@ -1039,6 +1041,22 @@ def canonical_params(params: dict) -> dict:
                     f"Keep co_ratio in [{_co_rng[0] * _m:.3g}, "
                     f"{_co_rng[1] / _m:.3g}] for a dlnCO row, or drop dlnCO "
                     "from fisher_params.")
+            # The stencil must also stay on ONE side of C/O = 1 (oxygen
+            # exhaustion): the chemistry changes regime across it and the
+            # C-rich stencil point does not reach a certified steady state.
+            # The AD row refuses in the same band through its b_z bound
+            # (CO_BZ_MIN_AD), so no dlnCO row exists here by either method.
+            if cp["co_ratio"] / _m <= 1.0 <= cp["co_ratio"] * _m:
+                raise ValueError(
+                    f"co_ratio={cp['co_ratio']:g}: the dlnCO FD stencil "
+                    f"(C/O x e^(+-{2.0 * _steps['dlnCO']:g})) straddles "
+                    "C/O = 1, the oxygen-exhaustion boundary, and the C-rich "
+                    "stencil point has no certified steady state. No dlnCO "
+                    f"Fisher row is available for {1.0 / _m:.3g} <= co_ratio "
+                    f"<= {_m:.3g} by either method (AD refuses there too, "
+                    "via its oxygen-reservoir bound). Drop dlnCO from "
+                    f"fisher_params, or set co_ratio < {1.0 / _m:.3g} (or "
+                    f"> {_m:.3g}).")
     # --- condensation: detection-only -- refuse every derivative combo -----
     # (why: module docstring; the raises below carry the full user-facing
     # explanation, and the '91% wrong' wording is test-pinned)
@@ -1690,6 +1708,31 @@ def run_model(params: dict, log=print) -> Path:
     advance()
     log("[fwd] building chemistry model ...")
     chem = _build_chem()
+    if cp["jac_method"] == "ad" and "dlnCO" in cp["fisher_params"]:
+        # Refuse the AD dlnCO row within one FD stencil of O-exhaustion (see
+        # CO_BZ_MIN_AD at module top) -- here, straight after the build that
+        # sets co_bz_bound, so the refusal costs no solve. A missing engine
+        # attribute means the check cannot run: refuse, never pass silently.
+        _bz = getattr(chem, "co_bz_bound", None)
+        if _bz is None:
+            raise RuntimeError(
+                "the sibling forward engine does not expose co_bz_bound "
+                "(the fixed-O direction's oxygen-reservoir bound): the "
+                "AD dlnCO row cannot be certified. Upgrade "
+                "vulcan-forward or use jac_method='fd'.")
+        if float(_bz) <= CO_BZ_MIN_AD:
+            _m = float(np.exp(2.0 * FD_STEPS["dlnCO"]))
+            raise RuntimeError(
+                "AD Jacobian for dlnCO refused at this composition: the "
+                f"fixed-O differential direction's oxygen-reservoir "
+                f"bound b_z = {float(_bz):.3g} <= {CO_BZ_MIN_AD:g} "
+                f"(C-rich composition, C/O = {cp['co_ratio']:g}: O-only "
+                "carriers are within one FD stencil of exhaustion, so "
+                "the tangent direction is ill-conditioned). The FD row is "
+                "an alternative only while its +-2h stencil stays below "
+                f"C/O = 1 (co_ratio < {1.0 / _m:.3g}; canonical_params "
+                "refuses a stencil that straddles it). Otherwise drop dlnCO "
+                "from fisher_params.")
 
     # BC flux species must exist in the solved network: the upstream
     # read_bc_flux SILENTLY skips unknown tokens, which would turn a typo'd
@@ -2146,28 +2189,6 @@ def run_model(params: dict, log=print) -> Path:
             y_w, diag = chem.converged_y(th, warm_y=y_sol, lnZ_ref=0.0,
                                          c_o_ref=0.0, return_conv_diag=True)
             return depth_from_y(y_w, th), diag
-
-        if cp["jac_method"] == "ad" and "dlnCO" in jac_names:
-            # Refuse the AD dlnCO row within one FD stencil of O-exhaustion
-            # (see CO_BZ_MIN_AD at module top). A missing engine attribute
-            # means the check cannot run: refuse, never pass silently.
-            _bz = getattr(chem, "co_bz_bound", None)
-            if _bz is None:
-                raise RuntimeError(
-                    "the sibling forward engine does not expose co_bz_bound "
-                    "(the fixed-O direction's oxygen-reservoir bound): the "
-                    "AD dlnCO row cannot be certified. Upgrade "
-                    "vulcan-retrieval or use jac_method='fd'.")
-            if float(_bz) <= CO_BZ_MIN_AD:
-                raise RuntimeError(
-                    "AD Jacobian for dlnCO refused at this composition: the "
-                    f"fixed-O differential direction's oxygen-reservoir "
-                    f"bound b_z = {float(_bz):.3g} <= {CO_BZ_MIN_AD:g} "
-                    f"(C-rich composition, C/O = {cp['co_ratio']:g}: O-only "
-                    "carriers are within one FD stencil of exhaustion, so "
-                    "the tangent direction is ill-conditioned). Use "
-                    "jac_method='fd' -- the certified FD row re-initializes "
-                    "the chemistry and is valid at any composition.")
 
         _ad_chem_rows = ([n for n in jac_names
                           if n not in CLOUD_FISHER_PARAMS]

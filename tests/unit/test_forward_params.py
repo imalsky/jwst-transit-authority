@@ -756,6 +756,16 @@ def test_composition_fd_stencil_envelope():
     forward.canonical_params(_p(co_ratio=1.6, fisher_params=["dlnCO"]))
     with pytest.raises(ValueError, match="stencil"):
         forward.canonical_params(_p(co_ratio=2.0, fisher_params=["dlnCO"]))
+    # the dlnCO stencil must not straddle C/O = 1 (oxygen exhaustion): the
+    # C-rich stencil point never certifies (a hot Jupiter at C/O = 0.89
+    # exhausted count_max at the +2h point, C/O = 1.087). lnZ holds C/O
+    # fixed and is unaffected.
+    for co in (0.85, 0.89, 1.0, 1.2):
+        with pytest.raises(ValueError, match="straddles C/O = 1"):
+            forward.canonical_params(_p(co_ratio=co, fisher_params=["dlnCO"]))
+    for co in (0.8, 1.25):
+        forward.canonical_params(_p(co_ratio=co, fisher_params=["dlnCO"]))
+    forward.canonical_params(_p(co_ratio=0.89, fisher_params=["lnZ"]))
     # no stencil under AD; and without fisher_params the value is legal
     forward.canonical_params(_p(met_x_solar=100.0, fisher_params=["lnZ"],
                                 jac_method="ad"))
