@@ -124,7 +124,6 @@ ENV VULCAN_PROJECT_ROOT=/srv/vulcan \
     JWST_TOOL_DATA_DIR=/data/jwst-data \
     JWST_TOOL_OUTPUT_DIR=/data/output \
     JWST_TOOL_PANDEIA_PYTHON=/opt/conda/envs/pandeia/bin/python \
-    JWST_TOOL_BACKEND=current \
     HOME=/data/home \
     PATH=/opt/conda/envs/app/bin:$PATH
 

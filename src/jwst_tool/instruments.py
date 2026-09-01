@@ -20,13 +20,6 @@ that convention verbatim (here: NIRSpec 15-20, NIRISS 20, NIRCam 25, MIRI 40);
 no value here is a measured end-to-end floor. Any caption describing the
 prefills must describe THESE values, not Greene's.
 
-Noise sensitivity factor (``noise_infl``): optional multiplier on the Pandeia
-random sigma, DEFAULT 1.0 for every mode. Published achieved-vs-reference
-ratios live in ``LITERATURE_NOISE_FACTORS`` as reference points only, never
-applied by default; read the per-entry comments there, because the published
-REFERENCE differs by paper (PandExo's prediction vs the bare photon-noise
-limit). Unlike the floor, it averages down with transits.
-
 Band edges (``wl_min``/``wl_max``): the mode's usable science bandpass from
 a published source, intersected with the forward model's 1-15 um coverage
 (short edge = the H2-H2 CIA table). Per instrument:
@@ -140,11 +133,6 @@ def atomic_write(path: Path, writer) -> None:
 # override any path per-machine.
 _SUPPORTED_PANDEIA_RELEASE = "2026.7"
 JWST_TOOL_BACKEND = "current"
-if os.environ.get("JWST_TOOL_BACKEND", JWST_TOOL_BACKEND).lower() != JWST_TOOL_BACKEND:
-    raise RuntimeError(
-        f"JWST_TOOL_BACKEND={os.environ['JWST_TOOL_BACKEND']!r} unknown; this "
-        f"release validates only the supported {_SUPPORTED_PANDEIA_RELEASE} "
-        "matched triple ('current'); archival backends are not selectable.")
 BACKEND_RELEASE = _SUPPORTED_PANDEIA_RELEASE
 BACKEND_STATUS = ("Pandeia 2026.7 / pandeia_data-2026.7-jwst / "
                   "pandeia_psfs-2026.7-jwst (the STScI-supported release, "
@@ -302,7 +290,7 @@ MODES = {
         # the peak extracted rate).
         wl_min=1.0, wl_max=5.30,
         r_native_med=110,
-        floor_ppm_suggested=20.0, noise_infl=1.0, ngroup_min=1,
+        floor_ppm_suggested=20.0, ngroup_min=1,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     "nirspec_g395h": dict(
@@ -317,7 +305,7 @@ MODES = {
         # from the Pandeia grid, never hard-coded here)
         wl_min=2.87, wl_max=5.18,
         r_native_med=2700,
-        floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=1,
+        floor_ppm_suggested=15.0, ngroup_min=1,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     "nirspec_g235h": dict(
@@ -332,7 +320,7 @@ MODES = {
         # detector cutoff, BELOW the nominal disperser table's 3.17.
         wl_min=1.66, wl_max=3.07,
         r_native_med=2700,
-        floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=1,
+        floor_ppm_suggested=15.0, ngroup_min=1,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     "niriss_soss": dict(
@@ -348,7 +336,7 @@ MODES = {
         # (same intersection contract as PRISM), 2.8 is 2.81 rounded inward.
         wl_min=1.0, wl_max=2.8,
         r_native_med=970,
-        floor_ppm_suggested=20.0, noise_infl=1.0, ngroup_min=1,
+        floor_ppm_suggested=20.0, ngroup_min=1,
         ngroup_max=30,
     ),
     "nircam_f322w2": dict(
@@ -364,7 +352,7 @@ MODES = {
         # WASP-39 b used 2.420-4.025; the Pandeia grid runs past it to 4.22.
         wl_min=2.45, wl_max=4.00,
         r_native_med=1400,
-        floor_ppm_suggested=25.0, noise_infl=1.0, ngroup_min=1,
+        floor_ppm_suggested=25.0, ngroup_min=1,
         ngroup_max=100,
     ),
     "nircam_f444w": dict(
@@ -380,7 +368,7 @@ MODES = {
         # ends at 4.998, so this edge is not what binds.
         wl_min=3.9, wl_max=5.00,
         r_native_med=1700,
-        floor_ppm_suggested=25.0, noise_infl=1.0, ngroup_min=1,
+        floor_ppm_suggested=25.0, ngroup_min=1,
         ngroup_max=100,
     ),
     "miri_lrs": dict(
@@ -399,7 +387,7 @@ MODES = {
         # Native R RISES with wavelength here (42 at 5 um, 150 median,
         # 209 at 12 um) -- the opposite of the gratings.
         r_native_med=150,
-        floor_ppm_suggested=40.0, noise_infl=1.0, ngroup_min=2,
+        floor_ppm_suggested=40.0, ngroup_min=2,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     # Appended LAST on purpose: MODE_COLOR/MODE_MARKER key by
@@ -426,7 +414,7 @@ MODES = {
         # grid agrees: usable pixels run 2.871-5.177 with none dropped.
         wl_min=2.87, wl_max=5.18,
         r_native_med=1000,
-        floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=1,
+        floor_ppm_suggested=15.0, ngroup_min=1,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     # Slots 9-12, appended in this order on purpose -- see the palette note
@@ -451,7 +439,7 @@ MODES = {
         background="ecliptic", background_level="medium",
         wl_min=1.0, wl_max=1.83,
         r_native_med=2700,   # measured median 2734 over 1.0-1.83 um
-        floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=1,
+        floor_ppm_suggested=15.0, ngroup_min=1,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     # G235M: the medium-R companion to G235H (the same trade G395M offers
@@ -468,7 +456,7 @@ MODES = {
         background="ecliptic", background_level="medium",
         wl_min=1.66, wl_max=3.12,
         r_native_med=1000,   # measured median 1018 over 1.66-3.12 um
-        floor_ppm_suggested=15.0, noise_infl=1.0, ngroup_min=1,
+        floor_ppm_suggested=15.0, ngroup_min=1,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     # SOSS order 2: same optics and subarray as order 1, extracted at
@@ -500,7 +488,7 @@ MODES = {
         background="ecliptic", background_level="medium",
         wl_min=1.0, wl_max=1.26,
         r_native_med=1140,   # measured median 1137 over 1.0-1.26 um
-        floor_ppm_suggested=20.0, noise_infl=1.0, ngroup_min=1,
+        floor_ppm_suggested=20.0, ngroup_min=1,
         ngroup_max=30,
     ),
     # F277W: the fourth NIRCam LW grism TSO filter this registry covers.
@@ -518,47 +506,9 @@ MODES = {
         background="ecliptic", background_level="medium",
         wl_min=2.45, wl_max=3.1,
         r_native_med=1300,   # measured median 1276 over 2.45-3.1 um
-        floor_ppm_suggested=25.0, noise_infl=1.0, ngroup_min=1,
+        floor_ppm_suggested=25.0, ngroup_min=1,
         ngroup_max=100,
     ),
-}
-
-# Literature achieved-vs-reference noise ratios: reference points only, never
-# applied by default (see module docstring).
-#
-# THE REFERENCE IS NOT THE SAME IN EVERY PAPER, so these numbers are not
-# strictly comparable with each other and none of them is a calibration:
-#   * vs PANDEXO'S PREDICTION -- Gordon et al. 2025 (JWST COMPASS, uniform
-#     reanalysis of seven G395H transmission spectra): real error bars
-#     average 5% larger on NRS1 and 12% larger on NRS2 than PandExo predicts.
-#     This is the only entry measured against the quantity this tool computes.
-#   * vs the BARE PHOTON-NOISE LIMIT -- Radica et al. 2023 (WASP-96 b,
-#     NIRISS/SOSS): "an average precision of 1.2 and 1.4x the photon noise
-#     for orders 1 and 2, respectively". Bouwman et al. 2023 (MIRI/LRS):
-#     measured noise 15-20% above random-noise simulations over
-#     6.8 < lambda < 11 um. Pandeia's prediction includes read noise and
-#     background, so these overstate the gap against it, more so where the
-#     target is not photon-dominated.
-#   * NOT MEASURED -- Rustamkulov et al. 2023 report the PRISM ERS light
-#     curves as very close to the photon-plus-read-noise expectation, hence
-#     1.0. The NIRCam 1.05 is an editorial placeholder with no measurement
-#     behind the digit. The G235H/G395M/G140H/G235M entries are extrapolated
-#     from G395H; no published per-mode number was found for them.
-LITERATURE_NOISE_FACTORS = {
-    "nirspec_prism": 1.0,
-    "nirspec_g395h": 1.10,
-    "nirspec_g235h": 1.10,
-    "nirspec_g395m": 1.10,   # extrapolated from G395H (no published number)
-    "nirspec_g140h": 1.10,   # extrapolated from G395H (no published number)
-    "nirspec_g235m": 1.10,   # extrapolated from G395H (no published number)
-    "niriss_soss": 1.20,       # Radica et al. 2023, order 1
-    "niriss_soss_ord2": 1.40,  # Radica et al. 2023, order 2 -- the SAME paper
-                               # measures order 2 worse than order 1; do not
-                               # copy the order-1 value here again
-    "nircam_f322w2": 1.05,
-    "nircam_f444w": 1.05,
-    "nircam_f277w": 1.05,    # same editorial placeholder as the other NIRCam
-    "miri_lrs": 1.15,
 }
 
 # Width of the extracted line response relative to the Gaussian
@@ -593,11 +543,6 @@ LSF_WIDTH = {
 RESPONSE_FACTOR = {
     "niriss_soss_ord2": 0.832,
 }
-
-
-def response_factor(key: str) -> float:
-    """Measured amplitude response of `key`'s extraction; 1.0 where unmeasured."""
-    return float(RESPONSE_FACTOR.get(key, 1.0))
 
 
 def lsf_r(key: str, wl, r_native):

@@ -204,13 +204,6 @@ CUSTOM_FIELD_RANGES = {
 }
 
 
-def system_fields(planet: dict) -> dict:
-    """The forward-model parameter fields carried by a registry entry."""
-    return dict(rp_rjup=planet["rp_rjup"], gs_cgs=planet["gs_cgs"],
-                rstar_rsun=planet["rstar_rsun"], orbit_au=planet["orbit_au"],
-                sflux=planet["sflux"])
-
-
 AU_CM = 1.496e13
 
 

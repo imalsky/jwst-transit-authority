@@ -22,7 +22,6 @@ from vulcan_forward import paths as _fwd_paths
 # --- shared physics: re-exported, never redefined --------------------------
 MOLECULES = _fwd.MOLECULES
 W39B_CFG_NAME = _fwd.DEFAULT_CFG_NAME
-BULK_H2_VULCAN = _fwd.BULK_H2_VULCAN
 
 # --- the planner's own base RT profile -------------------------------------
 # run_model overrides the resolution knobs from the canonical parameter set;
@@ -37,7 +36,6 @@ WIDE = {
     "nu_min": _fwd.WIDE_BAND_NU_MIN,    # 667 cm^-1 = 15 um
     "nu_max": _fwd.WIDE_BAND_NU_MAX,    # 10000 cm^-1 = 1 um (H2-H2 CIA edge)
     "art_nlayer": 60,
-    "display_R": 100,
 }
 
 # --- data locations --------------------------------------------------------
@@ -46,7 +44,6 @@ WIDE = {
 # one without a configured root raises RuntimeError naming the remedy.
 _LAZY = {
     "DATA_DIR": lambda: _fwd_paths.data_root(),
-    "OPACITY_CACHE": lambda: _fwd_paths.opacity_cache_dir(),
     "CIA_H2H2_FILE": lambda: _fwd_paths.cia_h2h2_file(),
     "CIA_H2HE_FILE": lambda: _fwd_paths.cia_h2he_file(),
     # ExoMolOP k-table tree (the gas opacity every run reads). No existence
@@ -61,7 +58,3 @@ def __getattr__(name: str) -> Path:
     if name in _LAZY:
         return _LAZY[name]()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-def __dir__() -> list[str]:
-    return sorted(list(globals()) + list(_LAZY))

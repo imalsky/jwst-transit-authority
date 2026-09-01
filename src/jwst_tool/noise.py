@@ -454,10 +454,8 @@ def depth_error_bins(mode_result: dict, edges: np.ndarray,
     transit counts correctly.
 
     ``noise_inflation``: optional factor on the random sigma, default 1.0
-    (the Pandeia prediction as-is). Literature achieved-vs-predicted ratios
-    (instruments.LITERATURE_NOISE_FACTORS) are reference points only, never
-    a default calibration. Proportional: averages down with transits, unlike
-    the floor.
+    (the Pandeia prediction as-is). Proportional: averages down with
+    transits, unlike the floor.
     """
     ninf = float(noise_inflation)
     if not (np.isfinite(ninf) and ninf > 0.0):

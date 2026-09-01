@@ -1608,8 +1608,7 @@ with st.sidebar:
         # of them (composed below, so neither control is a hidden override)
         _infl_mode = {k: st.number_input(
             f"{ins.MODES[k]['label']} random-noise multiplier", 1.0, 3.0,
-            float(ins.MODES[k].get("noise_infl", 1.0)),
-            0.05, key=K(f"infl_{k}"))
+            1.0, 0.05, key=K(f"infl_{k}"))
             for k in mode_keys}
         infl = {k: float(noise_scale) * float(_infl_mode[k])
                 for k in mode_keys}

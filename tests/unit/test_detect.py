@@ -375,9 +375,9 @@ def test_measured_response_deficit_scales_the_detection_signal():
                      wo_mols=["X"])
         return detect.evaluate_mode(mode_key, mr, model, **kw)["sigma_detect"]
 
-    factor = ins.response_factor("niriss_soss_ord2")
+    factor = ins.RESPONSE_FACTOR["niriss_soss_ord2"]
     assert factor < 0.9, "order 2's measured deficit is what this guards"
-    assert ins.response_factor("nirspec_prism") == 1.0
+    assert "nirspec_prism" not in ins.RESPONSE_FACTOR
 
     from unittest.mock import patch
     scored = _score("niriss_soss_ord2")

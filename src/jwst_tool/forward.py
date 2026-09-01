@@ -783,7 +783,7 @@ def canonical_params(params: dict) -> dict:
     planet = str(params.get("planet", "wasp39b"))
     if planet not in planets.PLANETS and planet != "custom":
         raise ValueError(f"unknown planet {planet!r}")
-    sysd = planets.system_fields(planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS))
+    sysd = planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS)
     nz = int(params.get("nz", NZ_DEFAULT))
     if not NZ_RANGE[0] <= nz <= NZ_RANGE[1]:
         raise ValueError(f"nz={nz} outside the validated layer-count range {NZ_RANGE} "

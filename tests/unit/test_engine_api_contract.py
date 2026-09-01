@@ -37,7 +37,7 @@ EXPECTED = {
     "vulcan_forward.paths": ["opacity_cache_dir"],
     "vulcan_forward.exomolop": ["table_path", "provenance", "table_info"],
     "vulcan_forward.constants": [
-        "MOLECULES", "ATOM_COLS", "ATOMIC_MASSES", "BULK_H2_VULCAN",
+        "MOLECULES", "ATOM_COLS", "ATOMIC_MASSES",
         "ART_PTOP_BAR", "ART_PBTM_BAR", "T_OPA_MIN_K", "T_OPA_MAX_K",
         "P_REF_BAR", "P_REF_EMISSION_BAR",
     ],

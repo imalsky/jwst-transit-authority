@@ -4,8 +4,6 @@ pandeia imports are function-local, so the module imports with numpy alone).
 The release-match gate compares leading numeric release segments: 3.0 +
 3.0rc3 passes; a mixed engine/refdata pair is refused BEFORE a deep error.
 """
-import os
-
 import pytest
 
 from jwst_tool import instruments as ins
@@ -93,18 +91,12 @@ def _triple(tmp_path, data_ver, psf_ver):
 
 def test_matched_triple_and_psf_identity(tmp_path):
     """A matched triple passes and records all three versions; PSF identity
-    comes from VERSION_PSF, then the directory name; an unidentifiable PSF
-    tree is refused."""
+    comes from VERSION_PSF, and an unidentifiable PSF tree is refused."""
     ref, psf = _triple(tmp_path, "2026.7", "2026.7")
     prov = pw._check_backend_match("2026.7", ref, psf)
     assert prov["refdata_version"] == "2026.7"
     assert prov["psf_version"] == "2026.7"
     assert prov["psf_version_source"] == "VERSION_PSF"
-
-    os.remove(os.path.join(psf, "VERSION_PSF"))
-    prov = pw._check_backend_match("2026.7", ref, psf)
-    assert (prov["psf_version"], prov["psf_version_source"]) == (
-        "2026.7-jwst", "directory name")
 
     blank = tmp_path / "psfs_somewhere"
     blank.mkdir()

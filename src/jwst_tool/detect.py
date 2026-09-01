@@ -425,7 +425,7 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         # much of a narrow feature survives extraction, scale the signal to the
         # measured response -- detection_significance is homogeneous of degree
         # one in s, so the mismatch does not cancel.
-        s_b = (d_full_b - d_wo_b) * ins.response_factor(mode_key)
+        s_b = (d_full_b - d_wo_b) * ins.RESPONSE_FACTOR.get(mode_key, 1.0)
         sigma_detect = detection_significance(s_b, nz["sigma"], nuisance=steps)
         # also profile the T-P/cloud/lnR0 Jacobian directions (conditional)
         sigma_detect_proj = float("nan")

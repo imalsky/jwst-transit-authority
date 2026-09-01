@@ -377,18 +377,14 @@ def _refdata_version(refdata):
 
 
 def _psf_version(psf_dir):
-    """PSF-library release from VERSION_PSF, else the pandeia_psfs-<ver> dir
-    name. Returns (version|None, source)."""
+    """PSF-library release from VERSION_PSF. Returns (version|None, source)."""
     p = os.path.join(psf_dir, "VERSION_PSF")
     if os.path.isfile(p):
         with open(p) as f:
             first = f.readline().strip()
         if first:
             return first, "VERSION_PSF"
-    base = os.path.basename(os.path.normpath(psf_dir))
-    if base.startswith("pandeia_psfs-"):
-        return base[len("pandeia_psfs-"):], "directory name"
-    return None, "no VERSION_PSF file or pandeia_psfs-<ver> dir name"
+    return None, "no VERSION_PSF file"
 
 
 def _check_backend_match(engine_version, refdata, psf_dir=None):

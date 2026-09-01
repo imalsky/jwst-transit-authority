@@ -138,7 +138,6 @@ def test_full_report_structure_formatting_and_cache_stats():
                                 extra_mols=forward.EXTRA_MOLECULES)
     items = datacheck.all_items(rep)
     assert items, "report must not be empty"
-    assert all(it.section for it in items)        # section filled in
     assert all(it.status in (datacheck.OK, datacheck.MISSING, datacheck.AUTO)
                for it in items)
     # consistency of the two summary helpers

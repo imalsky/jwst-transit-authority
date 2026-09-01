@@ -40,7 +40,6 @@ class Item:
     required: bool      # required for ANY run (vs opt-in feature data)
     detail: str         # what was found / which path is missing
     remedy: str = ""    # exact command / URL / pointer to get it
-    section: str = ""   # filled by full_report()
 
 
 def _found(path: Path) -> str:
@@ -433,7 +432,7 @@ def cache_stats() -> dict:
 
 def full_report(base_mols: list[str] = None, extra_mols: list[str] = None,
                 deep: bool = False) -> dict:
-    """Every section's items (each Item.section filled), plus cache stats.
+    """Every section's items, plus cache stats.
 
     ``base_mols``/``extra_mols`` default to the forward model's sets (passed
     in to keep this module import-independent of forward.py for tests).
@@ -453,9 +452,6 @@ def full_report(base_mols: list[str] = None, extra_mols: list[str] = None,
             check_pandeia_backend(),
         "Star normalization data (synphot CDBS)": check_synphot_cdbs(),
     }
-    for name, items in sections.items():
-        for it in items:
-            it.section = name
     report = {"backend": ins.JWST_TOOL_BACKEND,
               "backend_status": ins.BACKEND_STATUS,
               "sections": sections, "caches": cache_stats()}
