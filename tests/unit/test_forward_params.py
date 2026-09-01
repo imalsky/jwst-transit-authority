@@ -619,41 +619,21 @@ def test_kzz_modes_validate_and_zero_inert_knobs(tmp_path):
             forward.canonical_params(_p(**bad))
 
 
-# --- boundary conditions ----------------------------------------------------
+# --- removed boundary fluxes / escape / settling -----------------------------
 
-def test_boundary_conditions_canonicalized_and_gated():
-    # defaults stay empty (cache hygiene: keys unchanged by absence)
+def test_boundary_flux_escape_and_settling_are_removed():
+    """Cache-neutral removal: the four keys stay in the canonical payload
+    pinned off, so no cached spectrum's key moved, and any enabling value
+    is refused instead of silently ignored."""
     cp0 = forward.canonical_params(_p())
-    assert cp0["top_flux"] == [] and cp0["bot_flux"] == []
     assert cp0["use_settling"] is False and cp0["diff_esc"] == []
-    cp = forward.canonical_params(_p(
-        top_flux=[["H2O", 1.0e8], ["CH4", 0.0]],          # zero row dropped
-        bot_flux=[["SO2", 1.0e9, 0.1]]))
-    assert cp["top_flux"] == [["H2O", 1.0e8]]
-    assert cp["bot_flux"] == [["SO2", 1.0e9, 0.1]]
-    assert forward.canonical_params(
-        _p(use_settling=True))["use_settling"] is True
-    assert forward.canonical_params(
-        _p(diff_esc=["H2", "H"]))["diff_esc"] == ["H", "H2"]  # sorted, deduped
-    # settling and escape both ride the molecular-diffusion coefficient;
-    # escape with moldiff off would silently be zero, so both REFUSE instead
-    with pytest.raises(ValueError):
-        forward.canonical_params(_p(use_settling=True, use_moldiff=False))
-    with pytest.raises(ValueError):
-        forward.canonical_params(_p(use_settling=True, use_condense=True))
-    with pytest.raises(ValueError):
-        forward.canonical_params(_p(diff_esc=["H"], use_moldiff=False))
-    # empty escape list is fine with moldiff off (nothing to escape)
-    assert forward.canonical_params(_p(use_moldiff=False))["diff_esc"] == []
-    with pytest.raises(ValueError):
-        forward.canonical_params(_p(diff_esc=["SO2"]))     # curated choices
-    for bad in (dict(top_flux=[["H2O", 1e8], ["H2O", 2e8]]),   # duplicate
-                dict(top_flux=[["H2 O", 1e8]]),                # bad token
-                dict(bot_flux=[["SO2", 1e9]]),                 # 3 fields
-                dict(bot_flux=[["SO2", 1e9, -1.0]]),           # vdep
-                dict(top_flux=[["H2O", 1e30]])):               # out of range
-        with pytest.raises(ValueError):
-            forward.canonical_params(_p(**bad))
+    assert cp0["top_flux"] == [] and cp0["bot_flux"] == []
+    for enabling in (dict(use_settling=True),
+                     dict(diff_esc=["H2"]),
+                     dict(top_flux=[["H2O", 1.0e8]]),
+                     dict(bot_flux=[["SO2", 1.0e9, 0.1]])):
+        with pytest.raises(ValueError, match="removed from this tool"):
+            forward.canonical_params(_p(**enabling))
 
 
 # --- cloud deck -------------------------------------------------------------

@@ -407,22 +407,12 @@ def _restore_system_profile(cp: dict, key, pk, planet: str,
 
 
 def _reject_removed_physics(cp: dict) -> None:
-    removed = []
-    for active, label in (
-            (bool(cp.get("use_condense", False)), "condensation (use_condense)"),
-            (bool(cp.get("use_settling", False)),
-             "gravitational settling (use_settling)"),
-            (bool(cp.get("diff_esc") or []), "diffusion-limited escape (diff_esc)"),
-            (bool(cp.get("top_flux") or []), "top-boundary fluxes (top_flux)"),
-            (bool(cp.get("bot_flux") or []), "bottom-boundary fluxes (bot_flux)")):
-        if active:
-            removed.append(label)
-    if removed:
+    if bool(cp.get("use_condense", False)):
         raise ValueError(
-            "this configuration enables atmospheric physics the interface no "
-            "longer offers -- " + ", ".join(removed) + ". These settings "
-            "remain available through the programmatic interface "
-            "(jwst_tool.forward.canonical_params); loading them in the GUI "
+            "this configuration enables condensation (use_condense), "
+            "atmospheric physics the interface no longer offers. It remains "
+            "available through the programmatic interface "
+            "(jwst_tool.forward.canonical_params); loading it in the GUI "
             "would change the atmosphere.")
 
 

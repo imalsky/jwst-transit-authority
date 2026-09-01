@@ -486,33 +486,25 @@ def test_provenance_snapshot_records_the_ktables(tmp_path, monkeypatch):
 
 
 def test_gui_removed_physics_defaults_load_and_nondefaults_refuse():
-    """Condensation, settling, escape and BC fluxes are API-only.
-    Defaults load normally, but a configuration that ENABLES
-    any of them must RAISE, not load with a note: these switches change the
-    atmosphere the model computes, so pinning them off would show a
+    """Condensation is API-only. Defaults load normally, but a configuration
+    that ENABLES it must RAISE, not load with a note: the switch changes the
+    atmosphere the model computes, so pinning it off would show a
     successful restore while Run computed something the file does not
     describe -- the class of silent behavior change the fail-fast rule
     forbids. (The removed noise scenarios only get a note: those never
-    changed the model.) The settings remain reachable through the API."""
+    changed the model.) The setting remains reachable through the API. The
+    retired boundary-flux/escape/settling keys still round-trip pinned off."""
     canon = _canon()
     assert canon["use_condense"] is False and canon["use_settling"] is False
     assert not canon["diff_esc"] and not canon["top_flux"]
+    assert not canon["bot_flux"]
     state, notes = share_config.widget_state(canon, _key)
     assert not notes
     assert state["n0_planet"] == "wasp39b"
 
-    cases = [
-        (dict(use_condense=True, use_photo=True, use_moldiff=True),
-         "condensation"),
-        (dict(use_settling=True, use_moldiff=True), "gravitational settling"),
-        (dict(diff_esc=["H2"], use_moldiff=True), "diffusion-limited escape"),
-        (dict(top_flux=[["H2O", "1.0e8"]]), "top-boundary"),
-        (dict(bot_flux=[["SO2", "1.0e9", "0.1"]]), "bottom-boundary"),
-    ]
-    for over, needle in cases:
-        canon = _canon(**over)
-        with pytest.raises(ValueError, match=needle):
-            share_config.widget_state(canon, _key)
+    canon = _canon(use_condense=True, use_photo=True, use_moldiff=True)
+    with pytest.raises(ValueError, match="condensation"):
+        share_config.widget_state(canon, _key)
     # a saved configuration carrying the deleted Mie deck / line-by-line
     # mode refuses with the removal message (never loads under correlated-k)
     for stale in (dict(mie_condensate="MgSiO3"), dict(opacity_mode="lbl")):
