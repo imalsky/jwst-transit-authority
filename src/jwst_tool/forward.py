@@ -31,10 +31,10 @@ central finite differences: composition rows (lnZ, dlnCO) re-initialize
 the chemistry per FD point, every row must pass the h-vs-2h consistency
 gate, lnR0 is RT-only. jac_method="ad" is one warm-started forward-mode
 jvp per row (photo-on required; the lnZ jvp is the fixed-structural-grid
-derivative and the dlnCO jvp is refused near O-exhaustion). The FD dlnCO
-row is refused when its +-2h stencil straddles C/O = 1, so neither method
-gives a dlnCO row for 0.82 <= C/O <= 1.22. ``fisher.py`` turns the
-Jacobian + Pandeia noise into forecasts.
+derivative and the dlnCO jvp is refused near O-exhaustion). Where the
+central dlnCO stencil would straddle C/O = 1, the FD row steps one-sided
+away from the boundary instead (``fd_stencil``); AD has no such escape.
+``fisher.py`` turns the Jacobian + Pandeia noise into forecasts.
 
 Per-molecule "removed" spectra zero that molecule's VMR in the RT only --
 structure (T, mmw) is kept: the standard nested-model comparison.
@@ -132,9 +132,36 @@ JAC_METHODS = ("fd", "ad")            # certified-FD default / warm-jvp opt-in
 # ln(1 + min_z(OO_z/OC_z)) is nonnegative by construction, so a "<= 0" refusal
 # can never fire; the reachable criterion is one FD stencil width (2h) from
 # the O-exhaustion boundary, below which the per-layer tangent factors are
-# ill-conditioned. FD re-initializes per stencil point, but its +-2h stencil
-# must not cross C/O = 1 either (canonical_params refuses that).
+# ill-conditioned. FD re-initializes per stencil point and steps one-sided
+# away from C/O = 1 when the central stencil would cross it (fd_stencil).
 CO_BZ_MIN_AD = 2.0 * FD_STEPS["dlnCO"]   # = 0.2
+
+
+def fd_stencil(name: str, value: float) -> tuple[int, ...]:
+    """Step multiples of FD_STEPS[name] a composition row solves at. Central
+    (+-h, +-2h) unless the dlnCO stencil would straddle C/O = 1: the C-rich
+    side has no certified steady state (W39b at C/O 1.087 exhausts count_max
+    at longdy 36), so the row steps away from the boundary with the
+    second-order one-sided stencil (d, 2d, 4d) instead."""
+    if name == "dlnCO":
+        m = float(np.exp(2.0 * FD_STEPS[name]))
+        if value / m <= 1.0 <= value * m:
+            return (-1, -2, -4) if value <= 1.0 else (1, 2, 4)
+    return (1, -1, 2, -2)
+
+
+def fd_estimates(offs, dvals, f0, h):
+    """(J_h, J_2h) from stencil values dvals[s] = f(x + s h): central when
+    offs holds +-1, else the one-sided stencil anchored on f0 = f(x). The
+    Richardson combination (4 J_h - J_2h) / 3 is exact for cubics either way."""
+    if 1 in offs and -1 in offs:
+        return ((dvals[1] - dvals[-1]) / (2.0 * h),
+                (dvals[2] - dvals[-2]) / (4.0 * h))
+    d = offs[0]
+    return (d * (-3.0 * f0 + 4.0 * dvals[d] - dvals[2 * d]) / (2.0 * h),
+            d * (-3.0 * f0 + 4.0 * dvals[2 * d] - dvals[4 * d]) / (4.0 * h))
+
+
 # Cloud-deck Fisher parameters: RT-only rows, evaluated like the lnR0 nuisance
 # (single central difference or RT jvp; no chemistry re-solve, no h-vs-2h
 # gate). Only available with cloud_on.
@@ -1011,52 +1038,23 @@ def canonical_params(params: dict) -> dict:
             "only in the photo-on regime. Enable photochemistry, or use the "
             "default certified finite differences (jac_method='fd'), which "
             "work photo-off too.")
-    # Composition FD stencils must stay inside the validated envelope: the
-    # central stencil evaluates at +-2h in ln-space, so a row requested AT a
-    # range edge would silently solve the chemistry outside it. T-P rows
+    # Composition FD rows solve the chemistry at every stencil point, so each
+    # point must stay inside the validated envelope (a row requested AT a
+    # range edge would otherwise silently solve outside it). T-P rows
     # window-check every stencil point for the same reason.
-    if cp["jac_method"] == "fd" and cp["fisher_params"]:
-        _steps = FD_STEPS
-        _met_rng = (0.1, 100.0)
-        _co_rng = (0.1, 2.0)
-        if "lnZ" in cp["fisher_params"]:
-            _m = float(np.exp(2.0 * _steps["lnZ"]))
-            if not _met_rng[0] * _m <= cp["met_x_solar"] <= _met_rng[1] / _m:
+    if cp["jac_method"] == "fd":
+        for name, key, rng in (("lnZ", "met_x_solar", (0.1, 100.0)),
+                               ("dlnCO", "co_ratio", (0.1, 2.0))):
+            if name not in cp["fisher_params"]:
+                continue
+            pts = [cp[key] * float(np.exp(s * FD_STEPS[name]))
+                   for s in fd_stencil(name, cp[key])]
+            if not all(rng[0] <= p <= rng[1] for p in pts):
                 raise ValueError(
-                    f"met_x_solar={cp['met_x_solar']:g} is within one FD "
-                    f"stencil (2h = {2.0 * _steps['lnZ']:g} in ln) of the "
-                    f"validated range edge {list(_met_rng)}: the lnZ Fisher "
-                    f"row would evaluate the chemistry outside the envelope. "
-                    f"Keep met_x_solar in [{_met_rng[0] * _m:.3g}, "
-                    f"{_met_rng[1] / _m:.3g}] for an lnZ row, or drop lnZ "
-                    "from fisher_params.")
-        if "dlnCO" in cp["fisher_params"]:
-            _m = float(np.exp(2.0 * _steps["dlnCO"]))
-            if not _co_rng[0] * _m <= cp["co_ratio"] <= _co_rng[1] / _m:
-                raise ValueError(
-                    f"co_ratio={cp['co_ratio']:g} is within one FD stencil "
-                    f"(2h = {2.0 * _steps['dlnCO']:g} in ln) of the "
-                    f"validated range edge {list(_co_rng)}: the dlnCO Fisher "
-                    f"row would evaluate the chemistry outside the envelope. "
-                    f"Keep co_ratio in [{_co_rng[0] * _m:.3g}, "
-                    f"{_co_rng[1] / _m:.3g}] for a dlnCO row, or drop dlnCO "
-                    "from fisher_params.")
-            # The stencil must also stay on ONE side of C/O = 1 (oxygen
-            # exhaustion): the chemistry changes regime across it and the
-            # C-rich stencil point does not reach a certified steady state.
-            # The AD row refuses in the same band through its b_z bound
-            # (CO_BZ_MIN_AD), so no dlnCO row exists here by either method.
-            if cp["co_ratio"] / _m <= 1.0 <= cp["co_ratio"] * _m:
-                raise ValueError(
-                    f"co_ratio={cp['co_ratio']:g}: the dlnCO FD stencil "
-                    f"(C/O x e^(+-{2.0 * _steps['dlnCO']:g})) straddles "
-                    "C/O = 1, the oxygen-exhaustion boundary, and the C-rich "
-                    "stencil point has no certified steady state. No dlnCO "
-                    f"Fisher row is available for {1.0 / _m:.3g} <= co_ratio "
-                    f"<= {_m:.3g} by either method (AD refuses there too, "
-                    "via its oxygen-reservoir bound). Drop dlnCO from "
-                    f"fisher_params, or set co_ratio < {1.0 / _m:.3g} (or "
-                    f"> {_m:.3g}).")
+                    f"{key}={cp[key]:g}: the {name} FD stencil would solve "
+                    f"the chemistry at {[round(p, 3) for p in pts]}, outside "
+                    f"the validated range {list(rng)}. Move {key} inward or "
+                    f"drop {name} from fisher_params.")
     # --- condensation: detection-only -- refuse every derivative combo -----
     # (why: module docstring; the raises below carry the full user-facing
     # explanation, and the '91% wrong' wording is test-pinned)
@@ -1721,18 +1719,15 @@ def run_model(params: dict, log=print) -> Path:
                 "AD dlnCO row cannot be certified. Upgrade "
                 "vulcan-forward or use jac_method='fd'.")
         if float(_bz) <= CO_BZ_MIN_AD:
-            _m = float(np.exp(2.0 * FD_STEPS["dlnCO"]))
             raise RuntimeError(
                 "AD Jacobian for dlnCO refused at this composition: the "
                 f"fixed-O differential direction's oxygen-reservoir "
                 f"bound b_z = {float(_bz):.3g} <= {CO_BZ_MIN_AD:g} "
                 f"(C-rich composition, C/O = {cp['co_ratio']:g}: O-only "
                 "carriers are within one FD stencil of exhaustion, so "
-                "the tangent direction is ill-conditioned). The FD row is "
-                "an alternative only while its +-2h stencil stays below "
-                f"C/O = 1 (co_ratio < {1.0 / _m:.3g}; canonical_params "
-                "refuses a stencil that straddles it). Otherwise drop dlnCO "
-                "from fisher_params.")
+                "the tangent direction is ill-conditioned). Use "
+                "jac_method='fd': its dlnCO row steps one-sided away from "
+                "C/O = 1 and is certified by the h-vs-2h gate.")
 
     # BC flux species must exist in the solved network: the upstream
     # read_bc_flux SILENTLY skips unknown tokens, which would turn a typo'd
@@ -2152,9 +2147,8 @@ def run_model(params: dict, log=print) -> Path:
             _check_converged(diag_b, stage)
             return np.asarray(make_depth_fn(chem_b)(y_b, jnp.asarray(th)))
 
-        def _fd_row(name, d_p1, d_m1, d_p2, d_m2, h):
-            j1 = (d_p1 - d_m1) / (2.0 * h)
-            j2 = (d_p2 - d_m2) / (4.0 * h)
+        def _fd_row(name, j1, j2, h):
+            # j1 / j2: the same scheme's estimate at step h and 2h
             if not (np.isfinite(j1).all() and np.isfinite(j2).all()):
                 raise RuntimeError(
                     f"FD Jacobian for {name}: non-finite entries")
@@ -2171,7 +2165,8 @@ def run_model(params: dict, log=print) -> Path:
                     "yconv_cri (1e-3 or 1e-4), raise nz, or adjust "
                     "forward.FD_STEPS. An uncertified derivative is never "
                     "reported.")
-            return (4.0 * j1 - j2) / 3.0, err   # Richardson, O(h^4)
+            return (4.0 * j1 - j2) / 3.0, err   # Richardson: O(h^4) central,
+            #                                      O(h^3) one-sided
 
         def _ad_theta_depth(th):
             # warm continuation from the converged column: the primal is a
@@ -2300,10 +2295,14 @@ def run_model(params: dict, log=print) -> Path:
                 continue
             h = FD_STEPS[name]
             dvals = {}
+            offs = (1, -1, 2, -2)
             if name in FD_COMP_PARAMS:
                 # composition direction: FastChem re-init + certified cold
-                # solve per FD point (4x build+solve)
-                for s in (1, -1, 2, -2):
+                # solve per stencil point (central, or one-sided away from
+                # C/O = 1 -- see fd_stencil)
+                offs = fd_stencil(name, cp["met_x_solar" if name == "lnZ"
+                                           else "co_ratio"])
+                for s in offs:
                     f = float(np.exp(s * h))
                     if name == "lnZ":      # all metals together; C/O preserved
                         ab = _abundance_overrides(cp["met_x_solar"] * f,
@@ -2334,12 +2333,14 @@ def run_model(params: dict, log=print) -> Path:
                                 "or reduce forward.FD_STEPS for it.")
                     dvals[s] = _certified_depth(chem, th_s,
                                                 f"FD {name} {s:+d}h")
-            jac[j], err = _fd_row(name, dvals[1], dvals[-1],
-                                  dvals[2], dvals[-2], h)
+            method = "fd-central" if len(offs) == 4 else "fd-onesided"
+            f0 = (None if method == "fd-central"
+                  else np.asarray(depth_from_y(y_sol, th0)))
+            jac[j], err = _fd_row(name, *fd_estimates(offs, dvals, f0, h), h)
             fd_h.append(h)
             fd_err.append(err)
-            row_method.append("fd-central")
-            log(f"[fwd] FD Jacobian d(depth)/d({name}) in "
+            row_method.append(method)
+            log(f"[fwd] FD Jacobian d(depth)/d({name}) [{method}] in "
                 f"{time.time()-t1:.0f} s (h-vs-2h consistency {err:.3f} < "
                 f"{FD_CONSISTENCY_TOL})")
 

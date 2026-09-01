@@ -737,29 +737,33 @@ def test_emission_mode_gating_star_params_and_hygiene(tmp_path):
 # --- composition FD stencils + the dayside emission default ----------------
 
 def test_composition_fd_stencil_envelope():
-    """FD Fisher rows for lnZ/dlnCO refuse a baseline within one 2h stencil of
-    the validated range edge (v17): the stencil would otherwise silently solve
-    the chemistry outside the exercised envelope (met=100 -> 122x solar,
-    co=2.0 -> C/O 2.44). AD rows take no stencil and are exempt here (the
-    dlnCO AD row has its own run-time b_z margin)."""
+    """FD Fisher rows solve the chemistry at every stencil point, so a
+    baseline whose stencil leaves the validated range refuses (met=100 ->
+    122x solar, co=2.0 -> C/O 2.44). The dlnCO stencil steps one-sided away
+    from C/O = 1 instead of across it (the C-rich side never certifies: W39b
+    at C/O 1.087 exhausts count_max at longdy 36). AD rows take no stencil
+    and are exempt here (the dlnCO AD row has its own run-time b_z margin)."""
     forward.canonical_params(_p(met_x_solar=80.0, fisher_params=["lnZ"]))
-    with pytest.raises(ValueError, match="stencil"):
-        forward.canonical_params(_p(met_x_solar=100.0, fisher_params=["lnZ"]))
-    with pytest.raises(ValueError, match="stencil"):
-        forward.canonical_params(_p(met_x_solar=0.1, fisher_params=["lnZ"]))
-    forward.canonical_params(_p(co_ratio=1.6, fisher_params=["dlnCO"]))
-    with pytest.raises(ValueError, match="stencil"):
-        forward.canonical_params(_p(co_ratio=2.0, fisher_params=["dlnCO"]))
-    # the dlnCO stencil must not straddle C/O = 1 (oxygen exhaustion): the
-    # C-rich stencil point never certifies (a hot Jupiter at C/O = 0.89
-    # exhausted count_max at the +2h point, C/O = 1.087). lnZ holds C/O
-    # fixed and is unaffected.
-    for co in (0.85, 0.89, 1.0, 1.2):
-        with pytest.raises(ValueError, match="straddles C/O = 1"):
-            forward.canonical_params(_p(co_ratio=co, fisher_params=["dlnCO"]))
-    for co in (0.8, 1.25):
+    for kw, fp in ((dict(met_x_solar=100.0), "lnZ"),
+                   (dict(met_x_solar=0.1), "lnZ"),
+                   (dict(co_ratio=2.0), "dlnCO"),
+                   (dict(co_ratio=0.12), "dlnCO")):
+        with pytest.raises(ValueError, match="stencil"):
+            forward.canonical_params(_p(fisher_params=[fp], **kw))
+    assert forward.fd_stencil("dlnCO", 0.55) == (1, -1, 2, -2)
+    assert forward.fd_stencil("dlnCO", 0.89) == (-1, -2, -4)
+    assert forward.fd_stencil("dlnCO", 1.1) == (1, 2, 4)
+    assert forward.fd_stencil("lnZ", 0.89) == (1, -1, 2, -2)
+    for co in (0.89, 1.0, 1.1, 1.6):
         forward.canonical_params(_p(co_ratio=co, fisher_params=["dlnCO"]))
-    forward.canonical_params(_p(co_ratio=0.89, fisher_params=["lnZ"]))
+    # both schemes' Richardson rows are exact on a cubic (sign and
+    # coefficients of the one-sided stencil included)
+    x0, h = 0.3, 0.1
+    f = lambda x: x ** 3 - 2.0 * x
+    for offs in ((1, -1, 2, -2), (-1, -2, -4), (1, 2, 4)):
+        j1, j2 = forward.fd_estimates(offs, {s: f(x0 + s * h) for s in offs},
+                                      f(x0), h)
+        assert abs((4.0 * j1 - j2) / 3.0 - (3.0 * x0 ** 2 - 2.0)) < 1e-12
     # no stencil under AD; and without fisher_params the value is legal
     forward.canonical_params(_p(met_x_solar=100.0, fisher_params=["lnZ"],
                                 jac_method="ad"))
