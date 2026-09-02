@@ -92,12 +92,14 @@ JAC_METHODS = ("fd", "ad")            # certified-FD default / warm-jvp opt-in
 # ln(1 + min_z(OO_z/OC_z)) is the largest ln C/O increment before some
 # layer's fixed-O factor b_z turns nonpositive (nonnegative by construction,
 # so a "<= 0" refusal could never fire); it is computed on the build's
-# initial column, a proxy for the warm state the tangent runs on. Below this
-# margin the per-layer tangent factors are ill-conditioned. Empirical, equal
-# to the central FD stencil's reach today; a literal so a step change cannot
-# move the AD gate silently. FD re-initializes per stencil point and steps
-# one-sided below C/O = 1 when the central stencil would cross it.
-CO_BZ_MIN_AD = 0.2
+# initial column, a proxy for the warm state the tangent runs on. Set by
+# closure against the certified one-sided FD row on the TOI-7169 b case:
+# margin 0.12 (C/O 0.89) closes at the C/O 0.55 level, margin 0.05 (C/O
+# 0.95) does not (notes.md, Decision records 2026-09-02). A literal so a
+# step change cannot move the AD gate silently. FD re-initializes per
+# stencil point and steps one-sided below C/O = 1 when the central stencil
+# would cross it.
+CO_BZ_MIN_AD = 0.1
 
 
 def fd_stencil(name: str, value: float) -> tuple[tuple[int, ...], float]:
