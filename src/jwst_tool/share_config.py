@@ -38,7 +38,7 @@ SHARE_FORMAT = 1
 # tests/unit/test_share_config.py so they cannot drift. Session-global keys;
 # forward.* constants are shared with the widgets themselves.
 _GLOBAL_BOUNDS = {
-    "met": (0.1, 100.0), "co": (0.10, 2.00),
+    "met": (0.1, 100.0), "co": (0.10, 0.95),
     "sza": (0.0, 89.0), "fdiur": (0.1, 1.0),
     "yconv": (1.0e-4, 1.0e-2),
     "ck": (-4.0, 2.0), "ca": (0.0, 4.0),
@@ -103,6 +103,10 @@ def build_share(canon: dict, goal: dict, observation: dict,
         "canonical_params": dict(canon),
         "goal": dict(goal),
         "observation": dict(observation),
+        # The elemental set the run actually solved (number ratios to H):
+        # informational, derived from met_x_solar + co_ratio, never read back.
+        "elemental_abundances": forward.elemental_abundances(
+            canon["met_x_solar"], canon["co_ratio"]),
         # Which software wrote this file is recorded ONCE, inside the
         # provenance block ("software"), never as a second top-level copy.
         # Informational only -- a configuration must load on any tool

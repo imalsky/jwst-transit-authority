@@ -1036,17 +1036,21 @@ with st.sidebar:
 
     with st.expander("Composition"):
         # Composition is STRUCTURAL, one path for every value:
-        # metallicity scales O/C/N/S together, C/O sets C_H = co * O_H,
-        # FastChem re-initializes at exactly that composition. No
-        # perturbative knob; C-rich (> 1) is the same code path; an
-        # uncertified corner errors loudly (longdy gate).
+        # metallicity scales O/N/S, C/O sets C_H = co * O_H, FastChem
+        # re-initializes at exactly that composition. No perturbative knob.
+        # C/O stops below forward.CO_MAX: the carbon-rich side never
+        # certifies under the shipped settings (refused before any solve).
         met = st.number_input(
             "Metallicity (× solar)", 0.1, 100.0, 10.0, 0.5,
-            format="%.2f", key=K("met"))
+            format="%.2f", key=K("met"),
+            help="Scales O, N and S. Carbon follows C/O at the scaled "
+                 "oxygen, so it sits at this enrichment only at C/O 0.55.")
         co_ratio = st.number_input(
             "C/O (carbon/oxygen number ratio)",
-            0.10, 2.00, float(forward.CO_DEFAULT), 0.05,
-            format="%.3f", key=K("co"))
+            0.10, 0.95, float(forward.CO_DEFAULT), 0.05,
+            format="%.3f", key=K("co"),
+            help="Carbon varied at fixed oxygen. C/O of 1 and above is not "
+                 "certified under the shipped solver settings.")
 
     # Kzz and photochemistry render BEFORE the science-goal step, so the AD
     # photo-lock reads the EFFECTIVE differentiation method from session
@@ -2612,8 +2616,9 @@ if _have_fisher:
                             # INTERNAL ln-space draw (multiplicative, stays
                             # positive; center + delta_display can go
                             # negative for an unconstrained C/O) and draw
-                            # the same clipped-at-zero Gaussian family the
-                            # no-draw forecast uses. A weakly constrained C/O
+                            # the same lognormal family the no-draw forecast
+                            # uses, at the forecast's ln-space width
+                            # (sigma_display / center). A weakly constrained C/O
                             # sends exp(delta) off the forecast scale, where
                             # the input-point width no longer describes the
                             # shifted center: that draw has no curve
@@ -2630,8 +2635,9 @@ if _have_fisher:
                                     "off the panel scale, so the unshifted "
                                     "forecast is drawn")
                             else:
-                                _mc = posteriors.truncated_gaussian_curve(
-                                    _mu_d, _pr["sigma_display"])
+                                _mc = posteriors.lognormal_curve(
+                                    _mu_d,
+                                    _pr["sigma_display"] / _pr["center"])
                         else:
                             _mu_d = _pr["center"] + float(
                                 _mr["delta_display"][_p])

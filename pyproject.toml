@@ -44,7 +44,7 @@ dependencies = [
     # application). The floor is load-bearing: an older engine ignores unknown
     # profile keys silently. tests/unit/test_engine_api_contract.py pins every
     # engine symbol and profile key the tool uses.
-    "vulcan-forward>=0.12.1",
+    "vulcan-forward>=0.14.0",
     # Direct imports: load_config (CO_BASELINE check) and steady_state_grad
     # (adjoint_diag). The floor carries the sflux-epseri normalization fix.
     "vulcan-jax>=0.3.1",

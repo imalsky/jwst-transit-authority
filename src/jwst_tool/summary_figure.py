@@ -178,8 +178,8 @@ def _validate_panels(posterior_panels) -> list[dict]:
                 _mu = float(_mu)
                 if not np.isfinite(_mu):
                     raise ValueError(f"{cw}: mu must be finite, got {_mu!r}")
-            # curve_family marks a positive-support (zero-clipped) curve, so
-            # the automatic x-window never extends the axis below zero
+            # curve_family "lognormal" marks a multiplicative width (C/O), so
+            # the automatic x-window is taken in ln theta and stays positive
             _fam = c.get("curve_family")
             curves.append(dict(label=str(_req(c, "label", cw)),
                                theta=theta, pdf=pdf,
@@ -528,12 +528,15 @@ def _plot_posterior_panel(axp, pan: dict,
         for c in pan["curves"]:
             if c["mu"] is None or c["sigma"] is None:
                 continue
-            _lo_c = c["mu"] - _XLIM_SIGMA * c["sigma"]
-            if c.get("curve_family") == "gaussian_truncated_positive":
-                # positive quantity (C/O): the curve is clipped at zero, so
-                # the window never extends below it
-                _lo_c = max(_lo_c, 0.0)
-            _spans.append((_lo_c, c["mu"] + _XLIM_SIGMA * c["sigma"]))
+            if c.get("curve_family") == "lognormal":
+                # multiplicative width (C/O): sigma is the first-order
+                # C/O * sigma_ln, so the ln-space window is mu * exp(+-X s)
+                _s_ln = _XLIM_SIGMA * c["sigma"] / c["mu"]
+                _spans.append((c["mu"] * float(np.exp(-_s_ln)),
+                               c["mu"] * float(np.exp(_s_ln))))
+            else:
+                _spans.append((c["mu"] - _XLIM_SIGMA * c["sigma"],
+                               c["mu"] + _XLIM_SIGMA * c["sigma"]))
         if _spans:
             _lo = min(s[0] for s in _spans)
             _hi = max(s[1] for s in _spans)

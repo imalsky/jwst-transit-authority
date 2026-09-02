@@ -151,29 +151,51 @@ def gaussian_curve(center: float, sigma: float, grid=None,
     return dict(theta=theta, pdf=pdf)
 
 
-def truncated_gaussian_curve(center: float, sigma: float,
-                             n_sigma: float = 5.0,
-                             n_points: int = 201) -> dict:
-    """Gaussian N(center, sigma) clipped to theta >= 0 (positive quantity,
-    e.g. C/O). The maintainer's chosen display for the C/O panel: a familiar
-    symmetric bell whose width matches the quoted +/- sigma, with the
-    unphysical negative part simply cut. Panels draw curves peak-normalized,
-    so clipping and clip-plus-renormalize render identically.
+def lognormal_curve(center: float, sigma_ln: float, grid=None,
+                    n_sigma: float = 5.0, n_points: int = 201) -> dict:
+    """Lognormal pdf with median ``center`` and ln-space width ``sigma_ln``:
+    the Fisher Gaussian in ln(C/O) mapped to C/O, so the curve is drawn in
+    the coordinate the width was computed in (68% interval center*exp(+-
+    sigma_ln), positive by construction, no clip). Auto grid center*exp(+-
+    n_sigma*sigma_ln) (n_points, uniform in ln theta) or a caller grid
+    (1-D ascending, > 0). pdf integrates to ~1 over the auto grid.
     """
     center = float(center)
-    sigma = float(sigma)
+    sigma_ln = float(sigma_ln)
     if not (np.isfinite(center) and center > 0.0):
         raise ValueError(
-            f"truncated_gaussian_curve: center must be finite and > 0, "
-            f"got {center!r}")
-    if not (np.isfinite(sigma) and sigma > 0.0):
+            f"lognormal_curve: center must be finite and > 0, got {center!r}")
+    if not (np.isfinite(sigma_ln) and sigma_ln > 0.0):
         raise ValueError(
-            f"truncated_gaussian_curve: sigma must be finite and > 0, "
-            f"got {sigma!r} -- an unconstrained (inf) direction has no "
-            "curve by design")
-    lo = max(center - float(n_sigma) * sigma, 0.0)
-    grid = np.linspace(lo, center + float(n_sigma) * sigma, int(n_points))
-    return gaussian_curve(center, sigma, grid=grid)
+            f"lognormal_curve: sigma_ln must be finite and > 0, got "
+            f"{sigma_ln!r} -- an unconstrained (inf) direction has no curve "
+            "by design")
+    if grid is None:
+        n_sigma = float(n_sigma)
+        n_points = int(n_points)
+        if not (np.isfinite(n_sigma) and n_sigma > 0.0):
+            raise ValueError(f"lognormal_curve: n_sigma must be finite and "
+                             f"> 0, got {n_sigma!r}")
+        if n_points < 3:
+            raise ValueError(f"lognormal_curve: n_points must be >= 3, got "
+                             f"{n_points}")
+        with np.errstate(over="ignore"):
+            theta = center * np.exp(np.linspace(-n_sigma * sigma_ln,
+                                                n_sigma * sigma_ln, n_points))
+    else:
+        theta = np.asarray(grid, float)
+        if theta.ndim != 1 or theta.size < 2:
+            raise ValueError("lognormal_curve: grid must be a 1-D array with "
+                             f"at least 2 points, got shape {theta.shape}")
+    if not np.all(np.isfinite(theta)) or np.any(theta <= 0.0):
+        raise ValueError(
+            f"lognormal_curve: the grid around center {center!r} at sigma_ln "
+            f"{sigma_ln!r} is unresolvable in float64 or not positive")
+    if np.any(np.diff(theta) <= 0.0):
+        raise ValueError("lognormal_curve: grid must be strictly ascending")
+    z = np.log(theta / center) / sigma_ln
+    pdf = np.exp(-0.5 * z * z) / (theta * sigma_ln * np.sqrt(2.0 * np.pi))
+    return dict(theta=theta, pdf=pdf)
 
 
 def marginalized_posteriors(results, free_names: list[str], centers: dict,
@@ -252,16 +274,13 @@ def marginalized_posteriors(results, free_names: list[str], centers: dict,
         if np.isfinite(s_disp):
             grid = grids.get(name) if grids is not None else None
             if name == "dlnCO":
-                # C/O display: symmetric Gaussian in the display units,
-                # clipped at the physical boundary C/O = 0; a caller grid
-                # is honored verbatim
-                if grid is not None:
-                    curve = gaussian_curve(rec["center"], s_disp, grid=grid)
-                else:
-                    curve = truncated_gaussian_curve(
-                        rec["center"], s_disp,
-                        n_sigma=n_sigma, n_points=n_points)
-                rec["curve_family"] = "gaussian_truncated_positive"
+                # C/O display: the Fisher Gaussian in ln(C/O) mapped to C/O,
+                # a lognormal at the INTERNAL width (the table's sigma_display
+                # stays the first-order C/O * sigma_lnCO); a caller grid is
+                # honored verbatim
+                curve = lognormal_curve(rec["center"], s_int, grid=grid,
+                                        n_sigma=n_sigma, n_points=n_points)
+                rec["curve_family"] = "lognormal"
             else:
                 curve = gaussian_curve(rec["center"], s_disp, grid=grid,
                                        n_sigma=n_sigma, n_points=n_points)

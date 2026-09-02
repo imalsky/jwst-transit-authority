@@ -59,7 +59,7 @@ def test_adjoint_key_tracks_chemistry_and_species():
     k0 = adjoint_diag.adjoint_key(_p(), "SO2")
     assert adjoint_diag.adjoint_key(_p(), "CH4") != k0
     assert adjoint_diag.adjoint_key(_p(Tirr=1100.0), "SO2") != k0
-    assert adjoint_diag.adjoint_key(_p(co_ratio=1.5), "SO2") != k0
+    assert adjoint_diag.adjoint_key(_p(co_ratio=0.75), "SO2") != k0
     assert adjoint_diag.adjoint_key(_p(use_photo=False), "SO2") != k0
     assert adjoint_diag.adjoint_key(_p(use_vm_mol=True), "SO2") != k0
 

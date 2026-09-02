@@ -285,12 +285,14 @@ def test_composition_structural_path_baseline_and_ranges():
     cp = forward.canonical_params(_p())
     assert cp["co_ratio"] == forward.CO_DEFAULT == 0.55
     assert "dco" not in cp and "co_baseline" not in cp
-    # C-rich is the same path, with NO detection-only restriction: FD Fisher
-    # rows are certified re-solves, valid at any baseline
-    cp = forward.canonical_params(_p(co_ratio=1.5, met_x_solar=30.0,
+    # High C/O below CO_MAX is the same path, with NO detection-only
+    # restriction: FD Fisher rows are certified re-solves, valid at any
+    # baseline inside the bound
+    cp = forward.canonical_params(_p(co_ratio=0.8, met_x_solar=30.0,
                                      fisher_params=["lnZ", "dlnCO"]))
-    assert cp["co_ratio"] == 1.5 and cp["met_x_solar"] == 30.0
-    for bad in (dict(co_ratio=0.05), dict(co_ratio=2.5),
+    assert cp["co_ratio"] == 0.8 and cp["met_x_solar"] == 30.0
+    for bad in (dict(co_ratio=0.05), dict(co_ratio=forward.CO_MAX),
+                dict(co_ratio=2.5),
                 dict(met_x_solar=0.05), dict(met_x_solar=150.0)):
         with pytest.raises(ValueError):
             forward.canonical_params(_p(**bad))
@@ -720,14 +722,15 @@ def test_emission_mode_gating_star_params_and_hygiene(tmp_path):
 def test_composition_fd_stencil_envelope():
     """FD Fisher rows solve the chemistry at every stencil point, so a
     baseline whose stencil leaves the validated range refuses (met=100 ->
-    122x solar, co=2.0 -> C/O 2.44). The dlnCO stencil steps one-sided away
-    from C/O = 1 instead of across it (the C-rich side never certifies: W39b
-    at C/O 1.087 exhausts count_max at longdy 36). AD rows take no stencil
-    and are exempt here (the dlnCO AD row has its own run-time b_z margin)."""
+    122x solar, co=0.12 -> C/O 0.098). The dlnCO stencil steps one-sided
+    away from C/O = 1 instead of across it, and co_ratio itself is bounded
+    below CO_MAX with or without a Fisher row (the C-rich side never
+    certifies: W39b at C/O 1.087 exhausts count_max at longdy 36). AD rows
+    take no stencil and are exempt here (the dlnCO AD row has its own
+    run-time margin gate)."""
     forward.canonical_params(_p(met_x_solar=80.0, fisher_params=["lnZ"]))
     for kw, fp in (({"met_x_solar": 100.0}, "lnZ"),
                    ({"met_x_solar": 0.1}, "lnZ"),
-                   ({"co_ratio": 2.0}, "dlnCO"),
                    ({"co_ratio": 0.12}, "dlnCO")):
         with pytest.raises(ValueError, match="stencil"):
             forward.canonical_params(_p(fisher_params=[fp], **kw))
@@ -736,13 +739,14 @@ def test_composition_fd_stencil_envelope():
     assert forward.fd_stencil("dlnCO", 0.89) == ((-1, -2, -4), h0 / 2)
     assert forward.fd_stencil("lnZ", 0.89) == ((1, -1, 2, -2),
                                                forward.FD_STEPS["lnZ"])
-    for co in (0.89, 1.6):
+    for co in (0.89, 0.95):
         forward.canonical_params(_p(co_ratio=co, fisher_params=["dlnCO"]))
-    # at or above 1 inside the band nothing is certified (exactly 1.0 must
-    # not fall to either side by floating-point accident)
-    for co in (1.0, 1.1):
-        with pytest.raises(ValueError, match="not certified"):
-            forward.canonical_params(_p(co_ratio=co, fisher_params=["dlnCO"]))
+    # at or above CO_MAX nothing is certified, Fisher row or not (exactly
+    # 1.0 must not fall below the bound by floating-point accident)
+    for co in (1.0, 1.1, 2.0):
+        for fp in ([], ["dlnCO"]):
+            with pytest.raises(ValueError, match="carbon-rich"):
+                forward.canonical_params(_p(co_ratio=co, fisher_params=fp))
     # both schemes' Richardson rows are exact on a cubic (sign and
     # coefficients of the one-sided stencil included); the one-sided row is
     # third order -- on a quartic its error is -f''''(x) h^3 / 3 exactly, so

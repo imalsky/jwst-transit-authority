@@ -63,9 +63,10 @@ def _vulcan_jax_constant(name: str) -> float:
     ("G_grav", planets.G_CGS, True),
     # R_sun converts rstar_rsun on both sides; same argument as G.
     ("r_sun", planets.R_SUN_CM, True),
-    # AU legitimately differs by rounding (1.496e13 vs 1.49597871e13): it
-    # only converts orbit_au into local irradiation geometry and never
-    # crosses into the chemistry. The tolerance keeps that true.
+    # AU differs at the 9th digit (IAU 2012 exact 1.495978707e13 here vs
+    # vulcan_jax's 1.49597871e13): it only converts orbit_au into local
+    # irradiation geometry and never crosses into the chemistry. The
+    # tolerance keeps that true.
     ("au", planets.AU_CM, False),
 ])
 def test_constants_match_vulcan_jax(name, ours, exact):

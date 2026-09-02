@@ -83,28 +83,30 @@ def test_panel_xlim_verbatim_when_given_automatic_otherwise():
             plt.close(fig)
 
 
-def test_truncated_co_panel_window_clamps_at_zero():
-    """A zero-clipped (positive-quantity) curve keeps the symmetric
-    mu +/- 3.5 sigma window on the right but never extends the axis below
-    zero; a plain Gaussian panel of the same width does go negative."""
+def test_lognormal_co_panel_window_is_multiplicative():
+    """A lognormal (multiplicative-width) curve takes its automatic window in
+    ln theta, mu * exp(+-3.5 sigma / mu), so the axis stays positive on the
+    left and reaches further on the right than a symmetric window would; a
+    plain Gaussian panel of the same width does go negative."""
     from jwst_tool import posteriors
     center, sigma = 0.55, 0.479          # weakly constrained C/O
-    curve = posteriors.truncated_gaussian_curve(center, sigma)
+    curve = posteriors.lognormal_curve(center, sigma / center)
     pan = dict(axis_label="C/O", notes=[], center=center,
                curves=[dict(label="fitted", theta=curve["theta"],
                             pdf=curve["pdf"], mu=center, sigma=sigma,
-                            curve_family="gaussian_truncated_positive",
+                            curve_family="lognormal",
                             color="#2a78d6")])
     fig = summary_figure.compose_summary_figure(
         _spectrum(), posterior_panels=[pan])
     try:
         lo, hi = fig.axes[1].get_xlim()
-        assert lo >= 0.0
-        assert hi == pytest.approx(center + summary_figure._XLIM_SIGMA * sigma,
-                                   rel=1e-6)
-        assert np.all(np.asarray(curve["theta"]) >= 0.0)
+        s = summary_figure._XLIM_SIGMA * sigma / center
+        assert lo == pytest.approx(center * np.exp(-s), rel=1e-6)
+        assert hi == pytest.approx(center * np.exp(s), rel=1e-6)
+        assert lo > 0.0
+        assert np.all(np.asarray(curve["theta"]) > 0.0)
         # the same width through the plain Gaussian branch DOES go negative,
-        # which is exactly what the clipped family exists to avoid
+        # which is exactly what the lognormal family exists to avoid
         gfig = summary_figure.compose_summary_figure(
             _spectrum(),
             posterior_panels=[_panel_sized(mu=center, sigma=sigma)])

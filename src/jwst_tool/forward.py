@@ -9,10 +9,11 @@ that entry, logging "[fwd] PROG <frac> <label>" for the GUI bar. With
 method in ``jac_row_method``): "fd" is certified central finite differences
 under the h-vs-2h gate, "ad" one warm-started jvp per row (photo-on required;
 the lnZ jvp is the fixed-structural-grid
-derivative and the dlnCO jvp is refused near O-exhaustion). Where the
-central dlnCO stencil would straddle C/O = 1, the FD row steps one-sided
-toward lower C/O instead (``fd_stencil``; refused at or above 1 in that
-band); AD has no such escape.
+derivative and the dlnCO jvp is refused near O-exhaustion, on the build
+column and again on the converged column). Where the central dlnCO stencil
+would reach C/O = 1, the FD row steps one-sided toward lower C/O instead
+(``fd_stencil``); ``co_ratio`` itself is bounded below ``CO_MAX``, since
+the carbon-rich side never certified. AD has no such escape.
 ``fisher.py`` turns the Jacobian + Pandeia noise into forecasts.
 
 A "removed" spectrum zeroes that molecule's VMR in the RT only, keeping the
@@ -65,12 +66,30 @@ _VERSION = 41  # model_cache buster (identity = canonical params + this
                # number, never a content hash); bump on any physics or
                # canonical-key-set change.
 
-# Baseline C/O: the number ratio N_C/N_O (not [C/H]/[O/H], not a log) on the
-# W39b cfg's elemental set, the ONLY valid basis. Display value only, and
-# _assemble_chem refuses on drift from the loaded cfg's C_H/O_H.
-CO_BASELINE = 0.00295 / 0.00537   # = 0.54935, cfg C_H/O_H (Tsai 2023 10x-solar)
+# The W39b cfg's elemental set (number ratios to H, 10x solar): Lodders 2020
+# Table 8 present-day solar (log eps C 8.47, N 7.85, O 8.73, S 7.15; He 10.924
+# stays in the FastChem file) times 10, the numbers upstream VULCAN's
+# vulcan_cfg.py carries. _assemble_chem refuses on drift from the loaded cfg,
+# so they are usable without the engine (share files, display).
+CFG_ABUNDANCES = {"O_H": 0.00537, "C_H": 0.00295,
+                  "N_H": 0.000708, "S_H": 0.000141}
+# Baseline C/O: the number ratio N_C/N_O (not [C/H]/[O/H], not a log) on that
+# set, the ONLY valid basis. Display value only.
+CO_BASELINE = CFG_ABUNDANCES["C_H"] / CFG_ABUNDANCES["O_H"]   # = 0.54935
 # GUI/API default co_ratio: the baseline rounded onto the widgets' 0.05 grid.
 CO_DEFAULT = 0.55
+
+
+def elemental_abundances(met_x_solar: float, co_ratio: float) -> dict:
+    """The run's O/H, C/H, N/H, S/H: the cfg metals scaled by met_x_solar/10
+    (the cfg is 10x solar; He fixed), carbon from co_ratio at the scaled
+    oxygen. Structural: FastChem re-initializes at exactly this set, so at
+    C/O away from the baseline carbon is NOT at met_x_solar times solar."""
+    m = float(met_x_solar) / 10.0
+    o_h = CFG_ABUNDANCES["O_H"] * m
+    return {"O_H": o_h, "C_H": float(co_ratio) * o_h,
+            "N_H": CFG_ABUNDANCES["N_H"] * m,
+            "S_H": CFG_ABUNDANCES["S_H"] * m}
 
 # FD Fisher steps. lnZ scales O/C/N/S together (C/O preserved), dlnCO scales
 # C_H at fixed O, lnKzz/T-P rows perturb theta on the same build. Every row is
@@ -100,30 +119,25 @@ JAC_METHODS = ("fd", "ad")            # certified-FD default / warm-jvp opt-in
 # stencil point and steps one-sided below C/O = 1 when the central stencil
 # would cross it.
 CO_BZ_MIN_AD = 0.1
+# co_ratio is accepted below this bound only (exclusive): the carbon-rich side
+# does not certify under the shipped settings (W39b at C/O 1.087 exhausts
+# count_max at longdy 36; 0.984 is the highest certified value), and a value
+# that cannot certify is refused before it costs a 30 000-step solve.
+CO_MAX = 1.0
 
 
 def fd_stencil(name: str, value: float) -> tuple[tuple[int, ...], float]:
     """(step multiples, step) a composition row solves at. Central (+-h, +-2h)
-    at h = FD_STEPS[name], unless the dlnCO stencil would straddle C/O = 1:
-    the C-rich side does not certify under the shipped solver settings (W39b
-    at C/O 1.087 exhausts count_max at longdy 36), so below 1 the row uses
-    the one-sided stencil (-1, -2, -4) toward lower C/O -- third order after
-    Richardson -- at h/2 so its reach equals the central stencil's 2h (at
-    the full step the curvature toward the boundary fails the h-vs-2h gate
-    on a 1600 K hot Jupiter). At or above 1 inside that band no stencil is
-    certified, so the row refuses."""
+    at h = FD_STEPS[name], unless the dlnCO stencil would reach C/O = 1
+    (co_ratio itself stays below CO_MAX): the C-rich side does not certify
+    under the shipped solver settings, so the row uses the one-sided stencil
+    (-1, -2, -4) toward lower C/O -- third order after Richardson -- at h/2
+    so its reach equals the central stencil's 2h (at the full step the
+    curvature toward the boundary fails the h-vs-2h gate on a 1600 K hot
+    Jupiter)."""
     h = FD_STEPS[name]
-    if name == "dlnCO":
-        m = float(np.exp(2.0 * h))
-        if value / m <= 1.0 <= value * m:
-            if value >= 1.0:
-                raise ValueError(
-                    f"co_ratio={value:g}: a dlnCO FD row at or above C/O = 1 "
-                    "within one stencil of the boundary is not certified "
-                    "(the C-rich side does not reach a certified steady "
-                    "state under the shipped settings). Drop dlnCO from "
-                    "fisher_params.")
-            return (-1, -2, -4), h / 2.0
+    if name == "dlnCO" and value * float(np.exp(2.0 * h)) >= CO_MAX:
+        return (-1, -2, -4), h / 2.0
     return (1, -1, 2, -2), h
 
 
@@ -821,10 +835,12 @@ def canonical_params(params: dict) -> dict:
                 "molecule via extra_mols.")
         _req = set(cp["wo_mols"])
         cp["wo_mols"] = [m for m in _active if m in _req]
-    if not 0.1 <= cp["co_ratio"] <= 2.0:
+    if not 0.1 <= cp["co_ratio"] < CO_MAX:
         raise ValueError(
-            f"co_ratio={cp['co_ratio']} outside [0.1, 2.0] (the network was "
-            "never exercised beyond this range)")
+            f"co_ratio={cp['co_ratio']} outside [0.1, {CO_MAX:g}): carbon-rich "
+            "C/O is not certified under the shipped settings (the solve "
+            "exhausts count_max without a steady state), so it is refused "
+            "before any solve")
     if not 0.1 <= cp["met_x_solar"] <= 100.0:
         raise ValueError(
             f"met_x_solar={cp['met_x_solar']} outside [0.1, 100] x solar")
@@ -863,7 +879,7 @@ def canonical_params(params: dict) -> dict:
     # window-check every stencil point for the same reason.
     if cp["jac_method"] == "fd":
         for name, key, rng in (("lnZ", "met_x_solar", (0.1, 100.0)),
-                               ("dlnCO", "co_ratio", (0.1, 2.0))):
+                               ("dlnCO", "co_ratio", (0.1, CO_MAX))):
             if name not in cp["fisher_params"]:
                 continue
             offs, h = fd_stencil(name, cp[key])
@@ -1299,17 +1315,18 @@ def _assemble_chem(cp: dict, log):
             "layers per decade")
     profile["cfg_overrides"] = ovr
 
-    # CO_BASELINE must equal the loaded cfg's C_H/O_H: a wrong basis here
-    # mislabels every C/O display.
+    # CFG_ABUNDANCES must equal the loaded cfg's O_H/C_H/N_H/S_H: a wrong set
+    # here mislabels every C/O display and every exported abundance.
     import vulcan_jax as _vj
     _cfg_chk = _vj.load_config(profile.get("vulcan_cfg_name") or config.W39B_CFG_NAME)
-    _co_cfg = float(_cfg_chk.C_H) / float(_cfg_chk.O_H)
-    if abs(_co_cfg / CO_BASELINE - 1.0) > 1e-9:
-        raise RuntimeError(
-            f"forward.CO_BASELINE={CO_BASELINE:.5f} no longer matches the "
-            f"network cfg's C_H/O_H={_co_cfg:.5f}: the C/O display baseline "
-            "would be mislabeled. Update CO_BASELINE to the cfg value (and "
-            "bump _VERSION).")
+    for _k, _v in CFG_ABUNDANCES.items():
+        _cfg_v = float(getattr(_cfg_chk, _k))
+        if abs(_cfg_v / _v - 1.0) > 1e-9:
+            raise RuntimeError(
+                f"forward.CFG_ABUNDANCES[{_k!r}]={_v:g} no longer matches the "
+                f"network cfg's {_k}={_cfg_v:g}: the C/O display baseline and "
+                "the exported abundances would be mislabeled. Update "
+                "CFG_ABUNDANCES to the cfg values (and bump _VERSION).")
     # CHEM_P_SPAN_DYN must match the live cfg too: the light path's
     # bottom-coverage refusal keys on it.
     _span_cfg = (float(_cfg_chk.P_t), float(_cfg_chk.P_b))
@@ -1332,14 +1349,9 @@ def _assemble_chem(cp: dict, log):
                 "over that range (the upstream file-mode convention).")
 
     def _abundance_overrides(met_x_solar: float, co_ratio: float) -> dict:
-        # Structural composition: scale the cfg metals together (He fixed), then
-        # set carbon from the requested C/O at the scaled oxygen. FastChem
-        # re-initializes here; fastchem_met_scale follows for trace metals.
-        m = met_x_solar / 10.0                 # cfg abundances ARE 10x solar
-        o_h = float(_cfg_chk.O_H) * m
-        return {"O_H": o_h, "C_H": co_ratio * o_h,
-                "N_H": float(_cfg_chk.N_H) * m,
-                "S_H": float(_cfg_chk.S_H) * m,
+        # Structural composition (elemental_abundances); fastchem_met_scale
+        # follows for the trace metals FastChem carries outside the network.
+        return {**elemental_abundances(met_x_solar, co_ratio),
                 "fastchem_met_scale": float(met_x_solar)}
 
     ovr.update(_abundance_overrides(cp["met_x_solar"], cp["co_ratio"]))
@@ -1421,23 +1433,27 @@ def run_model(params: dict, log=print) -> Path:
     advance()
     log("[fwd] building chemistry model ...")
     chem = _build_chem()
+    _bz_build = _bz_warm = float("nan")   # AD dlnCO margins (build / converged column)
     if cp["jac_method"] == "ad" and "dlnCO" in cp["fisher_params"]:
         # Refuse the AD dlnCO row within one FD stencil of O-exhaustion (see
         # CO_BZ_MIN_AD at module top) -- here, straight after the build that
-        # sets co_bz_bound, so the refusal costs no solve. A missing engine
-        # attribute means the check cannot run: refuse, never pass silently.
+        # sets co_bz_bound, so the refusal costs no solve; the same margin is
+        # re-checked on the converged column the tangent starts from, below.
+        # A missing engine attribute means the check cannot run: refuse,
+        # never pass silently.
         _bz = getattr(chem, "co_bz_bound", None)
-        if _bz is None:
+        if _bz is None or getattr(chem, "co_bz_margin", None) is None:
             raise RuntimeError(
-                "the sibling forward engine does not expose co_bz_bound "
-                "(the fixed-O direction's oxygen-reservoir bound): the "
-                "AD dlnCO row cannot be certified. Upgrade "
-                "vulcan-forward or use jac_method='fd'.")
-        if float(_bz) <= CO_BZ_MIN_AD:
+                "the sibling forward engine does not expose co_bz_bound / "
+                "co_bz_margin (the fixed-O direction's oxygen-reservoir "
+                "margin): the AD dlnCO row cannot be certified. Upgrade "
+                "vulcan-forward (>= 0.14) or use jac_method='fd'.")
+        _bz_build = float(_bz)
+        if not _bz_build > CO_BZ_MIN_AD:
             raise RuntimeError(
                 f"The AD Jacobian for dlnCO is not available at C/O = "
                 f"{cp['co_ratio']:g}: it needs co_bz_bound > {CO_BZ_MIN_AD:g} "
-                f"(here {float(_bz):.3g}; roughly C/O below "
+                f"(here {_bz_build:.3g}; roughly C/O below "
                 f"{math.exp(-CO_BZ_MIN_AD):.2f}), the margin before the "
                 "fixed-O direction exhausts the oxygen-only carriers. Use "
                 "finite differences.")
@@ -1571,26 +1587,41 @@ def run_model(params: dict, log=print) -> Path:
     # --- chemistry: certified cold solves (no warm continuation) ------------
     t0 = time.time()
     th0 = jnp.asarray(theta)
-    conv_cert = []   # (stage, accept_count, longdy) for every PASSED gate
+    # (stage, accept_count, longdy, longdydt, branch, aflux_change, cell) for
+    # every PASSED gate; branch 1 = tight (yconv_cri), 2 = loose (yconv_min),
+    # cell = the 'species@z<layer>' whose change sets longdy.
+    conv_cert = []
     # Certification is the runner's own CANONICAL gate (ConvDiag.conv_normal AND
     # longdy < yconv_min), recomputed at the exit state. Never loosen it.
+    _BRANCH = {1: "tight (yconv_cri)", 2: "loose (yconv_min)"}
 
     def _check_converged(diag, stage):
         ac = int(diag.accept_count)
         longdy = float(diag.longdy)
+        branch = int(diag.conv_branch)
+        z = int(diag.cell_layer)
+        cell = f"{_species_now[int(diag.cell_species)]}@z{z}"
+        detail = (f"longdy={longdy:.3g}, longdydt={float(diag.longdydt):.3g}/s, "
+                  f"branch {_BRANCH.get(branch, 'none')}, "
+                  f"aflux_change={float(diag.aflux_change):.3g}, "
+                  f"t={float(diag.t):.3g} s, dt={float(diag.dt):.3g} s; "
+                  f"controlling cell {cell} at {float(chem.p_bar[z]):.3g} bar, "
+                  f"VMR {float(diag.cell_vmr):.3g}")
         if not (bool(diag.conv_normal) and longdy < chem.yconv_min):
             how = (f"hit the count_max={chem.count_max} cap" if ac >= int(chem.count_max)
                    else f"exited at {ac} accepted steps without the runner's "
                         "canonical certification (stall fallback / hybrid "
                         "vm_mol phase-flip / photolysis flux still changing)")
             raise RuntimeError(
-                f"chemistry did NOT converge ({stage}: longdy={longdy:.3g}, "
+                f"chemistry did NOT converge ({stage}: {detail}; "
                 f"gate yconv_min={chem.yconv_min:g}, "
                 f"conv_normal={bool(diag.conv_normal)}; {how}). This "
                 "parameter corner has no certified steady state -- adjust "
                 "T-P / Kzz / composition (or the convergence settings) "
                 "rather than trusting an unconverged spectrum.")
-        conv_cert.append((stage, ac, longdy))
+        log(f"[fwd] {stage}: certified at {ac} accepted steps ({detail})")
+        conv_cert.append((stage, ac, longdy, float(diag.longdydt), branch,
+                          float(diag.aflux_change), cell))
 
     # Single certified cold solve, unless an identical chemistry-relevant set
     # already solved: the chem-level cache stores the RAW column, so an RT-only
@@ -1625,7 +1656,16 @@ def run_model(params: dict, log=print) -> Path:
                 f"chem-cache {_chem_out.name}: stored certificate "
                 f"(longdy={_ld:.3g}) fails the current gate "
                 f"yconv_min={float(chem.yconv_min):g}")
-        conv_cert.append(("baseline solve (chem-cache)", _ac, _ld))
+        # certificate detail written since the cell diagnostic existed; an
+        # older chem-cache carries none, and says so rather than inventing one
+        _old = "conv_cell" not in _chem_art.files
+        conv_cert.append((
+            "baseline solve (chem-cache)", _ac, _ld,
+            float("nan") if _old else float(_chem_art["conv_longdydt"][0]),
+            -1 if _old else int(_chem_art["conv_branch"][0]),
+            float("nan") if _old else float(_chem_art["conv_flux"][0]),
+            "n/a (chem-cache predates the certificate detail)" if _old
+            else str(_chem_art["conv_cell"][0])))
         y_sol = jnp.asarray(y_np)
         log(f"[fwd] chemistry column from chem-cache ({_chem_out.name}, "
             f"{_ac} accepted steps at write); solve skipped")
@@ -1640,7 +1680,7 @@ def run_model(params: dict, log=print) -> Path:
                 "parameter set outside the modelable range")
         log(f"[fwd] chemistry solved in {time.time()-t0:.0f} s total")
         # persist the certified RAW column (atomic, as for the flat cache)
-        _stage, _ac, _ld = conv_cert[-1]
+        _stage, _ac, _ld, _lddt, _br, _fl, _cell = conv_cert[-1]
         _chem_arrays = dict(
             y_raw=y_np,
             species=np.array(_species_now, dtype="U16"),
@@ -1649,6 +1689,10 @@ def run_model(params: dict, log=print) -> Path:
             p_bar=np.asarray(chem.p_bar),
             conv_accept=np.array([_ac], dtype=np.int64),
             conv_longdy=np.array([_ld], dtype=np.float64),
+            conv_longdydt=np.array([_lddt], dtype=np.float64),
+            conv_branch=np.array([_br], dtype=np.int64),
+            conv_flux=np.array([_fl], dtype=np.float64),
+            conv_cell=np.array([_cell], dtype="U48"),
         )
         MODEL_CACHE.mkdir(parents=True, exist_ok=True)
         _ins.atomic_write(
@@ -1825,6 +1869,20 @@ def run_model(params: dict, log=print) -> Path:
                           if n not in CLOUD_FISHER_PARAMS]
                          if cp["jac_method"] == "ad" else [])
         _ad_cols = {}
+        if "dlnCO" in _ad_chem_rows:
+            # The build-time co_bz_bound is a proxy (FastChem equilibrium
+            # column); the seed map recomputes the O split from the converged
+            # column the tangent starts from, so gate on that column too.
+            _bz_warm = float(chem.co_bz_margin(np.asarray(y_sol)))
+            log(f"[fwd] AD dlnCO margin: build column {_bz_build:.3g}, "
+                f"converged column {_bz_warm:.3g} (gate {CO_BZ_MIN_AD:g})")
+            if not _bz_warm > CO_BZ_MIN_AD:
+                raise RuntimeError(
+                    f"The AD Jacobian for dlnCO is not available at C/O = "
+                    f"{cp['co_ratio']:g}: the converged column's "
+                    f"oxygen-reservoir margin is {_bz_warm:.3g} (build column "
+                    f"{_bz_build:.3g}; it needs > {CO_BZ_MIN_AD:g}). Use "
+                    "finite differences.")
         if _ad_chem_rows:
             # One plain jvp per chemistry-theta row, NEVER vmap over the
             # tangent directions: the batched tangent through the solver's
@@ -2001,11 +2059,18 @@ def run_model(params: dict, log=print) -> Path:
         # auto-sized U dtype: a fixed width silently truncated long JSON
         params_json=np.array(json.dumps(cp)),
         # convergence certificate: the runner's own longdy per gated stage
-        conv_stages=np.array([s for s, _, _ in conv_cert], dtype="U48"),
-        conv_accept=np.array([a for _, a, _ in conv_cert], dtype=np.int64),
-        conv_longdy=np.array([l for _, _, l in conv_cert], dtype=np.float64),
+        conv_stages=np.array([c[0] for c in conv_cert], dtype="U48"),
+        conv_accept=np.array([c[1] for c in conv_cert], dtype=np.int64),
+        conv_longdy=np.array([c[2] for c in conv_cert], dtype=np.float64),
+        conv_longdydt=np.array([c[3] for c in conv_cert], dtype=np.float64),
+        conv_branch=np.array([c[4] for c in conv_cert], dtype=np.int64),
+        conv_flux=np.array([c[5] for c in conv_cert], dtype=np.float64),
+        conv_cell=np.array([c[6] for c in conv_cert], dtype="U48"),
         conv_gate=np.array([float(getattr(chem, "yconv_min", np.nan))],
                            dtype=np.float64),
+        # AD dlnCO oxygen-reservoir margin on the build column and on the
+        # converged column the tangent starts from (NaN when no AD dlnCO row)
+        co_bz_margin=np.array([_bz_build, _bz_warm], dtype=np.float64),
         science_mode=np.array(cp["science_mode"], dtype="U16"),
         chem_provider=np.array(cp["chem_provider"], dtype="U16"),
     )

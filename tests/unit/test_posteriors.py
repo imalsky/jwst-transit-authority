@@ -41,7 +41,7 @@ CO = 0.55
 def test_curves_match_fisher_and_are_honestly_labeled():
     """The statistical core in one place: honesty labels, sigma equal to the
     Fisher forecast, the display-unit transforms (dlnCO reported as absolute
-    C/O with the zero-clipped Gaussian curve family), a caller grid used verbatim,
+    C/O with the lognormal curve family), a caller grid used verbatim,
     and a LIST of results combining via combined_forecast."""
     r = _result()
     out = posteriors.marginalized_posteriors(r, FREE, CENTERS, co_eval=CO)
@@ -57,19 +57,22 @@ def test_curves_match_fisher_and_are_honestly_labeled():
         assert rec["sigma_display"] == pytest.approx(want, rel=1e-12)
         assert rec["center"] == CENTERS[name]
         # Ordinary display coordinates stay Gaussian (pdf integrates to
-        # ~1 on the +/-5-sigma grid); absolute C/O is the same Gaussian
-        # clipped at the physical boundary C/O = 0.
+        # ~1 on the +/-5-sigma grid); absolute C/O is the lognormal the
+        # ln(C/O) Fisher width induces: positive grid CO*exp(+-5 sigma_ln),
+        # median at CO, unit mass, no clip.
         theta, pdf = rec["theta"], rec["pdf"]
         # np.trapezoid is NumPy 2.0+; np.trapz was removed in NumPy 2.4
         _trapz = getattr(np, "trapezoid", None) or np.trapz
         if name == "dlnCO":
-            assert rec["curve_family"] == "gaussian_truncated_positive"
-            assert np.all(theta >= 0.0)
-            assert theta.min() == pytest.approx(max(CO - 5 * want, 0.0))
-            assert theta.max() == pytest.approx(CO + 5 * want)
-            assert theta[np.argmax(pdf)] == pytest.approx(CO, rel=1e-2)
-            # clipping can only REMOVE mass, never add it
-            assert _trapz(pdf, theta) <= 1.0 + 1e-4
+            s_ln = float(sig[name])
+            assert rec["curve_family"] == "lognormal"
+            assert np.all(theta > 0.0)
+            assert theta.min() == pytest.approx(CO * np.exp(-5 * s_ln))
+            assert theta.max() == pytest.approx(CO * np.exp(5 * s_ln))
+            assert _trapz(pdf, theta) == pytest.approx(1.0, abs=1e-3)
+            below = theta <= CO
+            assert _trapz(pdf[below], theta[below]) == pytest.approx(
+                0.5, abs=5e-3)
         else:
             assert _trapz(pdf, theta) == pytest.approx(1.0, abs=1e-4)
             assert rec["curve_family"] == "gaussian"
@@ -99,13 +102,11 @@ def test_curves_match_fisher_and_are_honestly_labeled():
         assert outc["params"][name]["sigma_display"] == pytest.approx(
             want, rel=1e-12)
 
-    # a very broad C/O curve is clipped at the physical boundary: the grid
-    # starts exactly at 0 and the peak stays at the center
-    curve = posteriors.truncated_gaussian_curve(0.55, 1.0)
-    assert curve["theta"].min() == 0.0
-    assert np.all(curve["theta"] >= 0.0)
-    assert curve["theta"][np.argmax(curve["pdf"])] == pytest.approx(
-        0.55, abs=0.06)
+    # a very broad C/O curve stays positive with its median at the center
+    # (the lognormal needs no clip)
+    curve = posteriors.lognormal_curve(0.55, 1.0)
+    assert np.all(curve["theta"] > 0.0)
+    assert curve["theta"][100] == pytest.approx(0.55)
 
 
 def test_null_directions_are_flagged_never_faked():
@@ -156,7 +157,7 @@ def test_input_validation_raises():
     with pytest.raises(ValueError):
         posteriors.gaussian_curve(0.0, np.inf)
     with pytest.raises(ValueError):
-        posteriors.truncated_gaussian_curve(-0.1, 1.0)
+        posteriors.lognormal_curve(-0.1, 1.0)
 
 
 # --- named combinations ------------------------------------------------------
@@ -361,21 +362,17 @@ def test_mock_center_co_refuses_an_off_scale_draw():
     """The C/O draw recenters MULTIPLICATIVELY while the drawn width stays
     the forecast width, which is linearized at the INPUT C/O. On a weakly
     constrained direction exp(delta) runs orders of magnitude past that
-    width and the pairing breaks: the curve grid collapses to one float64
-    value. mock_center_co returns the shifted center inside the forecast
-    window and None past it, so that curve is never requested."""
+    width and the pairing breaks. mock_center_co returns the shifted center
+    inside the forecast window and None past it, so no curve is drawn at a
+    center the input-point width does not describe."""
     sig_ln = 0.2
     mu = posteriors.mock_center_co(CO, CO * sig_ln, 0.15)
     assert mu == pytest.approx(CO * np.exp(0.15), rel=1e-12)
-    curve = posteriors.truncated_gaussian_curve(mu, CO * sig_ln)
+    curve = posteriors.lognormal_curve(mu, sig_ln)
     assert np.all(np.diff(curve["theta"]) > 0.0)
 
     # unconstrained C/O: a 1-sigma draw in ln(C/O) lands e^40 out
     assert posteriors.mock_center_co(CO, CO * 40.0, 40.0) is None
-    # ... and that is exactly the center that has no representable curve
-    with pytest.raises(ValueError, match="unresolvable in float64"):
-        posteriors.truncated_gaussian_curve(CO * float(np.exp(40.0)),
-                                            CO * 40.0)
 
 
 def test_scoring_modules_never_reference_the_mock_layer():

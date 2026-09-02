@@ -36,10 +36,11 @@ from __future__ import annotations
 import math
 
 # IAU 2015 Resolution B3 nominal values (R_jup equatorial, R_sun, and
-# M_jup = nominal GM_J / CODATA G) and CODATA 2018 G -- identical to
-# astropy.constants to the digits printed.
+# M_jup = nominal GM_J / CODATA G), the IAU 2012 exact au, and CODATA 2018 G
+# -- identical to astropy.constants to the digits printed.
 R_JUP_CM = 7.1492e9
 R_SUN_CM = 6.957e10
+AU_CM = 1.495978707e13  # only converts orbit_au in system_teq
 G_CGS = 6.67430e-8  # gravitational constant (cm^3 g^-1 s^-2); for gs_cgs -> Mp
 M_JUP_G = 1.89813e30  # Jupiter mass (g); for archive mass -> surface gravity
 
@@ -195,8 +196,6 @@ CUSTOM_FIELD_RANGES = {
     "t14": (0.5, 10.0),         # hours
 }
 
-
-AU_CM = 1.496e13
 
 
 def system_teq(star_teff: float, rstar_rsun: float, orbit_au: float) -> float:

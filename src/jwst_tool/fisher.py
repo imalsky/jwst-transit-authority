@@ -48,13 +48,13 @@ NULL_LOAD_TOL = 1e-6
 # FITTED coordinate. dlnCO is the only row whose display transform is a
 # LINEARIZATION (display_sigma: sigma_CO = C/O * sigma_lnCO); every other row
 # converts exactly (identity, or 1/ln10 for dex) and reports its width
-# verbatim however large it is. At sigma_lnCO = 1 that linearization has run
-# out: the symmetric display Gaussian's minus-1-sigma edge sits exactly at the
-# physical boundary C/O = 0, so "C/O = 0.55 +/- 0.55" and anything past it
-# describes the boundary, not a measurement. Such a direction reads
-# UNCONSTRAINED (inf), the same as a numerically null one -- never a number
-# that looks like a weak measurement. The value is derived, not tuned: it is
-# where sigma_CO reaches C/O.
+# verbatim however large it is. At sigma_lnCO = 1 that first-order number
+# equals C/O itself, so "C/O = 0.55 +/- 0.55" no longer describes the
+# multiplicative interval (a factor e each way) it stands for. Such a
+# direction reads UNCONSTRAINED (inf), the same as a numerically null one --
+# never a number that looks like a weak measurement. The value is derived,
+# not tuned: it is where sigma_CO reaches C/O. (The drawn curve is the
+# lognormal in C/O, which needs no such cut; the cut is about the table.)
 UNINFORMATIVE_SIGMA = {"dlnCO": 1.0}
 
 
