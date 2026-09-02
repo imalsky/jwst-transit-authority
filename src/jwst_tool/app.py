@@ -1673,9 +1673,8 @@ planet_label = (planets.PLANETS[planet_key]["label"]
 _canon = None
 try:
     _canon = forward.canonical_params(params)
-    # existence is enough for the runtime estimate: the cache version is
-    # inside the key, so a file at this path was written by this version
-    cached = forward.cache_path(params).exists()
+    # load, not exists(): a file that fails to load is not a cache hit
+    cached = forward.load_result(params) is not None
     params_error = None
 except (ValueError, RuntimeError) as e:  # stale widget combo mid-rerun, or a
     cached, params_error = False, str(e)  # missing/invalid T-P table
