@@ -640,24 +640,18 @@ def _axis_range(container, label: str, key: str, warn, *, unit: str = "",
     return (float(lo), float(hi))
 
 
-def _apply_pending_config() -> None:
-    """Apply a loaded configuration file to the widget state.
-
-    Must run BEFORE any widget instantiates (Streamlit forbids writing a
-    widget's key afterwards). The content hash makes it apply once, not on
-    every rerun; either the whole mapping applies or nothing does."""
+def _populate_config() -> None:
+    """Populate-button callback: write the uploaded configuration file into
+    the widget state. A callback runs to completion before the script, so no
+    widget has instantiated yet and a rerun cannot interrupt it half-way;
+    either the whole mapping applies or nothing does."""
+    for k in ("_cfg_load_error", "_cfg_load_notes", "_cfg_populated"):
+        st.session_state.pop(k, None)
     up = st.session_state.get(K("cfg_upload"))
     if up is None:
         return
-    raw = up.getvalue()
-    sha = hashlib.sha1(raw).hexdigest()
-    if st.session_state.get("_cfg_applied_sha") == sha:
-        return
-    st.session_state["_cfg_applied_sha"] = sha
-    st.session_state.pop("_cfg_load_error", None)
-    st.session_state.pop("_cfg_load_notes", None)
     try:
-        cfg = json.loads(raw.decode())
+        cfg = json.loads(up.getvalue().decode())
         state, notes = share_config.widget_state(cfg, K)
     except (ValueError, RuntimeError, TypeError, UnicodeDecodeError) as e:
         st.session_state["_cfg_load_error"] = str(e)
@@ -672,9 +666,15 @@ def _apply_pending_config() -> None:
     for k, v in state.items():
         st.session_state[k] = v
     st.session_state["_cfg_load_notes"] = notes
-
-
-_apply_pending_config()
+    _pk = state.get(K("planet"))
+    st.session_state["_cfg_populated"] = (
+        f"Populated {len(state)} settings from {up.name}: "
+        + (planets.PLANETS[_pk]["label"] if _pk in planets.PLANETS
+           else "custom planet")
+        + f", {state.get(K('met'))}x solar, C/O {state.get(K('co'))}, "
+        f"goal {state.get(K('goal'))}, "
+        + {"fd": "finite differences", "ad": "automatic differentiation"}.get(
+            state.get(K("jacm")), "") + ".")
 
 
 def _apply_pending_archive_fill() -> None:
@@ -759,8 +759,9 @@ def _combo_remove(i: int) -> None:
 
 
 with st.sidebar:
-    # Step 0: Load a configuration. The file was already APPLIED by
-    # _apply_pending_config(); this is the widget plus the outcome messages.
+    # Step 0: Load a configuration. Selecting the file does nothing by
+    # itself; the Populate button's callback (_populate_config) writes it
+    # into the widgets and the outcome line below says what was applied.
     st.markdown("### 0 · Configuration")
     # Every step's controls sit behind an expander,
     # so the sidebar reads as a short list of titled sections. The
@@ -769,14 +770,19 @@ with st.sidebar:
     with st.expander("Load a configuration (JSON)"):
         _cfg_up = st.file_uploader(
             "Configuration file", type=["json"], key=K("cfg_upload"))
+        st.button("Populate the settings from this file",
+                  disabled=(_cfg_up is None), on_click=_populate_config,
+                  key=K("cfg_populate"))
     if st.session_state.get("_cfg_load_error"):
         st.error("The configuration file could not be applied: "
                  + st.session_state["_cfg_load_error"])
-    elif _cfg_up is not None:
-        st.success("Configuration loaded. Review the steps below and "
-                   "press Run.")
+    elif st.session_state.get("_cfg_populated"):
+        st.success(st.session_state["_cfg_populated"]
+                   + " Review the steps below and press Run.")
         for _n in st.session_state.get("_cfg_load_notes") or []:
             st.warning(f"Not restored: {_n}")
+    elif _cfg_up is not None:
+        st.info("File selected. Press Populate to apply it.")
     st.divider()
 
     # Step 1: Target

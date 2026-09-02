@@ -220,6 +220,10 @@ def test_every_download_button_is_plain_and_click_safe():
     assert not at.exception, at.exception
     assert "Download configuration (JSON)" in {b.label
                                                for b in at.get("download_button")}
+    # The upload applies only through the Populate button (a callback), and
+    # the button waits for a file.
+    _pop = [b for b in at.button if b.key == "n0_cfg_populate"]
+    assert _pop and _pop[0].proto.disabled, "Populate button missing or live without a file"
 
     at2 = AppTest.from_file(str(APP), default_timeout=60)
     at2.session_state["n0_wasp39b_tp"] = "file"

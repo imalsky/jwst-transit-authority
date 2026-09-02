@@ -504,7 +504,7 @@ def _plot_posterior_panel(axp, pan: dict,
         # the input value the forecast is centered on: with a jitter draw the
         # curve sits OFF it, and that offset is the realization's luck
         axp.axvline(pan["center"], color="#666666", lw=0.8, ls=":", zorder=3,
-                    label="input value")
+                    label=f"input value {_fmt_val(pan['center'])}")
     # width in the TITLE, where corner.py puts it
     _sized = [c for c in pan["curves"] if c["sigma"] is not None]
     _q = _sized[0] if len(_sized) == 1 else None
