@@ -1,6 +1,6 @@
-# vulcan-jwst-tool
+# JWST Transit Authority
 
-`vulcan-jwst-tool` is a planning tool for JWST observations. The goal is to understand, for a given
+JWST Transit Authority is a planning tool for JWST observations. The goal is to understand, for a given
 science goal, the relative information that different JWST modes give you. The tool combines:
 
 - VULCAN-JAX photochemical kinetics;
@@ -14,7 +14,7 @@ template signal-to-noise values and local Fisher forecasts.
 In particular, I've focused on making the forward model (photochemistry and radiative transfer) auto-differentiable. This is hugely helpful because the gradients and the Jacobians can be calculated quickly. Also, by hosting this online,
 users can test ideas quickly instead of downloading 10s of GBs of data.
 
-Try the [public web app](https://huggingface.co/spaces/imalsky/jwst-tool), or
+Try the [public web app](https://huggingface.co/spaces/imalsky/jwst-transit-authority), or
 install the package for local runs. The Python package imports as `jwst_tool`. If you find bugs,
 note them here on GitHub or email me please.
 
@@ -43,7 +43,7 @@ environment.
 python -m pip install \
   -i https://test.pypi.org/simple/ \
   --extra-index-url https://pypi.org/simple/ \
-  "vulcan-jwst-tool[gui]"
+  "jwst-transit-authority[gui]"
 
 conda create -n pandeia_2026_7 python=3.12
 conda run -n pandeia_2026_7 pip install pandeia.engine==2026.7
@@ -153,7 +153,7 @@ data, reaction network, and model settings with any published result.
 
 ## Support and license
 
-Open a [GitHub issue](https://github.com/imalsky/vulcan-jwst-tool/issues) and
+Open a [GitHub issue](https://github.com/imalsky/jwst-transit-authority/issues) and
 include the exported configuration, versions, and full error message.
 
-`vulcan-jwst-tool` is released under GPLv3.
+JWST Transit Authority is released under GPLv3.

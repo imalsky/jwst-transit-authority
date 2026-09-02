@@ -57,7 +57,7 @@ def main() -> int:
     api = HfApi()
     user = api.whoami()["name"]
     dataset = os.environ.get("DATASET_REPO", f"{user}/vulcan-jwst-tool-data")
-    space = os.environ.get("SPACE_REPO", f"{user}/jwst-tool")
+    space = os.environ.get("SPACE_REPO", f"{user}/jwst-transit-authority")
     print(f"HF user: {user}\ndataset: {dataset}\nspace:   {space}\nstage:   {STAGE}")
 
     gone = [m for m in STAGE_MARKERS if not m.exists()]
@@ -68,12 +68,12 @@ def main() -> int:
             "STAGE_DIR.")
 
     # Non-fatal preflight: the Space build clones the GitHub repos and reads
-    # version pins from vulcan-jwst-tool/deploy/ -- if deploy/ is not pushed
+    # version pins from jwst-transit-authority/deploy/ -- if deploy/ is not pushed
     # yet, the first build fails until a push + Settings -> Factory rebuild.
     step("checking GitHub for the pushed deploy/ directory")
     try:
         req = urllib.request.Request(
-            "https://api.github.com/repos/imalsky/vulcan-jwst-tool/contents/deploy",
+            "https://api.github.com/repos/imalsky/jwst-transit-authority/contents/deploy",
             headers={"User-Agent": "jwst-tool-deploy"})
         with urllib.request.urlopen(req, timeout=15) as r:
             json.load(r)

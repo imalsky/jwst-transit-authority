@@ -22,7 +22,7 @@ from jwst_tool import noise
 REPOSITORIES = {
     "vulcan-jax": ("VULCAN-JAX", "jax-vulcan"),
     "vulcan-forward": ("vulcan-forward",),
-    "vulcan-jwst-tool": ("vulcan-jwst-tool",),
+    "jwst-transit-authority": ("jwst-transit-authority", "vulcan-jwst-tool"),
     "vulcan-retrieval": ("vulcan-retrieval",),
     "VULCAN-master": ("VULCAN-master",),
     "VULCAN-vm-branch": ("VULCAN-vm-branch", ".oracles/vulcan3_vm_branch"),
@@ -71,7 +71,7 @@ def _repo_identity(workspace: Path, directories: tuple) -> dict:
 
 def _versions() -> dict:
     out = {}
-    for name in ("vulcan-jwst-tool", "vulcan-forward", "vulcan-jax",
+    for name in ("jwst-transit-authority", "vulcan-forward", "vulcan-jax",
                  "exojax", "jax", "numpy"):
         try:
             out[name] = metadata.version(name)

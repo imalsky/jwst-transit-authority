@@ -1,4 +1,4 @@
-"""This work vs petitRADTRANS 3.4.0 on the JWST tool's own converged
+"""This work vs petitRADTRANS 3.4.0 on JWST Transit Authority's own converged
 atmospheres: four planets in transmission, two in emission, identical
 P/T/mmw/VMRs/geometry and k-table files, lines only, 3.03-5.17 um. Inputs:
 validation/data/atmos_*.npz (inputs/atmos_cases.py) and prt_*.npz

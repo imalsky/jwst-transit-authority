@@ -21,7 +21,7 @@ from packaging.requirements import Requirement
 # (streamlit/pandas) and the Space bootstrap's huggingface_hub. The trailing
 # entries are runtime imports that the roots' metadata does NOT declare; the
 # walker only fills in their versions.
-ROOTS = ["vulcan-jwst-tool", "vulcan-jax",
+ROOTS = ["jwst-transit-authority", "vulcan-jax",
          "streamlit", "pandas", "huggingface_hub", "matplotlib",
          "pooch", "sortedcontainers", "cloudpickle",
          "platformdirs", "setuptools", "threadpoolctl", "zstandard",
@@ -30,9 +30,9 @@ ROOTS = ["vulcan-jwst-tool", "vulcan-jax",
 # distributions -- pinning setuptools covers them)
 # Local editables: present in the closure but installed from the repo
 # checkouts by the Dockerfile, never from PyPI. vulcan-forward MUST be here:
-# it is a hard dependency of vulcan-jwst-tool with no PyPI release, so pinning
+# it is a hard dependency of jwst-transit-authority with no PyPI release, so pinning
 # it writes a line the --no-deps install cannot resolve and the image fails.
-LOCAL = {"vulcan-jwst-tool", "vulcan-jax", "vulcan-forward"}
+LOCAL = {"jwst-transit-authority", "vulcan-jax", "vulcan-forward"}
 
 seen: set[str] = set()
 pins: dict[str, str] = {}

@@ -1,11 +1,11 @@
 ---
-title: VULCAN JWST Tool
+title: JWST Transit Authority
 sdk: docker
 app_port: 7860
 pinned: false
 ---
 
-# VULCAN JWST Tool
+# JWST Transit Authority
 
 JWST observability and information-content forecasts on live VULCAN-JAX
 photochemical kinetics: forward transmission/emission spectra (ExoJAX RT),
@@ -13,7 +13,7 @@ Pandeia 2026.7 noise (the STScI-supported matched triple), conditional
 template S/N, and certified Fisher constraint forecasts.
 
 This Space is a deployment shim: the build clones the three source repos
-(jax-vulcan, vulcan-forward, vulcan-jwst-tool) from GitHub, and the ~8 GB
+(jax-vulcan, vulcan-forward, jwst-transit-authority) from GitHub, and the ~8 GB
 of reference data (Pandeia refdata + PSFs, synphot CDBS, exojax line lists,
 opacity caches) is served from a private dataset repo mounted read-only at
 /srv/hub-data (preferred; bootstrap_data.py download-seeding is the

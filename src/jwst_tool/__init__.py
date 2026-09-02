@@ -13,7 +13,7 @@ detect.py) plus rank-aware Fisher forecasts. adjoint_diag.py adds
 reverse-mode adjoint diagnostics (per-reaction dL/dlnk, per-layer dL/dT)
 with a scope audit and full numerical certification.
 
-Lives in src/jwst_tool/ (dist: vulcan-jwst-tool); the shared
+Lives in src/jwst_tool/ (dist: jwst-transit-authority); the shared
 forward-model modules come from the shared vulcan-forward package
 (vulcan_forward.*).
 

@@ -74,7 +74,7 @@ else:
     raise RuntimeError(
         "jwst_tool data root not found: set JWST_TOOL_DATA_DIR to a directory holding "
         "the tool's cdbs/ tree (a site-packages install cannot infer it), or run from "
-        "an editable checkout of vulcan-jwst-tool.")
+        "an editable checkout of jwst-transit-authority.")
 
 # GENERATED caches (model spectra + pandeia results) live in the repo output/;
 # JWST_TOOL_OUTPUT_DIR overrides. Created on demand by the writers.
@@ -86,7 +86,7 @@ elif _IN_CHECKOUT:
 else:
     raise RuntimeError(
         "jwst_tool output root not found: set JWST_TOOL_OUTPUT_DIR (a site-packages "
-        "install cannot infer it), or run from an editable checkout of vulcan-jwst-tool.")
+        "install cannot infer it), or run from an editable checkout of jwst-transit-authority.")
 MODEL_CACHE = OUTPUT_DIR / "model_cache"
 NOISE_CACHE = OUTPUT_DIR / "noise_cache"
 

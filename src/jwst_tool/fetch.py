@@ -23,7 +23,7 @@ from typing import Callable
 
 from jwst_tool import instruments as ins
 
-_UA = {"User-Agent": "vulcan-jwst-tool data fetcher"}
+_UA = {"User-Agent": "jwst-transit-authority data fetcher"}
 _CHUNK = 1 << 20                       # 1 MiB read chunks
 _PROGRESS_EVERY = 100                  # progress line every N chunks
 

@@ -1,5 +1,5 @@
 """Writes validation/data/atmos_<planet>_<mode>.npz: one (planet, science_mode)
-case at the JWST tool's defaults (GUI molecule set) -- solve the chemistry, map
+case at JWST Transit Authority's defaults (GUI molecule set) -- solve the chemistry, map
 the column onto the RT grid, and save what both RT codes need (P, T, mean
 molecular weight, VMRs, geometry) plus the tool's own wide-band observable and a
 lines-only 3.03-5.17 um spectrum for the petitRADTRANS comparison. Needs the

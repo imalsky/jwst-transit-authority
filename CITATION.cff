@@ -1,15 +1,15 @@
 cff-version: 1.2.0
-message: "If you use vulcan-jwst-tool in published work, please cite it as below, along with the underlying codes listed in the README's Papers and citation section."
+message: "If you use JWST Transit Authority in published work, please cite it as below, along with the underlying codes listed in the README's Papers and citation section."
 type: software
-title: "vulcan-jwst-tool: a JWST exoplanet observation planner with a live photochemical forward model"
+title: "JWST Transit Authority: a JWST exoplanet observation planner with a live photochemical forward model"
 authors:
   - family-names: Malsky
     given-names: Isaac
 version: 0.49.7
 date-released: "2026-09-01"
 license: GPL-3.0-only
-repository-code: "https://github.com/imalsky/vulcan-jwst-tool"
-url: "https://github.com/imalsky/vulcan-jwst-tool"
+repository-code: "https://github.com/imalsky/jwst-transit-authority"
+url: "https://github.com/imalsky/jwst-transit-authority"
 keywords:
   - JWST
   - exoplanets

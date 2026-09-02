@@ -48,7 +48,7 @@ def test_sibling_pins_are_full_shas_and_agree():
 def test_dockerfile_pins_the_deployed_tool_commit():
     args = _dockerfile_args()
     assert "JWST_TOOL_SHA" in args, (
-        "the Dockerfile must pin the deployed vulcan-jwst-tool commit by "
+        "the Dockerfile must pin the deployed jwst-transit-authority commit by "
         "full SHA (no unqualified branch clones)")
 
 

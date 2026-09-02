@@ -1,6 +1,6 @@
 """JWST exoplanet observation planner -- Streamlit GUI.
 
-Launch via the console script ``jwst-tool`` (installed with vulcan-jwst-tool), or
+Launch via the console script ``jwst-tool`` (installed with jwst-transit-authority), or
 directly:  streamlit run src/jwst_tool/app.py  (from the repo root).
 
 Pipeline per run: VULCAN-JAX photochemistry -> ExoJAX
@@ -145,9 +145,9 @@ def _csv_bytes(df: pd.DataFrame) -> bytes:
     """CSV with a one-line identity header (`pd.read_csv(..., comment="#")`)."""
     p = provenance.snapshot()
     repos = " ".join(f"{k}={p['repositories'][k]['commit'][:12]}"
-                     for k in ("vulcan-jwst-tool", "vulcan-forward", "vulcan-jax"))
+                     for k in ("jwst-transit-authority", "vulcan-forward", "vulcan-jax"))
     ps, cs = p["pandeia_stack"], p["cache_schema"]
-    head = (f"# provenance: jwst-tool {p['software']['vulcan-jwst-tool']} | {repos} | "
+    head = (f"# provenance: jwst-transit-authority {p['software']['jwst-transit-authority']} | {repos} | "
             f"pandeia engine {ps['engine']} refdata {ps['refdata']['version']} "
             f"psf {ps['psf']['version']} | cache model v{cs['model']} "
             f"worker v{cs['pandeia_worker']}\n")
@@ -177,7 +177,7 @@ def _detection_metric(r: dict) -> tuple[float, bool]:
 # initial_sidebar_state: the default ("auto") starts the sidebar COLLAPSED
 # on a narrow viewport -- the huggingface.co iframe is one -- hiding every
 # input behind a small toggle, which reads as "half the tool is missing".
-st.set_page_config(page_title="JWST Exoplanet Observation Planner",
+st.set_page_config(page_title="JWST Transit Authority",
                    layout="wide", initial_sidebar_state="expanded")
 
 # Header: short orientation, no acknowledgment gate
@@ -217,20 +217,20 @@ with st.expander("Validation"):
         "The suites run in CI for each repository: "
         "[jax-vulcan](https://github.com/imalsky/jax-vulcan), "
         "[vulcan-forward](https://github.com/imalsky/vulcan-forward), "
-        "[vulcan-jwst-tool](https://github.com/imalsky/vulcan-jwst-tool), and "
+        "[jwst-transit-authority](https://github.com/imalsky/jwst-transit-authority), and "
         "[vulcan-retrieval](https://github.com/imalsky/vulcan-retrieval). "
         "For end-to-end tests, see the set of validation figures that I've "
-        "created [here](https://github.com/imalsky/vulcan-jwst-tool/tree/main/"
+        "created [here](https://github.com/imalsky/jwst-transit-authority/tree/main/"
         "validation/figures). This includes trying to recreate the results "
         "of [Tsai et al. 2023](https://doi.org/10.5281/zenodo.7542781), the "
         "[JWST ERS carbon dioxide paper](https://doi.org/10.5281/zenodo."
         "6959427), and VULCAN 2.0 and petitRADTRANS on identical inputs. "
         "The correlated-k binning validation is shown "
-        "[here](https://github.com/imalsky/vulcan-jwst-tool/blob/main/"
+        "[here](https://github.com/imalsky/jwst-transit-authority/blob/main/"
         "validation/figures/ckd_verification_vs_exojax_exok.png). "
         "The power-law cloud deck is checked against petitRADTRANS on "
         "identical inputs, clear and cloudy, "
-        "[here](https://github.com/imalsky/vulcan-jwst-tool/blob/main/"
+        "[here](https://github.com/imalsky/jwst-transit-authority/blob/main/"
         "validation/figures/cloud_verification_vs_petitradtrans.png); its "
         "autodiff gradient is checked against the exact analytic derivative "
         "in the test suite.")

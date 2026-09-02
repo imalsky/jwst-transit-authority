@@ -186,7 +186,7 @@ def test_provenance_block_is_complete_and_portable(tmp_path):
     prov = share["provenance"]
     assert prov["random_seed"] == 73
     assert set(prov["cache_schema"]) == {"model", "pandeia_worker"}
-    assert "vulcan-jwst-tool" in prov["software"]
+    assert "jwst-transit-authority" in prov["software"]
     assert "pandeia_stack" in prov and "datasets" in prov
     assert "ktables" in prov["datasets"]
     serialized = __import__("json").dumps(prov)

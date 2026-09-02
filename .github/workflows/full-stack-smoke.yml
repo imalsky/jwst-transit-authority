@@ -10,7 +10,7 @@ name: full-stack-smoke
 #   -> install jax-vulcan HEAD (VULCAN-JAX)
 #   -> install vulcan-forward HEAD (the shared chemistry+RT engine)
 #   -> install vulcan-retrieval HEAD
-#   -> install vulcan-jwst-tool HEAD
+#   -> install jwst-transit-authority HEAD
 #   -> assert vulcan_jax.conden exposes make_conden_spec + build_conden_profile
 #   -> build + solve a small live-T(P) S8 condensation model (isothermal AND
 #      Guillot) and assert finite output + nonzero S8 condensate
@@ -34,10 +34,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Checkout vulcan-jwst-tool (this repo)
+      - name: Checkout jwst-transit-authority (this repo)
         uses: actions/checkout@v4
         with:
-          path: vulcan-jwst-tool
+          path: jwst-transit-authority
 
       # The clone directory name "VULCAN-JAX" is load-bearing (the GitHub repo is
       # named jax-vulcan); vulcan-retrieval's config/validate_env resolve it by
@@ -71,7 +71,7 @@ jobs:
           pip install --no-deps -e ./VULCAN-JAX
           pip install --no-deps -e ./vulcan-forward
           pip install --no-deps -e ./vulcan-retrieval
-          pip install --no-deps -e ./vulcan-jwst-tool
+          pip install --no-deps -e ./jwst-transit-authority
 
       - name: Capability probe -- the missing-builder guard
         # Hard gate: a released/installed vulcan-jax that predates the on-graph
@@ -88,7 +88,7 @@ jobs:
 
       - name: Confirm jwst-tool imports against the installed retrieval
         run: |
-          python -c "import jwst_tool; print('vulcan-jwst-tool', jwst_tool.__version__, 'imports against installed vulcan-retrieval')"
+          python -c "import jwst_tool; print('jwst-transit-authority', jwst_tool.__version__, 'imports against installed vulcan-retrieval')"
 
       - name: Build + solve a live-T(P) S8 condensation model (finite + nonzero condensate)
         working-directory: vulcan-retrieval

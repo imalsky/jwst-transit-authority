@@ -52,7 +52,7 @@ def main() -> int:
         import streamlit  # noqa: F401
     except ImportError:
         print("jwst-tool: streamlit is not installed in this environment.\n"
-              "Install the GUI extra:  pip install 'vulcan-jwst-tool[gui]'  "
+              "Install the GUI extra:  pip install 'jwst-transit-authority[gui]'  "
               "(or, in a checkout:  pip install -e '.[gui]' --no-deps "
               "plus pip install streamlit pandas)", file=sys.stderr)
         return 2

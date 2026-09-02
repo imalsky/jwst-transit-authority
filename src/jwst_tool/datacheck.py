@@ -1,4 +1,4 @@
-"""Data-availability detection for vulcan-jwst-tool.
+"""Data-availability detection for JWST Transit Authority.
 
 Knows every external dataset the tool touches, probes the filesystem, and
 reports a structured status: present, missing, or fetched-on-first-use.

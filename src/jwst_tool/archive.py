@@ -284,7 +284,7 @@ def refresh_snapshot(dest: Path | None = None, url: str = TAP_SYNC_URL) -> tuple
     q = urllib.parse.urlencode({"query": SNAPSHOT_ADQL, "format": "csv"})
     req = urllib.request.Request(f"{url}?{q}",
                                  headers={"User-Agent":
-                                          "vulcan-jwst-tool archive-refresh"})
+                                          "jwst-transit-authority archive-refresh"})
     with urllib.request.urlopen(req, timeout=300) as resp:
         text = resp.read().decode("utf-8")
     rows = [r for r in csv.reader(text.splitlines()) if r]

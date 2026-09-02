@@ -1,4 +1,4 @@
-# vulcan-jwst-tool: JWST instrument selector on the shared vulcan-forward
+# jwst-transit-authority: JWST instrument selector on the shared vulcan-forward
 # engine. The Pandeia ETC noise backend runs in its OWN conda env, addressed via
 # JWST_TOOL_PANDEIA_PYTHON -- it is deliberately NOT a dependency here. The
 # ONLY backend is the STScI-supported matched triple pandeia.engine 2026.7 +
@@ -12,7 +12,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "vulcan-jwst-tool"
+name = "jwst-transit-authority"
 dynamic = ["version"]
 description = "JWST instrument selector: VULCAN-JAX chemistry -> ExoJAX transmission and emission spectra -> Pandeia ETC noise; conditional template S/N + Fisher forecasts (Streamlit GUI + programmatic API)"
 readme = "README.md"
@@ -51,8 +51,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/imalsky/vulcan-jwst-tool"
-Repository = "https://github.com/imalsky/vulcan-jwst-tool"
+Homepage = "https://github.com/imalsky/jwst-transit-authority"
+Repository = "https://github.com/imalsky/jwst-transit-authority"
 
 [project.optional-dependencies]
 # streamlit floor: app.py uses the width="stretch" API on st.button/st.pyplot/

@@ -1,4 +1,4 @@
-# vulcan-jwst-tool as a Hugging Face Docker Space.
+# jwst-transit-authority (JWST Transit Authority) as a Hugging Face Docker Space.
 #
 # The Space repo holds ONLY this deployment shim (Dockerfile, entrypoint,
 # bootstrap, README); the build clones the three GitHub repos. To deploy new
@@ -45,7 +45,7 @@ RUN set -e; \
     for spec in \
       "VULCAN-JAX https://github.com/imalsky/jax-vulcan.git ${VULCAN_JAX_SHA}" \
       "vulcan-forward https://github.com/imalsky/vulcan-forward.git ${VULCAN_FORWARD_SHA}" \
-      "vulcan-jwst-tool https://github.com/imalsky/vulcan-jwst-tool.git ${JWST_TOOL_SHA}"; do \
+      "jwst-transit-authority https://github.com/imalsky/jwst-transit-authority.git ${JWST_TOOL_SHA}"; do \
       set -- $spec; \
       git init -q "/srv/vulcan/$1"; \
       git -C "/srv/vulcan/$1" remote add origin "$2"; \
@@ -57,19 +57,19 @@ RUN set -e; \
     done; \
     cat /srv/vulcan/BUILD_INFO
 
-# Pins live in the jwst-tool repo (deploy/) so the Space shim never drifts
+# Pins live in the jwst-transit-authority repo (deploy/) so the Space shim never drifts
 # from the validated versions. The app env installs the FULL resolver-clean
 # lock with --no-deps so a later image rebuild reproduces the certified
 # versions instead of re-resolving newer transitive dependencies. The lock
 # includes streamlit/pandas (gui extra) and huggingface_hub (bootstrap).
 RUN /opt/conda/envs/pandeia/bin/pip install --no-cache-dir \
-        -r /srv/vulcan/vulcan-jwst-tool/deploy/requirements-pandeia.txt
+        -r /srv/vulcan/jwst-transit-authority/deploy/requirements-pandeia.txt
 RUN /opt/conda/envs/app/bin/pip install --no-cache-dir --no-deps \
-        -r /srv/vulcan/vulcan-jwst-tool/deploy/requirements-app-lock.txt
+        -r /srv/vulcan/jwst-transit-authority/deploy/requirements-app-lock.txt
 RUN /opt/conda/envs/app/bin/pip install --no-cache-dir --no-deps \
         -e /srv/vulcan/VULCAN-JAX \
         -e /srv/vulcan/vulcan-forward \
-        -e /srv/vulcan/vulcan-jwst-tool
+        -e /srv/vulcan/jwst-transit-authority
 
 # FastChem for THIS platform (any checked-in binary would be the wrong arch).
 RUN rm -f /srv/vulcan/VULCAN-JAX/src/vulcan_jax/fastchem_vulcan/fastchem \
