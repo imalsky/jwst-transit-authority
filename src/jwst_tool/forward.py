@@ -1112,7 +1112,7 @@ def _make_progress(cp: dict, log):
         stages += [(f"full {'eclipse' if _emis else 'transmission'} spectrum",
                     8.0)]
     # Jacobian rows: fd = one build+solve per stencil point, cloud rows are
-    # RT-only, ad = ONE shared warm primal for every chemistry row
+    # RT-only, ad = one warm jvp per chemistry row (one stage for all)
     _ad = cp["jac_method"] == "ad"
 
     def _row_stage(n):
@@ -1122,13 +1122,13 @@ def _make_progress(cp: dict, log):
                 280.0 if n in FD_COMP_PARAMS else 260.0)
 
     if _ad:
-        # chemistry-theta rows share one warm primal (one stage); RT-only deck
+        # chemistry-theta rows run back to back in one stage; RT-only deck
         # rows keep their own per-row stages
         _chem_rows = [n for n in cp["fisher_params"]
                       if n not in CLOUD_FISHER_PARAMS]
         if _chem_rows:
-            stages += [(f"AD Jacobian ({len(_chem_rows)} rows, shared "
-                        "primal)", 110.0 + 30.0 * (len(_chem_rows) - 1))]
+            stages += [(f"AD Jacobian ({len(_chem_rows)} rows)",
+                        110.0 * len(_chem_rows))]
     stages += [_row_stage(n) for n in cp["fisher_params"]
                if not _ad or n in CLOUD_FISHER_PARAMS]
     if cp["fisher_params"]:
@@ -1822,24 +1822,23 @@ def run_model(params: dict, log=print) -> Path:
                          if cp["jac_method"] == "ad" else [])
         _ad_cols = {}
         if _ad_chem_rows:
-            # ONE warm primal for every chemistry-theta AD row: vmap over the
-            # basis tangents traces the primal unbatched (th0 carries no batch
-            # axis), so only the tangent carry is batched. The convergence
-            # certificate rides the same solve the rows differentiate.
+            # One plain jvp per chemistry-theta row, NEVER vmap over the
+            # tangent directions: the batched tangent through the solver's
+            # while_loop is NaN in every bin on a column with clamped-zero
+            # layers (TOI-7169 b, 10x solar, C/O 0.55; even a batch of one),
+            # while the unbatched jvp is finite. Each row certifies its own
+            # warm re-converge.
             t1 = time.time()
             advance()
-            _E = np.zeros((len(_ad_chem_rows), theta.size))
-            for _i, _n in enumerate(_ad_chem_rows):
-                _E[_i, theta_names.index(_n)] = 1.0
-            (_pd, _pdiag), (_dd_all, _) = jax.vmap(
-                lambda e: jax.jvp(_ad_theta_depth_diag, (th0,), (e,)))(
-                    jnp.asarray(_E))
-            _diag0 = jax.tree_util.tree_map(lambda x: x[0], _pdiag)
-            _check_converged(_diag0, "AD warm re-converge (shared primal)")
-            for _i, _n in enumerate(_ad_chem_rows):
-                _ad_cols[_n] = np.asarray(_dd_all[_i])
-            log(f"[fwd] AD Jacobian: {len(_ad_chem_rows)} rows from one "
-                f"shared warm primal in {time.time()-t1:.0f} s")
+            for _n in _ad_chem_rows:
+                _e = np.zeros(theta.size)
+                _e[theta_names.index(_n)] = 1.0
+                (_pd, _pdiag), (_dd, _) = jax.jvp(
+                    _ad_theta_depth_diag, (th0,), (jnp.asarray(_e),))
+                _check_converged(_pdiag, f"AD warm re-converge ({_n})")
+                _ad_cols[_n] = np.asarray(_dd)
+            log(f"[fwd] AD Jacobian: {len(_ad_chem_rows)} rows, one warm jvp "
+                f"each, in {time.time()-t1:.0f} s")
 
         def _rt_deck_row(name, base_vec, idx, kwarg):
             """RT-only Jacobian row for a cloud-deck parameter (no chemistry
@@ -1887,7 +1886,7 @@ def run_model(params: dict, log=print) -> Path:
             if cp["jac_method"] == "ad":
                 # AD row: warm-started jvp along this theta direction; lnZ is
                 # the fixed-structural-grid derivative and is not cross-checked
-                # against FD. Computed in the shared-primal batch above.
+                # against FD. Computed row by row above.
                 jac[j] = _ad_cols[name]
                 if not np.isfinite(jac[j]).all():
                     raise RuntimeError(
@@ -1895,8 +1894,7 @@ def run_model(params: dict, log=print) -> Path:
                 fd_h.append(0.0)          # no FD step: AD row
                 fd_err.append(np.nan)     # no h-vs-2h metric: AD row
                 row_method.append("ad-jvp")
-                log(f"[fwd] AD Jacobian d(depth)/d({name}) "
-                    "from the shared-primal batch")
+                log(f"[fwd] AD Jacobian d(depth)/d({name}) from its warm jvp")
                 continue
             offs, h = (1, -1, 2, -2), FD_STEPS[name]
             dvals = {}
