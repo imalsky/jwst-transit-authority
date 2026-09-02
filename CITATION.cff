@@ -5,8 +5,8 @@ title: "JWST Transit Authority: a JWST exoplanet observation planner with a live
 authors:
   - family-names: Malsky
     given-names: Isaac
-version: 0.51.0
-date-released: "2026-09-01"
+version: 0.51.1
+date-released: "2026-09-02"
 license: GPL-3.0-only
 repository-code: "https://github.com/imalsky/jwst-transit-authority"
 url: "https://github.com/imalsky/jwst-transit-authority"

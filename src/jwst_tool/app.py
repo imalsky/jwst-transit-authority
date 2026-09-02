@@ -1822,8 +1822,15 @@ def _compute_locked():
                 pfile.unlink(missing_ok=True)
             if proc.returncode != 0:
                 status.update(label="Forward model failed", state="error")
-                st.error("The forward model failed. Last output:\n\n```\n"
-                         + "\n".join(lines[-25:]) + "\n```")
+                # the exception line of the subprocess traceback is the
+                # tool's own user-facing sentence; the raw tail stays behind
+                # a collapsed expander
+                _exc = next((ln.split(": ", 1)[1] for ln in reversed(lines)
+                             if re.match(r"^\w+(Error|Exception): ", ln)),
+                            "the forward model stopped without a message.")
+                st.error(_exc)
+                with st.expander("Technical details"):
+                    st.code("\n".join(lines[-25:]))
                 return None
             bar.done()
             status.update(label="Forward model done", state="complete")
@@ -1891,7 +1898,11 @@ def _compute_locked():
 
 if run_clicked:
     out = compute()
-    if out is not None:
+    if out is None:
+        # a Run that produced nothing leaves nothing stale on screen
+        st.session_state.pop("out", None)
+        st.session_state.pop("out_meta", None)
+    else:
         st.session_state["out"] = out
         st.session_state["out_meta"] = dict(
             goal=goal, target=target_mol, goal_param=goal_param,

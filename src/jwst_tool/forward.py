@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import sys
 import time
@@ -1428,15 +1429,12 @@ def run_model(params: dict, log=print) -> Path:
                 "vulcan-forward or use jac_method='fd'.")
         if float(_bz) <= CO_BZ_MIN_AD:
             raise RuntimeError(
-                "AD Jacobian for dlnCO refused at this composition: the "
-                "fixed-O differential direction's oxygen-reservoir "
-                f"positivity margin co_bz_bound = {float(_bz):.3g} <= "
-                f"{CO_BZ_MIN_AD:g} (high-C/O composition, C/O = "
-                f"{cp['co_ratio']:g}: O-only carriers are within one FD "
-                "stencil of exhaustion, so the tangent direction is "
-                "ill-conditioned). Use jac_method='fd': below C/O = 1 its "
-                "dlnCO row steps one-sided away from the boundary and is "
-                "certified by the h-vs-2h gate.")
+                f"The AD Jacobian for dlnCO is not available at C/O = "
+                f"{cp['co_ratio']:g}: it needs co_bz_bound > {CO_BZ_MIN_AD:g} "
+                f"(here {float(_bz):.3g}; roughly C/O below "
+                f"{math.exp(-CO_BZ_MIN_AD):.2f}), the margin before the "
+                "fixed-O direction exhausts the oxygen-only carriers. Use "
+                "finite differences.")
 
     T_check = _check_t_window(tp_eval, theta, chem.p_bar, log,
                               T_base=getattr(chem, "T_base", None))

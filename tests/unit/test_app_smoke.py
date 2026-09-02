@@ -687,6 +687,26 @@ def test_changing_any_run_input_marks_the_result_stale(widget, value, field,
         assert _named() and field in _named()[0], _named()
 
 
+def test_a_run_that_produces_nothing_clears_the_previous_result(monkeypatch):
+    """A refused or failed Run must not leave the previous run's verdict and
+    figures on screen under a stale banner: the page shows only the error.
+    Exercised through the one refusal that keeps the Run button enabled (no
+    free concurrency slot); the forward-model failure branch pops the same
+    keys."""
+    from jwst_tool import runlimit as _rl
+
+    monkeypatch.setattr(_rl, "acquire", lambda *_a, **_k: None)
+    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
+    at = _run_with_result(out, out_meta)
+    assert not at.exception, at.exception
+    next(b for b in at.button if b.label == "Run").click()
+    at.run()
+    assert not at.exception, at.exception
+    assert "out" not in at.session_state
+    assert any("already running" in e.value for e in at.error), [e.value for e in at.error]
+    assert not [w.value for w in at.warning if "previous run" in w.value or "reach it" in w.value]
+
+
 @pytest.mark.parametrize("key,label", [("n0_sum_x", "Wavelength")])
 def test_a_nonpositive_bound_on_a_log_axis_warns_instead_of_killing_the_page(
         key, label):
