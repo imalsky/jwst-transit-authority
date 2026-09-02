@@ -397,18 +397,15 @@ def test_results_render_and_below_target_is_warning_not_error():
 
 def test_emission_results_use_eclipse_terms():
     """An emission run says "eclipse" throughout, never "transit"; an
-    above-target result renders the one-line verdict as plain text and NO
-    banner (maintainer: a green bar restating the number is redundant, but
-    the verdict itself must always be on the page)."""
+    above-target result renders NO verdict line and NO banner (maintainer:
+    the figure and table carry the number)."""
     out, out_meta = _synthetic_out(science_mode="emission",
                                    sigma_detect=8.0, n_transits=3)
     at = _run_with_result(out, out_meta)
     assert not at.exception, at.exception
     assert not at.success, \
         f"an above-target result must render no banner: {[s.value for s in at.success]}"
-    verdicts = [m.value for m in at.markdown       # the intro copy also
-                if "template S/N 8.0" in m.value]   # says "template S/N"
-    assert verdicts and "3 eclipses" in verdicts[0], verdicts
+    assert not [m.value for m in at.markdown if "template S/N 8.0" in m.value]
     # the figure section is an EXPANDER, not a subheader
     _exps = [e.label for e in at.get("expander")]
     assert any("eclipse emission spectrum" in e for e in _exps), _exps

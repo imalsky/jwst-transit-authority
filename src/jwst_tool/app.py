@@ -13,9 +13,9 @@ uncertainty). Planets beyond WASP-39b come from the registry in planets.py (or
 a fully custom system).
 
 Layout: four numbered sidebar steps (Target, Atmosphere, Science goal,
-Observation) plus one "More settings" group; the result page leads with the
-verdict, then physical structure, the constraint forecast, and the summary
-figure. Widget KEYS must never change
+Observation) plus one "More settings" group; the result page leads with a
+shortfall warning when the target is missed, then physical structure, the
+constraint forecast, and the summary figure. Widget KEYS must never change
 (tests and cached session state rely on them); only placement, labels, and
 help text may move. A downloaded configuration JSON is a complete, shareable
 run setup; "Load a configuration" (share_config.py) restores it into the
@@ -220,17 +220,17 @@ with st.expander("Validation"):
         "[vulcan-jwst-tool](https://github.com/imalsky/vulcan-jwst-tool), and "
         "[vulcan-retrieval](https://github.com/imalsky/vulcan-retrieval). "
         "For end-to-end tests, see the set of validation figures that I've "
-        "created [here](https://github.com/imalsky/vulcan-forward/tree/main/"
+        "created [here](https://github.com/imalsky/vulcan-jwst-tool/tree/main/"
         "validation/figures). This includes trying to recreate the results "
         "of [Tsai et al. 2023](https://doi.org/10.5281/zenodo.7542781), the "
         "[JWST ERS carbon dioxide paper](https://doi.org/10.5281/zenodo."
         "6959427), and VULCAN 2.0 and petitRADTRANS on identical inputs. "
         "The correlated-k binning validation is shown "
-        "[here](https://github.com/imalsky/vulcan-forward/blob/main/"
+        "[here](https://github.com/imalsky/vulcan-jwst-tool/blob/main/"
         "validation/figures/ckd_verification_vs_exojax_exok.png). "
         "The power-law cloud deck is checked against petitRADTRANS on "
         "identical inputs, clear and cloudy, "
-        "[here](https://github.com/imalsky/vulcan-forward/blob/main/"
+        "[here](https://github.com/imalsky/vulcan-jwst-tool/blob/main/"
         "validation/figures/cloud_verification_vs_petitradtrans.png); its "
         "autodiff gradient is checked against the exact analytic derivative "
         "in the test suite.")
@@ -376,7 +376,10 @@ def _source_rows(base_set, extra_set, extra_on, rayleigh_on, cloud_on,
          "used in this setup": True,
          "data set": "PHOENIX (Allard et al., synphot CDBS)",
          "source DOI": "10.1098/rsta.2011.0269",
-         "source page": "http://perso.ens-lyon.fr/france.allard/"},
+         "source page": "https://www.stsci.edu/hst/instrumentation/"
+                        "reference-data-for-calibration-and-tools/"
+                        "astronomical-catalogs/"
+                        "phoenix-models-available-in-synphot"},
         {"component": "Ks bandpass (flux normalization)",
          "used in this setup": True, "data set": "2MASS",
          "source DOI": "10.1086/498708",
@@ -392,8 +395,9 @@ def _source_rows(base_set, extra_set, extra_on, rayleigh_on, cloud_on,
          "used in this setup": True,
          "data set": f"Pandeia {ins.BACKEND_RELEASE}",
          "source DOI": "10.1117/12.2231768",
-         "source page": "https://jwst-docs.stsci.edu/jwst-etc-pandeia-"
-                        "engine-tutorial"},
+         "source page": "https://jwst-docs.stsci.edu/"
+                        "jwst-exposure-time-calculator-overview/"
+                        "jwst-etc-pandeia-engine-tutorial"},
     ]
     return rows
 
@@ -2106,8 +2110,8 @@ elif _combos_cfg:
                    "need a run with free parameters (a Fisher forecast)")
                   for _c in _combos_cfg]
 
-# --- verdict (first; success = target met, warning = valid result that
-# misses the target, error = only for failed calculations) ------------------
+# --- shortfall warning (first; nothing when the target is met, warning =
+# valid result that misses it, error = only for failed calculations) --------
 if goal_r == "detect":
     tsig = float(meta.get("target_sig") or 3.0)
     ntr = meta["n_transits"]
@@ -2127,11 +2131,7 @@ if goal_r == "detect":
                    f"({_METRIC_LABEL[_best_projected]}) in {ntr} "
                    f"{_ev}{'s' if ntr > 1 else ''} (target {tsig:g}σ).")
         if bsig >= tsig:
-            # Target met: the verdict as plain text, with no banner. A green
-            # bar would restate the number the line already carries, and a
-            # SHORTFALL is the case that earns one -- its banner adds the
-            # transit count, which appears nowhere else.
-            st.markdown(verdict)
+            pass        # target met: the figure and table carry the number
         elif bsig > 0:
             # floor-aware transit solver: the photon term averages down with
             # N, the systematic floor does not -- a plain 1/sqrt(N) law is
@@ -2183,7 +2183,7 @@ else:
                f"{tsig:g}σ in {ntr} {_ev}{'s' if ntr > 1 else ''} "
                f"(target ±{target:g}{usp}).")
     if bs <= target:
-        st.markdown(verdict)      # target met: plain text, no banner
+        pass                      # target met: nothing to add
     elif np.isfinite(comb) and comb <= target:
         st.warning(verdict + f"  Combined modes: ±{comb:.3g}{usp}.")
     else:
