@@ -753,9 +753,8 @@ with st.sidebar:
     with st.expander("Load a configuration (JSON)"):
         _cfg_up = st.file_uploader(
             "Configuration file", type=["json"], key=K("cfg_upload"))
-        st.button("Populate the settings from this file",
-                  disabled=(_cfg_up is None), on_click=_populate_config,
-                  key=K("cfg_populate"))
+        st.button("Populate", disabled=(_cfg_up is None),
+                  on_click=_populate_config, key=K("cfg_populate"))
     if st.session_state.get("_cfg_load_error"):
         st.error("The configuration file could not be applied: "
                  + st.session_state["_cfg_load_error"])
