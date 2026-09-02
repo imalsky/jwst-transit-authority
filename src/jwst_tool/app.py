@@ -224,16 +224,7 @@ with st.expander("Validation"):
         "validation/figures). This includes trying to recreate the results "
         "of [Tsai et al. 2023](https://doi.org/10.5281/zenodo.7542781), the "
         "[JWST ERS carbon dioxide paper](https://doi.org/10.5281/zenodo."
-        "6959427), and VULCAN 2.0 and petitRADTRANS on identical inputs. "
-        "The correlated-k binning validation is shown "
-        "[here](https://github.com/imalsky/jwst-transit-authority/blob/main/"
-        "validation/figures/ckd_verification_vs_exojax_exok.png). "
-        "The power-law cloud deck is checked against petitRADTRANS on "
-        "identical inputs, clear and cloudy, "
-        "[here](https://github.com/imalsky/jwst-transit-authority/blob/main/"
-        "validation/figures/cloud_verification_vs_petitradtrans.png); its "
-        "autodiff gradient is checked against the exact analytic derivative "
-        "in the test suite.")
+        "6959427), and VULCAN 2.0 and petitRADTRANS on identical inputs.")
 
 # Data availability -- detected live. The GUI reports only what BLOCKS a run;
 # the full install inventory is `jwst-tool data`.
@@ -666,15 +657,7 @@ def _populate_config() -> None:
     for k, v in state.items():
         st.session_state[k] = v
     st.session_state["_cfg_load_notes"] = notes
-    _pk = state.get(K("planet"))
-    st.session_state["_cfg_populated"] = (
-        f"Populated {len(state)} settings from {up.name}: "
-        + (planets.PLANETS[_pk]["label"] if _pk in planets.PLANETS
-           else "custom planet")
-        + f", {state.get(K('met'))}x solar, C/O {state.get(K('co'))}, "
-        f"goal {state.get(K('goal'))}, "
-        + {"fd": "finite differences", "ad": "automatic differentiation"}.get(
-            state.get(K("jacm")), "") + ".")
+    st.session_state["_cfg_populated"] = True
 
 
 def _apply_pending_archive_fill() -> None:
@@ -761,7 +744,7 @@ def _combo_remove(i: int) -> None:
 with st.sidebar:
     # Step 0: Load a configuration. Selecting the file does nothing by
     # itself; the Populate button's callback (_populate_config) writes it
-    # into the widgets and the outcome line below says what was applied.
+    # into the widgets; the line below confirms it.
     st.markdown("### 0 · Configuration")
     # Every step's controls sit behind an expander,
     # so the sidebar reads as a short list of titled sections. The
@@ -777,8 +760,7 @@ with st.sidebar:
         st.error("The configuration file could not be applied: "
                  + st.session_state["_cfg_load_error"])
     elif st.session_state.get("_cfg_populated"):
-        st.success(st.session_state["_cfg_populated"]
-                   + " Review the steps below and press Run.")
+        st.success("Populated")
         for _n in st.session_state.get("_cfg_load_notes") or []:
             st.warning(f"Not restored: {_n}")
     elif _cfg_up is not None:
