@@ -11,7 +11,7 @@ The tool ranks supported modes and estimates the number of transits or
 eclipses needed (e.g. to detect SO2 at a certain confidence). It also provides conditional
 template signal-to-noise values and local Fisher forecasts.
 
-In particular, I've focused on making the whole pipeline auto-differentiable. This is hugely helpful because the gradients and the Jacobians can be calculated quickly. Also, by hosting this online,
+In particular, I've focused on making the forward model (photochemistry and radiative transfer) auto-differentiable. This is hugely helpful because the gradients and the Jacobians can be calculated quickly. Also, by hosting this online,
 users can test ideas quickly instead of downloading 10s of GBs of data.
 
 Try the [public web app](https://huggingface.co/spaces/imalsky/jwst-tool), or
@@ -116,15 +116,21 @@ the current JWST ETC and APT.
 
 The test suite covers instrument configuration, binning, noise scaling,
 detection statistics, Fisher calculations, and full transmission and emission
-chains. Pandeia results are also compared with PandExo. Radiative-transfer
-checks against petitRADTRANS and science comparison figures are stored in
-[`vulcan-forward`](https://github.com/imalsky/vulcan-forward/tree/main/validation/figures).
-The correlated-k binning validation (this tool's only opacity path,
-cross-checked against ExoJAX and exo_k) is
-[`ckd_verification_vs_exojax_exok.png`](https://github.com/imalsky/vulcan-forward/blob/main/validation/figures/ckd_verification_vs_exojax_exok.png).
+chains (the full-chain tests need the reference data and `JWST_TOOL_RUN_SLOW=1`). Pandeia results are compared with PandExo in
+[`validation/parity/`](validation/parity/). The engine and science checks are
+committed figures with the code that makes them in
+[`validation/`](validation/) (`python validation/scripts/make_figures.py`
+regenerates all of them; every PNG embeds the script that made it):
+
+- [Radiative transfer vs petitRADTRANS](validation/figures/rt_verification_vs_petitradtrans.png) and [six atmospheres](validation/figures/rt_verification_six_atmospheres.png)
+- [Power-law cloud deck vs petitRADTRANS](validation/figures/cloud_verification_vs_petitradtrans.png)
+- [Correlated-k reader vs ExoJAX and exo_k](validation/figures/ckd_verification_vs_exojax_exok.png)
+- [Chemistry: VULCAN 2.0 vs VULCAN 3.0 (JAX)](validation/figures/chemistry_w39b_vulcan2_vs_vulcan3.png)
+- [WASP-39 b vs the ERS CO2 model grid](validation/figures/wasp39b_ers2023_co2_models.png) and [vs Tsai et al. 2023](validation/figures/wasp39b_tsai2023_metallicity_so2.png)
+- [Observed spectra](validation/figures/observed_spectra_v30.png)
 
 ```bash
-python -m pip install -e ".[gui,dev]"
+python -m pip install -e ".[gui,dev]" pytest
 python -m pytest tests -q
 ```
 
