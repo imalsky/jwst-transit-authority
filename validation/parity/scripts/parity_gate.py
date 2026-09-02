@@ -17,7 +17,7 @@ import re
 import sys
 from pathlib import Path
 
-_HERE = Path(__file__).resolve().parent          # tests/parity/scripts
+_HERE = Path(__file__).resolve().parent          # validation/parity/scripts
 sys.path.insert(0, str(_HERE.parents[2] / "src"))
 
 from jwst_tool import instruments as _ins        # noqa: E402

@@ -21,7 +21,7 @@ import pytest
 
 from jwst_tool import instruments as ins
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "parity" / "scripts"
+SCRIPTS = Path(__file__).resolve().parents[2] / "validation" / "parity" / "scripts"
 
 
 def test_display_encodings_are_complete_and_unique():

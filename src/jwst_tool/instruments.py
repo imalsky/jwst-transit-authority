@@ -489,7 +489,7 @@ MODES = {
 # Width of the extracted line response relative to the Gaussian
 # lambda/R_refdata kernel, per mode as (wavelength_um, width) points: the
 # single-Gaussian FWHM scale fitted to a narrow line pushed through Pandeia
-# (tests/parity/scripts/run_parity.py --impulse, parity_summary.json
+# (validation/parity/scripts/run_parity.py --impulse, parity_summary.json
 # ["lsf_impulse"][mode][line]["width_fit"]). The refdata dispersion R is the
 # pixel dispersion; on the slitless modes the PSF along the dispersion axis
 # sets the response, which comes out this much broader. Interpolated in

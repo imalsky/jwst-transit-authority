@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "parity" / "scripts"
+SCRIPTS = Path(__file__).resolve().parents[2] / "validation" / "parity" / "scripts"
 
 
 @pytest.fixture(scope="module")

@@ -29,8 +29,8 @@ main() scrubs absolute paths from the provenance before writing the summary):
   JWST_TOOL_OUTPUT_DIR       the tool's own worker noise cache (model_cache /
                              noise_cache); unrelated to the parity artifacts
 
-Usage: python tests/parity/run_parity.py
-Everything parity lives in THIS directory (tests/parity/): the raw per-run
+Usage: python validation/parity/run_parity.py
+Everything parity lives in THIS directory (validation/parity/): the raw per-run
 JSON (git-ignored, see .gitignore) is written here alongside the committed
 artifacts (parity_summary.json, REPORT.md, the figures). The tool's Pandeia
 noise cache still goes under JWST_TOOL_OUTPUT_DIR (that is the app's cache,
@@ -44,7 +44,7 @@ from pathlib import Path
 
 import numpy as np
 
-HERE = Path(__file__).resolve().parent        # tests/parity/scripts
+HERE = Path(__file__).resolve().parent        # validation/parity/scripts
 OUTPUTS = HERE.parent / "outputs"             # raw JSON + parity_summary.json
 REPO = HERE.parents[2]                         # scripts -> parity -> tests -> repo
 sys.path.insert(0, str(REPO / "src"))
@@ -533,7 +533,7 @@ def main_impulse():
 def main():
     if "--impulse" in sys.argv:
         return main_impulse()
-    # raw per-run JSON goes in tests/parity/outputs/ (git-ignored there,
+    # raw per-run JSON goes in validation/parity/outputs/ (git-ignored there,
     # alongside the committed parity_summary.json and REPORT.md)
     out_root = OUTPUTS
     out_root.mkdir(parents=True, exist_ok=True)

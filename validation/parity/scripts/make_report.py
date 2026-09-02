@@ -16,7 +16,7 @@ the artifact -- nothing is hard-coded, so the text cannot go stale against
 the JSON. `--require-pass` refuses to write a report for a failing artifact
 at all.
 
-Usage: python tests/parity/scripts/make_report.py [--require-pass]
+Usage: python validation/parity/scripts/make_report.py [--require-pass]
 """
 import argparse
 import json

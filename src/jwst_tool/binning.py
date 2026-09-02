@@ -19,7 +19,7 @@ Guardrails:
   average; on high-R modes the blur is a no-op. The Gaussian kernel
   approximates the full Pandeia response matrix; its width is
   R_refdata / instruments.LSF_WIDTH, the per-mode width fitted to an impulse
-  through the engine (tests/parity/scripts/run_parity.py --impulse,
+  through the engine (validation/parity/scripts/run_parity.py --impulse,
   parity_summary.json["lsf_impulse"]).
 """
 from __future__ import annotations

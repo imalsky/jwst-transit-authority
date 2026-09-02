@@ -2,7 +2,7 @@
 
 A runner that writes a summary and exits 0 no matter what lets stale or
 saturated artifacts look like passing release gates. The gate lives in the
-import-safe `tests/parity/scripts/parity_gate.py`, shared by the runner, the
+import-safe `validation/parity/scripts/parity_gate.py`, shared by the runner, the
 renderers, and these tests -- no exec tricks, no duplicated constants. Each
 `_fails` block breaks one thing in a synthetic full-matrix passing summary
 and proves `validate()` (or `validate_artifact()`) fails; related fail-closed
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "parity" / "scripts"
+SCRIPTS = Path(__file__).resolve().parents[2] / "validation" / "parity" / "scripts"
 PLOTS = SCRIPTS / "make_parity_plots.py"
 
 # mutation-path shorthands for _mut/_upd

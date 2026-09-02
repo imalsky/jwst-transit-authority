@@ -2,7 +2,7 @@
 where available, the raw per-wavelength run outputs.
 
 Usage:
-    python tests/parity/scripts/make_parity_plots.py
+    python validation/parity/scripts/make_parity_plots.py
 
 These figures show the quantities that are in PARITY between this tool and
 current PandExo on the same Pandeia 2026.7 engine -- the things that match
@@ -19,13 +19,14 @@ directory (git-ignored); it is skipped with a notice if those are absent (a
 fresh clone has the committed figures already, and re-running run_parity.py
 regenerates the raw JSON).
 
-Layout under tests/parity/: scripts/ (this + the harness), outputs/ (the
+Layout under validation/parity/: scripts/ (this + the harness), outputs/ (the
 committed parity_summary.json + REPORT.md and the git-ignored raw run JSON),
 figs/ (the committed PNG figures this writes).
 
-Style: the project's serif figure style (Okabe-Ito cycle, square panels,
-axis labels and legend only). Two-code overlays are black under, red dashed
-on top; the timing panels colour by instrument and mark by star.
+Style: validation/figstyle.py, the one style of every committed figure here
+(serif, Okabe-Ito cycle, square panels, axis labels and legend only). Two-code
+overlays are black under, red dashed on top; the timing panels colour by
+instrument and mark by star. fs.save() embeds this script in each PNG.
 """
 import json
 import sys
@@ -37,7 +38,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-HERE = Path(__file__).resolve().parent        # tests/parity/scripts
+HERE = Path(__file__).resolve().parent        # validation/parity/scripts
 OUTPUTS = HERE.parent / "outputs"             # parity_summary.json + raw JSON
 FIGS = HERE.parent / "figs"                   # committed PNG figures
 sys.path.insert(0, str(HERE))
@@ -46,10 +47,10 @@ import parity_gate as pg                       # noqa: E402
 
 from jwst_tool import instruments as _ins       # noqa: E402
 
-CYC = ["#0072B2", "#D55E00", "#009E73", "#E69F00", "#CC79A7", "#56B4E9"]
-INK = "#2b2b2b"        # the reference side of a two-code comparison
-RED = "#CC3311"        # the model side
-MS = 3.5
+sys.path.insert(0, str(HERE.parents[1]))       # validation/figstyle
+import figstyle as fs                          # noqa: E402
+from figstyle import CYC, INK, RED, MS         # noqa: E402
+fs.use()
 
 # The plotted mode set is the GATE's declared experiment, never a local copy.
 # A hand-maintained list here silently drops modes from the committed
@@ -72,24 +73,6 @@ STAR_LABEL = {"w39_like": f"W39-like (Ks {pg.STARS['w39_like']['ks_mag']:.1f})",
               "bright_hot": f"bright (Ks {pg.STARS['bright_hot']['ks_mag']:.1f})",
               "faint_k": f"faint (Ks {pg.STARS['faint_k']['ks_mag']:.0f})"}
 SAT_LIMIT = pg.SAT_LIMIT   # a mode above this is saturated (unusable)
-
-plt.rcParams.update({
-    "font.family": "serif",
-    "font.serif": ["Times New Roman", "Palatino", "DejaVu Serif", "serif"],
-    "font.size": 12, "axes.labelsize": "large", "axes.linewidth": 1.5,
-    "axes.xmargin": 0, "axes.ymargin": 0.1, "axes.axisbelow": False,
-    "axes.formatter.use_mathtext": True, "mathtext.fontset": "stix",
-    "axes.prop_cycle": plt.cycler("color", CYC),
-    "xtick.direction": "in", "xtick.top": True, "xtick.minor.visible": True,
-    "xtick.labelsize": "large", "xtick.major.size": 8, "xtick.major.width": 1.3,
-    "xtick.minor.size": 4, "xtick.minor.width": 1, "xtick.major.pad": 6,
-    "ytick.direction": "in", "ytick.right": True, "ytick.minor.visible": True,
-    "ytick.labelsize": "large", "ytick.major.size": 8, "ytick.major.width": 1.3,
-    "ytick.minor.size": 4, "ytick.minor.width": 1, "ytick.major.pad": 6,
-    "axes.grid": False, "legend.frameon": False, "legend.fontsize": 10,
-    "legend.handlelength": 1.5, "legend.labelspacing": 0.3,
-    "savefig.bbox": "tight", "savefig.dpi": 300,
-})
 
 
 def load_summary():
@@ -158,8 +141,7 @@ def fig_config_parity(summary, release):
                          label=STAR_LABEL[st]) for st in STAR_MARK]
                + [Line2D([], [], color=INK, ls="--", lw=1.0, label="1:1")])
     axes[0].legend(handles=handles, loc="upper left")
-    out = FIGS / "parity_config_timing.png"
-    fig.savefig(out, bbox_inches="tight")
+    out = fs.save(fig, "parity_config_timing.png", out_dir=FIGS)
     plt.close(fig)
     return out
 
@@ -202,7 +184,7 @@ def _require_raw_matches_summary(summary, star, o_all, p_all, of, pf):
             "committed parity_summary.json, so the extracted-flux figure "
             "would misrepresent the gated run:\n  "
             + "\n  ".join(problems)
-            + "\n\nEither re-run tests/parity/scripts/run_parity.py to "
+            + "\n\nEither re-run validation/parity/scripts/run_parity.py to "
               "regenerate the raw outputs for THIS experiment, or move the "
               "stale *_ours.json / *_pandexo.json aside and keep the "
               "committed figure.")
@@ -243,8 +225,7 @@ def fig_extracted_flux(summary, out_root, mode="nirspec_g395h",
     ax.set_xlabel("wavelength ($\\mu$m)")
     ax.set_ylabel("extracted stellar count rate (e$^-$ s$^{-1}$)")
     ax.legend(loc="upper right")
-    out = FIGS / "parity_extracted_flux.png"
-    fig.savefig(out, bbox_inches="tight")
+    out = fs.save(fig, "parity_extracted_flux.png", out_dir=FIGS)
     plt.close(fig)
     return out
 
@@ -252,19 +233,16 @@ def fig_extracted_flux(summary, out_root, mode="nirspec_g395h",
 def main():
     summary = load_summary()
     release = require_passing_summary(summary)
-    made = [fig_config_parity(summary, release)]
+    fig_config_parity(summary, release)
     # The flux figure ALSO needs the raw per-wavelength JSON (written by
     # run_parity.py, git-ignored). A stale raw set is refused rather than
     # plotted, but that must not discard the config figure, which is built
     # from the committed summary alone: report both, then exit non-zero.
     stale = None
     try:
-        made.append(fig_extracted_flux(summary, OUTPUTS, release=release))
+        fig_extracted_flux(summary, OUTPUTS, release=release)
     except SystemExit as exc:
         stale = str(exc)
-    for pth in made:
-        if pth is not None:
-            print(f"wrote {pth}")
     if stale:
         print(f"\n{stale}", file=sys.stderr)
         raise SystemExit(1)

@@ -28,8 +28,8 @@ widget.
 Scope: a Pandeia-extracted-noise BOX-TRANSIT planning forecast under the
 selected extraction/detector configuration. NEVER label sigmas
 PandExo-identical; parity status is per-backend and lives in
-tests/parity/outputs/REPORT.md, kept honest by the fail-closed gate
-(tests/parity/scripts/run_parity.py). Pandeia's extracted noise is not a
+validation/parity/outputs/REPORT.md, kept honest by the fail-closed gate
+(validation/parity/scripts/run_parity.py). Pandeia's extracted noise is not a
 time-series systematics model (no 1/f residuals, visit-long trends,
 detrending covariance, or stellar heterogeneity).
 
@@ -55,7 +55,7 @@ from . import proc as proc_mod
 _BACKEND_FINGERPRINT = None
 
 # The production Pandeia-worker version: part of every noise-cache key AND
-# the identity the parity gate (tests/parity/scripts/parity_gate.py) requires
+# the identity the parity gate (validation/parity/scripts/parity_gate.py) requires
 # of a committed artifact. Bump whenever a MEASURED pandeia_worker.py output
 # changes; a bump without a fresh parity run fails the gate test. Wording-only
 # worker changes do NOT bump: no number moves, so every cached entry stays
