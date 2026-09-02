@@ -66,6 +66,18 @@ def test_ngroup_ordering_and_pandexo_caps_hold_for_every_mode():
                 f"{m['instrument']} cap {cap}")
 
 
+def test_g395m_pandeia_tokens_are_the_verified_ones():
+    """Tokens verified against pandeia_data-2026.7 nirspec config.json; the
+    slow parity harness is the only other place they are exercised."""
+    m = ins.MODES["nirspec_g395m"]
+    assert (m["instrument"], m["mode"], m["config"], m["ngroup_max"],
+            ins.MODE_COLOR["nirspec_g395m"], ins.MODE_MARKER["nirspec_g395m"]) == (
+        "nirspec", "bots",
+        dict(instrument=dict(disperser="g395m", filter="f290lp"),
+             detector=dict(subarray="sub2048", readout_pattern="nrsrapid")),
+        ins.PANDEXO_UNBOUNDED_NGROUP, "#006c8e", "*")
+
+
 def test_every_mode_pins_the_full_tso_configuration():
     """Parity lesson: engine defaults are the WRONG non-TSO
     choices, so every mode must pin readout_pattern, the extraction strategy,
