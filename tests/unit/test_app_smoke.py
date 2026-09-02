@@ -478,21 +478,16 @@ def test_display_smoothing_is_nondestructive_and_actually_smooths():
 
 
 def test_custom_archive_fill_and_uv_menu_never_moves():
-    """Custom planet, one boot: the nearest-Teff caption tracks a typed Teff
-    while the UV MENU never moves, and the archive Fill button writes the
+    """Custom planet, one boot: a typed Teff never moves the UV MENU, and
+    the archive Fill button writes the
     snapshot row into the form (pending-then-apply path) -- still without
     touching the UV menu (no substitute spectra, standing maintainer
     rule)."""
     at = _run_app()
     at.selectbox(key="n0_planet").set_value("custom").run()
     assert not at.exception, at.exception
-    caps = " | ".join(c.value for c in at.caption)
-    assert "Nearest-Teff shipped UV template" in caps and "WASP-39" in caps
     at.number_input(key="n0_custom_teff").set_value(3100.0).run()
     assert not at.exception, at.exception
-    caps = " | ".join(c.value for c in at.caption)
-    assert "GJ 1214" in caps
-    assert "A different spectrum is currently selected" in caps
     assert at.selectbox(key="n0_custom_sflux").value == \
         "sflux-W39b_Tsai2023.txt"
 

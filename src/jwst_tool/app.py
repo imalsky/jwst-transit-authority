@@ -820,13 +820,6 @@ with st.sidebar:
                           disabled=(_arch_sel is None),
                           on_click=_queue_archive_fill,
                           key=K("custom_arch_fill"))
-                st.caption(
-                    "Values come from a NASA Exoplanet Archive PSCompPars "
-                    f"snapshot fetched {_snap.fetched_utc[:10]}, shipped "
-                    "with this tool release (not a live query). They are "
-                    "nominal catalog values; review them before "
-                    "forecasting. Catalog uncertainties are not "
-                    "propagated.")
             for _kind, _msg in st.session_state.get(
                     "_archive_fill_notes") or []:
                 getattr(st, _kind)(_msg)
@@ -867,25 +860,11 @@ with st.sidebar:
                 planets.SFLUX_CHOICES[f]
                 + ("" if _uv_ok.get(f) else "  [FILE MISSING]")),
             key=_k("sflux"))
-        if planet_key == "custom":
-            # Suggestion only, NEVER applied anywhere: neither a typed Teff
-            # nor the archive fill moves this menu (standing rule: no
-            # substitute UV spectrum is ever selected for the user).
-            _near = planets.nearest_sflux(teff)
-            st.caption(
-                f"Nearest-Teff shipped UV template for Teff {teff:.0f} K: "
-                f"{planets.SFLUX_CHOICES[_near]}."
-                + ("" if _near == sflux
-                   else " A different spectrum is currently selected."))
 
     # T_eq is derived from the star and orbit for every planet, registry or
     # custom: a stored literature value is a second source of truth that goes
     # stale when the star parameters are refreshed.
     teq = planets.system_teq(teff, rstar, orbit_au)
-    if planet_key == "custom":
-        st.caption(f"T_eq derived from the star and orbit above: "
-                   f"{teq:.0f} K (zero albedo, full redistribution). It "
-                   "sets the default Guillot T_irr in step 2.")
 
     # Step 2: Atmosphere
     st.divider()
@@ -993,13 +972,6 @@ with st.sidebar:
                     "1.000e+00   870.  1.0e+11\n")
                 with st.expander("Example array (what the file must look like)"):
                     st.code(_tp_example)
-                    st.caption(
-                        "Column 1: pressure in dyne/cm^2 (1 bar = 10^6), "
-                        "bottom of the atmosphere first or top first. "
-                        "Column 2: temperature in K. Column 3 (optional): "
-                        "Kzz in cm^2 s^-1, used when the vertical-mixing "
-                        "profile is set to 'Tabulated'. At least 4 data "
-                        "rows. The two header lines are required.")
                     st.download_button(
                         "Download this example (edit and re-upload)",
                         _tp_example, "example_atm.txt",
@@ -1015,15 +987,6 @@ with st.sidebar:
                         _rp_tp = Path(st.session_state["restored_tp_path"])
                         _tab_tp = forward._read_tp_table(_rp_tp)
                         tp_file_path = str(_rp_tp)
-                        st.caption(
-                            "T-P table restored from the loaded "
-                            f"configuration: {_tab_tp['P_dyn'].size} rows, "
-                            f"T {_tab_tp['T'].min():.0f}-"
-                            f"{_tab_tp['T'].max():.0f} K"
-                            + (", Kzz column present"
-                               if _tab_tp["Kzz"] is not None else
-                               ", no Kzz column")
-                            + ". Upload a file to replace it.")
                     except (OSError, ValueError) as e:
                         st.error("The restored T-P table is not usable: "
                                  f"{e} Upload the table again.")
@@ -1041,15 +1004,6 @@ with st.sidebar:
                     try:                       # loud validation, immediate
                         _tab_tp = forward._read_tp_table(_dst_tp)
                         tp_file_path = str(_dst_tp)
-                        st.caption(
-                            f"Loaded {_tab_tp['P_dyn'].size} rows, "
-                            f"P {_tab_tp['P_dyn'].min()/1e6:.2g}-"
-                            f"{_tab_tp['P_dyn'].max()/1e6:.2g} bar, "
-                            f"T {_tab_tp['T'].min():.0f}-"
-                            f"{_tab_tp['T'].max():.0f} K"
-                            + (", Kzz column present"
-                               if _tab_tp["Kzz"] is not None else
-                               ", no Kzz column"))
                     except ValueError as e:
                         st.error(
                             "The temperature-pressure table is not valid: "
@@ -1339,9 +1293,6 @@ with st.sidebar:
                     format_func=lambda n: forward.PARAM_LABELS[n])
                 fisher_params = sorted(set(fisher_extra) | {goal_param})
             elif goal == "constrain":
-                st.caption(
-                    "Marginalization is off (above): only the goal parameter "
-                    "is free (the optimistic conditional bound).")
                 fisher_params = [goal_param]
             else:
                 fisher_params = st.multiselect(
@@ -1480,24 +1431,6 @@ with st.sidebar:
                  "the saturation level, which is 0.50 here.")
         r_bin = st.number_input(
             "Analysis resolving power, R", 25, 500, 100, 25, key=K("rbin"))
-        # Past R ~ 250 the analysis bins are four or fewer of the model's
-        # R = 1000 k-table bands wide, so sub-band structure the high-R
-        # gratings record starts to matter at bin edges. Affected = the mode's
-        # LSF outresolves the model (2.3548 x response R > 1000, the median
-        # native R over the mode's measured width at mid-band,
-        # instruments.LSF_WIDTH); the median classifies all shipped modes the
-        # same way the binding MIN does (only PRISM and MIRI LRS fall on the
-        # resolved side either way).
-        if int(r_bin) >= 250:
-            _coarse = [ins.MODES[k]["label"] for k in mode_keys
-                       if 2.3548 * float(ins.lsf_r(
-                           k, 0.5 * (ins.MODES[k]["wl_min"] + ins.MODES[k]["wl_max"]),
-                           ins.MODES[k]["r_native_med"])) > 1000.0]
-            if _coarse:
-                st.caption(f"Bins this fine approach the model's R = 1000 "
-                           f"opacity resolution on {', '.join(_coarse)}: "
-                           "structure finer than R = 1000 is real to the "
-                           "instrument but absent from the model.")
 
     with st.expander("Noise model (Pandeia)"):
         st.markdown("**Minimum noise floor** (PandExo convention)")
@@ -1533,11 +1466,6 @@ with st.sidebar:
                                              ndmin=2)
                     noise_mod.resolve_floor(np.array([1.0]),
                                             floor_table)  # validate loudly now
-                    st.caption(f"Loaded {floor_table.shape[0]} rows, "
-                               f"{floor_table[:, 0].min():g}-"
-                               f"{floor_table[:, 0].max():g} µm, "
-                               f"{floor_table[:, 1].min():g}-"
-                               f"{floor_table[:, 1].max():g} ppm.")
                 except Exception as e:
                     st.error(
                         "The floor table is not valid: "
@@ -1550,10 +1478,6 @@ with st.sidebar:
                     floor_table = np.asarray(
                         st.session_state["restored_floor_table"], float)
                     noise_mod.resolve_floor(np.array([1.0]), floor_table)
-                    st.caption(
-                        "Floor table restored from the loaded configuration "
-                        f"({floor_table.shape[0]} rows). Upload a file to "
-                        "replace it.")
                 except Exception as e:
                     st.error("The restored floor table is not usable: "
                              f"{e} Upload the table again.")
@@ -1578,12 +1502,6 @@ with st.sidebar:
             for k in mode_keys}
         infl = {k: float(noise_scale) * float(_infl_mode[k])
                 for k in mode_keys}
-        if abs(float(noise_scale) - 1.0) > 1e-9:
-            st.caption(
-                f"Global noise multiplier {float(noise_scale):g}x is applied "
-                "on top of these, so the effective factors are "
-                + ", ".join(f"{ins.MODES[k]['label']} {infl[k]:.2f}x"
-                            for k in mode_keys) + ".")
 
     # More settings: solver grid and advanced RT, behind one entry point.
     # No help tooltips in here: the labels stand on their own and the
@@ -1848,10 +1766,6 @@ if _canon is not None:
             json.dumps(_share, indent=2, default=str).encode(),
             f"jwst_tool_{_slug(planet_label)}_config.json",
             "application/json", key=K("dl_config"), on_click="ignore")
-else:
-    with _cfg_col:
-        st.caption("Configuration download is unavailable while the "
-                   "settings do not validate.")
 
 
 # Compute on click
