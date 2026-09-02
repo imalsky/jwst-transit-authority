@@ -1658,7 +1658,7 @@ def run_model(params: dict, log=print) -> Path:
                 f"yconv_min={float(chem.yconv_min):g}")
         # certificate detail written since the cell diagnostic existed; an
         # older chem-cache carries none, and says so rather than inventing one
-        _old = "conv_cell" not in _chem_art.files
+        _old = "conv_cell" not in _chem_art
         conv_cert.append((
             "baseline solve (chem-cache)", _ac, _ld,
             float("nan") if _old else float(_chem_art["conv_longdydt"][0]),
