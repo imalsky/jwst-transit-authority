@@ -23,9 +23,9 @@ Layout under tests/parity/: scripts/ (this + the harness), outputs/ (the
 committed parity_summary.json + REPORT.md and the git-ignored raw run JSON),
 figs/ (the committed PNG figures this writes).
 
-Design: validated categorical palette (dataviz skill). Overlays use blue =
-this tool, orange = PandExo; per-mode panels color by mode in the fixed
-palette order. One axis per panel, thin marks, recessive grid, PNG @ 200 dpi.
+Style: the project's serif figure style (Okabe-Ito cycle, square panels,
+axis labels and legend only). Two-code overlays are black under, red dashed
+on top; the timing panels colour by instrument and mark by star.
 """
 import json
 import sys
@@ -46,13 +46,10 @@ import parity_gate as pg                       # noqa: E402
 
 from jwst_tool import instruments as _ins       # noqa: E402
 
-# --- validated categorical palette (light mode) ------------------------------
-TOOL = "#2a78d6"       # this tool (blue, slot 1)
-PANDEXO = "#eb6834"    # PandExo (orange, slot 8) -- CVD-safe against blue
-SURFACE = "#ffffff"
-INK = "#0b0b0b"
-INK2 = "#52514e"
-GRID = "#e6e5e2"
+CYC = ["#0072B2", "#D55E00", "#009E73", "#E69F00", "#CC79A7", "#56B4E9"]
+INK = "#2b2b2b"        # the reference side of a two-code comparison
+RED = "#CC3311"        # the model side
+MS = 3.5
 
 # The plotted mode set is the GATE's declared experiment, never a local copy.
 # A hand-maintained list here silently drops modes from the committed
@@ -61,7 +58,9 @@ GRID = "#e6e5e2"
 # registry, so deriving from it inherits that guard. Colours and short labels
 # likewise come from the one validated registry palette.
 MODES = list(pg.MODE_KEYS)
-MCOL = {k: _ins.MODE_COLOR[k] for k in MODES}
+INSTRUMENT_LABEL = {"nirspec": "NIRSpec", "niriss": "NIRISS",
+                    "nircam": "NIRCam", "miri": "MIRI"}
+INSTRUMENT_COLOR = {ins: CYC[i] for i, ins in enumerate(INSTRUMENT_LABEL)}
 LABEL = {k: (_ins.MODES[k]["label"]
              .replace("NIRSpec ", "").replace("NIRCam ", "")
              .replace("NIRISS ", "").replace(" (ord 1)", "")
@@ -75,19 +74,22 @@ STAR_LABEL = {"w39_like": f"W39-like (Ks {pg.STARS['w39_like']['ks_mag']:.1f})",
 SAT_LIMIT = pg.SAT_LIMIT   # a mode above this is saturated (unusable)
 
 plt.rcParams.update({
-    "figure.facecolor": SURFACE, "axes.facecolor": SURFACE,
-    "savefig.facecolor": SURFACE, "font.size": 10,
-    "axes.edgecolor": INK2, "axes.linewidth": 0.8,
-    "text.color": INK, "axes.labelcolor": INK, "axes.titlecolor": INK,
-    "xtick.color": INK2, "ytick.color": INK2,
-    "axes.grid": True, "grid.color": GRID, "grid.linewidth": 0.8,
-    "axes.axisbelow": True, "figure.dpi": 200,
+    "font.family": "serif",
+    "font.serif": ["Times New Roman", "Palatino", "DejaVu Serif", "serif"],
+    "font.size": 12, "axes.labelsize": "large", "axes.linewidth": 1.5,
+    "axes.xmargin": 0, "axes.ymargin": 0.1, "axes.axisbelow": False,
+    "axes.formatter.use_mathtext": True, "mathtext.fontset": "stix",
+    "axes.prop_cycle": plt.cycler("color", CYC),
+    "xtick.direction": "in", "xtick.top": True, "xtick.minor.visible": True,
+    "xtick.labelsize": "large", "xtick.major.size": 8, "xtick.major.width": 1.3,
+    "xtick.minor.size": 4, "xtick.minor.width": 1, "xtick.major.pad": 6,
+    "ytick.direction": "in", "ytick.right": True, "ytick.minor.visible": True,
+    "ytick.labelsize": "large", "ytick.major.size": 8, "ytick.major.width": 1.3,
+    "ytick.minor.size": 4, "ytick.minor.width": 1, "ytick.major.pad": 6,
+    "axes.grid": False, "legend.frameon": False, "legend.fontsize": 10,
+    "legend.handlelength": 1.5, "legend.labelspacing": 0.3,
+    "savefig.bbox": "tight", "savefig.dpi": 300,
 })
-
-
-def _style(ax):
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
 
 
 def load_summary():
@@ -122,65 +124,40 @@ def ok_rows(summary, star):
 # Configuration & timing parity: ours vs PandExo on the 1:1 line
 def fig_config_parity(summary, release):
     quantities = [
-        ("ngroup_pandexo", "ngroup_ours", "groups / integration"),
-        ("t_int_pandexo_s", "t_int_ours_s", "integration time"),
+        ("ngroup_pandexo", "ngroup_ours", "groups per integration"),
+        ("t_int_pandexo_s", "t_int_ours_s", "integration time (s)"),
         ("n_int_pandexo_in", "n_int_ours", "integrations in transit"),
     ]
-    unit = {"integration time": " (s)"}
-    fig, axes = plt.subplots(1, 3, figsize=(11.5, 5.7))
-    for ax, (kx, ky, title) in zip(axes, quantities):
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5.2), constrained_layout=True)
+    for ax, (kx, ky, name) in zip(axes, quantities):
         xs, ys = [], []
         for star in summary["stars"]:
             rows = ok_rows(summary, star)
             for key in MODES:
-                if key not in rows:
-                    continue
-                # skip saturated (unusable) configs entirely -- only VALID
-                # configurations are a meaningful parity comparison. PRISM
-                # saturates on the bright stars and is dropped there; it is
-                # shown from the faint star, where it is usable.
-                if rows[key].get("sat_frac_ours", 0.0) > SAT_LIMIT:
+                # saturated configurations are unusable, not a parity case
+                if key not in rows or rows[key].get("sat_frac_ours", 0.0) > SAT_LIMIT:
                     continue
                 x, y = rows[key][kx], rows[key][ky]
                 xs.append(x)
                 ys.append(y)
-                ax.scatter(x, y, s=46, marker=STAR_MARK[star],
-                           color=MCOL[key], edgecolor="white", linewidth=0.7,
-                           zorder=3)
-        lo = min(xs + ys) * 0.7
-        hi = max(xs + ys) * 1.4
-        ax.plot([lo, hi], [lo, hi], color=INK2, lw=1.0, ls="--", zorder=1)
+                ax.plot(x, y, STAR_MARK[star], ms=MS, ls="", clip_on=False,
+                        color=INSTRUMENT_COLOR[_ins.MODES[key]["instrument"]],
+                        zorder=3)
+        lo, hi = min(xs + ys), max(xs + ys)
+        ax.plot([lo, hi], [lo, hi], color=INK, lw=1.0, ls="--", zorder=1)
         ax.set_xscale("log")
         ax.set_yscale("log")
         ax.set_xlim(lo, hi)
         ax.set_ylim(lo, hi)
-        ax.set_aspect("equal")
-        u = unit.get(title, "")
-        ax.set_xlabel(f"PandExo  {title}{u}")
-        ax.set_ylabel(f"this tool  {title}{u}")
-        ax.set_title(title)
-        _style(ax)
-    mode_handles = [Line2D([], [], marker="o", ls="", color=MCOL[m],
-                           markeredgecolor="white", label=LABEL[m])
-                    for m in MODES]
-    star_handles = [Line2D([], [], marker=STAR_MARK[s], ls="", color=INK2,
-                           markeredgecolor="white", label=STAR_LABEL[s])
-                    for s in STAR_MARK]
-    line_handle = [Line2D([], [], color=INK2, ls="--", label="1:1 parity")]
-    fig.legend(handles=mode_handles + star_handles + line_handle,
-               loc="lower center", ncol=6, frameon=False, fontsize=8.5,
-               bbox_to_anchor=(0.5, 0.01))
-    fig.suptitle("Configuration & timing parity: this tool vs pinned PandExo "
-                 f"on the same Pandeia {release} engine", fontsize=11.5,
-                 y=0.99)
-    fig.text(0.5, 0.91, "Unsaturated configurations only (saturated rows are "
-             "excluded). The submitted configuration is pinned identically on "
-             "both sides; wavelength grids match pixel-for-pixel at rtol "
-             "1e-9; groups are independently optimized against the same 80% "
-             "saturation target (integer rounding is the residual); "
-             "integration time and count follow.", ha="center", fontsize=8.2,
-             color=INK2, wrap=True)
-    fig.tight_layout(rect=[0, 0.15, 1, 0.87])
+        ax.set_box_aspect(1)
+        ax.set_xlabel(f"PandExo {name}")
+        ax.set_ylabel(f"this tool {name}")
+    handles = ([Line2D([], [], marker="o", ls="", ms=MS, color=c, label=INSTRUMENT_LABEL[k])
+                for k, c in INSTRUMENT_COLOR.items()]
+               + [Line2D([], [], marker=STAR_MARK[st], ls="", ms=MS, color=INK,
+                         label=STAR_LABEL[st]) for st in STAR_MARK]
+               + [Line2D([], [], color=INK, ls="--", lw=1.0, label="1:1")])
+    axes[0].legend(handles=handles, loc="upper left")
     out = FIGS / "parity_config_timing.png"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
@@ -256,53 +233,16 @@ def fig_extracted_flux(summary, out_root, mode="nirspec_g395h",
     idx = np.clip(np.searchsorted(wl_o, wl_p), 0, wl_o.size - 1)
     ex = np.abs(wl_o[idx] - wl_p) < 1e-9 * np.maximum(wl_p, 1e-9)
     io, ip = idx[ex], np.where(ex)[0]
-    wl_pair = wl_o[io]
     ratio = flux_o[io] / erate[ip]
     med = float(np.median(ratio))
-    # binned running median: the real systematic agreement, with the
-    # per-pixel photon-level extraction jitter averaged out (the tool never
-    # uses per-pixel flux -- it integrates over bins)
-    nb = 24
-    bedges = np.linspace(wl_pair.min(), wl_pair.max(), nb + 1)
-    bc = 0.5 * (bedges[:-1] + bedges[1:])
-    bmed = np.array([
-        np.median(ratio[(wl_pair >= bedges[k]) & (wl_pair < bedges[k + 1])])
-        if ((wl_pair >= bedges[k]) & (wl_pair < bedges[k + 1])).any() else np.nan
-        for k in range(nb)])
-
-    fig, axes = plt.subplots(2, 1, figsize=(8.6, 5.6), sharex=True,
-                             gridspec_kw={"height_ratios": [3, 1.15]})
-    ax = axes[0]
-    ax.plot(wl_p, erate, color=PANDEXO, lw=1.4, label="PandExo", zorder=2)
-    ax.plot(wl_o, flux_o, color=TOOL, lw=1.4, ls=(0, (4, 2)),
-            label="this tool", zorder=3)
-    ax.set_ylabel("extracted stellar\ncount rate  (e$^-$/s)")
-    ax.set_title(f"Extracted stellar flux parity, {LABEL[mode]} on a "
-                 f"{STAR_LABEL[star]} star\n(the ETC engine product, "
-                 f"Pandeia {release} both sides; grids matched at rtol 1e-9)")
-    ax.legend(frameon=False, fontsize=9.5)
-    # both sides receive the identical PandExo-resampled spectrum, and after
-    # the quantum-yield unfold the two extractions agree per pixel, so the
-    # curves are the same line -- never label a residual here as a stellar-
-    # spectrum difference
-    ax.annotate("both sides receive the identical resampled stellar\n"
-                "spectrum; after the quantum-yield unfold the two\n"
-                f"extractions agree per pixel (median ratio {med:.4f})",
-                xy=(0.985, 0.97), xycoords="axes fraction", ha="right",
-                va="top", fontsize=7.6, color=INK2)
-    _style(ax)
-    axr = axes[1]
-    axr.plot(wl_pair, ratio, color="#c3c2bd", lw=0.6, alpha=0.9, zorder=2,
-             label="per-pixel")
-    axr.plot(bc, bmed, color=TOOL, lw=2.0, zorder=3,
-             label=f"binned median = {med:.4f} (the systematic)")
-    axr.axhline(1.0, color=PANDEXO, lw=1.0, ls=":", zorder=1)
-    axr.set_ylim(0.9, 1.1)
-    axr.set_ylabel("ratio\ntool / PandExo")
-    axr.set_xlabel("wavelength (micron)")
-    axr.legend(frameon=False, fontsize=8, loc="lower left", ncol=1)
-    _style(axr)
-    fig.tight_layout()
+    fig, ax = plt.subplots(figsize=(6.5, 6.5))
+    ax.plot(wl_p, erate, color=INK, lw=1.5, solid_capstyle="round",
+            label=f"PandExo, {LABEL[mode]}, {STAR_LABEL[star]}")
+    ax.plot(wl_o, flux_o, color=RED, lw=0.7, ls="--",
+            label=f"this tool (median ratio {med:.4f})")
+    ax.set_xlabel("wavelength ($\\mu$m)")
+    ax.set_ylabel("extracted stellar count rate (e$^-$ s$^{-1}$)")
+    ax.legend(loc="upper right")
     out = FIGS / "parity_extracted_flux.png"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)

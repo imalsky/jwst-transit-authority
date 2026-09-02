@@ -2974,7 +2974,7 @@ if d_wo_s is not None:
     # detect goal: the same without-target comparison curve the old
     # standalone spectrum carried (smoothed identically for display)
     _sum_spectrum["depth2_ppm"] = _display_smooth(d_wo_s)
-    _sum_spectrum["depth2_label"] = f"{meta['target']} removed from the opacity"
+    _sum_spectrum["depth2_label"] = f"No {meta['target']}"
 
 _sum_foot = None
 
