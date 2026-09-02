@@ -4,10 +4,9 @@ Launch via the console script ``jwst-tool`` (installed with vulcan-jwst-tool), o
 directly:  streamlit run src/jwst_tool/app.py  (from the repo root).
 
 Pipeline per run: VULCAN-JAX photochemistry -> ExoJAX
-transmission/emission spectrum (local subprocess, disk-cached; ~1.5-2 min at
-the default 100-layer resolution on the maintainer's laptop, ~2.5x that on the
-HF Space -- see _RUNTIME_SCALE) -> Pandeia ETC noise per instrument mode
-(subprocess in its own conda env, disk-cached) -> science-goal scoring per mode.
+transmission/emission spectrum (local subprocess, disk-cached) -> Pandeia ETC
+noise per instrument mode (subprocess in its own conda env, disk-cached) ->
+science-goal scoring per mode.
 Two goal types: DETECT a molecule (conditional template S/N) or CONSTRAIN a
 parameter (Fisher forecast from consistency-checked Jacobians, vs a target
 uncertainty). Planets beyond WASP-39b come from the registry in planets.py (or
@@ -57,28 +56,19 @@ from jwst_tool import instruments as ins
 from jwst_tool import planets
 from jwst_tool import runlimit
 
-# House figure style: the vendored science.mplstyle, flipped to serif + STIX
-# math. White faces are pinned so downloaded figures stay white on any
-# Streamlit theme. Data colors/markers stay the fixed per-mode palette in
+# House figure style: the vendored science.mplstyle plus summary_figure's
+# overrides (serif + STIX math; white faces so a downloaded figure stays white
+# on any Streamlit theme). ONE definition of the overrides, applied globally
+# here and per-figure there, so an in-app figure and a headless render match.
+# Data colors/markers stay the fixed per-mode palette in
 # instruments.MODE_COLOR / MODE_MARKER (no series relies on color alone).
 plt.style.use(str(TOOL_DIR / "science.mplstyle"))
-plt.rcParams.update({
-    "font.family": "serif",
-    "mathtext.fontset": "stix",
-    "figure.facecolor": "white", "axes.facecolor": "white",
-    "savefig.facecolor": "white",
-})
+plt.rcParams.update(summary_figure._STYLE_OVERRIDES)
 
 
 def _slug(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "_", str(s)).strip("_").lower()
 
-
-# bbox_inches="tight" crops each figure to ITS OWN ink, so two figures built
-# on the same canvas come out different sizes whenever one carries a legend
-# the other lacks. The T-P and mixing-ratio panels must match exactly, so
-# they render UNCROPPED (tight=False) on the shared canvas plotting.py
-# defines; everything else still crops.
 
 # On-screen width of every rendered figure, in CSS pixels: FIXED, not
 # "stretch", so figures stop rescaling as the window changes (see _show_fig).
@@ -92,51 +82,38 @@ _FIG_DISPLAY_PX = 1100
 _ALL_USABLE = "All usable modes"
 
 # How many forecast-posterior panels the summary figure will draw. A LAYOUT
-# limit, not a science one: up to 13 parameters can be free, and every one of
-# their widths is reported in the Fisher table regardless. The figure solves
-# its height so each panel is square at a fixed total width, so each extra
-# panel shrinks all of them -- 3 is where a panel stops being readable.
+# limit, not a science one: every free parameter's width is reported in the
+# Fisher table regardless. The figure solves its height so each panel is square
+# at a fixed total width, so each extra panel shrinks all of them -- 3 is where
+# a panel stops being readable.
 _MAX_POST_PANELS = 3
 
 # Custom-combination palette, deliberately disjoint from instruments.MODE_COLOR
 # so a combo line never collides with a member mode's color. Module level
-# because _series_color() (results section) needs it: defined further DOWN the
-# script than that call, it is a NameError on every results page.
+# because _series_color() (results section) reads it from further UP the
+# script than the results block that defines the combinations.
 _COMBO_COLORS = ("#6a3d9a", "#117733", "#882255", "#88ccee")
 
 
-def _full_bbox(fig):
-    """The whole canvas as an explicit Bbox (defeats savefig.bbox: tight).
+def _fig_bytes(fig, fmt: str, tight: bool = True) -> bytes:
+    """Export a figure for download: raster PNG at dpi 200 (house convention)
+    or vector PDF (proposal-ready; text and lines stay vector).
 
-    bbox_inches=None does NOT mean "no crop": matplotlib reads it as "use
-    rcParams['savefig.bbox']", and science.mplstyle sets that to `tight`.
-    Passing the figure's own bbox is the only way to force the full canvas.
-    """
-    return fig.bbox_inches
+    ``tight=True`` crops to the figure's OWN ink, so two figures on the same
+    canvas come out different sizes when one carries a legend the other lacks;
+    the paired T-P / mixing-ratio panels therefore export with ``tight=False``.
+    bbox_inches=None would NOT mean "no crop" -- matplotlib reads it as "use
+    rcParams['savefig.bbox']", which science.mplstyle sets to `tight` -- so the
+    figure's own bbox is the only way to force the full canvas.
 
-
-def _fig_png(fig, dpi: int = 200, tight: bool = True) -> bytes:
-    """Rasterize a figure for download (PNG, dpi 200 -- house convention).
-
-    ``tight=False`` keeps the full canvas, which is what makes paired panels
-    the same size. Under plotting.render_lock: savefig measures text through
-    the process-global mathtext parser (see plotting.py).
+    Under plotting.render_lock: savefig measures text through the
+    process-global mathtext parser (see plotting.py).
     """
     buf = io.BytesIO()
     with plotting.render_lock:
-        fig.savefig(buf, format="png", dpi=dpi,
-                    bbox_inches=("tight" if tight else _full_bbox(fig)),
-                    facecolor="white")
-    return buf.getvalue()
-
-
-def _fig_pdf(fig, tight: bool = True) -> bytes:
-    """Vector PDF export (proposal-ready; text and lines stay vector)."""
-    buf = io.BytesIO()
-    with plotting.render_lock:
-        fig.savefig(buf, format="pdf",
-                    bbox_inches=("tight" if tight else _full_bbox(fig)),
-                    facecolor="white")
+        fig.savefig(buf, format=fmt, facecolor="white",
+                    bbox_inches=("tight" if tight else fig.bbox_inches),
+                    **({"dpi": 200} if fmt == "png" else {}))
     return buf.getvalue()
 
 
@@ -147,7 +124,7 @@ def _show_fig(fig, tight: bool = True) -> None:
     layout does -- it belongs inside the lock like every other
     materialization (plotting.py has the full argument). ``tight=False``
     shows the full canvas at a fixed size: st.pyplot accepts no savefig
-    keywords any more, so that branch rasterizes through ``_fig_png`` (the
+    keywords any more, so that branch rasterizes through ``_fig_bytes`` (the
     same dpi 200 as st.pyplot's default) and displays the PNG with st.image.
 
     FIXED DISPLAY WIDTH: st.pyplot's width defaults to "stretch", which
@@ -160,7 +137,7 @@ def _show_fig(fig, tight: bool = True) -> None:
         with plotting.render_lock:
             st.pyplot(fig, width=_FIG_DISPLAY_PX)
     else:
-        st.image(_fig_png(fig, tight=False), width=_FIG_DISPLAY_PX)
+        st.image(_fig_bytes(fig, "png", tight=False), width=_FIG_DISPLAY_PX)
     plt.close(fig)
 
 
@@ -431,11 +408,10 @@ with st.expander("Data" +
 # from the run-time estimator's own model -- "Jacobian-row cost model".)
 _AD_ROW_MIN, _AD_ROW_MAX = 1, 2        # minutes per AD row
 
-# All wall-time constants below were measured on the maintainer's laptop.
-# The HF Space (SPACE_ID set there and only there) runs the same work
-# ~2.5x slower, so every DISPLAYED estimate and progress-bar prior is
-# scaled by this factor. The forward.py PROG weights are relative
-# fractions and need no scaling.
+# All wall-time constants below were measured on the maintainer's laptop; the
+# HF Space (SPACE_ID set there and only there) is slower, so every DISPLAYED
+# estimate and progress-bar prior is scaled by this factor. The forward.py
+# PROG weights are relative fractions and need no scaling.
 _RUNTIME_SCALE = 2.5 if os.environ.get("SPACE_ID") else 1.0
 
 _PROG_RE = re.compile(r"\[fwd\] PROG ([0-9.]+) (.*)")
@@ -568,36 +544,9 @@ def _managed_proc(cmd):
         cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT))
 
 
-# --- downloads that must not cancel a run ----------------------------------
-# Clicking a download button queues a rerun, and a queued rerun CANCELS the
-# script run in flight -- on the Run pass that is the forward model itself.
-# So every download rendered before `run_clicked` is known reserves its slot
-# with `_deferred_download` and is filled by `_render_deferred_downloads`:
-# dead for the duration of a run, live again the moment compute() returns.
-_DEFERRED_DOWNLOADS: list = []
-
-
-def _deferred_download(label: str, data, file_name: str, mime=None, *,
-                       key: str, help: str | None = None) -> None:
-    """Reserve this position for a download button. Call it where the button
-    belongs; `_render_deferred_downloads` decides live or dead."""
-    _DEFERRED_DOWNLOADS.append(
-        (st.empty(), label, data, file_name, mime, key, help))
-
-
-def _render_deferred_downloads(busy: bool = False) -> None:
-    """Fill every reserved slot. ``busy`` renders dead stand-ins that say why,
-    for the duration of a run."""
-    for slot, label, data, file_name, mime, key, help_ in _DEFERRED_DOWNLOADS:
-        if busy:
-            slot.button(
-                label, disabled=True, key=f"{key}_busy",
-                help="Available when the run finishes; downloading during "
-                     "a run cancels it.")
-        else:
-            slot.download_button(label, data, file_name, mime, key=key,
-                                 help=help_)
-
+# EVERY download button is rendered with on_click=ignore. Without it a click
+# queues a rerun, and a queued rerun CANCELS the script run in flight -- on the
+# Run pass that is the forward model itself.
 
 # default target precision per parameter (DISPLAY units: dex / K / absolute C/O)
 _TARGET_DEFAULT = {"lnZ": 0.10, "dlnCO": 0.10, "lnKzz": 0.30,
@@ -985,7 +934,7 @@ with st.sidebar:
                         and st.session_state.get(_k("tirr")) == _prev_auto):
                     st.session_state[_k("tirr")] = tirr0
                 st.session_state[_k("tirr_auto")] = tirr0
-            # key always seeded, so no value= default (see the _k("tp") note)
+            # key always seeded, so no value= default
             if _k("tirr") not in st.session_state:
                 st.session_state[_k("tirr")] = tirr0
             tp_kwargs["Tirr"] = st.number_input(
@@ -1047,11 +996,10 @@ with st.sidebar:
                         "Kzz in cm^2 s^-1, used when the vertical-mixing "
                         "profile is set to 'Tabulated'. At least 4 data "
                         "rows. The two header lines are required.")
-                    # deferred: clicking a download cancels a run in flight
-                    _deferred_download(
+                    st.download_button(
                         "Download this example (edit and re-upload)",
                         _tp_example, "example_atm.txt",
-                        key=_k("tpex"))
+                        key=_k("tpex"), on_click="ignore")
                 up_tp = st.file_uploader(
                     "Upload an array: T-P (+ optional Kzz) as text",
                     type=["txt", "dat"],
@@ -1135,7 +1083,7 @@ with st.sidebar:
                                   forward.P_BTM_PARAMETRIC_BAR)
                     and _pbtm_now != _pbtm_default)):
             st.session_state[_pbtm_key] = _pbtm_default
-        # key always seeded above, so no value= default (see the _k("tp") note)
+        # key always seeded above, so no value= default
         p_btm_bar = st.number_input(
             "Column bottom pressure (bar)",
             *forward.P_BTM_RANGE,
@@ -1182,7 +1130,7 @@ with st.sidebar:
                 st.session_state[_k("kzzmode")] = "file"
         elif st.session_state.get(_k("kzzmode")) in ("file", None):
             st.session_state[_k("kzzmode")] = "const"
-        # key always seeded above, so no index= default (see the _k("tp") note)
+        # key always seeded above, so no index= default
         kzz_mode = st.selectbox(
             "Vertical-mixing profile, Kzz", _kzz_opts,
             key=_k("kzzmode"),
@@ -1221,7 +1169,7 @@ with st.sidebar:
                          "ncho": "N-C-H-O (no sulfur, faster)"}.get)
         if K("photo") not in st.session_state or _jac_hint == "ad":
             st.session_state[K("photo")] = True   # AD needs photolysis ON
-        # key always seeded above, so no value= default (see the _k("tp") note)
+        # key always seeded above, so no value= default
         use_photo = st.checkbox(
             "Photochemistry (UV photolysis)", key=K("photo"),
             disabled=(_jac_hint == "ad"))
@@ -1285,7 +1233,7 @@ with st.sidebar:
             # canonical_params forces Rayleigh OFF in emission (no scattering
             # channel); show the forced state, not a checked-but-ignored box
             st.session_state[K("rayl")] = False
-        # key always seeded above, so no value= default (see the _k("tp") note)
+        # key always seeded above, so no value= default
         use_rayleigh = st.checkbox(
             "H2/He Rayleigh scattering", key=K("rayl"),
             disabled=(science_mode == "emission"))
@@ -1431,9 +1379,9 @@ with st.sidebar:
     # Pandeia 2026.7 wavelength grids (largest grid step) and equal to
     # Birkmann et al. 2022 Table 2 / jwst-docs BOTS Table 1; scoring always
     # uses the worker's actual pixels, so the gap never enters the math.
-    # The OUTER endpoints must equal the registry's wl_min/wl_max (a duplicate
-    # band statement is exactly how the G395M red edge drifted from its
-    # source); test_app_smoke pins that.
+    # The OUTER endpoints must equal the registry's wl_min/wl_max
+    # (test_app_smoke pins that): this string restates a band the registry
+    # already owns.
     _MODE_BAND_DISPLAY = {
         "nirspec_g140h": "1.00-1.31 + 1.35-1.83 µm",
         "nirspec_g235h": "1.66-2.20 + 2.27-3.07 µm",
@@ -1494,9 +1442,23 @@ with st.sidebar:
                  "together. Composes with the per-mode multipliers.")
 
     with st.expander("Timing, saturation & binning (Pandeia)"):
+        # follow-until-overridden (same pattern as _k("tirr")): while the
+        # baseline still equals the T14 it last tracked, it keeps following the
+        # event duration (PandExo convention baseline = T14); the first manual
+        # edit breaks the link. Without this it froze at the first-render seed
+        # and silently kept a former planet's duration.
+        _tb_auto = float(t14)
+        _tb_prev = st.session_state.get(_k("tbase_auto"))
+        if (_tb_prev is not None
+                and st.session_state.get(_k("tbase")) == _tb_prev):
+            st.session_state[_k("tbase")] = _tb_auto
+        st.session_state[_k("tbase_auto")] = _tb_auto
+        # key always seeded above, so no value= default
+        if _k("tbase") not in st.session_state:
+            st.session_state[_k("tbase")] = _tb_auto
         t_base = st.number_input(
             f"Out-of-{_evw} baseline (hours)", 0.5, 10.0,
-            float(t14), 0.1, key=_k("tbase"),
+            step=0.1, key=_k("tbase"),
             help="Out-of-event time anchoring the stellar flux; the PandExo "
                  "convention is baseline = T14.")
         sat_limit = st.number_input(
@@ -1636,11 +1598,12 @@ with st.sidebar:
             forward.YCONV_DEFAULT, 1.0e-4,
             format="%.1e", key=K("yconv"))
 
-    # Condensation, gravitational settling, diffusion-limited escape and the
-    # boundary-condition fluxes are API-only: canonical parameters in
-    # forward.py, but the GUI pins them off. share_config REFUSES a loaded
-    # configuration that sets any of them non-default rather than silently
-    # computing a different atmosphere than the file describes.
+    # Condensation is API-only: the GUI pins it off, and share_config REFUSES
+    # a loaded configuration that enables it rather than silently computing a
+    # different atmosphere than the file describes. Settling, escape and the
+    # boundary-condition fluxes were REMOVED -- forward.canonical_params
+    # refuses any enabling value -- but their keys stay in the canonical
+    # payload, pinned off, so no cached spectrum's key changes.
     use_condense = use_settling = False
     diff_esc, top_flux, bot_flux = [], [], []
 
@@ -1653,7 +1616,7 @@ with st.sidebar:
             # canonical_params pins simpson in emission (no transit chord);
             # show the pinned state, not a silently ignored choice
             st.session_state[K("rtint")] = "simpson"
-        # key always seeded above, so no index= default (see the _k("tp") note)
+        # key always seeded above, so no index= default
         rt_integration = st.selectbox(
             "Transit chord integration", ["simpson", "trapezoid"],
             key=K("rtint"), disabled=(science_mode == "emission"),
@@ -1697,11 +1660,10 @@ params = dict(planet=planet_key, science_mode=science_mode,
               cloud_on=cloud_on,
               log_kappa_cloud=log_kappa_cloud, alpha_cloud=alpha_cloud,
               # Detect computes the removed-molecule spectrum for the TARGET
-              # only (the score reads exactly one row; the full block was the
-              # largest cost of a cold run). Accepted trade: wo_mols is
-              # cache-keyed, so switching the detection target is a real
-              # re-run; API callers can pass wo_mols=None for the full block.
-              # Constrain reads none of them and skips the block entirely.
+              # only; the score reads exactly one row. wo_mols is cache-keyed,
+              # so switching the detection target is a real re-run; API callers
+              # can pass wo_mols=None for the full block. Constrain reads none
+              # of them and skips the block entirely.
               wo_mols=([target_mol] if goal == "detect" else []),
               extra_mols=extra_mols, **tp_kwargs)
 star = dict(teff=teff, log_g=logg, metallicity=feh, ks_mag=ks_mag)
@@ -1711,7 +1673,9 @@ planet_label = (planets.PLANETS[planet_key]["label"]
 _canon = None
 try:
     _canon = forward.canonical_params(params)
-    cached = forward.load_result(params) is not None
+    # existence is enough for the runtime estimate: the cache version is
+    # inside the key, so a file at this path was written by this version
+    cached = forward.cache_path(params).exists()
     params_error = None
 except (ValueError, RuntimeError) as e:  # stale widget combo mid-rerun, or a
     cached, params_error = False, str(e)  # missing/invalid T-P table
@@ -1756,16 +1720,14 @@ base_min = 0.1 + 0.010 * nz
 if yconv_cri <= 1.5e-3:              # strict convergence costs extra iterations
     base_min += 0.5
 base_min += 0.25 * len(extra_mols)   # k-table load + one more overlap fold
-# cool columns (<~900 K) converge much more slowly (a W107b run took ~5 min)
+# cool columns (<~900 K) converge much more slowly
 t_char = {"guillot": tp_kwargs.get("Tirr", 1560.0) / np.sqrt(2.0),
           "file": float(teq)}.get(tp_mode, 1100.0)
 if t_char < 900.0:
     base_min += 2.5
-# condensing solves carry the window + pin + stricter gate overhead
 
 # Jacobian-row cost model: fd = 4 solves per row; cloud rows are RT-only
 # (~seconds); ad = ONE shared warm primal plus a batched tangent per row
-# (measured 80 s for 2 rows on the default case)
 _solve_min = max(1.0, base_min * 0.5)
 _rt_only = set(forward.CLOUD_FISHER_PARAMS)
 n_cloud_rows = sum(1 for n in fisher_params if n in _rt_only)
@@ -1821,9 +1783,9 @@ with _run_slot:
 # ONE description of everything a run consumes OUTSIDE the canonical model
 # parameters: the science goal and the observation setup. Built once and used
 # three times -- the shareable config, the stored run meta, and the staleness
-# guard -- so a new setting joins all three at once. The guard must compare
-# this WHOLE block, never a hand-picked subset: a field it misses reaches the
-# page silently as stale results.
+# guard -- so a new setting joins all three at once. The guard compares the
+# whole block minus _DISPLAY_ONLY below, never a hand-picked subset: a
+# computed field it misses reaches the page silently as stale results.
 _goal_meta = dict(goal=goal, target_mol=target_mol,
                   target_sig=float(target_sig),
                   goal_param=goal_param,
@@ -1856,11 +1818,18 @@ _obs_meta = dict(
     seed=int(seed),
     combos=[dict(name=str(c["name"]), modes=[str(m) for m in c["modes"]])
             for c in (st.session_state.get(K("combos")) or [])])
-_run_sig = dict(goal=_goal_meta, observation=_obs_meta)
+# Observation fields that change only what is DRAWN from the cached run (the
+# mock draw, its seed, the named mode sets). They stay in _obs_meta -- the
+# shareable config and floor_selected read it -- but the staleness guard
+# ignores them: they recompute nothing, so they can never make a result stale.
+_DISPLAY_ONLY = ("show_noise", "seed", "combos")
+_run_sig = dict(goal=_goal_meta,
+                observation={k: v for k, v in _obs_meta.items()
+                             if k not in _DISPLAY_ONLY})
 
 # The shareable configuration: built here (it needs _canon and the goal /
 # observation blocks above) and rendered into the slot reserved beside the
-# Run button. Deferred, so clicking it can never cancel a run in flight.
+# Run button.
 if _canon is not None:
     _share = share_config.build_share(
         canon=_canon,
@@ -1871,19 +1840,15 @@ if _canon is not None:
         floor_table=(np.asarray(floor_table).tolist()
                      if floor_table is not None else None))
     with _cfg_col:
-        _deferred_download(
+        st.download_button(
             "Download configuration (JSON)",
             json.dumps(_share, indent=2, default=str).encode(),
             f"jwst_tool_{_slug(planet_label)}_config.json",
-            "application/json", key=K("dl_config"))
+            "application/json", key=K("dl_config"), on_click="ignore")
 else:
     with _cfg_col:
         st.caption("Configuration download is unavailable while the "
                    "settings do not validate.")
-
-
-# run_clicked is finally known: every reserved download slot can be filled
-_render_deferred_downloads(busy=run_clicked)
 
 
 # Compute on click
@@ -2022,9 +1987,6 @@ def _compute_locked():
 
 if run_clicked:
     out = compute()
-    # the run is over (finished, failed, or declined): give the buttons back
-    # without waiting for the next rerun
-    _render_deferred_downloads()
     if out is not None:
         st.session_state["out"] = out
         st.session_state["out_meta"] = dict(
@@ -2166,12 +2128,11 @@ if goal_r == "detect":
                    f"({_METRIC_LABEL[_best_projected]}) in {ntr} "
                    f"{_ev}{'s' if ntr > 1 else ''} (target {tsig:g}σ).")
         if bsig >= tsig:
-            # No banner when the target is met: the
-            # figure and the verdict already carry the number, and a green
-            # bar restating it is the redundant UI prose the house policy
-            # forbids. A SHORTFALL still gets a bar -- the transit count it
-            # quotes is information that appears nowhere else.
-            pass
+            # Target met: the verdict as plain text, with no banner. A green
+            # bar would restate the number the line already carries, and a
+            # SHORTFALL is the case that earns one -- its banner adds the
+            # transit count, which appears nowhere else.
+            st.markdown(verdict)
         elif bsig > 0:
             # floor-aware transit solver: the photon term averages down with
             # N, the systematic floor does not -- a plain 1/sqrt(N) law is
@@ -2223,7 +2184,7 @@ else:
                f"{tsig:g}σ in {ntr} {_ev}{'s' if ntr > 1 else ''} "
                f"(target ±{target:g}{usp}).")
     if bs <= target:
-        pass                      # see the detect-goal note: no banner on success
+        st.markdown(verdict)      # target met: plain text, no banner
     elif np.isfinite(comb) and comb <= target:
         st.warning(verdict + f"  Combined modes: ±{comb:.3g}{usp}.")
     else:
@@ -2284,16 +2245,28 @@ _depth_lbl = ("eclipse depth (ppm)"
               if str(model.get("science_mode", "transmission")) == "emission"
               else "transit depth (ppm)")
 
+
+def _binned_series(r, mock=None):
+    """One evaluated mode as (wl_eff um, depth ppm, sigma ppm) -- the plotted
+    x coordinate (it differs from wl_um near a detector gap), depths in ppm.
+    ``mock`` substitutes that mode's seeded draw for the noiseless depth."""
+    depth = (mock["modes"][r["mode_key"]]["depth_mock"] if mock is not None
+             else r["depth"])
+    return (np.asarray(r.get("wl_eff", r["wl"]), dtype=float),
+            np.asarray(depth, dtype=float) * 1e6,
+            np.asarray(r["sigma"], dtype=float) * 1e6)
+
+
 # plotted/binned numbers for the downloads under the summary figure
-_bin_df = pd.concat([
-    pd.DataFrame({
+_bin_rows = []
+for r in results:
+    _bwl, _bd, _bs = _binned_series(r)
+    _bin_rows.append(pd.DataFrame({
         "mode": r["mode_key"], "label": r["label"],
         "wl_um": np.asarray(r["wl"], dtype=float),
-        "wl_eff_um": np.asarray(r.get("wl_eff", r["wl"]), dtype=float),
-        "depth_ppm": np.asarray(r["depth"], dtype=float) * 1e6,
-        "sigma_ppm": np.asarray(r["sigma"], dtype=float) * 1e6,
-        "saturated": bool(r["saturated"]),
-    }) for r in results], ignore_index=True)
+        "wl_eff_um": _bwl, "depth_ppm": _bd, "sigma_ppm": _bs,
+        "saturated": bool(r["saturated"])}))
+_bin_df = pd.concat(_bin_rows, ignore_index=True)
 _native = {"wl_um": wl_s, "depth_ppm": d_s}
 if d_wo_s is not None:
     _native[f"depth_{meta['target']}_opacity_removed_ppm"] = d_wo_s
@@ -2337,7 +2310,7 @@ with st.expander("Physical structure (T-P profile, mixing ratios)"):
                  if s in _want]
         _cols.sort(key=lambda kv: -float(np.nanmax(kv[1])))
         fig3 = plotting.build_structure_figure(_p_arr, _T_arr, _cols)
-        _struct_png = _fig_png(fig3, tight=False)
+        _struct_png = _fig_bytes(fig3, "png", tight=False)
         _show_fig(fig3, tight=False)
 
         if _cpj.get("science_mode") == "emission":
@@ -2358,13 +2331,13 @@ with st.expander("Physical structure (T-P profile, mixing ratios)"):
         _s1, _s2, _s3 = st.columns(3)
         _s1.download_button("Figure (PNG)", _struct_png,
                             f"{_fname_base}_structure.png", "image/png",
-                            key=K("dl_struct_png"))
+                            key=K("dl_struct_png"), on_click="ignore")
         _s2.download_button("T-P values (CSV)", _csv_bytes(_tp_df),
                             f"{_fname_base}_tp_profile.csv", "text/csv",
-                            key=K("dl_tp_csv"))
+                            key=K("dl_tp_csv"), on_click="ignore")
         _s3.download_button("Mixing ratios (CSV)", _csv_bytes(_vmr_df),
                             f"{_fname_base}_mixing_ratios.csv", "text/csv",
-                            key=K("dl_vmr_csv"))
+                            key=K("dl_vmr_csv"), on_click="ignore")
 
 
 with st.expander("Parameter constraint forecast (local Fisher)"):
@@ -2540,7 +2513,7 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
         st.download_button("Constraint forecast (CSV)",
                            _csv_bytes(pd.DataFrame(frows)),
                            f"{_fname_base}_fisher_forecast.csv", "text/csv",
-                           key=K("dl_fisher_csv"))
+                           key=K("dl_fisher_csv"), on_click="ignore")
         # No full-rank numerical-health prose; a rank DEFICIENCY is still
         # disclosed -- degenerate directions would otherwise read as
         # silently missing rows
@@ -2549,8 +2522,8 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
                 f"**Fisher matrix is rank-deficient ({fdiag['fisher_rank']} "
                 f"of {fdiag['fisher_dimension']}): degenerate directions "
                 "read as unconstrained.**")
-        # No "How to read this table" expander here: that reference material
-        # lives in README.md ("How to interpret the result"); do not re-add it.
+        # Reference material on reading this table belongs in README.md, not
+        # in the GUI.
         st.divider()
         # Filled by the marginalized-forecast block below, which needs the
         # posterior records built after this panel renders.
@@ -2781,12 +2754,9 @@ if _have_fisher:
                                   "direction carries no information in "
                                   "the fitted band (no curve, by design)")
             # A panel whose curves are FITS to the jitter draw is not a
-            # forecast: its centers move with the realization, and a
-            # forecast's center is the input value by construction. VERIFIED
-            # not a bug (reviews re-find it): the recovery shift is linear
-            # in the noise -- over realizations its mean is 0 and its spread
-            # is exactly the Fisher sigma (measured over 4000 draws). The
-            # axis names which of the two the reader is looking at.
+            # forecast: its centers move with the realization, while a
+            # forecast's center is the input value by construction. The y-axis
+            # name says which of the two the reader is looking at.
             _fitted = any(c.get("kind") == posteriors.MOCK_RECOVERY_KIND
                           for c in _curves)
             _post_panels.append(dict(
@@ -2948,8 +2918,7 @@ for r in results:
     if (f"mode:{r['mode_key']}" not in _sel_series
             and "allusable:all" not in _sel_series):
         continue                      # deselected in the controls above
-    _y = (np.asarray(_mock["modes"][r["mode_key"]]["depth_mock"], float)
-          if _mock is not None else np.asarray(r["depth"], float)) * 1e6
+    _pwl, _pdep, _psig = _binned_series(r, _mock)
     _lbl = r["label"]
     if r["mode_key"] in _leg_num:
         _lbl += f": {_leg_num[r['mode_key']]}"
@@ -2960,9 +2929,7 @@ for r in results:
         # indistinguishable at the ~3.6 pt size these points render at.
         # Modes are distinguished by color plus the legend entry.
         marker=ins.MODE_MARKER.get(r["mode_key"], "o"),
-        wl_um=np.asarray(r.get("wl_eff", r["wl"]), float),
-        depth_ppm=_y,
-        sigma_ppm=np.asarray(r["sigma"], float) * 1e6))
+        wl_um=_pwl, depth_ppm=_pdep, sigma_ppm=_psig))
 _leg_note = None
 if _leg_num:
     # ONE short line, rendered as the legend's TITLE (not folded into the
@@ -2984,11 +2951,8 @@ for _ci, (_cname, _members) in enumerate(_combo_members.items()):
         _rr = next((x for x in _usable if x["mode_key"] == _mk), None)
         if _rr is None:
             continue
-        _cw.append(np.asarray(_rr.get("wl_eff", _rr["wl"]), float))
-        _cd.append((np.asarray(_mock["modes"][_mk]["depth_mock"], float)
-                    if _mock is not None
-                    else np.asarray(_rr["depth"], float)) * 1e6)
-        _cs.append(np.asarray(_rr["sigma"], float) * 1e6)
+        for _dst, _arr in zip((_cw, _cd, _cs), _binned_series(_rr, _mock)):
+            _dst.append(_arr)
     if not _cw:
         continue
     _cw, _cd, _cs = (np.concatenate(_cw), np.concatenate(_cd),
@@ -3036,44 +3000,43 @@ except ValueError as _e:
     _fig_box.warning("Log axis unavailable; linear shown.")
     _sum_spectrum["y_log"] = False
     fig_sum = _compose(_sum_spectrum)
-_sum_png = _fig_png(fig_sum)
-_sum_pdf = _fig_pdf(fig_sum)
+_sum_png = _fig_bytes(fig_sum, "png")
+_sum_pdf = _fig_bytes(fig_sum, "pdf")
 with _fig_box:
     _show_fig(fig_sum)
 _s1, _s2, _s3, _s4, _s5 = _fig_box.columns([1.5, 1.2, 1.5, 1.5, 1.9])
 _s1.download_button("Figure (PDF, vector)", _sum_pdf,
                     f"{_fname_base}_proposal_summary.pdf",
-                    "application/pdf", key=K("dl_summary_pdf"))
+                    "application/pdf", key=K("dl_summary_pdf"),
+                    on_click="ignore")
 _s2.download_button("Figure (PNG)", _sum_png,
                     f"{_fname_base}_proposal_summary.png", "image/png",
-                    key=K("dl_summary_png"))
+                    key=K("dl_summary_png"), on_click="ignore")
 _s3.download_button("Binned points (CSV)", _csv_bytes(_bin_df),
                     f"{_fname_base}_binned_points.csv", "text/csv",
-                    key=K("dl_spec_bins"))
+                    key=K("dl_spec_bins"), on_click="ignore")
 _s4.download_button("Native model (CSV)", _csv_bytes(pd.DataFrame(_native)),
                     f"{_fname_base}_model_spectrum.csv", "text/csv",
-                    key=K("dl_spec_native"))
+                    key=K("dl_spec_native"), on_click="ignore")
 if _mock is not None:
     # the mock data is downloadable, but ONLY under a name that says what it
     # is (a seeded mock realization) -- the result CSVs above stay noiseless
-    _mock_df = pd.concat([
-        pd.DataFrame({
+    _mock_rows = []
+    for r in results:
+        # wl_eff is the PLOTTED x coordinate: the figure must be reproducible
+        # from this file alone
+        _mwl, _md, _ms = _binned_series(r, _mock)
+        _mock_rows.append(pd.DataFrame({
             "mode": r["mode_key"], "label": r["label"],
             "wl_um": np.asarray(r["wl"], dtype=float),
-            # the PLOTTED x-coordinate (differs from wl_um near detector
-            # gaps): the figure must be reproducible from this file alone
-            "wl_eff_um": np.asarray(r.get("wl_eff", r["wl"]), dtype=float),
-            "depth_mock_ppm": np.asarray(
-                _mock["modes"][r["mode_key"]]["depth_mock"],
-                dtype=float) * 1e6,
-            "sigma_ppm": np.asarray(r["sigma"], dtype=float) * 1e6,
+            "wl_eff_um": _mwl, "depth_mock_ppm": _md, "sigma_ppm": _ms,
             "seed": int(seed),
             "disclosure": _mock["label"],
             "seed_scheme": _mock["seed_scheme"],
-            "numpy_version": _mock["numpy_version"],
-        }) for r in results], ignore_index=True)
+            "numpy_version": _mock["numpy_version"]}))
+    _mock_df = pd.concat(_mock_rows, ignore_index=True)
     _s5.download_button(
         "Mock observation (CSV)", _csv_bytes(_mock_df),
         f"{_fname_base}_mock_realization_seed{int(seed)}.csv", "text/csv",
-        key=K("dl_spec_mock"),
+        key=K("dl_spec_mock"), on_click="ignore",
         help=posteriors.MOCK_SHORT_LABEL)

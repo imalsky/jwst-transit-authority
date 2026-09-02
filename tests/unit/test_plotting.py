@@ -204,16 +204,16 @@ def test_structure_panels_share_one_pressure_axis_drawn_on_both():
 def test_app_materializes_figures_only_through_locked_helpers():
     """STRUCTURAL: no unlocked layout/export/render call survives in app.py.
 
-    app.py must go through _fig_png / _fig_pdf / _show_fig, which hold the
-    lock; a bare fig.tight_layout(), fig.savefig() or st.pyplot() would
-    reintroduce the crash, so parse the module and fail on one.
+    app.py must go through _fig_bytes / _show_fig, which hold the lock; a
+    bare fig.tight_layout(), fig.savefig() or st.pyplot() would reintroduce
+    the crash, so parse the module and fail on one.
     compose_summary_figure serializes too (it mutates global rcParams via
     plt.style.context and lays out mathtext axes): its source must enter the
     lock no later than the style context.
     """
     src = APP.read_text()
     tree = ast.parse(src)
-    locked_helpers = {"_fig_png", "_fig_pdf", "_show_fig"}
+    locked_helpers = {"_fig_bytes", "_show_fig"}
     exempt_lines = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name in locked_helpers:

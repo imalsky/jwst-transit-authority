@@ -178,38 +178,45 @@ def test_unconstrained_panel_renders_note_without_curve():
 
 
 def test_validation_is_loud():
-    with pytest.raises(ValueError):
+    """Every refusal carries a DISTINGUISHING token: these are all the same
+    ValueError from the same callable, so a bare `raises` would let a deleted
+    validator pass by hiding behind another one's message."""
+    with pytest.raises(ValueError, match="missing required entry 'wl_um'"):
         summary_figure.compose_summary_figure(dict(depth_ppm=[1.0, 2.0]))
     bad = _spectrum()
     bad["depth_ppm"] = bad["depth_ppm"][:-1]
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="shapes differ"):
         summary_figure.compose_summary_figure(bad)
     nonfinite = _spectrum()
     nonfinite["depth_ppm"] = nonfinite["depth_ppm"].copy()
     nonfinite["depth_ppm"][3] = np.nan
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="depth_ppm contains non-finite"):
         summary_figure.compose_summary_figure(nonfinite)
     # an empty posterior panel says nothing -- refused, never silent
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="needs curves or notes"):
         summary_figure.compose_summary_figure(
             _spectrum(with_points=False),
             posterior_panels=[dict(axis_label="x", curves=[], notes=[])])
     # the cap is THREE, matching the GUI's _MAX_POST_PANELS: a lower cap
     # here makes a selection the widget allows raise instead of rendering
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="at most three posterior panels"):
         summary_figure.compose_summary_figure(
             _spectrum(with_points=False),
             posterior_panels=[_panel() for _ in range(4)])
     # axis windows: a reversed or non-finite pair is refused, never silently
     # swapped or ignored. The GUI validates before calling, so these are the
     # backstop for API callers.
-    for bad_range in ((21500.0, 20500.0), (np.nan, 1.0)):
+    for bad_range, msg in (((21500.0, 20500.0), "depth_range needs lo < hi"),
+                           ((np.nan, 1.0), "depth_range must be finite")):
         spec = _spectrum(with_points=False)
         spec["depth_range"] = bad_range
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=msg):
             summary_figure.compose_summary_figure(spec)
-    for bad_pair in ((1.0, 0.0), (np.nan, 1.0), (1.0,), 3.5):
-        with pytest.raises(ValueError):
+    for bad_pair, msg in (((1.0, 0.0), "needs finite lo < hi"),
+                          ((np.nan, 1.0), "needs finite lo < hi"),
+                          ((1.0,), r"must be a \(lo, hi\) pair"),
+                          (3.5, r"must be a \(lo, hi\) pair")):
+        with pytest.raises(ValueError, match=msg):
             summary_figure.compose_summary_figure(
                 _spectrum(with_points=False),
                 posterior_panels=[_panel_sized()], panel_xlims=[bad_pair])

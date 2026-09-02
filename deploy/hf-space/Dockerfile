@@ -6,9 +6,11 @@
 # clone layer), push the Space files. Factory rebuild is the fallback if a
 # build ever reuses a stale clone layer anyway.
 #
-# Datasets are NOT in the image: the entrypoint seeds /data (the Space's
-# persistent-storage volume) from a private HF dataset repo on first boot.
-# Requires: persistent storage enabled (Small tier) + secret HF_TOKEN.
+# Datasets are NOT in the image. Preferred layout: the private HF dataset repo
+# mounted READ-ONLY at /srv/hub-data plus a writable bucket volume at /data
+# (buckets replaced the retired per-Space persistent storage). Fallback, when
+# no dataset mount exists: the entrypoint seeds /data by download, which needs
+# the secret HF_TOKEN.
 # Base image pinned by DIGEST, not :latest -- an upstream rebuild must never
 # change the environment under fixed source SHAs. Update deliberately, with
 # a notes.md decision record.
@@ -74,11 +76,9 @@ RUN rm -f /srv/vulcan/VULCAN-JAX/src/vulcan_jax/fastchem_vulcan/fastchem \
     && make -C /srv/vulcan/VULCAN-JAX/src/vulcan_jax/fastchem_vulcan \
     && test -x /srv/vulcan/VULCAN-JAX/src/vulcan_jax/fastchem_vulcan/fastchem
 
-# Only /data persists on a Space. Since the forward engine became its own
-# distribution its data root IS env-overridable ($VULCAN_FORWARD_DATA), so
-# there are no repo-relative data stubs to remove: the entrypoint just exports
-# the variable. The retrieval application is no longer installed at all -- the
-# planner depends on the shared engine, not on that app.
+# Only /data persists on a Space. The forward engine's data root is
+# env-overridable ($VULCAN_FORWARD_DATA), so there are no repo-relative data
+# stubs to fix up: the entrypoint just exports the variable.
 
 COPY entrypoint.sh bootstrap_data.py /srv/app/
 # Spaces run the container as uid 1000; the base image may already ship a
@@ -90,35 +90,19 @@ RUN chmod +x /srv/app/entrypoint.sh \
     && chown -R 1000:1000 /srv/vulcan /srv/app
 USER 1000
 
-# BACKEND (2026-08-04). `current` is the STScI-supported 2026.7 triple:
+# BACKEND. The tool ships exactly one: the STScI-supported 2026.7 triple,
 # pandeia.engine==2026.7 (requirements-pandeia.txt) + pandeia_data-2026.7-jwst
 # + pandeia_psfs-2026.7-jwst. The engine, the reference data and the PSF
 # library must all be the SAME release; the worker refuses a mismatched set
-# rather than running one.
+# rather than running one, and there is no archival backend to fall back to.
 #
-# *** DO NOT REBUILD THIS IMAGE UNTIL BOTH 2026.7 TREES ARE IN THE DATASET ***
-# The Space seeds /data/jwst-data from the dataset repo. Until
-# pandeia_data-2026.7-jwst and pandeia_psfs-2026.7-jwst are uploaded there,
-# this pin makes the app demand trees the volume does not have: the data panel
-# reports both missing and every noise step stops with an error. That is the
-# intended fail-closed behaviour, not a silent fallback, and it is exactly what
-# happened on 2026-08-03 when the token was repointed ahead of the data.
-#
-# Upgrade order (all three, in this order):
-#   1. download pandeia_data-2026.7-jwst (~20 MiB) and
-#      pandeia_psfs-2026.7-jwst (~4 GiB) into vulcan-jwst-tool/data/
-#      (STScI Box; browser, or the scripted recipe in fetch.py's MANUAL --
-#      the PSF transfer truncates and still exits 0, so check byte counts)
-#   2. upload both to the dataset repo under jwst-data/ (upload_data.sh;
-#      DELETE the staging dir first, it skips staging when one already exists)
-#   3. rebuild the Space with this pin at `current`
-#
-# There is no archival backend to fall back to: instruments.py ships exactly
-# one, "current" = 2026.7, and raises for any other JWST_TOOL_BACKEND. An
-# older release is reachable only by checking out a commit that still carried
-# it. The committed PandExo parity artifact (tests/parity/outputs/REPORT.md)
-# is a gate-evaluated PASS on 2026.7 (2026-08-04); the old 2026.2 artifact
-# predates the gate and was never gate-evaluated.
+# Upgrading the release means, in this order: download both data trees into
+# vulcan-jwst-tool/data/ (STScI Box; the PSF transfer truncates and still
+# exits 0, so check byte counts), upload them to the dataset repo under
+# jwst-data/ (upload_data.sh -- DELETE the staging dir first, it skips staging
+# when one already exists), then rebuild the Space. Rebuilding before the
+# dataset carries the trees is fail-closed by design: the data panel reports
+# them missing and every noise step stops with an error.
 ENV VULCAN_PROJECT_ROOT=/srv/vulcan \
     VULCAN_FORWARD_DATA=/data/retrieval-data \
     JWST_TOOL_DATA_DIR=/data/jwst-data \

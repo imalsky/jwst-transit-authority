@@ -29,11 +29,8 @@ if [ ! -e "$ROOT/vulcan-jwst-tool/data/cdbs/grid/phoenix/catalog.fits" ]; then
     exit 1
 fi
 
-# Stage per TOP-LEVEL ENTRY, not per tree. The old check was a single
-# sentinel file ("does the phoenix catalog exist in the stage?"), so a stage
-# left over from an earlier run made this skip wholesale -- and anything added
-# to data/ since then, e.g. a new pandeia release pair, was silently never
-# uploaded. The Space then boots without it and every noise step errors.
+# Stage per TOP-LEVEL ENTRY, not per tree: a single sentinel file would let a
+# stage left over from an earlier run skip everything added to data/ since.
 # Known limit: this adds MISSING entries, it does not refresh changed files
 # inside an entry already present. Delete the entry (or the stage) to re-copy.
 # -RL: follow symlinks so the staged copy is self-contained.

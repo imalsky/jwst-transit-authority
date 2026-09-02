@@ -13,14 +13,14 @@ questions in one graphic:
   Each legend entry carries that mode's expected performance number (the
   caller appends it to the point-series label: a conditional template S/N
   for a detection goal, an expected +/- for a constraint goal).
-* CENTER and RIGHT -- what would the measurement look like? Up to two 1D
-  marginalized
-  Fisher-Gaussian forecast curves (linearized Cramer-Rao forecasts, never
-  sampled retrieval posteriors). An unconstrained direction renders as an
-  explicit annotation, never a fake finite curve.
+* CENTER and RIGHT -- what would the measurement look like? Up to three 1D
+  marginalized Fisher-Gaussian forecast curves (linearized Cramer-Rao
+  forecasts, never sampled retrieval posteriors). An unconstrained direction
+  renders as an explicit annotation, never a fake finite curve.
 
-House style: the vendored science.mplstyle with the GUI's serif/STIX
-overrides, so the standalone render matches the in-app figures.
+House style: the vendored science.mplstyle plus the serif/STIX overrides
+this module owns (_STYLE_OVERRIDES, which the GUI applies globally), so a
+standalone render matches the in-app figures.
 """
 from __future__ import annotations
 
@@ -36,12 +36,13 @@ from jwst_tool import plotting
 
 _STYLE_FILE = Path(__file__).resolve().parent / "science.mplstyle"
 
-# The GUI's overrides on top of the vendored style (app.py applies the same
-# set globally); repeated here so a headless render matches the app.
-# One typography scale across the three square panels (the vendored style is
-# sized for a single full-width axes; a third-width panel needs its own).
+# ONE typography scale across the three square panels: the vendored style is
+# sized for a single full-width axes, so a third-width panel needs its own.
 _AX_LBL, _TICK, _LEG = 9.0, 8.0, 7.0
 
+# The overrides on top of the vendored style, applied here per figure and
+# globally by the GUI (app.py imports this dict), so a headless render and an
+# in-app figure match.
 _STYLE_OVERRIDES = {
     "font.family": "serif",
     "mathtext.fontset": "stix",
@@ -299,12 +300,9 @@ def _visible_ylim(spec: dict, lo: float, hi: float):
     if allv.size == 0:
         return None
     y0, y1 = float(np.min(allv)), float(np.max(allv))
-    # ASYMMETRIC padding ("make the y scale fit a
-    # little better by auto"). The old symmetric 6% left the data filling only
-    # 76% of the axis -- 4.6% dead space below and 19.6% above, and the top
-    # gap is separately reserved for the in-axes legend anyway. 2% below is
-    # enough to keep a whisker off the spine; the legend headroom is added by
-    # the caller, sized from its row count.
+    # ASYMMETRIC padding: 2% below is enough to keep a whisker off the spine,
+    # and the top gap is not padded here at all -- the caller adds the legend
+    # headroom, sized from its row count.
     if spec["y_log"] and y0 > 0.0:
         f = (y1 / y0) ** 0.02 if y1 > y0 else 1.02
         return (y0 / f, y1 * f)
@@ -321,12 +319,10 @@ def _plot_spectrum(ax, spec: dict) -> None:
     ax.plot(spec["wl_um"], spec["depth_ppm"], color="#444444", lw=1.1,
             alpha=0.9, zorder=4, label=spec["model_label"])
     if spec["depth2_ppm"] is not None:
-        # zorder 3.5: ABOVE the points (3), below the model (4). At zorder 1 this
-        # curve sat under both, and since it is identical to the model everywhere
-        # outside the target molecule's own bands it read as absent -- a reviewer
-        # reported "I didn't see the model without SO2 curve" for exactly this
-        # reason. It must not go above the model: where the two coincide the solid
-        # line is the one to show.
+        # zorder 3.5: ABOVE the points (3), below the model (4). It is identical
+        # to the model everywhere outside the target molecule's own bands, so
+        # under the points it reads as absent; above the model it would hide the
+        # solid line wherever the two coincide.
         ax.plot(spec["wl_um"], spec["depth2_ppm"], color="#888888",
                 lw=1.0, ls="--", zorder=3.5, label=spec["depth2_label"])
     for p in spec["points"]:
@@ -335,12 +331,9 @@ def _plot_spectrum(ax, spec: dict) -> None:
         # swallows the fill -- every mode's marker renders black and the
         # per-mode color is invisible. That color is the series identity
         # shared with the forecast panels, so it has to read.
-        # ms 3.6: the model line is raised ABOVE the points (zorder 4, see
-        # _plot_spectrum), which is what lets the markers stay large enough
-        # to READ. Measured at 3.0 / 3.6 / 4.2 / 5.0 over the model line: at
-        # 3.0 the eight shapes all collapse to a dot, silently undoing the
-        # per-mode marker encoding. 3.6 is the smallest size where D/^/v and
-        # P/X/* still separate.
+        # ms 3.6 is the smallest size at which the marker shapes still
+        # separate (D/^/v and P/X/*); below it they collapse to a dot and the
+        # per-mode marker encoding is silently lost.
         ax.errorbar(p["wl_um"], p["depth_ppm"], yerr=p["sigma_ppm"],
                     fmt=p["marker"], ms=3.6, lw=0.9, color=p["color"],
                     markerfacecolor=p["color"], markeredgecolor=p["color"],
@@ -398,16 +391,11 @@ def _plot_spectrum(ax, spec: dict) -> None:
                 "axis for this data, or set depth_range explicitly.")
         ax.set_yscale("log")
         # LOG-SPACED ticks at every span (LogLocator with 1-2-5 subdivisions),
-        # formatted as plain numbers rather than powers of ten.
-        #
-        # A transit depth spans a tiny fraction of a decade (measured: 0.019
-        # for a 19.6-20.5 kppm range), and a bare decade locator puts every
-        # tick outside the view, so the axis draws with NO labels at all.
-        # LINEARLY spaced ticks on a log axis are not the answer: equal label
-        # steps sit at unequal distances. Measured tick counts inside the view
-        # with subs=(1, 2, 5): 8 at 0.019 decades, 7 at 0.48, 5 at 1.38, 6 at
-        # 1.70, 9 at 2.60 -- the subdivided log locator solves the no-labels
-        # case at every span.
+        # formatted as plain numbers rather than powers of ten. A transit depth
+        # spans a small fraction of a decade, where a bare decade locator puts
+        # every tick outside the view and the axis draws with NO labels;
+        # linearly spaced ticks are not the answer either, since equal label
+        # steps would sit at unequal distances.
         ax.yaxis.set_major_locator(
             LogLocator(base=10.0, subs=(1.0, 2.0, 5.0)))
         ax.yaxis.set_minor_locator(NullLocator())
@@ -424,12 +412,11 @@ def _plot_spectrum(ax, spec: dict) -> None:
         # would distort the visible depth range purely for the legend's
         # benefit.
         # A translucent frame keeps it readable if it must sit over gridlines.
-        # TWO COLUMNS BY GROUP: model curves in the
-        # first, instrument modes in the second. matplotlib fills a legend
-        # COLUMN-MAJOR (verified: with ncol=2 and 6 entries, entries 0-2 land
-        # in column 1), so the handle list is ordered models-then-modes and the
-        # SHORTER group is padded with invisible entries -- otherwise the
-        # column break lands mid-group and the grouping is lost.
+        # TWO COLUMNS BY GROUP: model curves in the first, instrument modes in
+        # the second. matplotlib fills a legend COLUMN-MAJOR, so the handle list
+        # is ordered models-then-modes and the SHORTER group is padded with
+        # invisible entries -- otherwise the column break lands mid-group and
+        # the grouping is lost.
         _h, _l = ax.get_legend_handles_labels()
         _mode_labels = {str(p["label"]) for p in spec["points"]}
         _models = [(h, l) for h, l in zip(_h, _l) if l not in _mode_labels]
@@ -483,29 +470,18 @@ def _fmt_val(v: float) -> str:
     return f"{float(v):.3g}"
 
 
-# One color per PARAMETER in the merged forecast box. Chosen to stay
-# distinguishable in grayscale and for the common forms of color blindness
-# (blue vs vermillion, Okabe-Ito).
-_PARAM_COLORS = ("#0072b2", "#d55e00")
-
-
-def _plot_posterior_panel(axp, pan: dict, color: str,
+def _plot_posterior_panel(axp, pan: dict,
                           xlim: tuple | None = None) -> None:
-    """One marginalized forecast posterior: curve, shaded 1-sigma band, and
-    the width QUOTED in the panel title.
+    """One marginalized forecast posterior: its curve, and the width QUOTED in
+    the panel title.
 
-    This replaces a single merged box with twin x-axes. That merge
-    was geometrically self-defeating -- ``gaussian_curve`` builds its grid as
-    center +/- 5 sigma, so each parameter's axis auto-scales to its own width;
-    peak-normalizing then leaves exactly ONE possible outline. Measured: FWHM
-    = 0.230 of the axis width for sigma 0.001, 0.035 and 5.0 alike, and the
-    two curves landed within 2e-12 px of each other -- one hidden exactly
-    under the other. Separate panels give each parameter its own axis back.
-
-    The width therefore cannot be read from the curve's shape and is reported
-    the way marginalized posteriors are published: as a number above the panel
-    (corner.py annotates the median and 68% interval over each histogram) and
-    as a shaded 1-sigma interval against real tick values.
+    ONE PANEL PER PARAMETER, never a merged box with twin x-axes: the curves
+    are peak-normalized and each grid spans its own center +/- 5 sigma, so
+    every parameter draws the SAME outline and one curve hides exactly under
+    the other. The width therefore cannot be read from a curve's shape and is
+    reported the way marginalized posteriors are published -- as a number
+    above the panel (corner.py annotates the median and 68% interval over each
+    histogram) against real tick values.
     """
     for c in pan["curves"]:
         theta = np.asarray(c["theta"], dtype=float)
@@ -513,22 +489,17 @@ def _plot_posterior_panel(axp, pan: dict, color: str,
         peak = float(np.max(pdf)) if pdf.size else 0.0
         if peak > 0.0:
             pdf = pdf / peak              # unit peak: see the y-axis note
-        # each curve's OWN color when the caller set one: with the sources
-        # following the spectrum's series, the color IS the series identity, so
-        # a per-parameter color would erase the thing the panel is showing.
-        # ``color`` (the per-parameter fallback) applies only when there is one
-        # unlabelled curve and no caller color.
-        _c = c.get("color") or color
-        # No shaded 1-sigma band: with one curve per
-        # selected series the overlapping fills muddied the panel, and every
-        # entry already quotes its sigma as a number.
-        # With several sources the title cannot quote one width without
-        # silently picking a source, so each ENTRY carries its own.
+        # The colour IS the series identity, shared with that series on the
+        # spectrum, so it always comes from the curve (_validate_panels
+        # guarantees one). No shaded 1-sigma band: with one curve per selected
+        # series the overlapping fills muddy the panel. With several sources
+        # the title cannot quote one width without silently picking a source,
+        # so each ENTRY carries its own.
         _lab = str(c["label"])
         if c["sigma"] is not None and len(pan["curves"]) > 1:
             _lab = f"{_lab}: ±{_fmt_val(c['sigma'])}"
-        axp.plot(theta, pdf, color=_c, ls=c["ls"], lw=c["lw"], zorder=2,
-                 label=_lab)
+        axp.plot(theta, pdf, color=c["color"], ls=c["ls"], lw=c["lw"],
+                 zorder=2, label=_lab)
     if pan["center"] is not None:
         # the input value the forecast is centered on: with a jitter draw the
         # curve sits OFF it, and that offset is the realization's luck
@@ -544,15 +515,12 @@ def _plot_posterior_panel(axp, pan: dict, color: str,
             if _mu is not None
             else f"{pan['axis_label']}: ± {_fmt_val(_q['sigma'])}",
             fontsize=_AX_LBL)
-    # NARROWER x bounds ("hard to read right now").
-    # posteriors.gaussian_curve builds its grid as center +/- 5 sigma, and at
-    # +/-5 sigma the curve is visually zero across most of the axis, which
-    # squeezes the informative part into the middle fifth. The automatic
-    # window clips to the widest drawn curve at +/-_XLIM_SIGMA, which still
-    # contains >99.7% of every curve's mass. The grid itself is untouched (it
-    # is MC-pinned elsewhere), so this is a WINDOW, never a resampling: an
-    # explicit ``xlim`` from the caller shows the same curve, not a recomputed
-    # one, and is used verbatim.
+    # posteriors.gaussian_curve builds its grid as center +/- 5 sigma, where
+    # the curve is visually zero across most of the axis, so the automatic
+    # window clips to the widest drawn curve at +/-_XLIM_SIGMA (still >99.7% of
+    # every curve's mass). The grid itself is untouched, so this is a WINDOW,
+    # never a resampling: an explicit ``xlim`` from the caller shows the same
+    # curve and is used verbatim.
     if xlim is not None:
         axp.set_xlim(float(xlim[0]), float(xlim[1]))
     else:
@@ -581,12 +549,10 @@ def _plot_posterior_panel(axp, pan: dict, color: str,
     axp.tick_params(labelsize=_TICK)
     # The y label distinguishes a FORECAST (centered on the input by
     # construction, "relative forecast density") from a fit to the jitter
-    # realization (whose center moves, plain "relative density").
-    # Reviews re-find this: with jitter on, curves sit off the
-    # injected value while the axis still read "forecast density" -- and a
-    # forecast centered anywhere but the input would be a bug, so the label
-    # invited exactly that reading. The caller passes density_label; the
-    # forecast wording stays the default.
+    # realization (whose center moves, plain "relative density"): a forecast
+    # centered anywhere but the input value would be a bug, so the two must
+    # never share a label. The caller passes density_label; the forecast
+    # wording is the default.
     axp.set_ylabel(pan.get("density_label")
                    or "relative forecast density", fontsize=_AX_LBL)
     # Headroom for the in-axes legend, sized from the legend's ROW COUNT --
@@ -623,7 +589,7 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
     Per-mode expected performance belongs IN each point label (the caller
     appends the number), so the legend carries the ranking.
 
-    ``posterior_panels``: up to two dicts, one per parameter:
+    ``posterior_panels``: up to three dicts, one per parameter:
     dict(axis_label, curves=[dict(label, theta, pdf, color, ls, lw), ...],
     notes=[...], center=float|None). An unconstrained direction belongs in
     ``notes`` (rendered as an in-panel annotation), never as a curve. A
@@ -665,11 +631,10 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
     # argument). Reentrant, so a caller holding it already is fine.
     with plotting.render_lock, \
             plt.style.context([str(_STYLE_FILE), _STYLE_OVERRIDES]):
-        # Spectrum at 2x width, then ONE PANEL PER PARAMETER -- never a single
-        # merged twin-axis box (see _plot_posterior_panel for the
-        # measurement). A 2:1 wavelength panel is the right shape for a
-        # spectrum and matches how these appear in papers; the posterior
-        # panels stay square.
+        # Spectrum at 2x width, then ONE PANEL PER PARAMETER -- never a
+        # single merged twin-axis box (_plot_posterior_panel says why). A 2:1
+        # wavelength panel is the right shape for a spectrum and matches how
+        # these appear in papers; the posterior panels stay square.
         # ASPECT RATIOS: the spectrum is golden
         # ratio (PHI:1 wide) and every forecast panel is SQUARE. Both are
         # enforced twice over -- the figure size is SOLVED so each gridspec
@@ -713,9 +678,9 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
             if i >= len(panels):
                 axp.set_axis_off()
                 continue
-            _plot_posterior_panel(axp, panels[i],
-                                  _PARAM_COLORS[i % len(_PARAM_COLORS)],
-                                  xlim=(xlims[i] if i < len(xlims) else None))
+            _plot_posterior_panel(
+                axp, panels[i],
+                xlim=(xlims[i] if i < len(xlims) else None))
 
         if title:
             fig.suptitle(str(title), fontsize=11)

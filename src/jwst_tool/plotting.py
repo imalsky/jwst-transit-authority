@@ -11,10 +11,8 @@ runs the layout engine OUTSIDE it, and layout measures every tick label --
 mathtext on a log axis. Two Streamlit sessions (each its own script-runner
 thread) laying out figures at once can therefore be inside the shared parser
 concurrently; the loser raises ``ValueError: ParseException`` out of
-``tight_layout``. VERIFIED on the deployed pin with a threaded stress test
-(the unlocked path raises in 7-8 of 8 threads, the locked builders in 0;
-measurements: notes.md); bare ``Figure`` objects do NOT help -- the race is
-in the shared parser, not pyplot's figure registry.
+``tight_layout``. Bare ``Figure`` objects do NOT help -- the race is in the
+shared parser, not in pyplot's figure registry.
 
 RULE: every figure lifecycle -- construct, lay out, draw, export, close --
 happens inside ``render_lock``. Do not lay out, save, or draw a figure
@@ -48,8 +46,7 @@ render_lock = threading.RLock()
 MAX_LOG_TICKS = 7
 
 # Linear axes (temperature): 4-digit labels on a ~3 in box collide at the
-# matplotlib default, which is what "the temperature ticks overlap a ton"
-# was. Cap the count and let the locator pick round values.
+# matplotlib default. Cap the count and let the locator pick round values.
 MAX_LIN_TICKS = 5
 
 

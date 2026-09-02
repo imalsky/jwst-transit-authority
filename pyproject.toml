@@ -1,11 +1,11 @@
 # vulcan-jwst-tool: JWST instrument selector on the shared vulcan-forward
 # engine. The Pandeia ETC noise backend runs in its OWN conda env, addressed via
 # JWST_TOOL_PANDEIA_PYTHON -- it is deliberately NOT a dependency here. The
-# DEFAULT backend is the STScI-supported matched triple pandeia.engine 2026.7 +
-# pandeia_data-2026.7-jwst + pandeia_psfs-2026.7-jwst (JWST_TOOL_BACKEND=current,
-# the default). Older backends were removed because this release does not ship
-# or validate their complete matched data triples. Inputs live at the repo-root
-# data/ (override with JWST_TOOL_DATA_DIR); generated caches at output/
+# ONLY backend is the STScI-supported matched triple pandeia.engine 2026.7 +
+# pandeia_data-2026.7-jwst + pandeia_psfs-2026.7-jwst. Older backends were
+# removed because this release does not ship or validate their complete
+# matched data triples. Inputs live at the repo-root data/
+# (override with JWST_TOOL_DATA_DIR); generated caches at output/
 # (JWST_TOOL_OUTPUT_DIR).
 [build-system]
 requires = ["setuptools>=68", "wheel"]

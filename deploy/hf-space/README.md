@@ -21,14 +21,16 @@ no-mount fallback).
 
 Operational notes:
 
-- Requirements: persistent storage (Small tier), secret `HF_TOKEN` with read
-  access to the dataset repo, CPU Upgrade hardware recommended.
+- Requirements: the dataset repo mounted read-only at `/srv/hub-data` plus a
+  writable bucket volume at `/data` (buckets replaced the retired per-Space
+  persistent storage); secret `HF_TOKEN` with read access to the dataset repo
+  for the no-mount download fallback; CPU Upgrade hardware recommended.
 - A forward model run takes minutes of CPU (photochemical kinetics to
   steady state); Fisher forecasts take tens of minutes depending on method.
-  Space hardware is ~2.5x slower than the laptop the estimates were
-  measured on; the app scales its displayed estimates accordingly
-  (`_RUNTIME_SCALE`). The in-app status panel reports data availability
-  and progress.
+  Space hardware is slower than the laptop the estimates were measured on
+  (measured on the same case: ExoJAX RT ~4.5x, the VULCAN solve ~1.2x), and
+  the app scales its displayed estimates by `_RUNTIME_SCALE`. Progress and
+  remaining time are shown live while a run is in flight.
 - To update the code: push to GitHub, bump the three `*_SHA` ARG defaults in
   the Dockerfile (and `deploy/pins.env` with them), then upload the Space
   files. Changing an ARG default busts the layers that clone the repos, so no

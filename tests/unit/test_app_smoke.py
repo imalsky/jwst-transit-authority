@@ -110,15 +110,6 @@ def _run_with_result(out, out_meta, **state):
     return at
 
 
-def _deferred_labels(at):
-    """(live download buttons, dead busy stand-ins) among the deferred set."""
-    deferred = {"Download configuration (JSON)",
-                "Download this example (edit and re-upload)"}
-    live = {b.label for b in at.get("download_button")} & deferred
-    dead = {b.label for b in at.get("button")} & deferred
-    return live, dead
-
-
 def test_fresh_boot_pre_run_contract():
     """One default boot: no intro gate, the speed-first mode trio (the ETC
     computes only the selected modes), the data-status panel + annotated
@@ -215,26 +206,28 @@ def test_gui_structure_defaults_match_canonical_params():
         at.selectbox(key=f"n0_{key}_tp").set_value(cp["tp_mode"]).run()
 
 
-def test_deferred_downloads_are_live_outside_a_run():
-    """Clicking a download widget mid-run cancels the run (Streamlit's
-    ScriptControlException is a BaseException), so the config
-    JSON and the sidebar T-P example downloads render through deferred
-    placeholder slots. Outside a run both must be LIVE download buttons,
-    never dead busy stand-ins."""
+def test_every_download_button_is_plain_and_click_safe():
+    """Clicking a download widget queues a rerun, and a queued rerun cancels
+    the script run in flight -- on the Run pass, the forward model itself.
+    on_click="ignore" is what keeps the buttons live during a run instead of
+    dead stand-ins, so EVERY download button must carry it (AppTest cannot
+    click one, hence the source count). Both pre-run downloads are plain,
+    always-live download buttons."""
+    src = APP.read_text()
+    assert src.count("download_button(") == src.count('on_click="ignore"'), \
+        "a download button without on_click=ignore cancels a run in flight"
     at = _run_app()
     assert not at.exception, at.exception
-    live, dead = _deferred_labels(at)
-    assert "Download configuration (JSON)" in live
-    assert not dead, "a busy stand-in must not render outside a run"
+    assert "Download configuration (JSON)" in {b.label
+                                               for b in at.get("download_button")}
 
     at2 = AppTest.from_file(str(APP), default_timeout=60)
     at2.session_state["n0_wasp39b_tp"] = "file"
     at2.session_state["n0_wasp39b_tpsrc"] = "upload"   # forward.TP_FILE_UPLOAD
     at2.run()
     assert not at2.exception, at2.exception
-    live, dead = _deferred_labels(at2)
-    assert "Download this example (edit and re-upload)" in live
-    assert not dead
+    assert "Download this example (edit and re-upload)" in \
+        {b.label for b in at2.get("download_button")}
 
 
 def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
@@ -293,6 +286,16 @@ def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
     assert not at.exception, at.exception
     assert _floor_error(at), [e.value for e in at.error]
 
+    # 4. the out-of-transit baseline FOLLOWS T14 (PandExo convention) until
+    #    the user edits it; after that the link is broken for good
+    at.number_input(key="n0_wasp39b_t14").set_value(4.0).run()
+    assert not at.exception, at.exception
+    assert at.number_input(key="n0_wasp39b_tbase").value == 4.0
+    at.number_input(key="n0_wasp39b_tbase").set_value(5.0).run()
+    at.number_input(key="n0_wasp39b_t14").set_value(6.0).run()
+    assert not at.exception, at.exception
+    assert at.number_input(key="n0_wasp39b_tbase").value == 5.0
+
 
 def test_source_pins_fig_width_fisher_table_and_noise_recording():
     """Source-level pins for three maintainer decisions: (1) the
@@ -313,8 +316,9 @@ def test_source_pins_fig_width_fisher_table_and_noise_recording():
         "the global scale is not recorded, so a run cannot be reproduced"
     assert "st.pyplot(fig, width=_FIG_DISPLAY_PX)" in src, \
         "the tight branch no longer pins the display width"
-    assert "st.image(_fig_png(fig, tight=False), width=_FIG_DISPLAY_PX)" \
-        in src, "the full-canvas branch no longer pins the display width"
+    assert 'st.image(_fig_bytes(fig, "png", tight=False), ' \
+        'width=_FIG_DISPLAY_PX)' in src, \
+        "the full-canvas branch no longer pins the display width"
     assert 'st.pyplot(fig, width="stretch"' not in src
     assert not [ln for ln in src.splitlines()
                 if "st.pyplot(" in ln and "bbox_inches" in ln], \
@@ -393,14 +397,18 @@ def test_results_render_and_below_target_is_warning_not_error():
 
 def test_emission_results_use_eclipse_terms():
     """An emission run says "eclipse" throughout, never "transit"; an
-    above-target result renders NO banner (maintainer: the figure and mode
-    table already carry the number)."""
+    above-target result renders the one-line verdict as plain text and NO
+    banner (maintainer: a green bar restating the number is redundant, but
+    the verdict itself must always be on the page)."""
     out, out_meta = _synthetic_out(science_mode="emission",
                                    sigma_detect=8.0, n_transits=3)
     at = _run_with_result(out, out_meta)
     assert not at.exception, at.exception
     assert not at.success, \
         f"an above-target result must render no banner: {[s.value for s in at.success]}"
+    verdicts = [m.value for m in at.markdown       # the intro copy also
+                if "template S/N 8.0" in m.value]   # says "template S/N"
+    assert verdicts and "3 eclipses" in verdicts[0], verdicts
     # the figure section is an EXPANDER, not a subheader
     _exps = [e.label for e in at.get("expander")]
     assert any("eclipse emission spectrum" in e for e in _exps), _exps
@@ -626,23 +634,32 @@ def test_emission_mode_archive_fill_skips_transit_duration():
     # (measured 10.0 and 48.1 ppm on W39b -- forward.EXTRA_MOLECULES_DEFAULT)
     [("n0_mol_vulcan_C2H2_C2H4_H2S_HCN_NH3_OCS_SH_SO", "CO2",
       "target_mol"),                                # the reported bug
-     ("n0_noisescale", 2.0, "noise_scale")])        # an observation-block field
+     ("n0_noisescale", 2.0, "noise_scale"),         # an observation-block field
+     # DISPLAY-ONLY: the seed redraws the mock from the cached run and
+     # recomputes nothing, so it must never read as stale (field=None)
+     ("n0_seed", 7, None)])
 def test_changing_any_run_input_marks_the_result_stale(widget, value, field,
                                                        monkeypatch):
-    """The staleness guard compares the WHOLE non-canonical input set, not a
-    hand-picked subset. The bug this pins: the detection target is absent
-    from the canonical model params, so switching SO2 to CO2 without pressing
-    Run left the curve, legend and CSV on the previous target with no notice
-    (reported as a caching bug). The noise scale represents the observation
-    block because a subset guard is exactly how the next one gets missed."""
+    """The staleness guard compares the WHOLE non-canonical input set minus
+    the display-only fields, not a hand-picked subset. The bug this pins: the
+    detection target is absent from the canonical model params, so switching
+    SO2 to CO2 without pressing Run left the curve, legend and CSV on the
+    previous target with no notice (reported as a caching bug). The noise
+    scale represents the observation block because a subset guard is exactly
+    how the next one gets missed; the seed represents the display-only
+    fields, which change nothing that was computed."""
     from jwst_tool import share_config as _sc
     seen = {}
     _real = _sc.build_share
 
     def _spy(*, canon, goal, observation, **kw):
-        # the app hands the SAME two blocks to the shareable config and to
-        # the staleness guard
-        seen["run_sig"] = dict(goal=goal, observation=observation)
+        # the app hands the same two blocks to the shareable config and to the
+        # staleness guard, minus the display-only observation fields (app.py
+        # _DISPLAY_ONLY), which the guard never compares
+        seen["run_sig"] = dict(
+            goal=goal,
+            observation={k: v for k, v in observation.items()
+                         if k not in ("show_noise", "seed", "combos")})
         seen["canon"] = canon
         return _real(canon=canon, goal=goal, observation=observation, **kw)
 
@@ -667,7 +684,11 @@ def test_changing_any_run_input_marks_the_result_stale(widget, value, field,
     at.session_state[widget] = value
     at.run()
     assert not at.exception, at.exception
-    assert _named() and field in _named()[0], _named()
+    if field is None:
+        assert not _named(), \
+            f"a display-only input must not mark the run stale: {_named()}"
+    else:
+        assert _named() and field in _named()[0], _named()
 
 
 @pytest.mark.parametrize("key,label", [("n0_sum_x", "Wavelength")])
