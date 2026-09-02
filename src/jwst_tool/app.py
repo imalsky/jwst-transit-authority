@@ -1006,7 +1006,7 @@ with st.sidebar:
     with st.expander("Pressure limits & reference radius"):
         rt_ptop_bar = st.number_input(
             "Model top pressure (bar)",
-            1.0e-9, 1.0e-6, 1.0e-9, 1.0e-9,
+            1.0e-9, 1.0e-6, forward.RT_PTOP_DEFAULT, 1.0e-9,
             format="%.1e", key=K("rtptop"))
         p_ref_bar = st.number_input(
             "Reference pressure for the planet radius (bar)",

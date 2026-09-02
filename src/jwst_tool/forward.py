@@ -61,7 +61,7 @@ _S_MOLECULES = frozenset({"SO2", "H2S", "OCS", "SO", "SH", "CS", "NS"})
 # Network species with no published ExoMolOP k-table: never offered anywhere
 # (correlated-k over the published tables is the only opacity path).
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
-_VERSION = 40  # model_cache buster (identity = canonical params + this
+_VERSION = 41  # model_cache buster (identity = canonical params + this
                # number, never a content hash); bump on any physics or
                # canonical-key-set change.
 
@@ -83,6 +83,10 @@ FD_STEPS = {"lnZ": 0.10, "dlnCO": 0.10, "lnKzz": 0.10,      # ln-space steps
 FD_COMP_PARAMS = ("lnZ", "dlnCO")     # need a chemistry re-init per FD point
 FD_CONSISTENCY_TOL = 0.25
 FD_LNR0_STEP = 0.01                   # lnR0 is RT-only (smooth, analytic)
+# Model top (chemistry grid AND RT top) when a request does not set it.
+# 1e-7 bar is the usual published choice; the converged 1e-9 bar top the
+# tool shipped before (v40) is still selectable in the same range.
+RT_PTOP_DEFAULT = 1.0e-7
 JAC_METHODS = ("fd", "ad")            # certified-FD default / warm-jvp opt-in
 # Minimum positivity margin for the AD dlnCO row. The engine's co_bz_bound =
 # ln(1 + min_z(OO_z/OC_z)) is the largest ln C/O increment before some
@@ -226,7 +230,7 @@ def thin_flux_fraction(tau, flux) -> float:
 def chem_p_span_dyn(cp: dict) -> tuple:
     """The RUN's chemistry span (P_t, P_b) in dyn/cm^2: the top follows
     rt_ptop_bar, the bottom p_btm_bar (CHEM_P_SPAN_DYN is the shipped cfg's)."""
-    return (float(cp.get("rt_ptop_bar") or 1.0e-9) * 1.0e6,
+    return (float(cp.get("rt_ptop_bar") or RT_PTOP_DEFAULT) * 1.0e6,
             float(cp.get("p_btm_bar") or default_p_btm_bar(cp)) * 1.0e6)
 
 # Structure default: a MEASURED T-P/Kzz table VERIFIED end-to-end for a planet
@@ -630,7 +634,7 @@ def canonical_params(params: dict) -> dict:
             "chemistry and RT column bottom): below it the deep quench region "
             "is cut off, above it no shipped profile stays inside the "
             f"modelable window {T_WINDOW} K.")
-    _span = (float(params.get("rt_ptop_bar", 1.0e-9)) * 1.0e6, p_btm_bar * 1.0e6)
+    _span = (float(params.get("rt_ptop_bar", RT_PTOP_DEFAULT)) * 1.0e6, p_btm_bar * 1.0e6)
     tp_file, tp_file_sha1, tp_table = "", "", None
     if tp_mode == "file":
         tp_path, tp_file_sha1 = _resolve_tp_file(params)
@@ -723,7 +727,7 @@ def canonical_params(params: dict) -> dict:
         # ExoJAX RT knobs. rt_ptop_bar is the MODEL top and the chemistry grid
         # follows it (engine rule), so no RT layer is clamped above the
         # chemistry. rt_integration picks the ArtTransPure chord scheme.
-        "rt_ptop_bar": float(f"{float(params.get('rt_ptop_bar', 1.0e-9)):.6e}"),
+        "rt_ptop_bar": float(f"{float(params.get('rt_ptop_bar', RT_PTOP_DEFAULT)):.6e}"),
         "rt_integration": str(params.get("rt_integration", "simpson")),
         # The pressure rp_rjup and gs_cgs apply at. A catalogue radius is the
         # transit radius near the terminator photosphere, NOT the RT-grid
@@ -761,7 +765,7 @@ def canonical_params(params: dict) -> dict:
     if not 1.0e-9 <= cp["rt_ptop_bar"] <= 1.0e-6:
         raise ValueError(
             f"rt_ptop_bar={cp['rt_ptop_bar']:g} outside [1e-9, 1e-6] bar (the "
-            "exercised RT-top range; 1e-9 is the validated default)")
+            f"exercised RT-top range; {RT_PTOP_DEFAULT:g} is the default)")
     _art_pbtm = cp["p_btm_bar"] * ART_PBTM_FRACTION
     if not cp["rt_ptop_bar"] <= cp["p_ref_bar"] <= _art_pbtm:
         raise ValueError(

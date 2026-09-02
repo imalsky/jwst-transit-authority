@@ -141,7 +141,8 @@ def test_shipped_tables_gate_defaults_and_are_never_substituted():
                                        rt_ptop_bar=1.0e-7))
     assert cp["tp_mode"] == "file" and cp["kzz_mode"] == "file"
     with pytest.raises(ValueError):
-        forward.canonical_params(dict(planet="hd189733b", tp_mode="file"))
+        forward.canonical_params(dict(planet="hd189733b", tp_mode="file",
+                                      rt_ptop_bar=1.0e-8))
     assert forward._default_tp_mode(dict(planet="wasp39b")) == "file"
 
 
@@ -329,7 +330,7 @@ def test_fisher_names_and_jac_method_matrix():
 def test_rt_knobs_defaults_validation_and_cache_key():
     # two ExoJAX RT knobs are canonical (cache-keyed)
     cp = forward.canonical_params(_p())
-    assert cp["rt_ptop_bar"] == 1.0e-9
+    assert cp["rt_ptop_bar"] == 1.0e-7
     assert cp["rt_integration"] == "simpson"
     cp = forward.canonical_params(_p(rt_ptop_bar=1.0e-6,
                                      rt_integration="trapezoid"))
@@ -340,7 +341,7 @@ def test_rt_knobs_defaults_validation_and_cache_key():
             forward.canonical_params(_p(**bad))
     # a LIVE RT knob must change the cache key (different physics)
     k0 = forward.params_key(_p())
-    assert forward.params_key(_p(rt_ptop_bar=1.0e-7)) != k0
+    assert forward.params_key(_p(rt_ptop_bar=1.0e-8)) != k0
     assert forward.params_key(_p(rt_integration="trapezoid")) != k0
 
 
@@ -363,7 +364,7 @@ def test_chem_key_separates_chemistry_from_rt_only_edits():
         # chem key must not
     # rt_ptop_bar is dual-use: the chemistry grid top follows it
     for kw in (dict(met_x_solar=5.0), dict(co_ratio=0.3),
-               dict(p_btm_bar=50.0), dict(nz=110), dict(rt_ptop_bar=1.0e-7)):
+               dict(p_btm_bar=50.0), dict(nz=110), dict(rt_ptop_bar=1.0e-8)):
         assert forward.chem_key(_p(**kw)) != k0, kw
 
 
@@ -532,10 +533,10 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # 1.1 ppm, against 14.65 ppm at 1e-8): transmission moved 14.8 ppm vs v39,
     # emission 0.09 ppm. Both are the intended changes.
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b", tp_mode="file"))) == "b20c914a721f74b5"
+        dict(planet="wasp39b", tp_mode="file"))) == "ad0f34dc5322fb1a"
     # ... and the bare DEFAULT run is that same atmosphere
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "b20c914a721f74b5"
+        dict(planet="wasp39b"))) == "ad0f34dc5322fb1a"
     # the sha1 pin is only meaningful re-derived from the file the run
     # actually reads -- this catches the table itself being swapped
     path = forward._shipped_tp_file("wasp39b")
