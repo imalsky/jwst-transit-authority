@@ -36,8 +36,7 @@ a published source, intersected with the forward model's 1-15 um coverage
     the slitless dispersion turnover below 4.5 um, not a rounding.
 Every edge is checked against the Pandeia extracted grid the worker returns,
 and pinned to its source by tests/unit/test_instruments_registry.py. Never
-narrow an edge without a sourced reason on the entry: a G395M red edge of
-5.10 shipped for weeks against a jwst-docs number that does not exist.
+narrow an edge without a sourced reason on the entry.
 
 Saturation vocabulary: Pandeia's ``fraction_saturation`` is the fraction of
 the engine's per-mode ``saturation_fullwell``, which is NOT the physical full
@@ -177,31 +176,18 @@ PANDEIA_PSF_DIR = os.environ.get("JWST_TOOL_PANDEIA_PSF_DIR",
 PYSYN_CDBS = str(DATA_DIR / "cdbs")
 
 # Star normalization is band-integrated 2MASS Ks vegamag inside the worker
-# (the web-ETC convention) -- never the retired monochromatic at_lambda
-# shortcut, which mis-scaled cool/warm stars by ~1-4% and fed that error into
-# saturation/ngroup selection.
+# (the web-ETC convention) -- never the monochromatic at_lambda shortcut,
+# which mis-scales flux by ~1-4% with spectral type and carries that error
+# into saturation/ngroup selection.
 
 # Fixed categorical color per mode, never re-assigned when the selection
 # changes. Every color holds >= 3:1 contrast on white (WCAG 2.2 non-text) and
-# the set passes the dataviz palette validator in wavelength-adjacency order;
-# MODE_MARKER is the secondary, color-independent encoding.
+# the set passes the dataviz palette validator in wavelength-adjacency order,
+# with two residual flags (one chroma, one deutan pair) carried by
+# MODE_MARKER, the secondary color-independent encoding.
 _COLORS = ["#2a78d6", "#199e70", "#a35a00", "#007a00",
            "#4a3aa7", "#d43f3e", "#a83a9e", "#006c8e",
            "#c2185b", "#8b46c8", "#00929e", "#d81b8c"]
-# The 8th slot (nirspec_g395m) was re-chosen while still unused:
-# the original "#c2571f" sat at deltaE(Lab) ~16 from the G235H orange and ~24
-# from wavelength-neighbor F444W; "#006c8e" holds 5.94:1 on white and
-# deltaE >= 38 to every existing color (the palette's own internal minimum
-# is 32.6), >= 54 to its wavelength-adjacent neighbors (G395H, F444W).
-# Slots 9-12 (G140H rose, G235M violet, SOSS-ord2 cyan, F277W pink) fill the
-# only hue niches the first 8 left open. The 12-slot set passes the dataviz
-# palette validator in wavelength-adjacency order (the two flags it reports
-# are properties of the frozen first 8: g395m's chroma 0.098 vs the 0.10
-# floor, and the g395h/f444w deutan pair, both carried by the markers).
-# Contrast on white 3.75-5.87:1 for the new four; a 12-slot palette cannot
-# keep the old Lab deltaE >= 32 minimum -- the new colors hold >= 20 to
-# their nearest neighbor and the fixed per-mode MARKERS stay the
-# color-independent encoding.
 
 # Fixed marker shape per mode: series must never rely on color alone
 # (grayscale print, color-vision deficiency).
@@ -215,61 +201,50 @@ _MARKERS = ["o", "s", "D", "^", "v", "P", "X", "*",
 PANDEXO_NGROUP_MAX = {"nircam": 100, "niriss": 30}
 
 # NIRISS SOSS: 30 is the APT range limit for the NISRAPID readout pattern
-# (jwst-docs SOSS template parameters: "for NISRAPID the range is 1-30";
-# NIS allows 1-200), not a subarray property, and PandExo master carries the
-# same 30. NIRCam grism time series is 1-100 in APT, matching PandExo.
+# (jwst-docs SOSS template parameters), not a subarray property, and PandExo
+# master carries the same 30. NIRCam grism time series is 1-100 in APT,
+# matching PandExo.
 #
 # NIRSpec and MIRI get PANDEXO_UNBOUNDED_NGROUP because SATURATION, not a
-# registry cap, picks the ramp there; a self-imposed cap made the tool's
-# ramps/sigmas silently diverge from PandExo/ETC output (history: notes.md).
-# 65535 is PandExo's own value for both, and for NIRSpec it is exactly APT's
-# stated maximum NUMBER OF GROUPS/INTEGRATION. For MIRI it is NOT the real
-# ceiling: APT limits a MIRI integration to 2000 s, which is ~12,575 groups
-# on SLITLESSPRISM (tframe 0.15904 s). That limit is far above anything a
-# saturation-limited search reaches (MIRI's ramp is background-limited: the
-# faintest parity star lands at 1021 groups / 162 s), so it is not enforced
-# here.
+# registry cap, picks the ramp there -- never impose one. 65535 is PandExo's
+# own value for both, and APT's stated maximum groups/integration for
+# NIRSpec. For MIRI it is NOT the real ceiling (APT's 2000 s integration is
+# ~12,575 groups on SLITLESSPRISM), but that sits far above anything a
+# saturation-limited search reaches, so it is not enforced here.
 PANDEXO_UNBOUNDED_NGROUP = 65535
 
 # Extraction strategy + sky background are pinned to PandExo's TSO conventions
 # (per-instrument apertures/annuli; background "ecliptic" + background_level
-# "medium" -- BOTH keys required together), NOT pandeia's generic point-source
-# defaults: the default-strategy mismatch measured 8-20% in extracted flux.
+# "medium" -- BOTH keys required together), NOT pandeia's generic
+# point-source defaults, which extract a different flux.
 # wl_min/wl_max: see the module docstring for the per-instrument source of
 # every band edge; each entry below carries its own citation.
 # readout_pattern is pinned EXPLICITLY on every mode (NRSRAPID/NISRAPID/RAPID/
 # FASTR1, PandExo's TSO choices): engine defaults are non-TSO patterns and
 # drift between releases. Never leave readout_pattern implicit on a new mode.
 #
-# SCOPE (deliberate, reviewers keep re-finding it): each entry is ONE fixed
-# detector configuration (subarray + readout pattern), not the whole
-# instrument mode. The tool ranks these fixed configurations; it does NOT
-# search alternate subarrays (PRISM multistripe, other SOSS substrips) or
-# optimize the readout pattern. The GUI says so and shows each mode's
-# configuration in the details table.
+# SCOPE (deliberate): each entry is ONE fixed detector configuration
+# (subarray + readout pattern), not the whole instrument mode. The tool ranks
+# these fixed configurations; it does NOT search alternate subarrays (PRISM
+# multistripe, other SOSS substrips) or optimize the readout pattern. The GUI
+# says so and shows each mode's configuration in the details table.
 #
 # ngroup_min equals pandeia 2026.7 `mingroups` for each mode's detector
 # (pandeia_data-2026.7-jwst/jwst/<instrument>/config.json detector_config:
 # nirspec/niriss/nircam 1, miri 2). PandExo reads the same field
-# (timing_det_pars['mingroups'] at the pinned parity commit 34e42d81, no
-# instrument branching), so both tools search the same ramp space. Verified
-# against jwst-docs 2026-08-18: NIRSpec BOTS permits 1-group NRSRAPID for
-# very bright targets (2 recommended); NIRISS SOSS permits 1-group NISRAPID
-# (APT warns at 1); MIRI FASTR1 permits 2 groups with 5 recommended for
-# calibration accuracy.
-# Do not restore floors above pandeia's mingroups: that wrongly reported
-# bright targets "saturated at the shortest ramp" where PandExo passed
-# (notes.md, Decision records).
+# (timing_det_pars['mingroups'], no instrument branching), so both tools
+# search the same ramp space. Do not restore floors above pandeia's
+# mingroups: that reports bright targets "saturated at the shortest ramp"
+# where PandExo passes.
 
 # r_native_med: the mode's typical native resolving power, shown in the GUI
 # mode picker. Median of R(lambda) from the mode's 2026.7 refdata dispersion
 # file over the registry band, rounded to a readable figure (NIRCam from
 # jwst_nircam_disp_*.fits, the LW grism file, which carries no disperser
-# token in its name). For the NIRSpec gratings the rounding deliberately
-# lands on the published nominal figures -- jwst-docs quotes R ~ 2,700 for
-# the high-resolution and R ~ 1,000 for the medium-resolution gratings, and
-# the measured medians (2757/2722/2733 and 1019/1018) agree to ~2% -- so
-# G395H reads 2700, not the 2800 a blind round would give.
+# token in its name). For the NIRSpec gratings the rounding lands on the
+# published nominal figures (jwst-docs R ~ 2,700 high-res, R ~ 1,000
+# medium-res, which the measured medians match to ~2%), so G395H reads 2700,
+# not the 2800 a blind round would give.
 # RE-MEASURE ON ANY BAND OR REFDATA CHANGE: the median is taken over the
 # registry band, so moving an edge moves this number.
 # Display metadata only -- the LSF operator reads the full R(lambda) curve
@@ -475,9 +450,9 @@ MODES = {
     # identical ramp, sat_frac and cadence. jwst-docs puts the SUBSTRIP256
     # bright limit at J ~ 8.5 in order 1 but J ~ 6.3 in order 2, so between
     # those magnitudes the order-2 trace is still clean while this mode is
-    # reported saturated. That is conservative, not optimistic, and detect
-    # discloses it per mode; changing the verdict would mean giving the ramp
-    # search a per-order saturation measure, which also drops PandExo parity.
+    # reported saturated. That is conservative, not optimistic; changing the
+    # verdict would mean giving the ramp search a per-order saturation
+    # measure, which also drops PandExo parity.
     "niriss_soss_ord2": dict(
         label="NIRISS SOSS (ord 2)",
         instrument="niriss", mode="soss",

@@ -17,7 +17,7 @@ A parameter with no spectral response, loaded on a numerically null Fisher
 direction, or wider than its no-information scale (UNINFORMATIVE_SIGMA),
 comes back inf ("unconstrained" in the GUI). The inversion is
 ALWAYS rank-aware and unit-invariant: rank detection happens on the
-Jacobi-whitened (unit-diagonal) Fisher matrix (see _marg_sigmas).
+Jacobi-whitened (unit-diagonal) Fisher matrix (see _whitened_eig).
 np.linalg.inv returns misleading finite numbers on ill-conditioned matrices,
 so it is never used. Forecast sigmas are local Cramer-Rao lower bounds under
 the quoted noise model -- best cases, not posterior widths (Vallisneri 2008).
@@ -34,12 +34,11 @@ _TO_DISPLAY = {"lnZ": 1.0 / _LN10, "lnKzz": 1.0 / _LN10}
 
 # Relative eigenvalue threshold on the WHITENED (unit-diagonal) Fisher matrix:
 # directions below REL_EIG_TOL x the largest whitened eigenvalue are null.
-# Whitening makes the rank decision invariant under per-parameter unit
-# changes; thresholding the raw mixed-unit matrix flipped constraints under a
-# pure K-vs-kK rescaling. It is NOT invariant under arbitrary MIXED
-# reparameterizations near the threshold -- quote the whitened spectrum (the
-# ``diag`` output) where it matters. eigh's noise floor is ~1e-16 x wmax;
-# 1e-10 keeps 6 decades of margin either way.
+# Whitening makes the rank decision invariant under per-parameter unit changes
+# -- never threshold the raw mixed-unit matrix. It is NOT invariant under
+# arbitrary MIXED reparameterizations near the threshold: quote the whitened
+# spectrum (the ``diag`` output) where that matters. eigh's noise floor is
+# ~1e-16 x wmax, so 1e-10 keeps 6 decades of margin either way.
 REL_EIG_TOL = 1e-10
 # A parameter whose L2 projection onto the null subspace exceeds this reads
 # inf. Basis-invariant subspace norm, never a single eigenvector's component.
@@ -67,34 +66,42 @@ def _cut_uninformative(sigmas: dict) -> dict:
             for n, s in sigmas.items()}
 
 
-def _marg_sigmas(F: np.ndarray, n_report: int,
-                 diag: dict | None = None) -> np.ndarray:
-    """Rank-aware marginalized sigmas for the first n_report parameters of F.
+def _whitened_eig(F: np.ndarray) -> tuple:
+    """The ONE Jacobi whitening + rank decision behind _marg_sigmas and
+    _whitened_solve, so a direction that is null in one is null in the other.
 
-    Rank detection happens in Jacobi-whitened coordinates (q_i = theta_i *
-    sqrt(F_ii), unit-diagonal correlation form), invariant under
-    per-parameter rescaling; sigmas transform back afterwards and a full-rank
-    matrix reproduces inv(F) exactly. F_ii == 0 or a null-direction load
-    reads inf. Pass a dict as ``diag`` to receive rank / dimension /
-    condition number / whitened eigenvalues.
+    Returns (n, d, nz, w, V, good): F's dimension, the sqrt-diagonal scales
+    d_i = sqrt(F_ii), the mask of parameters with d > 0, and the eigenpairs
+    of the whitened (unit-diagonal) submatrix with the REL_EIG_TOL keep mask.
+    A matrix with no positive diagonal returns empty w/V and an all-False
+    ``good``; callers turn that into their own unconstrained value.
     """
     F = np.asarray(F, float)
     F = 0.5 * (F + F.T)
     n = F.shape[0]
-    out = np.full(n_report, np.inf)
     d = np.sqrt(np.clip(np.diag(F), 0.0, None))
     nz = d > 0.0
     if not nz.any():
-        if diag is not None:
-            diag.update(fisher_dimension=n, fisher_rank=0,
-                        condition_number=float("inf"),
-                        eigenvalues=np.zeros(0), rel_eig_tol=REL_EIG_TOL)
-        return out
+        return n, d, nz, np.zeros(0), np.zeros((0, 0)), np.zeros(0, bool)
     Fw = F[np.ix_(nz, nz)] / np.outer(d[nz], d[nz])
     w, V = np.linalg.eigh(0.5 * (Fw + Fw.T))
     wmax = float(w[-1]) if w.size else 0.0
-    good = w > REL_EIG_TOL * max(wmax, 1e-300)
+    return n, d, nz, w, V, w > REL_EIG_TOL * max(wmax, 1e-300)
+
+
+def _marg_sigmas(F: np.ndarray, n_report: int,
+                 diag: dict | None = None) -> np.ndarray:
+    """Rank-aware marginalized sigmas for the first n_report parameters of F.
+
+    Sigmas are read in the whitened coordinates of _whitened_eig and
+    transformed back, so a full-rank matrix reproduces inv(F) exactly.
+    F_ii == 0 or a null-direction load reads inf. Pass a dict as ``diag`` to
+    receive rank / dimension / condition number / whitened eigenvalues.
+    """
+    n, d, nz, w, V, good = _whitened_eig(F)
+    out = np.full(n_report, np.inf)
     if diag is not None:
+        wmax = float(w[-1]) if w.size else 0.0
         diag.update(
             fisher_dimension=n,
             fisher_rank=int(good.sum()),
@@ -129,24 +136,14 @@ def _whitened_solve(F: np.ndarray, b: np.ndarray,
     (same NULL_LOAD_TOL projection test) come back NaN -- an unconstrained
     direction has no recovered value by design.
     """
-    F = np.asarray(F, float)
-    F = 0.5 * (F + F.T)
+    n, d, nz, w, V, good = _whitened_eig(F)
     b = np.asarray(b, float)
-    n = F.shape[0]
     if b.shape != (n,):
         raise ValueError(f"_whitened_solve: b has shape {b.shape}, expected "
                          f"({n},)")
     if not np.all(np.isfinite(b)):
         raise ValueError("_whitened_solve: b contains non-finite values")
     out = np.full(n_report, np.nan)
-    d = np.sqrt(np.clip(np.diag(F), 0.0, None))
-    nz = d > 0.0
-    if not nz.any():
-        return out
-    Fw = F[np.ix_(nz, nz)] / np.outer(d[nz], d[nz])
-    w, V = np.linalg.eigh(0.5 * (Fw + Fw.T))
-    wmax = float(w[-1]) if w.size else 0.0
-    good = w > REL_EIG_TOL * max(wmax, 1e-300)
     if not good.any():
         return out
     bw = b[nz] / d[nz]
@@ -220,8 +217,7 @@ def mode_forecast(result: dict, free_names: list[str],
     (others fixed; see _conditional_sigmas) from the SAME Fisher matrix.
     Both sets pass the no-information cut (_cut_uninformative)."""
     J = np.asarray(result["jac_bins"])
-    steps = _segment_offset_rows(result)          # (n_steps, n_bins)
-    Jn = np.vstack([J, steps]) if steps.size else J
+    Jn = np.vstack([J, _segment_offset_rows(result)])
     F = _fisher(Jn, result)
     if conditional is not None:
         conditional.update(_cut_uninformative(
@@ -305,8 +301,8 @@ def transits_to_target(result: dict, free_names: list[str], gp: str,
 
     _floor = np.asarray(result["floor"])
     if not np.any(_floor > 0.0):
-        # No floor: nothing caps the precision. Reporting the 1e-30-clipped
-        # value here produced a spurious reachability gate.
+        # No floor: nothing caps the precision, so report 0.0 -- the
+        # 1e-30-clipped value would be a spurious reachability gate.
         sig_inf = 0.0
     else:
         sig_inf = _sig_with(np.maximum(_floor, 1e-30))

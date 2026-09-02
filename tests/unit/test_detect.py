@@ -220,8 +220,6 @@ def test_n_transits_and_window_validation():
     for good in (3, np.int64(4), 5.0):
         vn = noise_mod.pixel_depth_variance(_mr(), 3600.0, 3600.0, good)
         assert np.allclose(vn * int(good), v1, rtol=0, atol=0)
-    # one shared validator, not two copies that can drift apart
-    assert detect._n_transits is noise_mod.n_transits_int
     # depth_error_bins records the validated count and refuses non-integers
     edges = np.linspace(3.0, 5.0, 6)
     mr = dict(wl=np.linspace(3.0, 5.0, 200).tolist(),

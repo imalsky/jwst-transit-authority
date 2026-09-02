@@ -184,11 +184,11 @@ def marginalized_posteriors(results, free_names: list[str], centers: dict,
                             n_points: int = 201) -> dict:
     """1D marginalized Fisher-Gaussian posterior curves for chosen parameters.
 
-    ``results``: one mode result dict, or a list of them (>= 1) treated as a
-    combination -- a single dict goes through ``fisher.mode_forecast``, a
-    list through ``fisher.combined_forecast`` (identical for one mode; the
-    identity is pinned upstream). Each result needs ``jac_bins`` (rows
-    [free..., lnR0]), ``sigma``, and optionally ``seg``.
+    ``results``: one mode result dict, or a list of them (>= 1) treated as
+    a combination. Everything goes through ``fisher.combined_forecast``,
+    which equals ``fisher.mode_forecast`` for a single mode (identity pinned
+    upstream). Each result needs ``jac_bins`` (rows [free..., lnR0]),
+    ``sigma``, and optionally ``seg``.
 
     ``centers``: {param: theta_input in DISPLAY units} -- the input-model
     value each Gaussian is centered on (e.g. lnZ: log10(met_x_solar) in dex;
@@ -208,8 +208,7 @@ def marginalized_posteriors(results, free_names: list[str], centers: dict,
     the rank-aware inversion) has constrained=False and theta=pdf=None --
     explicitly flagged, never a fake finite curve.
     """
-    single = isinstance(results, dict)
-    rlist = [results] if single else list(results)
+    rlist = [results] if isinstance(results, dict) else list(results)
     if not rlist:
         raise ValueError("marginalized_posteriors: results is empty")
     if not free_names:
@@ -238,10 +237,7 @@ def marginalized_posteriors(results, free_names: list[str], centers: dict,
                              f"{bad}, which are not requested params")
 
     cond: dict = {}
-    if single:
-        sig = fisher.mode_forecast(rlist[0], list(free_names), conditional=cond)
-    else:
-        sig = fisher.combined_forecast(rlist, list(free_names), conditional=cond)
+    sig = fisher.combined_forecast(rlist, list(free_names), conditional=cond)
 
     out_params = {}
     for name in params:

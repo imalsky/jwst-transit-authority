@@ -138,17 +138,9 @@ PLANETS = {
         sflux="sflux-HD189_Moses11.txt",
         tp_table="atm_HD189_Kzz.txt", tp_table_default=False,
         tp_table_note=(
-            "selectable, but NOT the default: at the tool's default settings "
-            "the solver does not certify a steady state on it (measured "
-            "2026-07-22: longdy 0.0998 vs the 0.1 gate with conv_normal False "
-            "-- a stall exit, which the run refuses rather than presents as "
-            "converged), whereas the analytic default converges in ~36 s. "
-            "Tightening yconv_cri to 1e-3 does NOT help: same longdy, same "
-            "1445 accepted steps, so the blocker is the stall exit and not the "
-            "tolerance. Its tabulated Kzz is 10-17x the constant 1e9 default "
-            "over the chemistry grid at p < 1 mbar (measured 2026-07-28; the "
-            "earlier 15-17x did not reproduce at any pressure cut), so it is "
-            "the better structure on paper; certify a run before trusting one."),
+            "Selectable, not the default: the solver does not certify a "
+            "steady state on it at the default settings, while the analytic "
+            "profile converges. Certify a run before trusting one."),
         note="Very bright host (Ks = 5.5) with a high-gravity planet: expect "
              "most modes to saturate and small spectral features.",
     ),
@@ -227,24 +219,16 @@ def default_tirr(planet: dict, system: dict | None = None,
     """Guillot T_irr default: sqrt(2) * T_eq, on the GUI's 20 K step grid and
     clipped to the widget range.
 
-    T_eq is always DERIVED from the star and orbit -- for registry entries from
-    their own ``star["teff"]``/``rstar_rsun``/``orbit_au``, for the CUSTOM
-    planet from the ``system`` the caller passes (otherwise an untouched custom
-    T_irr silently keeps WASP-39 b's temperature). A stored literature value is
-    a second source of truth that goes stale: WASP-39 b's carried 1120 K from
-    the Faedi et al. 2011 stellar parameters after Teff and R_star had been
-    refreshed to the JWST-ERS values, 3.8 % below what its own entry implies.
+    T_eq is always DERIVED from the star and orbit, never stored: for registry
+    entries from their own ``star["teff"]``/``rstar_rsun``/``orbit_au``, for
+    the CUSTOM planet from the ``system`` the caller passes (otherwise an
+    untouched custom T_irr silently keeps WASP-39 b's temperature).
 
-    EMISSION takes the DAYSIDE value, T_eq * 2**0.25. A published
-    equilibrium temperature assumes full redistribution, which is a
-    planet-average profile: correct for a terminator, too cool for the dayside
-    an eclipse actually sees. Measured on HD 189733 b against the published
-    MIRI/LRS eclipse spectrum (Inglis et al. 2024), switching only this default
-    moved the eclipse depth from 1.35x LOW to within 3%, and chi2 per point from
-    934 to 31. It is the single largest error in the emission path.
+    EMISSION takes the DAYSIDE value, T_eq * 2**0.25: a published equilibrium
+    temperature assumes full redistribution, which is right for a terminator
+    and too cool for the dayside an eclipse sees.
 
-    ONE definition, used by BOTH canonical_params and the sidebar widget; a
-    split default built different profiles per planet (history: notes.md)."""
+    ONE definition, used by BOTH canonical_params and the sidebar widget."""
     teq = (system_teq(system["star_teff"], system["rstar_rsun"],
                       system["orbit_au"])
            if system is not None else

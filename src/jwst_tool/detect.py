@@ -4,10 +4,10 @@ uncertainty, and score the science goal.
 
 Model, removed-molecule model, Jacobians, and noise all go through one
 operator (binning.build_operator, flux-weighted). Fully saturated pixels are
-excluded from the operator; partially saturated pixels are kept but counted
-per bin. For modes whose final bins approach the native resolving power
-(MIRI LRS, NIRSpec PRISM, SOSS) the model is first blurred to the
-instrument's measured response, R(lambda) / instruments.LSF_WIDTH
+excluded from the operator; partially saturated ones are kept (the worker's
+native-grid census reports both). For modes whose final bins approach the
+native resolving power (MIRI LRS, NIRSpec PRISM, SOSS) the model is first
+blurred to the instrument's measured response, R(lambda) / instruments.LSF_WIDTH
 (binning.smooth_to_native_r); a no-op for high-R gratings.
 
 sigma_detect is a CONDITIONAL MATCHED-TEMPLATE S/N at the specified
@@ -121,11 +121,6 @@ def detection_significance(signal: np.ndarray, sigma: np.ndarray,
     return float(np.sqrt(max(chi2, 0.0)))
 
 
-# ONE transit-count validator for the whole stack; never max(1, int(n))
-# (history: notes.md)
-_n_transits = noise_mod.n_transits_int
-
-
 def sigma_at_transits(result: dict, n_transits: int) -> np.ndarray:
     """Per-bin depth sigma of an evaluated mode re-scaled to ``n_transits``.
 
@@ -134,7 +129,7 @@ def sigma_at_transits(result: dict, n_transits: int) -> np.ndarray:
     (PandExo semantics): sigma_N = max(sigma_random_N, floor).
     """
     n0 = int(result["n_transits_eval"])
-    scale = n0 / float(_n_transits(n_transits))
+    scale = n0 / float(noise_mod.n_transits_int(n_transits))
     return np.maximum(np.sqrt(np.asarray(result["var_phot"]) * scale),
                       np.asarray(result["floor"]))
 
@@ -241,10 +236,9 @@ def _removed_spectrum(model: dict, mols: list[str], target_mol,
             f"target molecule {target_mol!r} is not in the cached model's RT "
             f"set {mols} -- re-run the forward model with it enabled "
             "(extra_mols)")
-    # v32: depth_wo rows (and the emis_*_wo certificates) align with the
-    # model's wo_mols set, not with mols. REQUIRED key: every v32 cache
-    # stores it, and pre-v32 caches are unreachable (the version is in the
-    # cache key), so a missing key means a malformed payload, not an old one.
+    # depth_wo rows (and the emis_*_wo certificates) align with the model's
+    # wo_mols set, not with mols. wo_mols is a REQUIRED key: forward._VERSION
+    # rides in the cache key, so a missing one is a malformed payload.
     wo = [str(m) for m in np.asarray(model["wo_mols"])]
     if target_mol not in wo:
         raise ValueError(
@@ -254,10 +248,8 @@ def _removed_spectrum(model: dict, mols: list[str], target_mol,
             "detect goal (or wo_mols including the target).")
     index = wo.index(target_mol)
     if str(model.get("science_mode", "transmission")) == "emission":
-        # v27: FLUX-WEIGHTED. The min-tau form this replaces refused a target
-        # whenever the column saw through ANYWHERE, and on every planet tried
-        # that was a 60 nm notch at the extreme blue edge carrying under a
-        # thousandth of the planet's emission -- so it refused everything.
+        # FLUX-WEIGHTED, never a min-tau test: a narrow blue-edge notch
+        # carrying a thousandth of the emitted flux must not refuse a target.
         # run_model writes this key with every emission model, and _VERSION
         # rides in the cache key, so a readable model always carries it.
         if "emis_thin_flux_frac_wo" in model:
@@ -294,7 +286,7 @@ def _usable_pixels(mode_key: str, mode_result: dict) -> tuple:
             f"({int(degenerate.sum())}). Choose a mode with a larger "
             "saturation margin or a different target, or check the "
             "worker's wavelength grid")
-    return wl, flux, full, partial, degenerate, usable
+    return wl, flux, degenerate, usable
 
 
 def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
@@ -334,9 +326,7 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
     mols = [str(x) for x in model["mols"]]
     depth_wo = _removed_spectrum(model, mols, target_mol, order)
 
-    wl_pix, flux_pix, n_full_sat, n_part_sat, degen, usable = _usable_pixels(
-        mode_key, mode_result
-    )
+    wl_pix, flux_pix, degen, usable = _usable_pixels(mode_key, mode_result)
 
     lo = max(m["wl_min"], float(wl_model.min()), float(wl_pix[usable].min()))
     hi = min(m["wl_max"], float(wl_model.max()), float(wl_pix[usable].max()))
@@ -364,24 +354,19 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         po = np.flatnonzero(~degen)[np.argsort(wl_pix[~degen])]
         flux_model = np.maximum(np.interp(wl_model, wl_pix[po], flux_pix[po]), 0.0)
         # R(lambda) must go in ASCENDING wavelength order: the pandeia pixel
-        # grid is dispersion order, not wavelength order, and MIRI LRS ships
-        # it DESCENDING (13.86 -> 5.02 um). Passing it raw made the operator's
-        # np.interp read a reversed table and return the curve's LAST entry,
-        # R = 42, everywhere. Note which end that is: MIRI LRS resolving power
-        # RISES with wavelength (42 at 5 um, 150 median, 209 at 12 um), so 42
-        # is the BLUE end, and pinning the whole 5-12 um band to it blurred it
-        # with a ~3.5x-too-wide kernel. smooth_to_native_r now refuses an
-        # out-of-order curve, so this sort is the contract, not a convenience.
-        # The kernel width is the MEASURED response, R_refdata / the mode's
-        # impulse-fitted width (instruments.LSF_WIDTH): on the slitless modes
-        # the PSF, not the dispersion, sets it.
+        # grid is dispersion order (MIRI LRS ships it 13.86 -> 5.02 um) and
+        # smooth_to_native_r refuses an out-of-order curve, so this sort is
+        # the contract, not a convenience. The kernel width is the MEASURED
+        # response, R_refdata / the mode's impulse-fitted width
+        # (instruments.LSF_WIDTH): on the slitless modes the PSF, not the
+        # dispersion, sets it.
         wl_r = wl_pix[po]
         r_curve = ins.lsf_r(mode_key, wl_r, r_nat[po])
         depth_sm = binning.smooth_to_native_r(wl_model, depth, wl_r, r_curve,
                                               b_lo, b_hi, weight=flux_model)
         # metadata ONLY -- never gate the blur of OTHER vectors on this: a
         # flat baseline is a fixed point of the LSF while a narrow Jacobian
-        # feature is not (gating left Jacobians unsmoothed by ~59 ppm)
+        # feature is not
         lsf_applied = bool(np.any(depth_sm != depth))
         depth = depth_sm
         if depth_wo is not None:
@@ -437,13 +422,11 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
     else:
         d_wo_b, sigma_detect, sigma_detect_proj = None, float("nan"), float("nan")
 
-    keep = op["keep"]
     return dict(
         jac_bins=jac_bins, jac_names=jac_names,
         mode_key=mode_key, label=m["label"],
         wl=nz["wl_center"],
         wl_eff=binning.bin_values(op, wl_pix),
-        bin_lo=edges[:-1][keep], bin_hi=edges[1:][keep],
         seg=seg, n_segments=int(seg.max()) + 1 if seg.size else 1,
         depth=d_full_b, depth_wo=d_wo_b, sigma=nz["sigma"],
         var_phot=nz["var_phot"], floor=nz["floor"],
@@ -452,11 +435,6 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         sigma_detect=sigma_detect, sigma_detect_proj=sigma_detect_proj,
         median_sigma_ppm=float(np.median(nz["sigma"]) * 1e6),
         n_bins=int(nz["wl_center"].size),
-        n_pix_partial_sat=binning.bin_counts(op, n_part_sat > 0).astype(int),
-        # POST-FILTER count: blind to channels the worker already dropped
-        # (exactly the fully saturated ones) -- use the *_native fields for
-        # display/export.
-        n_pix_full_sat_dropped=int(np.sum(n_full_sat > 0)),
         n_pix_degenerate_dropped=int(degen.sum()),
         # native-grid truth from the worker; None = not measured -- never
         # substitute the post-filter count

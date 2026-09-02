@@ -20,9 +20,7 @@ Guardrails:
   approximates the full Pandeia response matrix; its width is
   R_refdata / instruments.LSF_WIDTH, the per-mode width fitted to an impulse
   through the engine (tests/parity/scripts/run_parity.py --impulse,
-  parity_summary.json["lsf_impulse"]): 1 on NIRSpec, 1.3-1.6 on the slitless
-  modes (NIRCam grism, SOSS, MIRI LRS), where the PSF sets the response;
-  the fitted kernel reproduces the extracted line to 5-10% of peak there.
+  parity_summary.json["lsf_impulse"]).
 """
 from __future__ import annotations
 
@@ -41,7 +39,7 @@ SEGMENT_GAP_FACTOR = 20.0
 # Local spacing below this fraction of the median = a DEGENERATE wavelength
 # solution (e.g. the G395H red-edge pileup). Counting such pixels as
 # independent samples overstates the information (~sqrt(n) too-small sigma),
-# so they are excluded loudly via n_pix_degenerate.
+# so they are excluded loudly via n_pix_degenerate_dropped.
 DEGENERATE_WL_FRAC = 0.02
 
 
@@ -142,23 +140,17 @@ def smooth_to_native_r(wl_model: np.ndarray, y: np.ndarray,
 
     ``wl_r``/``r_curve`` are the native resolving-power table. ``wl_r`` MUST
     be strictly ascending and is validated: the kernel width comes from
-    ``np.interp(lambda, wl_r, r_curve)``, which silently returns garbage on a
-    descending table (numpy requires increasing xp and does not check). The
-    pandeia pixel grid is DISPERSION order, not wavelength order -- MIRI LRS
-    ships it descending, 13.86 -> 5.02 um -- so a caller handing the raw
-    worker grid straight through got the table's LAST entry at every
-    wavelength. For MIRI LRS that is R = 42 at 5 um, the BLUE end, because
-    its resolving power RISES with wavelength (42 at 5 um to 209 at 12 um);
-    the whole band was then blurred with that one over-wide kernel. Sort
-    before calling.
+    ``np.interp(lambda, wl_r, r_curve)``, which silently returns the last
+    entry everywhere on a descending table. The pandeia pixel grid is
+    DISPERSION order, not wavelength order (MIRI LRS ships it 13.86 -> 5.02
+    um), so sort it before calling.
 
     ``weight`` is the stellar flux at ``wl_model``. The instrument measures
     LSF-averaged COUNTS, so d_obs = L[F d] / L[F], the flux-weighted LSF mean
-    -- never revert to the flat L[d] blur (it mislocated depth by tens of ppm
-    near structured stellar spectra). ``None`` or a constant weight reduces
-    exactly to the flat blur. F is only pixel-resolved (sub-pixel stellar
-    lines are a documented limit). The operator is LINEAR in d for fixed F,
-    so a Jacobian row blurs with the SAME weight as the depth.
+    -- never revert to the flat L[d] blur. ``None`` or a constant weight
+    reduces exactly to the flat blur. F is only pixel-resolved (sub-pixel
+    stellar lines are a documented limit). The operator is LINEAR in d for
+    fixed F, so a Jacobian row blurs with the SAME weight as the depth.
 
     Implementation: cell-average model and weight onto a uniform ln-lambda
     grid finer than the narrowest kernel, convolve with the
@@ -167,14 +159,10 @@ def smooth_to_native_r(wl_model: np.ndarray, y: np.ndarray,
     touch the returned region.
     """
     wl, yv = _validate_model(wl_model, y, "smooth_to_native_r")
-    # The R(lambda) table is consumed by np.interp, which REQUIRES ascending
-    # xp and returns silent nonsense otherwise (a descending table reads as
-    # the last value everywhere). Validate BEFORE any early return, so a
-    # mis-ordered curve raises on every mode rather than only where the blur
-    # is active. Same rule as the model grid: never silently repair upstream
-    # input -- a caller handing a dispersion-ordered pixel grid must fix its
-    # own ordering, because sorting here would hide the pairing bug if
-    # wl_r and r_curve were ever misaligned.
+    # Validate BEFORE any early return, so a mis-ordered curve raises on
+    # every mode, not only where the blur is active. Never silently repair
+    # the caller's ordering: sorting here would hide a wl_r/r_curve pairing
+    # bug.
     wl_r_v = _validate_wl(wl_r, "smooth_to_native_r: wl_r")
     r_v = np.asarray(r_curve, float)
     if r_v.shape != wl_r_v.shape:
@@ -241,9 +229,8 @@ def smooth_to_native_r(wl_model: np.ndarray, y: np.ndarray,
     widths = np.maximum(w_raw, 1e-300)
     yg = np.diff(ic) / widths
     # Zero-width END cells (edge clip past the model span) hold NO model
-    # content. Constant-extend from the nearest cell WITH content -- the
-    # spurious zeros otherwise fill the pad and drag the weight=None blur
-    # ~49% low at the band edge.
+    # content: constant-extend from the nearest cell WITH content, or the
+    # spurious zeros fill the pad and drag the band-edge blur low.
     _valid = np.flatnonzero(w_raw > 0.0)
     if _valid.size == 0:        # cannot happen for a validated band, be loud
         raise ValueError(
@@ -320,8 +307,8 @@ def build_operator(wl_pix: np.ndarray, w_pix: np.ndarray, edges: np.ndarray,
     extracted samples, as real reductions group them); the MODEL is
     integrated over the pixel's full cell. Exact-duplicate pixels have
     zero-width cells and drop out here; callers count them loudly via
-    degenerate_wl_mask (n_pix_degenerate). An operator left with NO usable
-    pixel raises with the per-criterion exclusion breakdown.
+    degenerate_wl_mask (n_pix_degenerate_dropped). An operator left with NO
+    usable pixel raises with the per-criterion exclusion breakdown.
 
     Returns dict:
       keep     (n_bins,)  bins with >=1 usable pixel
@@ -409,12 +396,6 @@ def bin_variance(op: dict, var_pix: np.ndarray) -> np.ndarray:
     """Variance of the count-weighted bin estimator: sum(w^2 Var)/(sum w)^2."""
     v = np.asarray(var_pix, float)[op["pix_idx"]]
     return _wsum(op, op["pix_w"] ** 2 * v) / _wsum(op, op["pix_w"]) ** 2
-
-
-def bin_counts(op: dict, flag_pix: np.ndarray) -> np.ndarray:
-    """Plain per-kept-bin sum of a per-pixel count/flag (e.g. saturation)."""
-    v = np.asarray(flag_pix, float)[op["pix_idx"]]
-    return _wsum(op, v)
 
 
 def _validate_model(wl: np.ndarray, y: np.ndarray, name: str) -> tuple[np.ndarray, np.ndarray]:

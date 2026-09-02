@@ -55,18 +55,11 @@ from . import proc as proc_mod
 _BACKEND_FINGERPRINT = None
 
 # The production Pandeia-worker version: part of every noise-cache key AND
-# the identity the parity gate (tests/parity/scripts/parity_gate.py)
-# requires of a committed artifact. Bump whenever pandeia_worker.py output
-# changes (per-version history: notes.md); a bump without a fresh parity run
-# fails the gate test.
-#
-# "Output" here means a MEASURED value; wording-only changes do not bump
-# (e.g. the worker's `unusable` reason string no longer calls sat_frac a
-# "full-well fraction" -- it is a fraction of Pandeia's per-mode saturation
-# level, which is already derated on some instruments): no number moves, so
-# an old cache entry stays exactly right, while a bump would discard every
-# cached ETC result and invalidate the committed parity artifact over one
-# sentence. A change to any measured field still bumps.
+# the identity the parity gate (tests/parity/scripts/parity_gate.py) requires
+# of a committed artifact. Bump whenever a MEASURED pandeia_worker.py output
+# changes; a bump without a fresh parity run fails the gate test. Wording-only
+# worker changes do NOT bump: no number moves, so every cached entry stays
+# right, while a bump discards them all and invalidates the parity artifact.
 WORKER_VERSION = 12
 
 
@@ -373,9 +366,8 @@ def resolve_floor(wl_um: np.ndarray, floor_spec) -> np.ndarray:
 def n_transits_int(n_transits) -> int:
     """A positive-INTEGER transit count, or a loud error.
 
-    ONE definition for the whole stack (``detect._n_transits`` is this
-    function): a fractional count has no meaning and must never be silently
-    floored.
+    ONE definition for the whole stack (detect.py calls it too): a
+    fractional count has no meaning and must never be silently floored.
     """
     n = int(n_transits)
     if n < 1 or n != n_transits:

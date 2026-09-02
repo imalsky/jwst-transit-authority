@@ -76,7 +76,7 @@ flag per pixel.
 Both the search and the "saturated" verdict read the SCENE-WIDE
 fraction_saturation, matching PandExo. On a multi-order mode (SOSS) that is
 the brightest order, so an order-2 selection inherits order 1's saturation
-even though its own extraction may be clean; detect discloses that, and
+even though its own extraction may be clean; the registry entry
 instruments.MODES["niriss_soss_ord2"] records why it is not overridden here.
 
 The seed formulas assume saturation_time grows linearly with ngroup. That is
@@ -220,23 +220,11 @@ def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
     sat_probe = float(probe["scalar"]["fraction_saturation"])
     sat_ng = probe["scalar"].get("sat_ngroups")
 
-    # Saturation is a MEASUREMENT, never a prediction: the mode is saturated
-    # exactly when the shortest permitted ramp measures above the limit. A
-    # predictor falling below the floor does not prove the measured floor is
-    # unsafe.
     saturated = sat_probe > sat_limit
     ng_best, rpt = ng_min, probe
-    # Maximality is PROVEN, not extrapolated: a predictor-stall exit can stop
-    # one integer below the true optimum on ramps with a per-integration time
-    # offset. Bracket
-    # invariant: ng_best is the largest MEASURED-safe count, hi the smallest
-    # MEASURED-unsafe one; the search is complete only when ng_best == ng_max
-    # or hi == ng_best + 1. Every candidate is strictly inside the bracket,
-    # so each measurement shrinks it and the loop terminates. The analytic
-    # formulas (linear extrapolation of the probe; pandeia's sat_ngroups)
-    # only pick the FIRST candidate. If the calculation budget runs out
-    # first, the measured-safe ng_best is returned with
-    # ramp_search_complete=False -- reported, never presented as maximal.
+    # Bracket invariant: ng_best is the largest MEASURED-safe count, hi the
+    # smallest MEASURED-unsafe one; every candidate is strictly inside the
+    # bracket, so each measurement shrinks it and the loop terminates.
     search_complete = True          # a measured-saturated floor is a proof
     if not saturated:
         hi = None

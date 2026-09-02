@@ -57,6 +57,8 @@ def test_ngroup_ordering_and_pandexo_caps_hold_for_every_mode():
         assert 1 <= m["ngroup_min"] <= m["ngroup_max"], (
             f"{key}: ngroup ordering broken "
             f"({m['ngroup_min']}/{m['ngroup_max']})")
+        # pandeia 2026.7 config.json mingroups, the field PandExo reads
+        assert m["ngroup_min"] == (2 if m["instrument"] == "miri" else 1), key
         cap = ins.PANDEXO_NGROUP_MAX.get(m["instrument"])
         if cap is not None:
             assert m["ngroup_max"] <= cap, (
