@@ -45,7 +45,6 @@ from jwst_tool import instruments as _ins
 
 ADJOINT_CACHE = _ins.OUTPUT_DIR / "adjoint_cache"
 _ADJ_VERSION = 3          # bump to invalidate cached adjoint diagnostics
-#                           (history: notes.md)
 
 # Loss-layer window (bar): transmission probes ~mbar-0.1 bar; picking the
 # peak-VMR layer inside it keeps a deep quenched maximum from hijacking the loss.

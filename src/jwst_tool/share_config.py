@@ -462,14 +462,12 @@ def _restore_rt_state(state: dict, cp: dict, key) -> None:
         key("nz"): int(cp["nz"]),
         key("rtptop"): float(cp["rt_ptop_bar"]),
         key("rtint"): str(cp["rt_integration"]),
-        # p_ref_bar (v26). .get with the default so a configuration downloaded
-        # before v26 still loads: those runs were anchored at the grid bottom,
-        # but restoring them onto the 1 mbar default is the CORRECT physics and
-        # the stale-key banner already tells the user the run must be redone.
+        # .get with the default so a configuration saved before the key
+        # existed still loads: restoring it onto the current default is the
+        # correct physics, and the stale-key banner already says the run must
+        # be redone.
         key("pref"): float(cp.get("p_ref_bar", 1.0e-3)),
-        # p_btm_bar (v27). Same .get treatment: a pre-v27 configuration has no
-        # column bottom; its runs used the shipped-table bottom. Per-geometry
-        # widget key (app.py's shipped key contract).
+        # same .get treatment; per-geometry widget key (app.py's key contract)
         key(f"pbtm_{cp.get('science_mode', 'transmission')}"):
             float(cp.get("p_btm_bar", forward.P_BTM_FILE_BAR)),
     })

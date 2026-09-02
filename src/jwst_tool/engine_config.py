@@ -8,9 +8,8 @@ Holds what the planner needs from the ``vulcan-forward`` engine:
 - the engine's data locations, resolved lazily so importing this module never
   touches the filesystem.
 
-The attribute surface is a contract shared with the retrieval framework's
-config module: every ``config.MOLECULES`` / ``cfg.CIA_H2HE_FILE`` call site
-must keep working.
+The attribute surface is a contract: ``forward``, ``datacheck``, ``fetch``
+and ``app`` reach for these names, so keep them working.
 """
 from __future__ import annotations
 
@@ -26,8 +25,7 @@ W39B_CFG_NAME = _fwd.DEFAULT_CFG_NAME
 # --- the planner's own base RT profile -------------------------------------
 # run_model overrides the resolution knobs from the canonical parameter set;
 # the band edges come from the engine, which owns the supported 1-15 um window
-# (short edge = the H2-H2 CIA table). Bit-identical to the pre-extraction
-# profile, pinned by tests/unit/test_rt_profile_golden.py.
+# (short edge = the H2-H2 CIA table).
 WIDE = {
     "use_photo": True,
     "nz": 150,
