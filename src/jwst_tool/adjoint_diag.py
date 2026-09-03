@@ -7,7 +7,8 @@ questions: dL/d(ln k_r) over every reaction
 molecule at its peak-VMR layer inside the transit photosphere
 (``PHOTOSPHERE_P_BAR``).
 
-Contract (all recorded in the npz and shown in the GUI):
+API-only (``python -m jwst_tool.adjoint_diag``); the GUI does not
+read it. Contract, all recorded in the npz:
 
 * same build path as the forecasts (``forward._assemble_chem``); the
   geometry/operator splice is ``make_body_terms``, never a manual one.

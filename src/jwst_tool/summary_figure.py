@@ -140,13 +140,17 @@ def _validate_spectrum(spectrum: dict) -> dict:
                 points=points)
 
 
+# The figure solves its height so each panel is square at a fixed total width,
+# so every extra panel shrinks all of them; 3 is where one stops being
+# readable. The GUI's multiselect reads this, so the two cannot drift.
+MAX_POST_PANELS = 3
+
+
 def _validate_panels(posterior_panels) -> list[dict]:
     panels = list(posterior_panels or [])
-    if len(panels) > 3:
-        # This cap must track the GUI's _MAX_POST_PANELS: if it lags, a
-        # selection the widget allows raises here instead of rendering.
-        raise ValueError("compose_summary_figure: at most three posterior "
-                         f"panels are supported, got {len(panels)}")
+    if len(panels) > MAX_POST_PANELS:
+        raise ValueError(f"compose_summary_figure: at most {MAX_POST_PANELS} "
+                         f"posterior panels are supported, got {len(panels)}")
     out = []
     for i, pan in enumerate(panels):
         where = f"posterior_panels[{i}]"
@@ -580,8 +584,6 @@ def _plot_posterior_panel(axp, pan: dict,
 
 
 def compose_summary_figure(spectrum: dict, posterior_panels=None,
-                           title: str | None = None,
-                           footnote: str | None = None,
                            panel_xlims=None):
     """Compose the three-panel proposal summary figure; returns the Figure.
 
@@ -597,9 +599,6 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
     notes=[...], center=float|None). An unconstrained direction belongs in
     ``notes`` (rendered as an in-panel annotation), never as a curve. A
     panel must carry curves or notes -- silence is not allowed.
-
-    ``footnote``: honesty caption under the figure (pass
-    posteriors.FORECAST_LABEL-based wording from the caller).
 
     ``panel_xlims``: one entry per forecast panel, each ``(lo, hi)`` in that
     panel's own parameter units or None for the automatic +/-_XLIM_SIGMA
@@ -646,8 +645,7 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
         # shrink an axes inside an ill-shaped cell and leave dead whitespace;
         # without box_aspect, a margin tweak would silently skew the ratios.
         _npan = max(1, len(panels))
-        _top = 0.965 if title is None else 0.905
-        _bottom = 0.165 if footnote else 0.135
+        _top, _bottom = 0.965, 0.135
         # The y tick labels on each posterior panel set the wspace floor here:
         # below ~0.13 they start colliding with the panel to their left.
         _left, _right, _wspace = 0.055, 0.988, 0.16
@@ -684,10 +682,4 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
             _plot_posterior_panel(
                 axp, panels[i],
                 xlim=(xlims[i] if i < len(xlims) else None))
-
-        if title:
-            fig.suptitle(str(title), fontsize=11)
-        if footnote:
-            fig.text(0.075, 0.03, str(footnote), fontsize=6.5,
-                     color="#555555", ha="left", va="bottom", wrap=True)
     return fig

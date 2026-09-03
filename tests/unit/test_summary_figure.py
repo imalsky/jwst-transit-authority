@@ -140,10 +140,7 @@ def test_figure_composes_exports_and_never_mutates_inputs():
     wl_before = spec["wl_um"].copy()
     d_before = spec["depth_ppm"].copy()
     fig = summary_figure.compose_summary_figure(
-        spec, posterior_panels=[_panel(), _panel()],
-        title="WASP-39 b -- transmission forecast",
-        footnote="Linearized Fisher (Cramer-Rao) forecast; not a sampled "
-                 "posterior.")
+        spec, posterior_panels=[_panel(), _panel()])
     try:
         for fmt, magic in (("png", b"\x89PNG"), ("pdf", b"%PDF")):
             buf = io.BytesIO()
@@ -199,9 +196,10 @@ def test_validation_is_loud():
         summary_figure.compose_summary_figure(
             _spectrum(with_points=False),
             posterior_panels=[dict(axis_label="x", curves=[], notes=[])])
-    # the cap is THREE, matching the GUI's _MAX_POST_PANELS: a lower cap
-    # here makes a selection the widget allows raise instead of rendering
-    with pytest.raises(ValueError, match="at most three posterior panels"):
+    # one cap, exported for the GUI multiselect: if the two drifted, a
+    # selection the widget allows would raise here instead of rendering
+    assert summary_figure.MAX_POST_PANELS == 3
+    with pytest.raises(ValueError, match="at most 3 posterior panels"):
         summary_figure.compose_summary_figure(
             _spectrum(with_points=False),
             posterior_panels=[_panel() for _ in range(4)])

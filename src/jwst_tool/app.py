@@ -42,7 +42,7 @@ import streamlit as st
 
 TOOL_DIR = Path(__file__).resolve().parent   # forward.py subprocess lives here
 
-from jwst_tool import binning, datacheck, detect, \
+from jwst_tool import datacheck, detect, \
     fisher as fisher_mod, forward
 from jwst_tool import archive
 from jwst_tool import noise as noise_mod
@@ -83,11 +83,6 @@ _ALL_USABLE = "All usable modes"
 
 # How many forecast-posterior panels the summary figure will draw. A LAYOUT
 # limit, not a science one: every free parameter's width is reported in the
-# Fisher table regardless. The figure solves its height so each panel is square
-# at a fixed total width, so each extra panel shrinks all of them -- 3 is where
-# a panel stops being readable.
-_MAX_POST_PANELS = 3
-
 # Custom-combination palette, deliberately disjoint from instruments.MODE_COLOR
 # so a combo line never collides with a member mode's color. Module level
 # because _series_color() (results section) reads it from further UP the
@@ -117,7 +112,7 @@ def _fig_bytes(fig, fmt: str, tight: bool = True) -> bytes:
     return buf.getvalue()
 
 
-def _show_fig(fig, tight: bool = True) -> None:
+def _show_fig(fig, tight: bool = True, png: bytes | None = None) -> None:
     """Render a figure into the page under the render lock, then close it.
 
     st.pyplot rasterizes, so it enters the same shared mathtext parser as
@@ -126,6 +121,8 @@ def _show_fig(fig, tight: bool = True) -> None:
     shows the full canvas at a fixed size: st.pyplot accepts no savefig
     keywords any more, so that branch rasterizes through ``_fig_bytes`` (the
     same dpi 200 as st.pyplot's default) and displays the PNG with st.image.
+    A caller that already has those bytes (for a download button) passes them
+    as ``png`` rather than paying a second dpi-200 savefig of the same figure.
 
     FIXED DISPLAY WIDTH: st.pyplot's width defaults to "stretch", which
     re-scales the figure on every window resize while its text stays at
@@ -137,8 +134,20 @@ def _show_fig(fig, tight: bool = True) -> None:
         with plotting.render_lock:
             st.pyplot(fig, width=_FIG_DISPLAY_PX)
     else:
-        st.image(_fig_bytes(fig, "png", tight=False), width=_FIG_DISPLAY_PX)
+        st.image(png if png is not None else _fig_bytes(fig, "png", tight=False),
+                 width=_FIG_DISPLAY_PX)
     plt.close(fig)
+
+
+# A forecast this wide carries no information; say so rather than print a
+# number the Fisher linearization cannot support.
+_UNCONSTRAINED_ABOVE = 1e4
+
+
+def _fmt_sigma(v: float) -> str:
+    """One display-unit uncertainty cell."""
+    return ("unconstrained" if not np.isfinite(v) or v > _UNCONSTRAINED_ABOVE
+            else f"{v:.3g}")
 
 
 def _csv_bytes(df: pd.DataFrame) -> bytes:
@@ -153,26 +162,6 @@ def _csv_bytes(df: pd.DataFrame) -> bytes:
             f"worker v{cs['pandeia_worker']}\n")
     return (head + df.to_csv(index=False)).encode()
 
-
-def _has_floor(r: dict) -> bool:
-    """Does this evaluated mode carry a noise floor anywhere? (floor_spec=None
-    gives an all-zero array, and then no N-to-infinity limit exists.)"""
-    return bool(np.any(np.asarray(r["floor"]) > 0.0))
-
-
-# Which statistic a template S/N actually is. They are not interchangeable:
-# the projected one additionally profiles the T-P / cloud / lnR0 directions, so
-# it answers "after those are fitted away", and a bare number that could be
-# either is not a reportable quantity.
-_METRIC_LABEL = {True: "T-P + cloud projected", False: "calibration profiled"}
-
-
-def _detection_metric(r: dict) -> tuple[float, bool]:
-    """Collaborator-facing score and whether physical nuisances were used."""
-    projected = float(r.get("sigma_detect_proj", float("nan")))
-    if np.isfinite(projected):
-        return projected, True
-    return float(r["sigma_detect"]), False
 
 # initial_sidebar_state: the default ("auto") starts the sidebar COLLAPSED
 # on a narrow viewport -- the huggingface.co iframe is one -- hiding every
@@ -494,20 +483,14 @@ class _TimedBar:
         """Refresh the clock without new progress information."""
         self._render()
 
-    def done(self, label: str = "done") -> None:
-        # same fixed-width shape as the live ticks, so the final render does
-        # not resize the row one last time
-        self._frac, self._label = 1.0, label
-        elapsed = time.monotonic() - self._t0
-        stage = label[:self._STAGE_W]
-        body = (f"{stage:<{self._STAGE_W}}  elapsed {_fmt_clock(elapsed)}"
-                f"  left {_fmt_clock(0.0)}")
-        self._bar.progress(1.0, text="`" + body.replace(" ", "\u00a0") + "`")
+    def done(self) -> None:
+        self._frac, self._label = 1.0, "done"
+        self._render()
 
 
-def _watch_proc(proc, on_line, on_tick, tick_s: float = 1.0) -> None:
+def _watch_proc(proc, on_line, on_tick) -> None:
     """Dispatch each stdout line of ``proc`` to ``on_line``, calling
-    ``on_tick`` at least every ``tick_s`` seconds of silence. Selects on the
+    ``on_tick`` at least once a second of silence. Selects on the
     raw pipe fd (os.read chunking) so the clock ticks through silent solver
     stages; never revert to blocking readline loops (they freeze the
     readout). On Windows (no select on pipes) it degrades to blocking
@@ -517,7 +500,7 @@ def _watch_proc(proc, on_line, on_tick, tick_s: float = 1.0) -> None:
     can_select = sys.platform != "win32"
     while True:
         if can_select:
-            ready, _, _ = select.select([fd], [], [], tick_s)
+            ready, _, _ = select.select([fd], [], [], 1.0)
             if not ready:
                 on_tick()
                 continue
@@ -587,8 +570,7 @@ def K(name: str) -> str:
 def _axis_range(container, label: str, key: str, warn, *, unit: str = "",
                 positive: bool = False,
                 positive_reason: str = "it is drawn on a log axis",
-                fmt: str = "%.6g",
-                step: float | None = None, help: str | None = None):
+                step: float | None = None):
     """A plain min/max pair of number boxes for one plot axis.
 
     Every axis control in this app is this widget:
@@ -613,9 +595,9 @@ def _axis_range(container, label: str, key: str, warn, *, unit: str = "",
     _u = f" ({unit})" if unit else ""
     c_lo, c_hi = container.columns(2)
     lo = c_lo.number_input(f"{label} min{_u}", value=None, step=step,
-                           format=fmt, key=f"{key}_min", help=help)
+                           format="%.6g", key=f"{key}_min")
     hi = c_hi.number_input(f"{label} max{_u}", value=None, step=step,
-                           format=fmt, key=f"{key}_max")
+                           format="%.6g", key=f"{key}_max")
     if (lo is None) != (hi is None):
         warn(f"{label} range needs both boxes filled. Fitting to the data.")
         return None
@@ -1038,19 +1020,26 @@ with st.sidebar:
         # Composition is STRUCTURAL, one path for every value:
         # metallicity scales O/N/S, C/O sets C_H = co * O_H, FastChem
         # re-initializes at exactly that composition. No perturbative knob.
-        # C/O stops below forward.CO_MAX: the carbon-rich side never
-        # certifies under the shipped settings (refused before any solve).
         met = st.number_input(
             "Metallicity (× solar)", 0.1, 100.0, 10.0, 0.5,
             format="%.2f", key=K("met"),
             help="Scales O, N and S. Carbon follows C/O at the scaled "
                  "oxygen, so it sits at this enrichment only at C/O 0.55.")
+        # The C/O ceiling follows the kinetics network, whose selectbox renders
+        # further down, so read it from session state. Clamp a stored value the
+        # new ceiling no longer admits: Streamlit discards an out-of-range
+        # session value silently and falls back to the widget default.
+        _co_max = forward.CO_MAX[st.session_state.get(K("network"), "sncho")]
+        if K("co") not in st.session_state:
+            st.session_state[K("co")] = float(forward.CO_DEFAULT)
+        st.session_state[K("co")] = min(st.session_state[K("co")], _co_max)
+        # key always seeded above, so no value= default
         co_ratio = st.number_input(
             "C/O (carbon/oxygen number ratio)",
-            0.10, 0.95, float(forward.CO_DEFAULT), 0.05,
+            forward.CO_MIN, _co_max, step=0.05,
             format="%.3f", key=K("co"),
-            help="Carbon varied at fixed oxygen. C/O of 1 and above is not "
-                 "certified under the shipped solver settings.")
+            help="Carbon varied at fixed oxygen. The ceiling follows the "
+                 "kinetics network; only the default network is validated.")
 
     # Kzz and photochemistry render BEFORE the science-goal step, so the AD
     # photo-lock reads the EFFECTIVE differentiation method from session
@@ -1115,7 +1104,8 @@ with st.sidebar:
             "Chemical network", list(forward.NETWORKS),
             key=K("network"),
             format_func={"sncho": "S-N-C-H-O (full, default)",
-                         "ncho": "N-C-H-O (no sulfur, faster)"}.get)
+                         "ncho": "N-C-H-O (no sulfur, faster)",
+                         "sncho2025": "S-N-C-H-O 2025 (experimental)"}.get)
         if K("photo") not in st.session_state or _jac_hint == "ad":
             st.session_state[K("photo")] = True   # AD needs photolysis ON
         # key always seeded above, so no value= default
@@ -1238,7 +1228,7 @@ with st.sidebar:
             goal_param = st.selectbox(
                 "Parameter to constrain", avail_free,
                 key=K(f"gp_vulcan_{tp_mode}_{int(cloud_on)}"),
-                format_func=lambda n: forward.PARAM_LABELS[n])
+                format_func=lambda n: fisher_mod.PARAM_LABELS[n])
             marginalize = st.checkbox(
                 "Marginalize over the other parameters", value=True,
                 key=K("marg"))
@@ -1246,12 +1236,12 @@ with st.sidebar:
                 st.warning(
                     "Marginalization is off: every other parameter is held "
                     "fixed, so the bound is a best-case sensitivity.")
-            unit = forward.PARAM_UNITS[goal_param]
+            unit = fisher_mod.PARAM_UNITS[goal_param]
             # label uses the unit when there is one (dex / K), else the bare
             # symbol -- C/O is a dimensionless number ratio
             _tgt_lbl = (f"Target uncertainty (±{unit})" if unit else
                         f"Target uncertainty "
-                        f"(±{forward.PARAM_SYMBOLS[goal_param]})")
+                        f"(±{fisher_mod.PARAM_SYMBOLS[goal_param]})")
             if unit == "K":
                 target_prec = st.number_input(_tgt_lbl, 5.0, 500.0,
                                               _TARGET_DEFAULT[goal_param], 5.0,
@@ -1281,7 +1271,7 @@ with st.sidebar:
                     default=[p for p in ("lnZ", "dlnCO")
                              if p in avail_free],
                     key=K(f"fx_vulcan_{tp_mode}_{int(cloud_on)}"),
-                    format_func=lambda n: forward.PARAM_LABELS[n])
+                    format_func=lambda n: fisher_mod.PARAM_LABELS[n])
                 fisher_params = sorted(set(fisher_extra) | {goal_param})
             elif goal == "constrain":
                 fisher_params = [goal_param]
@@ -1291,7 +1281,7 @@ with st.sidebar:
                     key=K(f"fp_vulcan_{tp_mode}_{int(cloud_on)}"),
                     default=[p for p in ("lnZ", "dlnCO")
                              if p in avail_free],
-                    format_func=lambda n: forward.PARAM_LABELS[n])
+                    format_func=lambda n: fisher_mod.PARAM_LABELS[n])
             jac_method = st.selectbox(
                 "Differentiation method", ["fd", "ad"], index=1,
                 key=K("jacm"),
@@ -1510,15 +1500,14 @@ with st.sidebar:
             "Solver convergence tolerance", 1.0e-4, 1.0e-2,
             forward.YCONV_DEFAULT, 1.0e-4,
             format="%.1e", key=K("yconv"))
+        yconv_min = st.number_input(
+            "Loose-branch convergence gate", 1.0e-4, 0.1,
+            forward.YCONV_MIN_DEFAULT, 1.0e-4,
+            format="%.1e", key=K("yconvmin"))
 
-    # Condensation is API-only: the GUI pins it off, and share_config REFUSES
-    # a loaded configuration that enables it rather than silently computing a
-    # different atmosphere than the file describes. Settling, escape and the
-    # boundary-condition fluxes were REMOVED -- forward.canonical_params
-    # refuses any enabling value -- but their keys stay in the canonical
-    # payload, pinned off, so no cached spectrum's key changes.
-    use_condense = use_settling = False
-    diff_esc, top_flux, bot_flux = [], [], []
+    # Condensation is API-only: the GUI never sends the key, and
+    # canonical_params pins it (and the removed settling/escape/boundary-flux
+    # keys) off on its own.
 
     with st.expander("Advanced radiative transfer (ExoJAX)"):
         # the pressure boundaries and the radius anchor live in step 2
@@ -1551,7 +1540,7 @@ with st.sidebar:
 params = dict(planet=planet_key, science_mode=science_mode,
               network=network,
               star_teff=teff, star_logg=logg, star_feh=feh,
-              nz=nz, yconv_cri=yconv_cri,
+              nz=nz, yconv_cri=yconv_cri, yconv_min=yconv_min,
               rp_rjup=rp, gs_cgs=g_ms2 * 100.0, rstar_rsun=rstar,
               orbit_au=orbit_au, sflux=sflux,
               met_x_solar=met, co_ratio=float(co_ratio),
@@ -1563,9 +1552,6 @@ params = dict(planet=planet_key, science_mode=science_mode,
               use_photo=use_photo, sl_angle_deg=sl_angle_deg,
               f_diurnal=f_diurnal, use_moldiff=use_moldiff,
               use_vm_mol=use_vm_mol and use_moldiff,
-              use_condense=use_condense,
-              use_settling=use_settling, diff_esc=diff_esc,
-              top_flux=top_flux, bot_flux=bot_flux,
               use_rayleigh=use_rayleigh,
               rt_ptop_bar=float(rt_ptop_bar), rt_integration=rt_integration,
               p_ref_bar=float(p_ref_bar),
@@ -2036,15 +2022,15 @@ if goal_r == "detect":
         st.warning(f"**No usable mode**: all selected modes saturate "
                    f"(Ks = {star['ks_mag']:g}).")
     else:
-        ranked = sorted(ok, key=lambda r: -_detection_metric(r)[0])
+        ranked = sorted(ok, key=lambda r: -detect.detection_metric(r)[0])
         best = ranked[0]
-        bsig, _best_projected = _detection_metric(best)
+        bsig, _best_projected = detect.detection_metric(best)
         # "template S/N" stays: a bare sigma reads as a retrieval claim. And
         # SAY WHICH ONE: the projected score profiles the T-P/cloud/lnR0
         # directions as well as the per-segment calibration offsets, so the two
         # are different statistics and must never share one bare label.
         verdict = (f"**{best['label']}**: template S/N {bsig:.1f}σ "
-                   f"({_METRIC_LABEL[_best_projected]}) in {ntr} "
+                   f"({detect.METRIC_LABEL[_best_projected]}) in {ntr} "
                    f"{_ev}{'s' if ntr > 1 else ''} (target {tsig:g}σ).")
         if bsig >= tsig:
             pass        # target met: the figure and table carry the number
@@ -2056,7 +2042,7 @@ if goal_r == "detect":
                 best, tsig, projected=_best_projected)
             if tt["reachable"]:
                 st.warning(verdict + f"  {tt['n']} {_ev}s reach it.")
-            elif _has_floor(best):
+            elif detect.has_floor(best):
                 st.warning(verdict
                            + f"  Floor caps it at {tt['sig_inf']:.1f}σ.")
             else:
@@ -2066,9 +2052,9 @@ if goal_r == "detect":
             st.warning(verdict + "  No signal.")
 else:
     gp = meta["goal_param"]
-    unit = forward.PARAM_UNITS[gp]
+    unit = fisher_mod.PARAM_UNITS[gp]
     usp = (" " + unit) if unit else ""       # " dex"/" K", or "" for C/O (ratio)
-    glabel = forward.PARAM_LABELS[gp]
+    glabel = fisher_mod.PARAM_LABELS[gp]
     target = float(meta["target_prec"])
     tsig = float(meta.get("target_sig") or 3.0)
     with_jac = [r for r in results if r.get("jac_bins") is not None]
@@ -2105,11 +2091,11 @@ else:
     else:
         best_r = next(r for r in usable_jac if r["mode_key"] == bk)
         tt = fisher_mod.transits_to_target(best_r, fisher_names, gp,
-                                           target / tsig, detect.sigma_at_transits,
+                                           target / tsig,
                                            co_eval=co_eval)
         if tt["reachable"]:
             st.warning(verdict + f"  {tt['n']} {_ev}s reach it.")
-        elif _has_floor(best_r):
+        elif detect.has_floor(best_r):
             st.warning(verdict + "  Floor caps it at "
                        f"±{tsig * tt['sig_inf']:.3g}{usp}.")
         else:
@@ -2122,22 +2108,8 @@ order = np.argsort(wl)
 wl_s, d_s = wl[order], model["depth"][order] * 1e6
 _fname_base = f"jwst_tool_{_slug(meta.get('planet', 'planet'))}"
 
-# DISPLAY smoothing: at the model's own resolving power (R = 1000 on the
-# correlated-k band grid) the unresolved line
-# forest renders as one-sample spikes, so the PLOT is convolved to a
-# constant display R (>= 3x the analysis R, floor 300) with the SAME tested
-# LSF operator the science path uses (flat weight). That operator no-ops
-# when the model grid cannot resolve the kernel, so past an analysis R of
-# about 140 this is already the native curve. No score touches it; the
-# native model stays in the "Native model (CSV)" download.
-_disp_R = float(max(300, 3 * int(meta["r_bin"])))
-_disp_wl_r = np.array([float(wl_s[0]), float(wl_s[-1])])
-_disp_curve = np.array([_disp_R, _disp_R])
-
-
 def _display_smooth(y_ppm):
-    return binning.smooth_to_native_r(wl_s, y_ppm, _disp_wl_r, _disp_curve,
-                                      float(wl_s[0]), float(wl_s[-1]))
+    return plotting.display_smooth(wl_s, y_ppm, int(meta["r_bin"]))
 
 
 d_plot = _display_smooth(d_s)
@@ -2226,7 +2198,7 @@ with st.expander("Physical structure (T-P profile, mixing ratios)"):
         _cols.sort(key=lambda kv: -float(np.nanmax(kv[1])))
         fig3 = plotting.build_structure_figure(_p_arr, _T_arr, _cols)
         _struct_png = _fig_bytes(fig3, "png", tight=False)
-        _show_fig(fig3, tight=False)
+        _show_fig(fig3, tight=False, png=_struct_png)
 
         if _cpj.get("science_mode") == "emission":
             if float(_T_arr.max()) > 2000.0:
@@ -2336,8 +2308,8 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
         with_jac = [r for r in results if r.get("jac_bins") is not None]
 
         def _cell(n, s):
-            v = tsig_f * fisher_mod.display_sigma(n, s, co_eval=co_eval)
-            return "unconstrained" if not np.isfinite(v) or v > 1e4 else f"{v:.3g}"
+            return _fmt_sigma(tsig_f * fisher_mod.display_sigma(
+                n, s, co_eval=co_eval))
 
         # long format, one row per mode x parameter, marginalized and conditional
         # side by side -- both read off the SAME nuisance-augmented Fisher matrix
@@ -2346,7 +2318,7 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
 
         def _param_rows(mode_label, sig, cond):
             return [{"mode": mode_label,
-                     "parameter": forward.PARAM_LABELS[n],
+                     "parameter": fisher_mod.PARAM_LABELS[n],
                      _marg_col: _cell(n, sig[n]),
                      _cond_col: _cell(n, cond[n])}
                     for n in fisher_names]
@@ -2380,13 +2352,9 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
                 frows.append({
                     # the user's own name for the set, unprefixed
                     "mode": str(_rec["name"]),
-                    "parameter": forward.PARAM_LABELS[n],
-                    _marg_col: ("unconstrained"
-                                if not np.isfinite(_sm) or _sm > 1e4
-                                else f"{_sm:.3g}"),
-                    _cond_col: ("unconstrained"
-                                if not np.isfinite(_sc) or _sc > 1e4
-                                else f"{_sc:.3g}")})
+                    "parameter": fisher_mod.PARAM_LABELS[n],
+                    _marg_col: _fmt_sigma(_sm),
+                    _cond_col: _fmt_sigma(_sc)})
         # Custom combinations FIRST: they are what the user built, so they
         # lead the table. Order within each group is preserved.
         _combo_names = {str(_rec["name"]) for _rec in combo_recs}
@@ -2450,30 +2418,6 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
 
 
 # --- marginalized forecast posteriors + proposal summary figure ------------
-def _param_center(name: str, cpj: dict):
-    """Input-model value of ``name`` in DISPLAY units (the Gaussian's
-    center), or None when the run's stored parameters define no single value
-    (e.g. lnKzz under a non-constant mixing profile, or a field the cached
-    run predates). A None center draws no curve -- the panel says so
-    explicitly instead of guessing a center."""
-    if name == "lnZ":
-        v = cpj.get("met_x_solar")
-        return None if v in (None, "") else float(np.log10(float(v)))
-    if name == "dlnCO":
-        return float(cpj.get("co_ratio", forward.CO_BASELINE))
-    if name == "lnKzz":
-        v = cpj.get("kzz_const")
-        if str(cpj.get("kzz_mode", "const")) == "const" and v not in (None, ""):
-            return float(np.log10(float(v)))
-        return None
-    direct = {"Tirr": "Tirr", "Tint": "Tint", "log_kappa": "log_kappa",
-              "log_gamma": "log_gamma", "Tint_cl": "tint_cl",
-              "log_kappa_cloud": "log_kappa_cloud",
-              "alpha_cloud": "alpha_cloud"}
-    k = direct.get(name)
-    if k is not None and cpj.get(k) is not None:
-        return float(cpj[k])
-    return None
 
 
 _post_panels: list[dict] = []       # summary_figure-compatible panel dicts
@@ -2523,7 +2467,7 @@ if _have_fisher:
             st.info("No usable mode carries a Jacobian, so there is no "
                     "forecast to draw.")
     else:
-        _centers_all = {n: _param_center(n, _cpj) for n in fisher_names}
+        _centers_all = {n: posteriors.param_center(n, _cpj) for n in fisher_names}
         _pp_key = K("post_params_" + "_".join(fisher_names))
         # a stored selection can go stale across runs (different free set)
         if any(p not in fisher_names
@@ -2533,8 +2477,8 @@ if _have_fisher:
             _post_sel = st.multiselect(
                 "Marginalized forecast curves to draw", fisher_names,
                 default=fisher_names[:2], key=_pp_key,
-                max_selections=_MAX_POST_PANELS,
-                format_func=lambda n: forward.PARAM_LABELS[n])
+                max_selections=summary_figure.MAX_POST_PANELS,
+                format_func=lambda n: fisher_mod.PARAM_LABELS[n])
         # record per source (sigmas always; curves for centered params)
         _curve_params = [p for p in _post_sel
                          if _centers_all.get(p) is not None]
@@ -2545,16 +2489,10 @@ if _have_fisher:
                 _rl, fisher_names, _centers,
                 params=_curve_params, co_eval=co_eval)
 
-        # SOURCES FOLLOW THE SPECTRUM SERIES: there is no separate "Forecast
-        # source" control -- the figure's series multiselect drives both
-        # halves of the figure, so the panels can never show a mode the
-        # spectrum is not displaying.
-        #
-        # That multiselect renders LATER in the script (it belongs beside the
-        # figure), so read its committed state here -- the same cross-section
-        # read the sidebar already uses. On the very first render the key is
-        # absent and every source is drawn, which matches the multiselect's own
-        # default of all modes.
+        # The figure's series multiselect drives both halves of the figure, so
+        # the panels can never show a mode the spectrum is not displaying. It
+        # renders later in the script, so read its committed state here;
+        # absent on the first render means every source, its own default.
         _sel_ids = st.session_state.get(K("sum_series"))
         if _sel_ids:
             _by_key = {r["mode_key"]: r["label"] for r in _usable_post}
@@ -2612,18 +2550,10 @@ if _have_fisher:
                         # information is lost by dropping the unshifted twin.
                         # The dotted center line marks the input value.
                         if _p == "dlnCO":
-                            # C/O lives on (0, inf): shift the center by the
-                            # INTERNAL ln-space draw (multiplicative, stays
-                            # positive; center + delta_display can go
-                            # negative for an unconstrained C/O) and draw
-                            # the same lognormal family the no-draw forecast
-                            # uses, at the forecast's ln-space width
-                            # (sigma_display / center). A weakly constrained C/O
-                            # sends exp(delta) off the forecast scale, where
-                            # the input-point width no longer describes the
-                            # shifted center: that draw has no curve
-                            # (mock_center_co returns None) and the unshifted
-                            # forecast is drawn instead.
+                            # C/O lives on (0, inf): shift multiplicatively by
+                            # the internal ln-space draw and keep the lognormal
+                            # family. Off-scale draws return None (see
+                            # posteriors.mock_center_co) and draw unshifted.
                             _mu_d = posteriors.mock_center_co(
                                 _pr["center"], _pr["sigma_display"],
                                 _mr["delta"][_p])
@@ -2681,8 +2611,8 @@ if _have_fisher:
                 # stable when the selection reorders (compose_summary_figure
                 # rebuilds each panel and drops keys it does not use)
                 param=str(_p),
-                axis_label=forward.param_axis(_p),
-                axis_unit=forward.PARAM_UNITS.get(_p, ""),
+                axis_label=fisher_mod.param_axis(_p),
+                axis_unit=fisher_mod.PARAM_UNITS.get(_p, ""),
                 density_label=("relative density" if _fitted
                                else "relative forecast density"),
                 curves=_curves, notes=_notes,
@@ -2709,7 +2639,7 @@ if goal_r == "detect":
     # combinations, forecasts); they get no score in the legend either
     _leg_projected = set()
     for r in results:
-        _score, _proj = _detection_metric(r)
+        _score, _proj = detect.detection_metric(r)
         if not r["saturated"] and np.isfinite(_score):
             _leg_num[r["mode_key"]] = f"S/N {_score:.1f}σ"
             _leg_projected.add(_proj)
@@ -2723,7 +2653,7 @@ elif _have_fisher:
             "Legend parameter (per-mode Fisher ±)", fisher_names,
             index=(fisher_names.index(_gp_default)
                    if _gp_default in fisher_names else 0),
-            key=_rk_key, format_func=lambda n: forward.PARAM_LABELS[n])
+            key=_rk_key, format_func=lambda n: fisher_mod.PARAM_LABELS[n])
     for r in [x for x in results if x.get("jac_bins") is not None
               and not x["saturated"]]:
         _v = _target_sig * fisher_mod.display_sigma(
@@ -2807,7 +2737,7 @@ with _fig_ctx.expander("Figure settings"):
         _dx, "Depth", K("sum_y"), _fig_box.warning, unit="ppm", step=1.0,
 )
     _y_log = _dlg.checkbox("Log y", value=False, key=K("sum_ylog"))
-    # no unit= here: forward.param_axis already carries it inside the label
+    # no unit= here: fisher_mod.param_axis already carries it inside the label
     # ("[M/H] [dex]"), so passing one again reads "[M/H] [dex] min (dex)"
     _post_xlims = [
         _axis_range(st, p["axis_label"], K("sum_post_" + p["param"]),
@@ -2854,13 +2784,15 @@ if _leg_num:
     # row spacing). Says what the per-mode numbers are, nothing more.
     _leg_note = (
         f"{meta['target']} template S/N per mode "
-        f"({'/'.join(_METRIC_LABEL[p] for p in sorted(_leg_projected))}), "
+        f"({'/'.join(detect.METRIC_LABEL[p] for p in sorted(_leg_projected))}), "
         f"{meta['n_transits']} {_ev}"
         f"{'s' if meta['n_transits'] > 1 else ''}"
         if goal_r == "detect" else
-        f"Fisher ±{forward.param_axis(_rk_param)} per mode "
+        f"Fisher ±{fisher_mod.param_axis(_rk_param)} per mode "
         f"at {_target_sig:g}σ")
-for _ci, (_cname, _members) in enumerate(_combo_members.items()):
+_combo_order = [str(c["name"])
+                for c in (st.session_state.get(K("combos")) or [])]
+for _cname, _members in _combo_members.items():
     if f"combo:{_cname}" not in _sel_series:
         continue
     _cw, _cd, _cs = [], [], []
@@ -2877,7 +2809,8 @@ for _ci, (_cname, _members) in enumerate(_combo_members.items()):
     _o = np.argsort(_cw)
     _sum_points.append(dict(
         label=f"{_cname} (combined)", marker="d",
-        color=_COMBO_COLORS[_ci % len(_COMBO_COLORS)],
+        color=_COMBO_COLORS[_combo_order.index(_cname)
+                            % len(_COMBO_COLORS)],
         wl_um=_cw[_o], depth_ppm=_cd[_o], sigma_ppm=_cs[_o]))
 
 _sum_spectrum = dict(wl_um=wl_s, depth_ppm=d_plot,
@@ -2894,7 +2827,6 @@ if d_wo_s is not None:
     _sum_spectrum["depth2_ppm"] = _display_smooth(d_wo_s)
     _sum_spectrum["depth2_label"] = f"No {meta['target']}"
 
-_sum_foot = None
 
 
 def _compose(spec):
@@ -2902,7 +2834,7 @@ def _compose(spec):
     # the exported PNG/PDF carry the planet name in their FILENAME.
     return summary_figure.compose_summary_figure(
         spec, posterior_panels=_post_panels or None,
-        footnote=_sum_foot, panel_xlims=_post_xlims)
+        panel_xlims=_post_xlims)
 
 
 try:

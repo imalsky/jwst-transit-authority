@@ -320,9 +320,11 @@ def test_source_pins_fig_width_fisher_table_and_noise_recording():
         "the global scale is not recorded, so a run cannot be reproduced"
     assert "st.pyplot(fig, width=_FIG_DISPLAY_PX)" in src, \
         "the tight branch no longer pins the display width"
-    assert 'st.image(_fig_bytes(fig, "png", tight=False), ' \
-        'width=_FIG_DISPLAY_PX)' in src, \
+    assert 'width=_FIG_DISPLAY_PX)' in src.split("def _show_fig")[1], \
         "the full-canvas branch no longer pins the display width"
+    assert "_show_fig(fig3, tight=False, png=_struct_png)" in src, \
+        "the structure figure must reuse the PNG the download button already " \
+        "rasterized, not pay a second dpi-200 savefig of the same figure"
     assert 'st.pyplot(fig, width="stretch"' not in src
     assert not [ln for ln in src.splitlines()
                 if "st.pyplot(" in ln and "bbox_inches" in ln], \
@@ -454,31 +456,6 @@ def test_all_saturated_run_has_no_best_mode_score_or_points():
     assert not any("Best mode" in e.value for e in at.error)
     # no plotted series at all, in particular no "<mode>: 5.0σ" legend entry
     assert seen.get("labels") == [], seen
-
-
-def test_display_smoothing_is_nondestructive_and_actually_smooths():
-    """Display smoothing must not touch the caller's native array (the CSV
-    download exports it) and must measurably reduce spikiness at the app's
-    display-R rule. Core smooth_to_native_r semantics live in
-    test_binning.py; these two properties are the app-side contract."""
-    from jwst_tool import binning
-
-    wl = np.geomspace(1.0, 12.0, 4000)          # the real native grid shape
-    rng = np.random.default_rng(0)
-    native = (21000.0 + 200.0 * np.sin(8.0 * np.log(wl))
-              + rng.choice([0.0, 0.0, 0.0, 600.0], size=wl.size))
-    untouched = native.copy()
-    r_disp = float(max(300, 3 * 100))           # the app's rule at R_bin=100
-    smoothed = binning.smooth_to_native_r(
-        wl, native, np.array([wl[0], wl[-1]]), np.array([r_disp, r_disp]),
-        float(wl[0]), float(wl[-1]))
-    assert np.array_equal(native, untouched), \
-        "display smoothing mutated the caller's native model"
-    # RMS of point-to-point differences, NOT the median: most consecutive
-    # pairs are exactly equal, so the median jump is ~0 and unbeatable.
-    rms_native = float(np.diff(untouched).std())
-    rms_disp = float(np.diff(smoothed).std())
-    assert rms_disp < 0.2 * rms_native, (rms_native, rms_disp)
 
 
 def test_custom_archive_fill_and_uv_menu_never_moves():
@@ -707,9 +684,7 @@ def test_a_run_that_produces_nothing_clears_the_previous_result(monkeypatch):
     assert not [w.value for w in at.warning if "previous run" in w.value or "reach it" in w.value]
 
 
-@pytest.mark.parametrize("key,label", [("n0_sum_x", "Wavelength")])
-def test_a_nonpositive_bound_on_a_log_axis_warns_instead_of_killing_the_page(
-        key, label):
+def test_a_nonpositive_bound_on_a_log_axis_warns_instead_of_killing_the_page():
     """A min at or below zero has no logarithm on a log axis. The builders
     raise on it -- right for an API backstop, but uncaught it takes the
     ENTIRE results page down. A typed number is a user choice, not a defect:
@@ -718,6 +693,7 @@ def test_a_nonpositive_bound_on_a_log_axis_warns_instead_of_killing_the_page(
     Only the summary figure carries axis controls now; the structure figure
     has none (it draws at the module defaults), so there is no typed bound
     left to poison there."""
+    key, label = "n0_sum_x", "Wavelength"
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
     at = _run_with_result(out, out_meta,
                           **{f"{key}_min": 0.0, f"{key}_max": 5.0})

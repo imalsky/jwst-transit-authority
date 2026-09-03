@@ -121,6 +121,27 @@ def detection_significance(signal: np.ndarray, sigma: np.ndarray,
     return float(np.sqrt(max(chi2, 0.0)))
 
 
+# Which statistic a reported template S/N actually is. They are not
+# interchangeable: the projected one additionally profiles the T-P / cloud /
+# lnR0 directions, so it answers "after those are fitted away", and a bare
+# number that could be either is not a reportable quantity.
+METRIC_LABEL = {True: "T-P + cloud projected", False: "calibration profiled"}
+
+
+def detection_metric(r: dict) -> tuple[float, bool]:
+    """Reportable score for one evaluated mode, and whether the physical
+    nuisance directions were projected out of it."""
+    projected = float(r.get("sigma_detect_proj", float("nan")))
+    if np.isfinite(projected):
+        return projected, True
+    return float(r["sigma_detect"]), False
+
+
+def has_floor(result: dict) -> bool:
+    """Does this mode result carry a systematic noise floor anywhere?"""
+    return bool(np.any(np.asarray(result["floor"]) > 0.0))
+
+
 def sigma_at_transits(result: dict, n_transits: int) -> np.ndarray:
     """Per-bin depth sigma of an evaluated mode re-scaled to ``n_transits``.
 
@@ -190,7 +211,7 @@ def transits_to_target(result: dict, target_sig: float, *,
     if result.get("depth_wo") is None:
         return dict(n=None, reachable=False, sig_inf=float("nan"))
     floor = np.asarray(result["floor"])
-    if not np.any(floor > 0.0):
+    if not has_floor(result):
         # no floor: the limit is genuinely INFINITE (report inf, not the
         # ~1e26 the 1e-30 clip would give)
         sig_inf = float("inf")
@@ -427,10 +448,10 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         mode_key=mode_key, label=m["label"],
         wl=nz["wl_center"],
         wl_eff=binning.bin_values(op, wl_pix),
-        seg=seg, n_segments=int(seg.max()) + 1 if seg.size else 1,
+        seg=seg,
         depth=d_full_b, depth_wo=d_wo_b, sigma=nz["sigma"],
         var_phot=nz["var_phot"], floor=nz["floor"],
-        noise_infl=float(noise_inflation), lsf_applied=lsf_applied,
+        lsf_applied=lsf_applied,
         n_transits_eval=int(nz["n_transits"]),
         sigma_detect=sigma_detect, sigma_detect_proj=sigma_detect_proj,
         median_sigma_ppm=float(np.median(nz["sigma"]) * 1e6),

@@ -5,7 +5,7 @@ no-floor transits-to-target limit must be exact."""
 import numpy as np
 import pytest
 
-from jwst_tool import detect, fisher, posteriors
+from jwst_tool import fisher, posteriors
 
 
 def test_marg_sigmas_matches_independent_oracles():
@@ -317,10 +317,8 @@ def test_fisher_transits_to_target_limits():
     limit is exactly 0.0 (never a finite clip artifact like 1e-26) and the
     scan stays monotone; a floored result keeps a finite positive limit."""
     names = ["lnZ", "lnKzz", "lnR0"]
-    tt = fisher.transits_to_target(_fisher_result(0.0), names, "lnZ", 1e9,
-                                   detect.sigma_at_transits)
+    tt = fisher.transits_to_target(_fisher_result(0.0), names, "lnZ", 1e9)
     assert tt["sig_inf"] == 0.0
     assert tt["reachable"]
-    tt2 = fisher.transits_to_target(_fisher_result(100.0), names, "lnZ", 1e9,
-                                    detect.sigma_at_transits)
+    tt2 = fisher.transits_to_target(_fisher_result(100.0), names, "lnZ", 1e9)
     assert np.isfinite(tt2["sig_inf"]) and tt2["sig_inf"] > 0.0

@@ -107,8 +107,6 @@ def _marg_sigmas(F: np.ndarray, n_report: int,
             fisher_rank=int(good.sum()),
             condition_number=(wmax / float(w[good].min()) if good.any()
                               else float("inf")),
-            eigenvalues=w.copy(),
-            rel_eig_tol=REL_EIG_TOL,
         )
     if not good.any():
         return out
@@ -168,6 +166,33 @@ def _conditional_sigmas(F: np.ndarray, n_report: int) -> np.ndarray:
     pos = d > 0.0
     out[pos] = 1.0 / np.sqrt(d[pos])
     return out
+
+
+# Display SYMBOL, UNIT and friendly name per free parameter. The symbol
+# MUST match the unit's log base: metallicity and Kzz are dex (log10), so
+# [M/H] and log Kzz, never "ln"; C/O is the number ratio N_C/N_O (no unit).
+PARAM_SYMBOLS = {"lnZ": "[M/H]", "dlnCO": "C/O", "lnKzz": "log Kzz",
+                 "Tirr": "T_irr", "Tint": "T_int",
+                 "log_kappa": "log κ_IR", "log_gamma": "log γ",
+                 "log_kappa_cloud": "log κ_cloud", "alpha_cloud": "α_cloud"}
+PARAM_UNITS = {"lnZ": "dex", "dlnCO": "", "lnKzz": "dex",
+               "Tirr": "K", "Tint": "K",
+               "log_kappa": "dex", "log_gamma": "dex",
+               "log_kappa_cloud": "dex", "alpha_cloud": ""}
+PARAM_LABELS = {"lnZ": "Metallicity", "dlnCO": "C/O ratio",
+                "lnKzz": "Vertical mixing (Kzz)",
+                "Tirr": "Guillot T_irr",
+                "Tint": "Guillot T_int", "log_kappa": "Guillot log κ_IR",
+                "log_gamma": "Guillot log γ",
+                "log_kappa_cloud": "Cloud deck log κ (at 3.5 um)",
+                "alpha_cloud": "Cloud deck slope α"}
+
+
+def param_axis(name: str) -> str:
+    """Axis/column label for a parameter: 'Symbol [unit]', or bare 'Symbol'
+    when it is dimensionless (e.g. '[M/H] [dex]', 'C/O', 'T_irr [K]')."""
+    u = PARAM_UNITS[name]
+    return f"{PARAM_SYMBOLS[name]} [{u}]" if u else PARAM_SYMBOLS[name]
 
 
 def display_sigma(name: str, sigma: float, co_eval: float | None = None) -> float:
@@ -279,12 +304,11 @@ def combined_forecast(results: list[dict], free_names: list[str],
 
 
 def transits_to_target(result: dict, free_names: list[str], gp: str,
-                       target_display: float, sigma_at_transits,
+                       target_display: float,
                        co_eval: float | None = None) -> dict:
     """Smallest transit count at which the marginalized display-unit forecast
     on ``gp`` reaches ``target_display``, with the systematic floor respected.
 
-    ``sigma_at_transits(result, n) -> per-bin sigma`` comes from detect.py.
     Returns dict(n, reachable, sig_inf); ``sig_inf`` is the infinite-transit
     (floor-only) limit in display units. The forecast is monotone in N
     (diagonal noise), so a target below sig_inf short-circuits to
@@ -300,7 +324,7 @@ def transits_to_target(result: dict, free_names: list[str], gp: str,
         return display_sigma(gp, mode_forecast(r2, free_names)[gp], co_eval=co_eval)
 
     _floor = np.asarray(result["floor"])
-    if not np.any(_floor > 0.0):
+    if not _detect.has_floor(result):
         # No floor: nothing caps the precision, so report 0.0 -- the
         # 1e-30-clipped value would be a spurious reachability gate.
         sig_inf = 0.0
@@ -311,6 +335,6 @@ def transits_to_target(result: dict, free_names: list[str], gp: str,
     if target_display < sig_inf:
         return dict(n=None, reachable=False, sig_inf=sig_inf)
     for n in range(1, _detect.N_TRANSITS_CAP + 1):
-        if _sig_with(sigma_at_transits(result, n)) <= target_display:
+        if _sig_with(_detect.sigma_at_transits(result, n)) <= target_display:
             return dict(n=n, reachable=True, sig_inf=sig_inf)
     return dict(n=None, reachable=False, sig_inf=sig_inf)

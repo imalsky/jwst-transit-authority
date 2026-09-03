@@ -8,7 +8,7 @@ Cramer-Rao bound in the fitted coordinate. Curves are rendered in DISPLAY
 units (the fisher-table convention:
 dex for lnZ/lnKzz, absolute C/O number ratio for dlnCO via
 ``fisher.display_sigma``, K for temperatures; a parameter unknown to
-``forward.PARAM_UNITS`` is already in display units and reports unit "").
+``fisher.PARAM_UNITS`` is already in display units and reports unit "").
 The dlnCO curve is a symmetric Gaussian in absolute C/O, clipped at the
 physical boundary C/O = 0 (curves render peak-normalized, so clipping and
 clip-plus-renormalize are identical on screen).
@@ -44,6 +44,10 @@ from jwst_tool import fisher
 # Machine token + human sentence, carried on every record this module
 # returns, so any downstream surface (GUI phase, exports) can label the
 # curves honestly without re-deriving the wording.
+# Auto curve grid: +/- _AUTO_SIGMA widths, _AUTO_POINTS samples. Shared by
+# both curve builders and by the off-scale test in mock_center_co.
+_AUTO_SIGMA, _AUTO_POINTS = 5.0, 201
+
 FORECAST_KIND = "fisher_gaussian_forecast"
 FORECAST_LABEL = (
     "Linearized Fisher (Cramer-Rao) forecast: a Gaussian approximation "
@@ -59,7 +63,7 @@ _SATURATED_REASON = "saturated at the shortest ramp tried (unusable data)"
 
 def _param_unit(name: str) -> str:
     """Display unit for ``name``, from the single source of truth
-    (forward.PARAM_UNITS; local import keeps this module numpy-light).
+    (fisher.PARAM_UNITS; local import keeps this module numpy-light).
 
     dlnCO reports "C/O ratio" (its display transform is the absolute number
     ratio). A name absent from the table is a caller-defined row already in
@@ -68,8 +72,7 @@ def _param_unit(name: str) -> str:
     """
     if name == "dlnCO":
         return "C/O ratio"
-    from jwst_tool import forward  # light path: no JAX/VULCAN imports
-    unit = forward.PARAM_UNITS.get(name)
+    unit = fisher.PARAM_UNITS.get(name)
     return unit if unit is not None else ""
 
 
@@ -98,10 +101,9 @@ def _validate_result(r: dict, n_free: int, where: str) -> None:
         raise ValueError(f"{where}: sigma must be finite and > 0 everywhere")
 
 
-def gaussian_curve(center: float, sigma: float, grid=None,
-                   n_sigma: float = 5.0, n_points: int = 201) -> dict:
+def gaussian_curve(center: float, sigma: float, grid=None) -> dict:
     """Normalized Gaussian pdf N(center, sigma) on ``grid`` (caller-supplied,
-    1-D ascending) or an auto grid center +/- n_sigma*sigma (n_points).
+    1-D ascending) or the auto grid center +/- _AUTO_SIGMA*sigma.
 
     Returns dict(theta, pdf); pdf integrates to ~1 over an auto grid. All
     inputs must be finite (sigma > 0) -- an inf/NaN sigma is an unconstrained
@@ -116,15 +118,8 @@ def gaussian_curve(center: float, sigma: float, grid=None,
             f"gaussian_curve: sigma must be finite and > 0, got {sigma!r} -- "
             "an unconstrained (inf) direction has no curve by design")
     if grid is None:
-        n_sigma = float(n_sigma)
-        n_points = int(n_points)
-        if not (np.isfinite(n_sigma) and n_sigma > 0.0):
-            raise ValueError(f"gaussian_curve: n_sigma must be finite and > 0, "
-                             f"got {n_sigma!r}")
-        if n_points < 3:
-            raise ValueError(f"gaussian_curve: n_points must be >= 3, got {n_points}")
-        theta = np.linspace(center - n_sigma * sigma,
-                            center + n_sigma * sigma, n_points)
+        theta = np.linspace(center - _AUTO_SIGMA * sigma,
+                            center + _AUTO_SIGMA * sigma, _AUTO_POINTS)
     else:
         theta = np.asarray(grid, float)
         if theta.ndim != 1 or theta.size < 2:
@@ -133,7 +128,7 @@ def gaussian_curve(center: float, sigma: float, grid=None,
         if not np.all(np.isfinite(theta)):
             raise ValueError("gaussian_curve: grid contains non-finite values")
     # Both paths: a grid that repeats a value carries no curve. An AUTO grid
-    # collapses that way when the +/- n_sigma window is thinner than one
+    # collapses that way when the auto window is thinner than one
     # float64 step at the center -- which is what a center shifted far from
     # the point where its sigma was linearized produces. Name that cause
     # rather than reporting it as a bad grid.
@@ -151,13 +146,12 @@ def gaussian_curve(center: float, sigma: float, grid=None,
     return dict(theta=theta, pdf=pdf)
 
 
-def lognormal_curve(center: float, sigma_ln: float, grid=None,
-                    n_sigma: float = 5.0, n_points: int = 201) -> dict:
+def lognormal_curve(center: float, sigma_ln: float, grid=None) -> dict:
     """Lognormal pdf with median ``center`` and ln-space width ``sigma_ln``:
     the Fisher Gaussian in ln(C/O) mapped to C/O, so the curve is drawn in
     the coordinate the width was computed in (68% interval center*exp(+-
     sigma_ln), positive by construction, no clip). Auto grid center*exp(+-
-    n_sigma*sigma_ln) (n_points, uniform in ln theta) or a caller grid
+    _AUTO_SIGMA*sigma_ln (uniform in ln theta) or a caller grid
     (1-D ascending, > 0). pdf integrates to ~1 over the auto grid.
     """
     center = float(center)
@@ -171,17 +165,10 @@ def lognormal_curve(center: float, sigma_ln: float, grid=None,
             f"{sigma_ln!r} -- an unconstrained (inf) direction has no curve "
             "by design")
     if grid is None:
-        n_sigma = float(n_sigma)
-        n_points = int(n_points)
-        if not (np.isfinite(n_sigma) and n_sigma > 0.0):
-            raise ValueError(f"lognormal_curve: n_sigma must be finite and "
-                             f"> 0, got {n_sigma!r}")
-        if n_points < 3:
-            raise ValueError(f"lognormal_curve: n_points must be >= 3, got "
-                             f"{n_points}")
         with np.errstate(over="ignore"):
-            theta = center * np.exp(np.linspace(-n_sigma * sigma_ln,
-                                                n_sigma * sigma_ln, n_points))
+            theta = center * np.exp(np.linspace(-_AUTO_SIGMA * sigma_ln,
+                                                _AUTO_SIGMA * sigma_ln,
+                                                _AUTO_POINTS))
     else:
         theta = np.asarray(grid, float)
         if theta.ndim != 1 or theta.size < 2:
@@ -201,9 +188,7 @@ def lognormal_curve(center: float, sigma_ln: float, grid=None,
 def marginalized_posteriors(results, free_names: list[str], centers: dict,
                             params: list[str] | None = None,
                             co_eval: float | None = None,
-                            grids: dict | None = None,
-                            n_sigma: float = 5.0,
-                            n_points: int = 201) -> dict:
+                            grids: dict | None = None) -> dict:
     """1D marginalized Fisher-Gaussian posterior curves for chosen parameters.
 
     ``results``: one mode result dict, or a list of them (>= 1) treated as
@@ -221,7 +206,7 @@ def marginalized_posteriors(results, free_names: list[str], centers: dict,
     ``co_eval``: the atmosphere's C/O at the evaluation point; REQUIRED when
     dlnCO is requested (fisher.display_sigma raises without it).
     ``grids``: optional {param: 1-D ascending display-unit grid}; parameters
-    not listed get the auto grid center +/- n_sigma * sigma_marg.
+    not listed get the auto grid center +/- _AUTO_SIGMA * sigma_marg.
 
     Returns dict(kind, label, n_modes, co_eval, sigma_marginalized,
     sigma_conditional, params) where params[name] is a record with
@@ -278,12 +263,10 @@ def marginalized_posteriors(results, free_names: list[str], centers: dict,
                 # a lognormal at the INTERNAL width (the table's sigma_display
                 # stays the first-order C/O * sigma_lnCO); a caller grid is
                 # honored verbatim
-                curve = lognormal_curve(rec["center"], s_int, grid=grid,
-                                        n_sigma=n_sigma, n_points=n_points)
+                curve = lognormal_curve(rec["center"], s_int, grid=grid)
                 rec["curve_family"] = "lognormal"
             else:
-                curve = gaussian_curve(rec["center"], s_disp, grid=grid,
-                                       n_sigma=n_sigma, n_points=n_points)
+                curve = gaussian_curve(rec["center"], s_disp, grid=grid)
                 rec["curve_family"] = "gaussian"
             rec.update(constrained=True, theta=curve["theta"],
                        pdf=curve["pdf"])
@@ -306,8 +289,7 @@ def combo_forecast(name: str, mode_keys: list[str], results_by_mode: dict,
                    free_names: list[str], centers: dict | None = None,
                    params: list[str] | None = None,
                    co_eval: float | None = None,
-                   grids: dict | None = None, n_sigma: float = 5.0,
-                   n_points: int = 201) -> dict:
+                   grids: dict | None = None) -> dict:
     """Forecast one NAMED combination of instrument modes.
 
     ``name``: the user's label for the combination (e.g. "SOSS + G395H").
@@ -380,7 +362,7 @@ def combo_forecast(name: str, mode_keys: list[str], results_by_mode: dict,
     if centers is not None:
         posteriors = marginalized_posteriors(
             rlist, list(free_names), centers, params=report, co_eval=co_eval,
-            grids=grids, n_sigma=n_sigma, n_points=n_points)
+            grids=grids)
 
     return dict(
         name=name, kind=FORECAST_KIND, label=FORECAST_LABEL,
@@ -595,8 +577,35 @@ def mock_recovery(results, free_names: list[str], realization: dict,
                 recovered=recovered)
 
 
-def mock_center_co(center: float, sigma_display: float, delta_ln: float,
-                   n_sigma: float = 5.0):
+def param_center(name: str, cpj: dict):
+    """Input-model value of ``name`` in DISPLAY units (the Gaussian's
+    center), or None when the run's stored parameters define no single value
+    (e.g. lnKzz under a non-constant mixing profile, or a field the cached
+    run predates). A None center draws no curve -- the panel says so
+    explicitly instead of guessing a center."""
+    from jwst_tool import forward   # light path: no JAX/VULCAN imports
+
+    if name == "lnZ":
+        v = cpj.get("met_x_solar")
+        return None if v in (None, "") else float(np.log10(float(v)))
+    if name == "dlnCO":
+        return float(cpj.get("co_ratio", forward.CO_BASELINE))
+    if name == "lnKzz":
+        v = cpj.get("kzz_const")
+        if str(cpj.get("kzz_mode", "const")) == "const" and v not in (None, ""):
+            return float(np.log10(float(v)))
+        return None
+    direct = {"Tirr": "Tirr", "Tint": "Tint", "log_kappa": "log_kappa",
+              "log_gamma": "log_gamma", "Tint_cl": "tint_cl",
+              "log_kappa_cloud": "log_kappa_cloud",
+              "alpha_cloud": "alpha_cloud"}
+    k = direct.get(name)
+    if k is not None and cpj.get(k) is not None:
+        return float(cpj[k])
+    return None
+
+
+def mock_center_co(center: float, sigma_display: float, delta_ln: float):
     """Recovered absolute C/O for ONE draw, or None when it is off scale.
 
     C/O lives on (0, inf), so the recovered center is shifted
@@ -605,7 +614,7 @@ def mock_center_co(center: float, sigma_display: float, delta_ln: float,
 
     The drawn curve keeps the FORECAST width, and that width is linearized
     at the INPUT C/O (sigma_CO = C/O * sigma_lnCO). The pairing only holds
-    while the shifted center stays inside the forecast's own +/- n_sigma
+    while the shifted center stays inside the forecast's own auto-grid
     window: on a weakly constrained direction exp(delta_ln) runs to many
     orders of magnitude, and a center that far out carries no width
     information -- its curve degenerates to one float64 value and the panel
@@ -629,4 +638,4 @@ def mock_center_co(center: float, sigma_display: float, delta_ln: float,
         mu = center * float(np.exp(delta_ln))
     if not np.isfinite(mu):
         return None
-    return mu if abs(mu - center) <= float(n_sigma) * sigma_display else None
+    return mu if abs(mu - center) <= _AUTO_SIGMA * sigma_display else None

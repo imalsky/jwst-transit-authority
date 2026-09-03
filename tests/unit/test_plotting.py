@@ -60,9 +60,7 @@ def _summary_fig(n_points: int = 3, with_sigma: bool = False):
                 depth_label="transit depth (ppm)",
                 model_label="model (smoothed for display)",
                 legend_title="SO2 S/N per mode, 1 transit", points=pts)
-    return summary_figure.compose_summary_figure(
-        spec, posterior_panels=pans, title="test",
-        footnote="one seeded realization")
+    return summary_figure.compose_summary_figure(spec, posterior_panels=pans)
 
 
 def _vertices_inside(ax, bbox):
@@ -456,3 +454,21 @@ def test_log_depth_axis_refusals_whisker_clip_and_tick_spacing():
             assert n >= 4, f"{name}: only {n} ticks inside the view"
         finally:
             plt.close(fig)
+
+
+def test_display_smoothing_is_nondestructive_and_actually_smooths():
+    """Display smoothing must not touch the caller's native array (the CSV
+    download exports it) and must measurably reduce spikiness at the app's
+    display-R rule. Core smooth_to_native_r semantics live in
+    test_binning.py; these two properties are the app-side contract."""
+    wl = np.geomspace(1.0, 12.0, 4000)          # the real native grid shape
+    rng = np.random.default_rng(0)
+    native = (21000.0 + 200.0 * np.sin(8.0 * np.log(wl))
+              + rng.choice([0.0, 0.0, 0.0, 600.0], size=wl.size))
+    untouched = native.copy()
+    smoothed = plotting.display_smooth(wl, native, 100)
+    assert np.array_equal(native, untouched), \
+        "display smoothing mutated the caller's native model"
+    # RMS of point-to-point differences, NOT the median: most consecutive
+    # pairs are exactly equal, so the median jump is ~0 and unbeatable.
+    assert float(np.diff(smoothed).std()) < 0.2 * float(np.diff(untouched).std())

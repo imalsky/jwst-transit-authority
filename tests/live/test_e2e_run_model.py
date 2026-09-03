@@ -37,7 +37,7 @@ if importlib.util.find_spec("exojax") is None or \
         importlib.util.find_spec("vulcan_jax") is None:
     pytest.skip("RT stack not installed", allow_module_level=True)
 
-FIXTURE = Path(__file__).parent / "data" / "w39b_v41_reference.npz"
+FIXTURE = Path(__file__).parent / "data" / "w39b_v42_reference.npz"
 
 WL_LO, WL_HI, R_BIN = 1.02, 5.26, 100.0
 

@@ -11,7 +11,7 @@ import math
 import numpy as np
 import pytest
 
-from jwst_tool import forward, planets
+from jwst_tool import fisher, forward, planets
 
 
 def _p(**kw):
@@ -285,14 +285,13 @@ def test_composition_structural_path_baseline_and_ranges():
     cp = forward.canonical_params(_p())
     assert cp["co_ratio"] == forward.CO_DEFAULT == 0.55
     assert "dco" not in cp and "co_baseline" not in cp
-    # High C/O below CO_MAX is the same path, with NO detection-only
+    # High C/O inside the bound is the same path, with NO detection-only
     # restriction: FD Fisher rows are certified re-solves, valid at any
     # baseline inside the bound
     cp = forward.canonical_params(_p(co_ratio=0.8, met_x_solar=30.0,
                                      fisher_params=["lnZ", "dlnCO"]))
     assert cp["co_ratio"] == 0.8 and cp["met_x_solar"] == 30.0
-    for bad in (dict(co_ratio=0.05), dict(co_ratio=forward.CO_MAX),
-                dict(co_ratio=2.5),
+    for bad in (dict(co_ratio=0.05), dict(co_ratio=2.5),
                 dict(met_x_solar=0.05), dict(met_x_solar=150.0)):
         with pytest.raises(ValueError):
             forward.canonical_params(_p(**bad))
@@ -435,11 +434,71 @@ def test_network_semantics():
         forward.canonical_params(_p(network="ncho", extra_mols=["H2S"]))
     with pytest.raises(ValueError):
         forward.canonical_params(_p(network="ncho", wo_mols=["SO2"]))
-    # (c)
-    with pytest.raises(ValueError):
-        forward.canonical_params(_p(network="ncho", use_condense=True))
-    # (d)
-    assert forward.params_key(cp) != forward.params_key(cpn)
+    # (c) condensation is sncho-only: ncho has no S8, and sncho2025's added
+    #     C3/H2CS species are outside CONDEN_CFG's tuned conver_ignore list
+    for net in ("ncho", "sncho2025"):
+        with pytest.raises(ValueError, match="network='sncho'"):
+            forward.canonical_params(_p(network=net, use_condense=True))
+    # (d) every network is its own cache key, spectrum AND chemistry level
+    keys = {n: forward.params_key(forward.canonical_params(_p(network=n)))
+            for n in forward.NETWORKS}
+    chem = {n: forward.chem_key(forward.canonical_params(_p(network=n)))
+            for n in forward.NETWORKS}
+    assert len(set(keys.values())) == len(set(chem.values())) == len(forward.NETWORKS)
+    # (e) sncho2025 keeps sulfur, so it offers the same molecules as sncho
+    assert (forward.active_molecules(forward.canonical_params(_p(network="sncho2025")))
+            == forward.active_molecules(cp))
+
+
+@pytest.mark.parametrize("network", sorted(forward.CO_MAX))
+def test_co_bound_is_per_network_and_shared_by_every_surface(network):
+    """One inclusive C/O bound per network, and the API, the GUI widget and
+    share_config all read it -- the three used to disagree (API < 1.0, widget
+    and share file <= 0.95), so an API run at C/O 0.97 could not be restored.
+
+    The permissive bounds are the highest value SAMPLED in the 2026-09-02
+    survey, not a measured ceiling: the convergence certificate is what
+    refuses an individual case that does not converge.
+    """
+    import ast
+    import importlib.util
+    from pathlib import Path
+
+    from jwst_tool import share_config
+
+    lo, hi = forward.co_bounds(network)
+    assert lo == forward.CO_MIN
+    # both ends inclusive, and nothing past the top
+    for co in (lo, hi):
+        assert forward.canonical_params(
+            _p(network=network, co_ratio=co))["co_ratio"] == co
+    for co in (lo * 0.5, hi * 1.01):
+        with pytest.raises(ValueError, match="outside"):
+            forward.canonical_params(_p(network=network, co_ratio=co))
+    # share_config refuses exactly what the API refuses, for this network
+    key = "n0_{}".format
+    state = {key("network"): network, key("co"): hi * 1.01}
+    with pytest.raises(ValueError, match="co_ratio"):
+        share_config._check_widget_ranges(state, key, key, "transmission")
+    state[key("co")] = hi
+    share_config._check_widget_ranges(state, key, key, "transmission")
+    # the GUI widget's ceiling is forward.CO_MAX[<network>], not a literal
+    src = Path(importlib.util.find_spec("jwst_tool.app").origin).read_text()
+    co_calls = [n for n in ast.walk(ast.parse(src))
+                if isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Attribute)
+                and n.func.attr == "number_input"
+                and any(kw.arg == "key" and isinstance(kw.value, ast.Call)
+                        and kw.value.args
+                        and getattr(kw.value.args[0], "value", None) == "co"
+                        for kw in n.keywords)]
+    assert len(co_calls) == 1
+    assert [ast.unparse(a) for a in co_calls[0].args[1:3]] == [
+        "forward.CO_MIN", "_co_max"]
+    assert "forward.CO_MAX[st.session_state.get(K('network'), 'sncho')]" in [
+        ast.unparse(n.value) for n in ast.walk(ast.parse(src))
+        if isinstance(n, ast.Assign)
+        and any(getattr(t, "id", None) == "_co_max" for t in n.targets)]
 
 
 def test_wo_mols_end_to_end_semantics():
@@ -527,18 +586,13 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # v28-v29) and the G395H SO2 significance (2.89 at v27, BELOW the
     # published 4.5-4.8 -- that gap is real and open). Both need a full
     # run; SO2 also needs the pandeia backend. Full history: notes.md.
-    # v39 re-pin: the chemistry grid extended to the RT top (vulcan-forward
-    # 0.12.0 sets P_t from art_ptop_bar = rt_ptop_bar and refuses a clamped
-    # top; the former constant-VMR clamp measured 73 ppm on W39b): transmission
-    # moved 26.8 ppm vs v38, emission 0.003 ppm. v40 re-pin: the model top
-    # moved 1e-8 -> 1e-9 bar (converged: one decade higher moves the depth
-    # 1.1 ppm, against 14.65 ppm at 1e-8): transmission moved 14.8 ppm vs v39,
-    # emission 0.09 ppm. Both are the intended changes.
+    # v42 re-pin: yconv_min joined the canonical key set at its cfg default
+    # 0.1, so the key moved with the payload while the physics did not.
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b", tp_mode="file"))) == "ad0f34dc5322fb1a"
+        dict(planet="wasp39b", tp_mode="file"))) == "bb46d19dceec08f9"
     # ... and the bare DEFAULT run is that same atmosphere
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "ad0f34dc5322fb1a"
+        dict(planet="wasp39b"))) == "bb46d19dceec08f9"
     # the sha1 pin is only meaningful re-derived from the file the run
     # actually reads -- this catches the table itself being swapped
     path = forward._shipped_tp_file("wasp39b")
@@ -585,8 +639,7 @@ def test_file_mode_content_addressing_hygiene_and_bad_tables(tmp_path):
         with pytest.raises(ValueError):
             forward.canonical_params(_pf(path))
 
-
-def test_canonical_params_round_trip_in_file_mode(tmp_path):
+    # canonical_params is idempotent in file mode too
     # The GUI hands the SUBPROCESS canonical_params(params) as its params
     # file, so canonicalization must be idempotent (given a resolvable path).
     p = _table(tmp_path)
@@ -596,6 +649,8 @@ def test_canonical_params_round_trip_in_file_mode(tmp_path):
 
 
 # --- kzz_mode ---------------------------------------------------------------
+
+
 
 def test_kzz_modes_validate_and_zero_inert_knobs(tmp_path):
     with pytest.raises(ValueError):
@@ -663,7 +718,7 @@ def test_every_freeable_param_has_display_metadata():
     # unit, symbol, and an FD step -- a missing entry KeyErrors the GUI/run.
     freeable = (set(forward.CHEM_PARAM_NAMES) | set(forward.CLOUD_FISHER_PARAMS)
                 | {p for ns in forward.TP_PARAM_NAMES.values() for p in ns})
-    for m in (forward.PARAM_LABELS, forward.PARAM_UNITS, forward.PARAM_SYMBOLS,
+    for m in (fisher.PARAM_LABELS, fisher.PARAM_UNITS, fisher.PARAM_SYMBOLS,
               forward.FD_STEPS):
         assert not (freeable - set(m)), sorted(freeable - set(m))
 
@@ -722,12 +777,10 @@ def test_emission_mode_gating_star_params_and_hygiene(tmp_path):
 def test_composition_fd_stencil_envelope():
     """FD Fisher rows solve the chemistry at every stencil point, so a
     baseline whose stencil leaves the validated range refuses (met=100 ->
-    122x solar, co=0.12 -> C/O 0.098). The dlnCO stencil steps one-sided
-    away from C/O = 1 instead of across it, and co_ratio itself is bounded
-    below CO_MAX with or without a Fisher row (the C-rich side never
-    certifies: W39b at C/O 1.087 exhausts count_max at longdy 36). AD rows
-    take no stencil and are exempt here (the dlnCO AD row has its own
-    run-time margin gate)."""
+    122x solar, co=0.12 -> C/O 0.098). The dlnCO stencil steps one-sided away
+    from the network's C/O ceiling instead of across it. AD rows take no
+    stencil and are exempt here (the dlnCO AD row has its own run-time margin
+    gate)."""
     forward.canonical_params(_p(met_x_solar=80.0, fisher_params=["lnZ"]))
     for kw, fp in (({"met_x_solar": 100.0}, "lnZ"),
                    ({"met_x_solar": 0.1}, "lnZ"),
@@ -735,18 +788,17 @@ def test_composition_fd_stencil_envelope():
         with pytest.raises(ValueError, match="stencil"):
             forward.canonical_params(_p(fisher_params=[fp], **kw))
     h0 = forward.FD_STEPS["dlnCO"]
-    assert forward.fd_stencil("dlnCO", 0.55) == ((1, -1, 2, -2), h0)
-    assert forward.fd_stencil("dlnCO", 0.89) == ((-1, -2, -4), h0 / 2)
-    assert forward.fd_stencil("lnZ", 0.89) == ((1, -1, 2, -2),
-                                               forward.FD_STEPS["lnZ"])
+    hi = forward.CO_MAX["sncho"]
+    assert forward.fd_stencil("dlnCO", 0.55, hi) == ((1, -1, 2, -2), h0)
+    assert forward.fd_stencil("dlnCO", 0.89, hi) == ((-1, -2, -4), h0 / 2)
+    assert forward.fd_stencil("lnZ", 0.89, hi) == ((1, -1, 2, -2),
+                                                   forward.FD_STEPS["lnZ"])
+    # the flip follows the network's ceiling, not a literal C/O = 1
+    hi25 = forward.CO_MAX["sncho2025"]
+    assert forward.fd_stencil("dlnCO", 2.0, hi25) == ((1, -1, 2, -2), h0)
+    assert forward.fd_stencil("dlnCO", 9.0, hi25) == ((-1, -2, -4), h0 / 2)
     for co in (0.89, 0.95):
         forward.canonical_params(_p(co_ratio=co, fisher_params=["dlnCO"]))
-    # at or above CO_MAX nothing is certified, Fisher row or not (exactly
-    # 1.0 must not fall below the bound by floating-point accident)
-    for co in (1.0, 1.1, 2.0):
-        for fp in ([], ["dlnCO"]):
-            with pytest.raises(ValueError, match="carbon-rich"):
-                forward.canonical_params(_p(co_ratio=co, fisher_params=fp))
     # both schemes' Richardson rows are exact on a cubic (sign and
     # coefficients of the one-sided stencil included); the one-sided row is
     # third order -- on a quartic its error is -f''''(x) h^3 / 3 exactly, so
@@ -864,13 +916,6 @@ def test_param_keys_read_matches_the_source():
 
 # --- ExoMolOP no-table gate ------------------------------------------------
 
-def test_species_without_an_exomolop_table_refuse_early():
-    # ExoMolOP publishes no CS2/C2H6 k-table: the run must refuse at the
-    # API with the pointed reason, not minutes later inside the RT build.
-    for mol in sorted(forward._NO_EXOMOLOP_TABLE):
-        with pytest.raises(ValueError, match="no published ExoMolOP k-table"):
-            forward.canonical_params(_p(extra_mols=[mol]))
-
 
 def test_molecule_list_invariants():
     """Menu/default consistency, none of it enforced by the code itself."""
@@ -888,6 +933,14 @@ def test_molecule_list_invariants():
         f"_S_MOLECULES misses {sorted(s_bearing - set(forward._S_MOLECULES))} "
         f"/ over-lists {sorted(set(forward._S_MOLECULES) - s_bearing)}")
     assert not (set(forward.MOLECULES) & set(forward.EXTRA_MOLECULES))
+
+    # ... and one with no published table refuses at the API
+    # ExoMolOP publishes no CS2/C2H6 k-table: the run must refuse at the
+    # API with the pointed reason, not minutes later inside the RT build.
+    for mol in sorted(forward._NO_EXOMOLOP_TABLE):
+        with pytest.raises(ValueError, match="no published ExoMolOP k-table"):
+            forward.canonical_params(_p(extra_mols=[mol]))
+
 
 
 def test_no_exomolop_table_set_matches_the_installed_tables():

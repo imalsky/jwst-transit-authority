@@ -49,6 +49,26 @@ MAX_LOG_TICKS = 7
 # matplotlib default. Cap the count and let the locator pick round values.
 MAX_LIN_TICKS = 5
 
+def display_smooth(wl_um, y_ppm, r_bin: int):
+    """Convolve a native model curve to a constant DISPLAY resolving power.
+
+    At the model's own resolving power (R = 1000 on the correlated-k band
+    grid) the unresolved line forest renders as one-sample spikes, so the PLOT
+    is convolved to >= 3x the analysis R (floor 300) with the SAME tested LSF
+    operator the science path uses (flat weight). That operator no-ops when the
+    model grid cannot resolve the kernel, so past an analysis R of about 140
+    this is already the native curve. No score touches it -- the native model
+    is what the "Native model (CSV)" download exports -- and the caller's array
+    is never modified.
+    """
+    from . import binning
+    wl_um = np.asarray(wl_um, float)
+    r = float(max(300, 3 * int(r_bin)))
+    return binning.smooth_to_native_r(
+        wl_um, y_ppm, np.array([wl_um[0], wl_um[-1]]), np.array([r, r]),
+        float(wl_um[0]), float(wl_um[-1]))
+
+
 
 def _thin_log_axis(ax, which: str) -> None:
     """Label at most ``MAX_LOG_TICKS`` decades on a log axis; no minor ticks.

@@ -87,6 +87,43 @@ def test_round_trip_restores_the_full_run():
     assert "n0_modes" not in state          # no observation section to restore
 
 
+@pytest.mark.parametrize("network", ["ncho", "sncho2025"])
+def test_a_non_default_network_round_trips_on_its_own_widget_keys(network):
+    """The molecule widgets are re-keyed per network so a selection from one
+    never strands in the other's options; only the default network's keys are
+    unsuffixed. That suffixed branch had no coverage, and it is a shipped
+    widget-KEY contract."""
+    co = 2.0 if forward.CO_MAX[network] > 1.0 else 0.6
+    canon = _canon(network=network, co_ratio=co, extra_mols=["HCN", "NH3"])
+    share = share_config.build_share(
+        canon,
+        goal=dict(goal="detect", target_mol="H2O", do_fisher=False,
+                  jac_method="fd"),
+        observation=dict(ks_mag=9.0, t14=2.8, t_base=2.8, sat_limit=0.8,
+                         star_teff=5485.0, star_logg=4.47, star_feh=0.0,
+                         modes=["nirspec_g395h"], n_transits=1, r_bin=100,
+                         floor_mode="none", floors={}, noise_infl={},
+                         show_noise=True, seed=0))
+    state, notes = share_config.widget_state(share, _key)
+    assert not notes
+    assert state["n0_network"] == network and state["n0_co"] == co
+    sfx = f"_{network}"
+    assert state[f"n0_xmols_vulcan{sfx}"] == ["HCN", "NH3"]
+    assert "n0_xmols_vulcan" not in state          # the sncho keys stay clean
+    assert any(k.startswith(f"n0_mol_vulcan{sfx}_") for k in state)
+
+
+def test_a_carbon_rich_config_is_refused_on_a_network_that_cannot_hold_it():
+    """The restore range for C/O follows the network, so a file written on
+    sncho2025 at C/O 2 must not silently restore onto the default network's
+    widget (Streamlit would discard it and run C/O 0.55 instead)."""
+    canon = _canon(network="sncho2025", co_ratio=2.0)
+    state = {"n0_network": "sncho", "n0_co": float(canon["co_ratio"])}
+    with pytest.raises(ValueError, match="co_ratio=2 outside"):
+        share_config._check_widget_ranges(state, "n0_{}".format,
+                                          "n0_{}".format, "transmission")
+
+
 def test_invalid_input_is_refused_before_anything_applies():
     """Fail closed: malformed files, unknown parameters, a missing uploaded
     table, and an unsupported format version all raise before any state

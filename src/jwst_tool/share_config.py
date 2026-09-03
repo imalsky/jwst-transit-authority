@@ -30,7 +30,7 @@ import hashlib
 import math
 import os
 
-from jwst_tool import forward, planets, provenance
+from jwst_tool import fisher, forward, planets, provenance
 
 SHARE_FORMAT = 1
 
@@ -38,9 +38,9 @@ SHARE_FORMAT = 1
 # tests/unit/test_share_config.py so they cannot drift. Session-global keys;
 # forward.* constants are shared with the widgets themselves.
 _GLOBAL_BOUNDS = {
-    "met": (0.1, 100.0), "co": (0.10, 0.95),
+    "met": (0.1, 100.0),
     "sza": (0.0, 89.0), "fdiur": (0.1, 1.0),
-    "yconv": (1.0e-4, 1.0e-2),
+    "yconv": (1.0e-4, 1.0e-2), "yconvmin": (1.0e-4, 0.1),
     "ck": (-4.0, 2.0), "ca": (0.0, 4.0),
     "nz": forward.NZ_RANGE,
     "rtptop": (1.0e-9, 1.0e-6),
@@ -78,7 +78,11 @@ def _check_widget_ranges(state: dict, key, pk, science_mode: str) -> None:
         checks[key(f"floor_{m}")] = (f"floor for {m}", _FLOOR_BOUNDS)
         checks[key(f"infl_{m}")] = (f"noise multiplier for {m}", _INFL_BOUNDS)
     checks[key(f"pbtm_{science_mode}")] = ("p_btm_bar", forward.P_BTM_RANGE)
-    for p, unit in forward.PARAM_UNITS.items():
+    # C/O: the widget's ceiling follows the kinetics network, so the accepted
+    # range is the network's, not one literal pair.
+    checks[key("co")] = ("co_ratio", forward.co_bounds(
+        str(state.get(key("network"), "sncho"))))
+    for p, unit in fisher.PARAM_UNITS.items():
         checks[key(f"tgt_{p}")] = (
             f"target uncertainty for {p}",
             _TGT_BOUNDS_K if unit == "K" else _TGT_BOUNDS)
@@ -448,6 +452,7 @@ def _restore_vulcan_physics(state: dict, cp: dict, key, pk) -> None:
         key("moldiff"): bool(cp["use_moldiff"]),
         key("vmmol"): bool(cp["use_vm_mol"]),
         key("yconv"): float(cp["yconv_cri"]),
+        key("yconvmin"): float(cp.get("yconv_min", forward.YCONV_MIN_DEFAULT)),
     })
     _reject_removed_physics(cp)
 

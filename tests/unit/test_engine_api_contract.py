@@ -106,6 +106,19 @@ def test_the_profile_keys_the_tool_sets_are_ones_the_engine_reads():
         assert f'"{key}"' in src, (
             f"the engine never reads profile[{key!r}], so the tool sets a knob "
             "that does nothing")
+    # the chemistry side: the solver knobs the tool drives, plus the two
+    # margins the AD dlnCO gate refuses without (their absence must be an
+    # import-time failure here, not a silent pass at run time)
+    chem_src = (Path(importlib.import_module("vulcan_forward.vulcan_chem").__file__)
+                .read_text())
+    for key in ("yconv_cri", "yconv_min", "dt_max", "co_mode",
+                "abundance_mode"):
+        assert f'"{key}"' in chem_src, (
+            f"the engine never reads profile[{key!r}]")
+    for attr in ("co_bz_bound", "co_bz_margin"):
+        assert f"{attr}=" in chem_src, (
+            f"the engine no longer returns {attr!r}; forward.check_ad_co_margin "
+            "refuses the AD dlnCO row without it")
 
 
 def test_the_engine_calls_in_forward_py_pass_arguments_it_accepts():

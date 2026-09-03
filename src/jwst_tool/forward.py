@@ -11,9 +11,9 @@ under the h-vs-2h gate, "ad" one warm-started jvp per row (photo-on required;
 the lnZ jvp is the fixed-structural-grid
 derivative and the dlnCO jvp is refused near O-exhaustion, on the build
 column and again on the converged column). Where the central dlnCO stencil
-would reach C/O = 1, the FD row steps one-sided toward lower C/O instead
-(``fd_stencil``); ``co_ratio`` itself is bounded below ``CO_MAX``, since
-the carbon-rich side never certified. AD has no such escape.
+would leave the network's accepted C/O range, the FD row steps one-sided
+toward lower C/O instead (``fd_stencil``); ``co_ratio`` itself is bounded by
+``CO_MAX[network]``. AD has no such escape.
 ``fisher.py`` turns the Jacobian + Pandeia noise into forecasts.
 
 A "removed" spectrum zeroes that molecule's VMR in the RT only, keeping the
@@ -50,11 +50,15 @@ EXTRA_MOLECULES = ["C2", "C2H2", "C2H4", "CH", "CH3", "CN", "CS",
 # GUI preselection: NEVER widen without a measured leave-one-out ppm impact.
 EXTRA_MOLECULES_DEFAULT = ["C2H2", "C2H4", "H2S", "HCN", "NH3", "OCS",
                            "SH", "SO"]
-# Kinetics networks ("ncho" drops sulfur, 69 vs 89 species) -> the engine's
-# import-frozen (VULCAN_JAX_NETWORK, VULCAN_JAX_ATOM_LIST) pair.
+# Kinetics networks -> the engine's import-frozen (VULCAN_JAX_NETWORK,
+# VULCAN_JAX_ATOM_LIST) pair. "sncho" (89 species) is the Tsai 2023 WASP-39 b
+# network and the default; "ncho" drops sulfur (69 species); "sncho2025" (93)
+# is what current upstream cfg_wasp39b.py ships -- the same lineage plus C3
+# isomers, C3H5 and H2CS. Only "sncho" is science-validated here.
 NETWORKS = {
     "sncho": ("thermo/SNCHO_photo_network.txt", "H,O,C,N,S"),
     "ncho": ("thermo/NCHO_photo_network.txt", "H,O,C,N"),
+    "sncho2025": ("thermo/SNCHO_photo_network_2025.txt", "H,O,C,N,S"),
 }
 # Every S-bearing member of the lists above; network="ncho" REFUSES these
 # rather than dropping them silently.
@@ -62,7 +66,7 @@ _S_MOLECULES = frozenset({"SO2", "H2S", "OCS", "SO", "SH", "CS", "NS"})
 # Network species with no published ExoMolOP k-table: never offered anywhere
 # (correlated-k over the published tables is the only opacity path).
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
-_VERSION = 41  # model_cache buster (identity = canonical params + this
+_VERSION = 42  # model_cache buster (identity = canonical params + this
                # number, never a content hash); bump on any physics or
                # canonical-key-set change.
 
@@ -108,35 +112,38 @@ FD_LNR0_STEP = 0.01                   # lnR0 is RT-only (smooth, analytic)
 RT_PTOP_DEFAULT = 1.0e-7
 JAC_METHODS = ("fd", "ad")            # certified-FD default / warm-jvp opt-in
 # Minimum positivity margin for the AD dlnCO row. The engine's co_bz_bound =
-# ln(1 + min_z(OO_z/OC_z)) is the largest ln C/O increment before some
-# layer's fixed-O factor b_z turns nonpositive (nonnegative by construction,
-# so a "<= 0" refusal could never fire); it is computed on the build's
-# initial column, a proxy for the warm state the tangent runs on. Set by
-# closure against the certified one-sided FD row on the TOI-7169 b case:
-# margin 0.12 (C/O 0.89) closes at the C/O 0.55 level, margin 0.05 (C/O
-# 0.95) does not (notes.md, Decision records 2026-09-02). A literal so a
-# step change cannot move the AD gate silently. FD re-initializes per
-# stencil point and steps one-sided below C/O = 1 when the central stencil
-# would cross it.
+# ln(1 + min_z(OO_z/OC_z)) is the largest ln C/O increment before some layer's
+# fixed-O factor b_z turns nonpositive. Empirical, set by closure against the
+# certified one-sided FD row (notes.md); a literal so an FD step change cannot
+# move the AD gate silently. FD has no equivalent limit: it re-initializes
+# FastChem per stencil point and never uses the b_z map.
 CO_BZ_MIN_AD = 0.1
-# co_ratio is accepted below this bound only (exclusive): the carbon-rich side
-# does not certify under the shipped settings (W39b at C/O 1.087 exhausts
-# count_max at longdy 36; 0.984 is the highest certified value), and a value
-# that cannot certify is refused before it costs a 30 000-step solve.
-CO_MAX = 1.0
+# Accepted co_ratio range, INCLUSIVE at both ends. One number per network,
+# read by canonical_params, the GUI widget and share_config so the three
+# cannot drift. Measured on the shipped W39b column (2026-09-02 survey):
+# "sncho" certifies to about 1.02 and fails from 1.03 upward, so it keeps its
+# sub-unity bound; "sncho2025" and "ncho" certified at every sampled value up
+# to 10, which is the highest value SAMPLED and not a measured ceiling. The
+# bound is deliberately permissive: the convergence certificate refuses the
+# individual cases that do not converge (e.g. sncho2025 at C/O 1.03).
+CO_MIN = 0.1
+CO_MAX = {"sncho": 0.99, "sncho2025": 10.0, "ncho": 10.0}
 
 
-def fd_stencil(name: str, value: float) -> tuple[tuple[int, ...], float]:
+def co_bounds(network: str) -> tuple[float, float]:
+    """(min, max) co_ratio for a network, both inclusive."""
+    return CO_MIN, CO_MAX[network]
+
+
+def fd_stencil(name: str, value: float, co_max: float) -> tuple[tuple[int, ...], float]:
     """(step multiples, step) a composition row solves at. Central (+-h, +-2h)
-    at h = FD_STEPS[name], unless the dlnCO stencil would reach C/O = 1
-    (co_ratio itself stays below CO_MAX): the C-rich side does not certify
-    under the shipped solver settings, so the row uses the one-sided stencil
-    (-1, -2, -4) toward lower C/O -- third order after Richardson -- at h/2
-    so its reach equals the central stencil's 2h (at the full step the
-    curvature toward the boundary fails the h-vs-2h gate on a 1600 K hot
-    Jupiter)."""
+    at h = FD_STEPS[name], unless the dlnCO stencil would leave the network's
+    accepted C/O range: then the row uses the one-sided stencil (-1, -2, -4)
+    toward lower C/O -- third order after Richardson -- at h/2 so its reach
+    equals the central stencil's 2h (at the full step the curvature toward the
+    boundary fails the h-vs-2h gate on a 1600 K hot Jupiter)."""
     h = FD_STEPS[name]
-    if name == "dlnCO" and value * float(np.exp(2.0 * h)) >= CO_MAX:
+    if name == "dlnCO" and value * float(np.exp(2.0 * h)) > co_max:
         return (-1, -2, -4), h / 2.0
     return (1, -1, 2, -2), h
 
@@ -151,6 +158,103 @@ def fd_estimates(offs, dvals, f0, h):
     d = offs[0]
     return (d * (-3.0 * f0 + 4.0 * dvals[d] - dvals[2 * d]) / (2.0 * h),
             d * (-3.0 * f0 + 4.0 * dvals[2 * d] - dvals[4 * d]) / (4.0 * h))
+
+
+def fd_row(name, j1, j2, h):
+    """Richardson-combined Jacobian row and its h-vs-2h consistency error.
+
+    j1 / j2 are the same scheme's estimate at step h and 2h. Raises when the
+    two disagree beyond FD_CONSISTENCY_TOL: an uncertified derivative is never
+    reported. A row with no spectral response is an exact zero, error 0."""
+    if not (np.isfinite(j1).all() and np.isfinite(j2).all()):
+        raise RuntimeError(f"FD Jacobian for {name}: non-finite entries")
+    scale = float(np.max(np.abs(j1)))
+    if scale == 0.0:
+        return j1, 0.0
+    err = float(np.max(np.abs(j1 - j2)) / scale)
+    if err > FD_CONSISTENCY_TOL:
+        raise RuntimeError(
+            f"FD Jacobian for {name} FAILED the step-size consistency "
+            f"check: max|J(h) - J(2h)| / max|J(h)| = {err:.3f} > "
+            f"{FD_CONSISTENCY_TOL} (h = {h:g}). The row is dominated "
+            "by solver convergence noise or curvature -- lower yconv_min "
+            "(and yconv_cri with it), raise nz, or adjust forward.FD_STEPS. "
+            "An uncertified derivative is never reported.")
+    return (4.0 * j1 - j2) / 3.0, err   # Richardson: O(h^4) central, O(h^3) one-sided
+
+
+# One record per certified stage; the order the conv_* npz arrays are written in.
+CONV_FIELDS = ("stage", "accept", "longdy", "longdydt", "branch", "flux", "cell")
+# ConvDiag.conv_branch legend (0 = not certified).
+CONV_BRANCH = {1: "tight (yconv_cri)", 2: "loose (yconv_min)"}
+
+
+def check_converged(diag, stage, species, chem, log=print) -> tuple:
+    """Certify one solve against the runner's CANONICAL gate and return its
+    record. Certification is ``ConvDiag.conv_normal`` AND ``longdy <
+    yconv_min``, recomputed at the exit state -- never loosen it. Raises
+    naming the branch, longdydt, aflux_change and the controlling
+    ``species@z`` cell when the solve does not certify."""
+    ac = int(diag.accept_count)
+    longdy = float(diag.longdy)
+    branch = int(diag.conv_branch)
+    z = int(diag.cell_layer)
+    cell = f"{species[int(diag.cell_species)]}@z{z}"
+    detail = (f"longdy={longdy:.3g}, longdydt={float(diag.longdydt):.3g}/s, "
+              f"branch {CONV_BRANCH.get(branch, 'none')}, "
+              f"aflux_change={float(diag.aflux_change):.3g}, "
+              f"t={float(diag.t):.3g} s, dt={float(diag.dt):.3g} s; "
+              f"controlling cell {cell} at {float(chem.p_bar[z]):.3g} bar, "
+              f"VMR {float(diag.cell_vmr):.3g}")
+    if not (bool(diag.conv_normal) and longdy < chem.yconv_min):
+        how = (f"hit the count_max={chem.count_max} cap" if ac >= int(chem.count_max)
+               else f"exited at {ac} accepted steps without the runner's "
+                    "canonical certification (stall fallback / hybrid "
+                    "vm_mol phase-flip / photolysis flux still changing)")
+        raise RuntimeError(
+            f"chemistry did NOT converge ({stage}: {detail}; "
+            f"gate yconv_min={chem.yconv_min:g}, "
+            f"conv_normal={bool(diag.conv_normal)}; {how}). This "
+            "parameter corner has no certified steady state -- adjust "
+            "T-P / Kzz / composition (or the convergence settings) "
+            "rather than trusting an unconverged spectrum.")
+    log(f"[fwd] {stage}: certified at {ac} accepted steps ({detail})")
+    return (stage, ac, longdy, float(diag.longdydt), branch,
+            float(diag.aflux_change), cell)
+
+
+def check_ad_co_margin(chem, co_ratio, y=None, build_margin=None,
+                       log=None) -> float:
+    """Certify the AD dlnCO row's oxygen-reservoir margin, or raise.
+
+    With ``y`` the margin is taken on that column (the converged one the
+    tangent starts from); without it, on the build's own ``co_bz_bound``.
+    A missing engine attribute means the check cannot run: refuse, never pass
+    silently. Returns the margin. Compared with ``not m > gate`` so a NaN
+    margin refuses (see ``vulcan_forward.vulcan_chem.bz_margin``)."""
+    bound = getattr(chem, "co_bz_bound", None)
+    if bound is None or getattr(chem, "co_bz_margin", None) is None:
+        raise RuntimeError(
+            "the sibling forward engine does not expose co_bz_bound / "
+            "co_bz_margin (the fixed-O direction's oxygen-reservoir "
+            "margin): the AD dlnCO row cannot be certified. Upgrade "
+            "vulcan-forward (>= 0.14) or use jac_method='fd'.")
+    if y is None:
+        margin, where = float(bound), "build column"
+    else:
+        margin, where = float(chem.co_bz_margin(y)), "converged column"
+        if log is not None:
+            log(f"[fwd] AD dlnCO margin: build column {build_margin:.3g}, "
+                f"converged column {margin:.3g} (gate {CO_BZ_MIN_AD:g})")
+    if not margin > CO_BZ_MIN_AD:
+        raise RuntimeError(
+            f"The AD Jacobian for dlnCO is not available at C/O = "
+            f"{co_ratio:g}: the {where}'s oxygen-reservoir margin is "
+            f"{margin:.3g} and it needs > {CO_BZ_MIN_AD:g} (roughly C/O below "
+            f"{math.exp(-CO_BZ_MIN_AD):.2f}), the margin before the fixed-O "
+            "direction exhausts the oxygen-only carriers. Use finite "
+            "differences.")
+    return margin
 
 
 # Cloud-deck Fisher rows: RT-only like lnR0 (one central difference or an RT
@@ -295,6 +399,12 @@ NZ_RANGE = (60, 150)            # equal counts on distinct chemistry and RT grid
 YCONV_RANGE = (1.0e-4, 1.0e-2)  # steady-state convergence tolerance (1e-3 is the
                                 # validated "high" tier; tighter costs runtime
                                 # but is safe -- the longdy gate is loud)
+# The runner certifies on EITHER branch: tight (yconv_cri, slope_cri) or loose
+# (yconv_min, slope_min). Every shipped solve exits on the loose one, so
+# yconv_cri alone cannot tighten a run; this is the knob that can. Its cfg
+# default is the upstream 0.1, and it may only tighten (never above it).
+YCONV_MIN_DEFAULT = 0.1
+YCONV_MIN_RANGE = (1.0e-4, 0.1)
 
 # Modelable temperature window -- reject, never clip. Conservative next to the
 # published ExoMolOP tables (100-3400 K): nothing above 2980 K is validated.
@@ -309,33 +419,6 @@ TP_PARAM_NAMES = {
     "guillot": ["Tirr", "Tint", "log_kappa", "log_gamma"],
     "file": [],
 }
-# Display SYMBOL, UNIT and friendly name per parameter for the GUI. The symbol
-# MUST match the unit's log base: metallicity and Kzz are dex (log10), so
-# [M/H] and log Kzz, never "ln"; C/O is the number ratio N_C/N_O (no unit).
-PARAM_SYMBOLS = {"lnZ": "[M/H]", "dlnCO": "C/O", "lnKzz": "log Kzz",
-                 "Tirr": "T_irr", "Tint": "T_int",
-                 "log_kappa": "log κ_IR", "log_gamma": "log γ",
-                 "log_kappa_cloud": "log κ_cloud", "alpha_cloud": "α_cloud"}
-PARAM_UNITS = {"lnZ": "dex", "dlnCO": "", "lnKzz": "dex",
-               "Tirr": "K", "Tint": "K",
-               "log_kappa": "dex", "log_gamma": "dex",
-               "log_kappa_cloud": "dex", "alpha_cloud": ""}
-PARAM_LABELS = {"lnZ": "Metallicity", "dlnCO": "C/O ratio",
-                "lnKzz": "Vertical mixing (Kzz)",
-                "Tirr": "Guillot T_irr",
-                "Tint": "Guillot T_int", "log_kappa": "Guillot log κ_IR",
-                "log_gamma": "Guillot log γ",
-                "log_kappa_cloud": "Cloud deck log κ (at 3.5 um)",
-                "alpha_cloud": "Cloud deck slope α"}
-
-
-def param_axis(name: str) -> str:
-    """Axis/column label for a parameter: 'Symbol [unit]', or bare 'Symbol'
-    when it is dimensionless (e.g. '[M/H] [dex]', 'C/O', 'T_irr [K]')."""
-    u = PARAM_UNITS[name]
-    return f"{PARAM_SYMBOLS[name]} [{u}]" if u else PARAM_SYMBOLS[name]
-
-
 # tp_mode="file" helpers (light path: no vulcan_jax/jax imports)
 
 def shipped_tp_table_name(planet: str) -> str:
@@ -571,6 +654,7 @@ _PARAM_KEYS_READ = frozenset({
     "star_teff", "top_flux", "tp_file", "tp_file_path",
     "tp_file_sha1", "tp_mode", "use_condense", "use_moldiff", "use_photo",
     "use_rayleigh", "use_settling", "use_vm_mol", "wo_mols", "yconv_cri",
+    "yconv_min",
 })
 # Output-only keys of the canonical dict itself: share_config validates a SAVED
 # payload by feeding it back in, so echo fields must not read as unknown.
@@ -634,9 +718,11 @@ def canonical_params(params: dict) -> dict:
     if network not in NETWORKS:
         raise ValueError(
             f"unknown network {network!r}: choose from {list(NETWORKS)} "
-            "('sncho' = the shipped S-N-C-H-O kinetics network, the default; "
-            "'ncho' = the sulfur-free N-C-H-O network, a cheaper solve with "
-            "no SO2/H2S/CS2/OCS).")
+            "('sncho' = the shipped S-N-C-H-O kinetics network, the default "
+            "and the only science-validated one; 'ncho' = the sulfur-free "
+            "N-C-H-O network, a cheaper solve with no SO2/H2S/CS2/OCS; "
+            "'sncho2025' = current upstream's S-N-C-H-O file, EXPERIMENTAL, "
+            "the carbon-rich path).")
     # tp_mode="file": resolve + validate the table NOW (numpy parse + hash, no
     # engine imports) so a bad upload fails at the API and the cache key is
     # content-addressed, never path-addressed.
@@ -672,6 +758,15 @@ def canonical_params(params: dict) -> dict:
     if not YCONV_RANGE[0] <= yconv_cri <= YCONV_RANGE[1]:
         raise ValueError(f"yconv_cri={yconv_cri:g} outside the validated range "
                          f"{YCONV_RANGE} (steady-state convergence tolerance)")
+    yconv_min = float(params.get("yconv_min", YCONV_MIN_DEFAULT))
+    if not YCONV_MIN_RANGE[0] <= yconv_min <= YCONV_MIN_RANGE[1]:
+        raise ValueError(f"yconv_min={yconv_min:g} outside the validated range "
+                         f"{YCONV_MIN_RANGE} (the loose certification branch)")
+    if yconv_min < yconv_cri:
+        raise ValueError(
+            f"yconv_min={yconv_min:g} is below yconv_cri={yconv_cri:g}: the "
+            "tight branch could then never certify. Raise yconv_min or lower "
+            "yconv_cri.")
     sflux = str(params.get("sflux", sysd["sflux"]))
     if sflux not in planets.SFLUX_CHOICES:
         raise ValueError(f"unknown stellar UV spectrum {sflux!r} "
@@ -693,6 +788,7 @@ def canonical_params(params: dict) -> dict:
                                            star_ref["metallicity"])), 2),
         "nz": nz,
         "yconv_cri": round(yconv_cri, 6),
+        "yconv_min": round(yconv_min, 6),
         "rp_rjup": round(float(params.get("rp_rjup", sysd["rp_rjup"])), 4),
         "gs_cgs": round(float(params.get("gs_cgs", sysd["gs_cgs"])), 1),
         "rstar_rsun": _rstar,
@@ -835,12 +931,13 @@ def canonical_params(params: dict) -> dict:
                 "molecule via extra_mols.")
         _req = set(cp["wo_mols"])
         cp["wo_mols"] = [m for m in _active if m in _req]
-    if not 0.1 <= cp["co_ratio"] < CO_MAX:
+    _co_lo, _co_hi = co_bounds(network)
+    if not _co_lo <= cp["co_ratio"] <= _co_hi:
         raise ValueError(
-            f"co_ratio={cp['co_ratio']} outside [0.1, {CO_MAX:g}): carbon-rich "
-            "C/O is not certified under the shipped settings (the solve "
-            "exhausts count_max without a steady state), so it is refused "
-            "before any solve")
+            f"co_ratio={cp['co_ratio']} outside [{_co_lo:g}, {_co_hi:g}] for "
+            f"network={network!r}, so it is refused before any solve. The "
+            "carbon-rich path is network='sncho2025' (experimental) or the "
+            "sulfur-free 'ncho'.")
     if not 0.1 <= cp["met_x_solar"] <= 100.0:
         raise ValueError(
             f"met_x_solar={cp['met_x_solar']} outside [0.1, 100] x solar")
@@ -879,10 +976,10 @@ def canonical_params(params: dict) -> dict:
     # window-check every stencil point for the same reason.
     if cp["jac_method"] == "fd":
         for name, key, rng in (("lnZ", "met_x_solar", (0.1, 100.0)),
-                               ("dlnCO", "co_ratio", (0.1, CO_MAX))):
+                               ("dlnCO", "co_ratio", co_bounds(network))):
             if name not in cp["fisher_params"]:
                 continue
-            offs, h = fd_stencil(name, cp[key])
+            offs, h = fd_stencil(name, cp[key], rng[1])
             pts = [cp[key] * float(np.exp(s * h)) for s in offs]
             if not all(rng[0] <= p <= rng[1] for p in pts):
                 raise ValueError(
@@ -893,11 +990,13 @@ def canonical_params(params: dict) -> dict:
     # --- condensation: detection-only -- refuse every derivative combo -----
     # (the "91% wrong" and "not a 9% mismatch" wording is test-pinned)
     if cp["use_condense"]:
-        if network == "ncho":
+        if network != "sncho":
             raise ValueError(
                 "condensation (use_condense) requires network='sncho': the "
                 "certified recipe condenses S8, which does not exist in the "
-                "sulfur-free ncho network. Keep the sncho network or turn "
+                "sulfur-free ncho network, and its conver_ignore list was "
+                "tuned on the 89-species file, not on sncho2025's added C3 "
+                "and H2CS species. Keep the sncho network or turn "
                 "condensation off.")
         if cp["fisher_params"]:
             raise ValueError(
@@ -1244,6 +1343,7 @@ def _assemble_chem(cp: dict, log):
 
     profile = _rt_profile_common(cp, config)
     profile["yconv_cri"] = cp["yconv_cri"]
+    profile["yconv_min"] = cp["yconv_min"]
     # exact-elemental abundance map (see the vulcan_chem docstring)
     profile["abundance_mode"] = "elemental"
     profile["co_mode"] = "fixed_O"
@@ -1435,28 +1535,10 @@ def run_model(params: dict, log=print) -> Path:
     chem = _build_chem()
     _bz_build = _bz_warm = float("nan")   # AD dlnCO margins (build / converged column)
     if cp["jac_method"] == "ad" and "dlnCO" in cp["fisher_params"]:
-        # Refuse the AD dlnCO row within one FD stencil of O-exhaustion (see
-        # CO_BZ_MIN_AD at module top) -- here, straight after the build that
-        # sets co_bz_bound, so the refusal costs no solve; the same margin is
-        # re-checked on the converged column the tangent starts from, below.
-        # A missing engine attribute means the check cannot run: refuse,
-        # never pass silently.
-        _bz = getattr(chem, "co_bz_bound", None)
-        if _bz is None or getattr(chem, "co_bz_margin", None) is None:
-            raise RuntimeError(
-                "the sibling forward engine does not expose co_bz_bound / "
-                "co_bz_margin (the fixed-O direction's oxygen-reservoir "
-                "margin): the AD dlnCO row cannot be certified. Upgrade "
-                "vulcan-forward (>= 0.14) or use jac_method='fd'.")
-        _bz_build = float(_bz)
-        if not _bz_build > CO_BZ_MIN_AD:
-            raise RuntimeError(
-                f"The AD Jacobian for dlnCO is not available at C/O = "
-                f"{cp['co_ratio']:g}: it needs co_bz_bound > {CO_BZ_MIN_AD:g} "
-                f"(here {_bz_build:.3g}; roughly C/O below "
-                f"{math.exp(-CO_BZ_MIN_AD):.2f}), the margin before the "
-                "fixed-O direction exhausts the oxygen-only carriers. Use "
-                "finite differences.")
+        # Straight after the build that sets co_bz_bound, so the refusal costs
+        # no solve; re-checked below on the converged column the tangent
+        # actually starts from.
+        _bz_build = check_ad_co_margin(chem, cp["co_ratio"])
 
     T_check = _check_t_window(tp_eval, theta, chem.p_bar, log,
                               T_base=getattr(chem, "T_base", None))
@@ -1587,41 +1669,11 @@ def run_model(params: dict, log=print) -> Path:
     # --- chemistry: certified cold solves (no warm continuation) ------------
     t0 = time.time()
     th0 = jnp.asarray(theta)
-    # (stage, accept_count, longdy, longdydt, branch, aflux_change, cell) for
-    # every PASSED gate; branch 1 = tight (yconv_cri), 2 = loose (yconv_min),
-    # cell = the 'species@z<layer>' whose change sets longdy.
+    # one CONV_FIELDS tuple per PASSED gate
     conv_cert = []
-    # Certification is the runner's own CANONICAL gate (ConvDiag.conv_normal AND
-    # longdy < yconv_min), recomputed at the exit state. Never loosen it.
-    _BRANCH = {1: "tight (yconv_cri)", 2: "loose (yconv_min)"}
 
     def _check_converged(diag, stage):
-        ac = int(diag.accept_count)
-        longdy = float(diag.longdy)
-        branch = int(diag.conv_branch)
-        z = int(diag.cell_layer)
-        cell = f"{_species_now[int(diag.cell_species)]}@z{z}"
-        detail = (f"longdy={longdy:.3g}, longdydt={float(diag.longdydt):.3g}/s, "
-                  f"branch {_BRANCH.get(branch, 'none')}, "
-                  f"aflux_change={float(diag.aflux_change):.3g}, "
-                  f"t={float(diag.t):.3g} s, dt={float(diag.dt):.3g} s; "
-                  f"controlling cell {cell} at {float(chem.p_bar[z]):.3g} bar, "
-                  f"VMR {float(diag.cell_vmr):.3g}")
-        if not (bool(diag.conv_normal) and longdy < chem.yconv_min):
-            how = (f"hit the count_max={chem.count_max} cap" if ac >= int(chem.count_max)
-                   else f"exited at {ac} accepted steps without the runner's "
-                        "canonical certification (stall fallback / hybrid "
-                        "vm_mol phase-flip / photolysis flux still changing)")
-            raise RuntimeError(
-                f"chemistry did NOT converge ({stage}: {detail}; "
-                f"gate yconv_min={chem.yconv_min:g}, "
-                f"conv_normal={bool(diag.conv_normal)}; {how}). This "
-                "parameter corner has no certified steady state -- adjust "
-                "T-P / Kzz / composition (or the convergence settings) "
-                "rather than trusting an unconverged spectrum.")
-        log(f"[fwd] {stage}: certified at {ac} accepted steps ({detail})")
-        conv_cert.append((stage, ac, longdy, float(diag.longdydt), branch,
-                          float(diag.aflux_change), cell))
+        conv_cert.append(check_converged(diag, stage, _species_now, chem, log))
 
     # Single certified cold solve, unless an identical chemistry-relevant set
     # already solved: the chem-level cache stores the RAW column, so an RT-only
@@ -1834,27 +1886,6 @@ def run_model(params: dict, log=print) -> Path:
             _check_converged(diag_b, stage)
             return np.asarray(make_depth_fn(chem_b)(y_b, jnp.asarray(th)))
 
-        def _fd_row(name, j1, j2, h):
-            # j1 / j2: the same scheme's estimate at step h and 2h
-            if not (np.isfinite(j1).all() and np.isfinite(j2).all()):
-                raise RuntimeError(
-                    f"FD Jacobian for {name}: non-finite entries")
-            scale = float(np.max(np.abs(j1)))
-            if scale == 0.0:
-                return j1, 0.0     # no spectral response: exact zero row
-            err = float(np.max(np.abs(j1 - j2)) / scale)
-            if err > FD_CONSISTENCY_TOL:
-                raise RuntimeError(
-                    f"FD Jacobian for {name} FAILED the step-size consistency "
-                    f"check: max|J(h) - J(2h)| / max|J(h)| = {err:.3f} > "
-                    f"{FD_CONSISTENCY_TOL} (h = {h:g}). The row is dominated "
-                    "by solver convergence noise or curvature -- tighten "
-                    "yconv_cri (1e-3 or 1e-4), raise nz, or adjust "
-                    "forward.FD_STEPS. An uncertified derivative is never "
-                    "reported.")
-            return (4.0 * j1 - j2) / 3.0, err   # Richardson: O(h^4) central,
-            #                                      O(h^3) one-sided
-
         def _ad_theta_depth_diag(th):
             # warm continuation from the converged column: the primal is a
             # warm re-converge plus the full spectrum, the jvp the validated
@@ -1873,16 +1904,9 @@ def run_model(params: dict, log=print) -> Path:
             # The build-time co_bz_bound is a proxy (FastChem equilibrium
             # column); the seed map recomputes the O split from the converged
             # column the tangent starts from, so gate on that column too.
-            _bz_warm = float(chem.co_bz_margin(np.asarray(y_sol)))
-            log(f"[fwd] AD dlnCO margin: build column {_bz_build:.3g}, "
-                f"converged column {_bz_warm:.3g} (gate {CO_BZ_MIN_AD:g})")
-            if not _bz_warm > CO_BZ_MIN_AD:
-                raise RuntimeError(
-                    f"The AD Jacobian for dlnCO is not available at C/O = "
-                    f"{cp['co_ratio']:g}: the converged column's "
-                    f"oxygen-reservoir margin is {_bz_warm:.3g} (build column "
-                    f"{_bz_build:.3g}; it needs > {CO_BZ_MIN_AD:g}). Use "
-                    "finite differences.")
+            _bz_warm = check_ad_co_margin(chem, cp["co_ratio"],
+                                          y=np.asarray(y_sol),
+                                          build_margin=_bz_build, log=log)
         if _ad_chem_rows:
             # One plain jvp per chemistry-theta row, NEVER vmap over the
             # tangent directions: the batched tangent through the solver's
@@ -1962,10 +1986,12 @@ def run_model(params: dict, log=print) -> Path:
             dvals = {}
             if name in FD_COMP_PARAMS:
                 # composition direction: FastChem re-init + certified cold
-                # solve per stencil point (central, or one-sided away from
-                # C/O = 1 -- see fd_stencil)
-                offs, h = fd_stencil(name, cp["met_x_solar" if name == "lnZ"
-                                              else "co_ratio"])
+                # solve per stencil point (central, or one-sided away from the
+                # network's C/O bound -- see fd_stencil)
+                offs, h = fd_stencil(name,
+                                     cp["met_x_solar" if name == "lnZ"
+                                        else "co_ratio"],
+                                     co_bounds(cp["network"])[1])
                 for s in offs:
                     f = float(np.exp(s * h))
                     if name == "lnZ":      # all metals together; C/O preserved
@@ -2000,7 +2026,7 @@ def run_model(params: dict, log=print) -> Path:
             method = "fd-central" if len(offs) == 4 else "fd-onesided"
             f0 = (None if method == "fd-central"
                   else np.asarray(depth_from_y(y_sol, th0)))
-            jac[j], err = _fd_row(name, *fd_estimates(offs, dvals, f0, h), h)
+            jac[j], err = fd_row(name, *fd_estimates(offs, dvals, f0, h), h)
             fd_h.append(h)
             fd_err.append(err)
             row_method.append(method)
