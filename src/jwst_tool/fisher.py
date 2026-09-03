@@ -44,17 +44,14 @@ REL_EIG_TOL = 1e-10
 # inf. Basis-invariant subspace norm, never a single eigenvector's component.
 NULL_LOAD_TOL = 1e-6
 
-# Widths at or past which the reported number is not a constraint, in the
-# FITTED coordinate. dlnCO is the only row whose display transform is a
-# LINEARIZATION (display_sigma: sigma_CO = C/O * sigma_lnCO); every other row
-# converts exactly (identity, or 1/ln10 for dex) and reports its width
-# verbatim however large it is. At sigma_lnCO = 1 that first-order number
-# equals C/O itself, so "C/O = 0.55 +/- 0.55" no longer describes the
-# multiplicative interval (a factor e each way) it stands for. Such a
-# direction reads UNCONSTRAINED (inf), the same as a numerically null one --
-# never a number that looks like a weak measurement. The value is derived,
-# not tuned: it is where sigma_CO reaches C/O. (The drawn curve is the
-# lognormal in C/O, which needs no such cut; the cut is about the table.)
+# Widths at or past which no number is reported, in the FITTED coordinate.
+# This is a CHOSEN policy threshold, not a derived one: sigma_lnCO = 1 is one
+# e-fold each way, which is where a C/O width stops being worth printing. It
+# also guards the numerics -- at sigma_lnCO of 41-920 (niriss_soss_ord2, see
+# notes.md) a shifted mock center collapses the curve grid. It is NOT the
+# reporting gate: format_co_width decides separately whether a PHYSICAL range
+# can be quoted, from the solver's own supported band, and keeps the dex
+# width either way.
 UNINFORMATIVE_SIGMA = {"dlnCO": 1.0}
 
 
@@ -198,10 +195,15 @@ def param_axis(name: str) -> str:
 def display_sigma(name: str, sigma: float, co_eval: float | None = None) -> float:
     """Internal-unit sigma -> display-unit sigma.
 
-    C/O (``dlnCO``) is reported as an ABSOLUTE number ratio: the internal sigma is
-    in delta-ln(C/O), so to first order sigma_CO = C/O * sigma_lnCO. ``co_eval``
-    is the atmosphere's C/O at the evaluation point (params_json co_ratio);
-    it is REQUIRED for dlnCO (a loud error beats a silently-wrong scale)."""
+    C/O (``dlnCO``) is reported as an ABSOLUTE number ratio: the internal sigma
+    is in delta-ln(C/O) and the local Jacobian is exactly C/O, so
+    sigma_CO = C/O * sigma_lnCO is the exact Jacobian rescaling of the local
+    Fisher width -- NOT the standard deviation of the nonlinear transformed
+    distribution, and not what any surface prints. It survives only because
+    meta["target_prec"] is a user-entered target in absolute C/O; display goes
+    through format_co_width. ``co_eval`` is the atmosphere's C/O at the
+    evaluation point (params_json co_ratio); it is REQUIRED for dlnCO (a loud
+    error beats a silently-wrong scale)."""
     if name == "dlnCO":
         if co_eval is None:
             raise ValueError(
@@ -209,6 +211,56 @@ def display_sigma(name: str, sigma: float, co_eval: float | None = None) -> floa
                 "to report an absolute C/O uncertainty: sigma_CO = C/O * sigma_lnCO.")
         return sigma * co_eval
     return sigma * _TO_DISPLAY.get(name, 1.0)
+
+
+def co_interval(center: float, sigma_ln: float, k: float = 1.0) -> tuple:
+    """(lo, hi) physical C/O at k sigma: center * exp(+-k*sigma_ln).
+
+    Positive by construction. These are the k-sigma quantiles of the
+    log-coordinate Gaussian the panel draws -- exact UNDER that local
+    approximation, which is a quadratic expansion at the input C/O. They are
+    not a globally evaluated credible interval; see format_co_width."""
+    center, w = float(center), float(sigma_ln) * float(k)
+    if not (np.isfinite(center) and center > 0.0):
+        raise ValueError(f"co_interval: center must be a finite C/O > 0, "
+                         f"got {center!r}")
+    if not (np.isfinite(w) and w > 0.0):
+        raise ValueError(f"co_interval: sigma_ln*k must be finite and > 0, "
+                         f"got {w!r}")
+    return (center * np.exp(-w), center * np.exp(w))
+
+
+def format_co_width(center: float, sigma_ln: float, bounds: tuple,
+                    k: float = 1.0, qualify_coord: bool = False) -> str:
+    """The C/O width string. dex is PRIMARY -- it is the coordinate the Fisher
+    Gaussian lives in -- and is ALWAYS reported when finite: a wide dex width
+    is a weak local constraint, not the absence of one.
+
+    Independently, the physical C/O range is appended only when the center AND
+    the interval stay inside ``bounds`` (forward.co_bounds(network,
+    use_photo)). Outside it the forward model cannot be evaluated, so a mapped
+    range there would extrapolate a local derivative; the width is marked
+    "(local)" instead. The CENTER is not required to sit in the band --
+    mock_center_co shifts a recovered center multiplicatively and a broad mode
+    lands outside it legitimately, which is a local result, never an error.
+
+    ``qualify_coord`` names the coordinate the dex belongs to, for surfaces
+    with no C/O axis beside them (the constraint table). PLAIN TEXT, never
+    mathtext: this string also lands in a Streamlit table cell and a CSV."""
+    lo_b, hi_b = float(bounds[0]), float(bounds[1])
+    if not (np.isfinite(lo_b) and np.isfinite(hi_b) and 0.0 < lo_b < hi_b):
+        raise ValueError(f"format_co_width: bounds must be finite, positive "
+                         f"and ordered, got {bounds!r}")
+    center = float(center)
+    if not (np.isfinite(center) and center > 0.0):
+        raise ValueError(f"format_co_width: center must be a finite C/O > 0, "
+                         f"got {center!r}")
+    dex = (f"\u00b1{float(sigma_ln) * float(k) / _LN10:.3g} dex"
+           + (" in log10(C/O)" if qualify_coord else ""))
+    lo, hi = co_interval(center, sigma_ln, k=k)
+    if lo_b <= center <= hi_b and lo_b <= lo and hi <= hi_b:
+        return f"{dex} (C/O {lo:.3g}\u2013{hi:.3g})"
+    return f"{dex} (local)"
 
 
 def _segment_offset_rows(result: dict) -> np.ndarray:

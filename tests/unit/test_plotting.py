@@ -293,8 +293,9 @@ def test_summary_legends_sit_inside_their_axes_and_cover_no_data():
     fig = _summary_fig(with_sigma=True)
     try:
         for i, ax in enumerate(fig.axes[1:], 1):
-            assert "±" in ax.get_title(), \
-                f"panel title quotes no width: {ax.get_title()!r}"
+            _t = ax.get_title()
+            assert "±" in _t or "dex" in _t, \
+                f"panel title quotes no width: {_t!r}"
             assert not ax.collections, \
                 f"axes{i} regained a shaded band ({len(ax.collections)})"
     finally:

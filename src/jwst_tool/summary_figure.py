@@ -1,4 +1,4 @@
-"""One-figure proposal summary: spectra + marginalized forecast posteriors.
+"""One-figure proposal summary: spectra + marginalized forecast densities.
 
 Pure matplotlib + numpy, importable and renderable without Streamlit (the GUI
 builds the input dicts; tests render headless). The composition takes plain
@@ -29,8 +29,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
-from matplotlib.ticker import (LogLocator, MaxNLocator, NullLocator,
-                              ScalarFormatter)
+from matplotlib.ticker import (FuncFormatter, LogLocator, MaxNLocator,
+                              NullFormatter, NullLocator, ScalarFormatter)
 
 from jwst_tool import plotting
 
@@ -182,12 +182,25 @@ def _validate_panels(posterior_panels) -> list[dict]:
                 _mu = float(_mu)
                 if not np.isfinite(_mu):
                     raise ValueError(f"{cw}: mu must be finite, got {_mu!r}")
-            # curve_family "lognormal" marks a multiplicative width (C/O), so
-            # the automatic x-window is taken in ln theta and stays positive
+            # curve_family "ln_gaussian" marks a multiplicative width (C/O):
+            # the panel goes to a log x axis and the automatic window is taken
+            # in ln theta, at the width the curve was BUILT with (sigma_ln),
+            # never sigma/mu -- those differ once a mock draw shifts mu.
             _fam = c.get("curve_family")
+            _sln = c.get("sigma_ln")
+            if _sln is not None:
+                _sln = float(_sln)
+                if not (np.isfinite(_sln) and _sln > 0.0):
+                    raise ValueError(f"{cw}: sigma_ln must be finite and > 0, "
+                                     f"got {_sln!r}")
+            if _fam == "ln_gaussian" and _sln is None:
+                raise ValueError(f"{cw}: an ln_gaussian curve must carry "
+                                 "sigma_ln (its multiplicative width)")
+            _wt = c.get("width_text")
             curves.append(dict(label=str(_req(c, "label", cw)),
                                theta=theta, pdf=pdf,
-                               mu=_mu, sigma=_sg,
+                               mu=_mu, sigma=_sg, sigma_ln=_sln,
+                               width_text=(None if _wt is None else str(_wt)),
                                curve_family=(None if _fam is None
                                              else str(_fam)),
                                kind=(None if c.get("kind") is None
@@ -476,7 +489,7 @@ def _fmt_val(v: float) -> str:
 
 def _plot_posterior_panel(axp, pan: dict,
                           xlim: tuple | None = None) -> None:
-    """One marginalized forecast posterior: its curve, and the width QUOTED in
+    """One marginalized forecast density: its curve, and the width QUOTED in
     the panel title.
 
     ONE PANEL PER PARAMETER, never a merged box with twin x-axes: the curves
@@ -500,8 +513,11 @@ def _plot_posterior_panel(axp, pan: dict,
         # the title cannot quote one width without silently picking a source,
         # so each ENTRY carries its own.
         _lab = str(c["label"])
-        if c["sigma"] is not None and len(pan["curves"]) > 1:
-            _lab = f"{_lab}: ±{_fmt_val(c['sigma'])}"
+        _wt = c.get("width_text")
+        if _wt is None and c["sigma"] is not None:
+            _wt = f"±{_fmt_val(c['sigma'])}"          # generic panels
+        if _wt and len(pan["curves"]) > 1:
+            _lab = f"{_lab}: {_wt}"
         axp.plot(theta, pdf, color=c["color"], ls=c["ls"], lw=c["lw"],
                  zorder=2, label=_lab)
     if pan["center"] is not None:
@@ -514,11 +530,10 @@ def _plot_posterior_panel(axp, pan: dict,
     _q = _sized[0] if len(_sized) == 1 else None
     if _q is not None:
         _mu = _q["mu"] if _q["mu"] is not None else pan["center"]
-        axp.set_title(
-            f"{pan['axis_label']} = {_fmt_val(_mu)} ± {_fmt_val(_q['sigma'])}"
-            if _mu is not None
-            else f"{pan['axis_label']}: ± {_fmt_val(_q['sigma'])}",
-            fontsize=_AX_LBL)
+        _wt = _q.get("width_text") or f"± {_fmt_val(_q['sigma'])}"
+        axp.set_title(f"{pan['axis_label']} = {_fmt_val(_mu)}; {_wt}"
+                      if _mu is not None
+                      else f"{pan['axis_label']}: {_wt}", fontsize=_AX_LBL)
     # posteriors.gaussian_curve builds its grid as center +/- 5 sigma, where
     # the curve is visually zero across most of the axis, so the automatic
     # window clips to the widest drawn curve at +/-_XLIM_SIGMA (still >99.7% of
@@ -532,10 +547,11 @@ def _plot_posterior_panel(axp, pan: dict,
         for c in pan["curves"]:
             if c["mu"] is None or c["sigma"] is None:
                 continue
-            if c.get("curve_family") == "lognormal":
-                # multiplicative width (C/O): sigma is the first-order
-                # C/O * sigma_ln, so the ln-space window is mu * exp(+-X s)
-                _s_ln = _XLIM_SIGMA * c["sigma"] / c["mu"]
+            if c.get("curve_family") == "ln_gaussian":
+                # multiplicative width: window taken in ln theta at the width
+                # the curve was BUILT with, never sigma/mu (equal only when
+                # the mock draw left the center unmoved)
+                _s_ln = _XLIM_SIGMA * c["sigma_ln"]
                 _spans.append((c["mu"] * float(np.exp(-_s_ln)),
                                c["mu"] * float(np.exp(_s_ln))))
             else:
@@ -549,8 +565,24 @@ def _plot_posterior_panel(axp, pan: dict,
                 _lo, _hi = min(_lo, pan["center"]), max(_hi, pan["center"])
             if _hi > _lo:
                 axp.set_xlim(_lo, _hi)
-    # a narrow window needs a tick count that fits the panel's width
-    axp.xaxis.set_major_locator(MaxNLocator(nbins=5, steps=[1, 2, 2.5, 5, 10]))
+    # A multiplicative-width panel shows PHYSICAL values on a LOG axis (house
+    # style: never logged values on a linear axis). The default log locator
+    # emits no tick inside a sub-decade window and dozens across a wide one,
+    # so the subdivisions follow the span. Otherwise: a narrow window needs a
+    # tick count that fits the panel's width.
+    if pan["curves"] and all(c.get("curve_family") == "ln_gaussian"
+                             for c in pan["curves"]):
+        axp.set_xscale("log")
+        _lo, _hi = axp.get_xlim()
+        _dec = np.log10(_hi / _lo)
+        _subs = "all" if _dec <= 1.2 else ((1., 2., 3., 5.) if _dec <= 2.5
+                                           else (1.,))
+        axp.xaxis.set_major_locator(LogLocator(base=10.0, subs=_subs))
+        axp.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
+        axp.xaxis.set_minor_formatter(NullFormatter())
+    else:
+        axp.xaxis.set_major_locator(MaxNLocator(nbins=5,
+                                                steps=[1, 2, 2.5, 5, 10]))
     axp.set_xlabel(pan["axis_label"], fontsize=_AX_LBL)
     axp.set_yticks([])
     axp.tick_params(labelsize=_TICK)

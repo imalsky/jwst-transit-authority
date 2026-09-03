@@ -322,3 +322,49 @@ def test_fisher_transits_to_target_limits():
     assert tt["reachable"]
     tt2 = fisher.transits_to_target(_fisher_result(100.0), names, "lnZ", 1e9)
     assert np.isfinite(tt2["sig_inf"]) and tt2["sig_inf"] > 0.0
+
+
+def test_co_width_keeps_the_dex_and_gates_only_the_physical_range():
+    """dex is always reported when finite -- a 0.4 dex width IS a weak local
+    constraint, not an absence of one. Only the physical range is gated, on
+    whether the center AND the interval stay inside the network's supported
+    C/O band."""
+    bounds = (0.1, 0.99)                     # sncho, photolysis on
+    lo, hi = fisher.co_interval(0.55, 0.0745, k=1.0)
+    assert (lo, hi) == pytest.approx((0.55 * np.exp(-0.0745),
+                                      0.55 * np.exp(0.0745)), rel=1e-12)
+    # informative mode: range fits at 1 and 3 sigma
+    assert fisher.format_co_width(0.55, 0.0745, bounds) == \
+        "±0.0324 dex (C/O 0.511–0.593)"
+    assert fisher.format_co_width(0.55, 0.0745, bounds, k=3.0,
+                                  qualify_coord=True) == \
+        "±0.0971 dex in log10(C/O) (C/O 0.44–0.688)"
+    # MIRI LRS: the width survives, the range does not
+    assert fisher.format_co_width(0.55, 0.9218, bounds) == "±0.4 dex (local)"
+    assert fisher.format_co_width(0.55, 0.9218, bounds, k=3.0,
+                                  qualify_coord=True) == \
+        "±1.2 dex in log10(C/O) (local)"
+    # plain text only: this string also lands in a Streamlit cell and a CSV
+    assert "$" not in fisher.format_co_width(0.55, 0.9218, bounds)
+
+
+def test_format_co_width_accepts_an_out_of_domain_mock_center():
+    """mock_center_co shifts a recovered center MULTIPLICATIVELY, so a broad
+    mode legitimately lands outside the solver band. That is a local result,
+    never an error -- raising there would crash a valid MIRI realization."""
+    assert fisher.format_co_width(1.27, 0.9218, (0.1, 0.99)) == \
+        "±0.4 dex (local)"
+    assert fisher.format_co_width(0.05, 0.05, (0.1, 0.99)) == \
+        "±0.0217 dex (local)"
+
+
+@pytest.mark.parametrize("bounds,center", [((0.99, 0.1), 0.55),
+                                           ((0.0, 0.99), 0.55),
+                                           ((0.1, np.inf), 0.55),
+                                           ((0.1, 0.99), 0.0),
+                                           ((0.1, 0.99), np.nan)])
+def test_format_co_width_validates_bounds_and_center(bounds, center):
+    """bounds finite, positive and ordered; center finite and positive. The
+    center is NOT required to lie inside the bounds."""
+    with pytest.raises(ValueError):
+        fisher.format_co_width(center, 0.1, bounds)

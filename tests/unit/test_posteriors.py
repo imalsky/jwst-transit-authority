@@ -41,7 +41,7 @@ CO = 0.55
 def test_curves_match_fisher_and_are_honestly_labeled():
     """The statistical core in one place: honesty labels, sigma equal to the
     Fisher forecast, the display-unit transforms (dlnCO reported as absolute
-    C/O with the lognormal curve family), a caller grid used verbatim,
+    C/O with the ln_gaussian curve family), a caller grid used verbatim,
     and a LIST of results combining via combined_forecast."""
     r = _result()
     out = posteriors.marginalized_posteriors(r, FREE, CENTERS, co_eval=CO)
@@ -57,21 +57,24 @@ def test_curves_match_fisher_and_are_honestly_labeled():
         assert rec["sigma_display"] == pytest.approx(want, rel=1e-12)
         assert rec["center"] == CENTERS[name]
         # Ordinary display coordinates stay Gaussian (pdf integrates to
-        # ~1 on the +/-5-sigma grid); absolute C/O is the lognormal the
-        # ln(C/O) Fisher width induces: positive grid CO*exp(+-5 sigma_ln),
-        # median at CO, unit mass, no clip.
+        # ~1 in d theta on the +/-5-sigma grid); absolute C/O is the
+        # ln_gaussian the ln(C/O) Fisher width induces: positive grid
+        # CO*exp(+-5 sigma_ln), unit mass in d ln(theta) -- the measure we
+        # chose to display -- peaking at CO, no clip.
         theta, pdf = rec["theta"], rec["pdf"]
         # np.trapezoid is NumPy 2.0+; np.trapz was removed in NumPy 2.4
         _trapz = getattr(np, "trapezoid", None) or np.trapz
         if name == "dlnCO":
             s_ln = float(sig[name])
-            assert rec["curve_family"] == "lognormal"
+            assert rec["curve_family"] == "ln_gaussian"
             assert np.all(theta > 0.0)
             assert theta.min() == pytest.approx(CO * np.exp(-5 * s_ln))
             assert theta.max() == pytest.approx(CO * np.exp(5 * s_ln))
-            assert _trapz(pdf, theta) == pytest.approx(1.0, abs=1e-3)
+            lt = np.log(theta)
+            assert _trapz(pdf, lt) == pytest.approx(1.0, abs=1e-3)
+            assert theta[np.argmax(pdf)] == pytest.approx(CO, rel=1e-6)
             below = theta <= CO
-            assert _trapz(pdf[below], theta[below]) == pytest.approx(
+            assert _trapz(pdf[below], lt[below]) == pytest.approx(
                 0.5, abs=5e-3)
         else:
             assert _trapz(pdf, theta) == pytest.approx(1.0, abs=1e-4)
@@ -103,8 +106,8 @@ def test_curves_match_fisher_and_are_honestly_labeled():
             want, rel=1e-12)
 
     # a very broad C/O curve stays positive with its median at the center
-    # (the lognormal needs no clip)
-    curve = posteriors.lognormal_curve(0.55, 1.0)
+    # (the ln_gaussian needs no clip)
+    curve = posteriors.ln_gaussian_curve(0.55, 1.0)
     assert np.all(curve["theta"] > 0.0)
     assert curve["theta"][100] == pytest.approx(0.55)
 
@@ -157,7 +160,7 @@ def test_input_validation_raises():
     with pytest.raises(ValueError):
         posteriors.gaussian_curve(0.0, np.inf)
     with pytest.raises(ValueError):
-        posteriors.lognormal_curve(-0.1, 1.0)
+        posteriors.ln_gaussian_curve(-0.1, 1.0)
 
 
 # --- named combinations ------------------------------------------------------
@@ -368,7 +371,7 @@ def test_mock_center_co_refuses_an_off_scale_draw():
     sig_ln = 0.2
     mu = posteriors.mock_center_co(CO, CO * sig_ln, 0.15)
     assert mu == pytest.approx(CO * np.exp(0.15), rel=1e-12)
-    curve = posteriors.lognormal_curve(mu, sig_ln)
+    curve = posteriors.ln_gaussian_curve(mu, sig_ln)
     assert np.all(np.diff(curve["theta"]) > 0.0)
 
     # unconstrained C/O: a 1-sigma draw in ln(C/O) lands e^40 out
@@ -439,3 +442,24 @@ def test_mock_draw_uses_the_same_sigma_as_the_reported_error_bars():
     # as std = s. 9600 samples -> std known to ~0.7%.
     assert abs(float(z.std()) - 1.0) < 0.05, float(z.std())
     assert abs(float(z.mean())) < 0.05, float(z.mean())
+
+
+def test_ln_gaussian_curve_is_a_normalized_density_per_dln():
+    """The C/O curve keeps the Gaussian normalization and loses only the
+    1/theta Jacobian. We CHOOSE to show density per unit d ln(C/O), so no
+    1/(C/O) Jacobian is applied to the ordinate; the curve therefore
+    integrates to 1 in ln theta and peaks on its own center, not at
+    center*exp(-sigma**2) as a density per unit linear C/O would."""
+    center, s = 0.55, 0.9218
+    c = posteriors.ln_gaussian_curve(center, s)
+    _trapz = getattr(np, "trapezoid", None) or np.trapz
+    assert _trapz(c["pdf"], np.log(c["theta"])) == pytest.approx(1.0,
+                                                                 rel=1e-4)
+    assert c["theta"][int(np.argmax(c["pdf"]))] == pytest.approx(center,
+                                                                 rel=1e-6)
+    assert c["pdf"].max() == pytest.approx(
+        1.0 / (s * np.sqrt(2.0 * np.pi)), rel=1e-12)
+    assert np.all(c["theta"] > 0.0)
+    assert c["pdf"] == pytest.approx(c["pdf"][::-1], rel=1e-9)   # sym. in ln
+    assert not hasattr(posteriors, "lognormal_curve"), \
+        "the density per unit linear C/O is gone, not deprecated"

@@ -1,4 +1,4 @@
-"""Fisher-Gaussian (Laplace) marginalized posterior curves + named mode combos.
+"""Marginalized Fisher-Gaussian forecast densities + named mode combos.
 
 Pure numpy, GUI-independent. Everything here is a LINEARIZED forecast read off
 the same nuisance-augmented Fisher matrices as the constraint table
@@ -9,9 +9,15 @@ units (the fisher-table convention:
 dex for lnZ/lnKzz, absolute C/O number ratio for dlnCO via
 ``fisher.display_sigma``, K for temperatures; a parameter unknown to
 ``fisher.PARAM_UNITS`` is already in display units and reports unit "").
-The dlnCO curve is a symmetric Gaussian in absolute C/O, clipped at the
-physical boundary C/O = 0 (curves render peak-normalized, so clipping and
-clip-plus-renormalize are identical on screen).
+The dlnCO curve is the normalized marginalized Fisher forecast density in
+ln(C/O), displayed against physical C/O on a LOGARITHMIC axis
+(ln_gaussian_curve). We CHOOSE to show density per unit d ln(C/O) -- a log
+axis does not by itself fix the measure -- and therefore apply NO 1/(C/O)
+Jacobian to the ordinate, so the curve peaks on its own center rather than at
+center*exp(-sigma_ln**2). The builders return unit-area densities; the
+renderer divides by the peak, which is why the visible axis reads "relative
+forecast density". Widths are quoted in dex via fisher.format_co_width, which
+appends a physical C/O range only inside the network's supported band.
 
 HONESTY (baked into every returned record, keys ``kind``/``label``): these
 are linearized Fisher/Cramer-Rao forecasts around the input model under the
@@ -53,8 +59,11 @@ FORECAST_LABEL = (
     "Linearized Fisher (Cramer-Rao) forecast: a Gaussian approximation "
     "in the fitted parameter coordinate, centered on the input model with "
     "the marginalized 1-sigma lower bound as width, under the quoted noise "
-    "model. The absolute C/O curve is clipped at the physical boundary "
-    "C/O = 0. Not a sampled posterior; a "
+    "model. C/O is fitted in ln(C/O) and shown as a density per d ln(C/O) "
+    "against a log C/O axis, with its width in dex; that width is a LOCAL "
+    "quadratic expansion at the input C/O, so a physical C/O range is quoted "
+    "only where it stays inside the selected network's supported band. "
+    "Not a sampled posterior; a "
     "retrieval freeing more parameters under the same assumptions usually "
     "reports lower significance.")
 
@@ -146,22 +155,26 @@ def gaussian_curve(center: float, sigma: float, grid=None) -> dict:
     return dict(theta=theta, pdf=pdf)
 
 
-def lognormal_curve(center: float, sigma_ln: float, grid=None) -> dict:
-    """Lognormal pdf with median ``center`` and ln-space width ``sigma_ln``:
-    the Fisher Gaussian in ln(C/O) mapped to C/O, so the curve is drawn in
-    the coordinate the width was computed in (68% interval center*exp(+-
-    sigma_ln), positive by construction, no clip). Auto grid center*exp(+-
-    _AUTO_SIGMA*sigma_ln (uniform in ln theta) or a caller grid
-    (1-D ascending, > 0). pdf integrates to ~1 over the auto grid.
+def ln_gaussian_curve(center: float, sigma_ln: float, grid=None) -> dict:
+    """The normalized marginalized Fisher forecast density in ln(theta), on a
+    geometric theta grid: the curve for a LOG-scaled physical axis.
+
+    We CHOOSE to show density per unit d ln(theta) -- a logarithmic axis does
+    not by itself fix the measure -- and therefore apply NO 1/theta Jacobian
+    to the ordinate. The curve peaks at ``center`` and is symmetric in
+    ln theta. Auto grid center*exp(+-_AUTO_SIGMA*sigma_ln), or a caller grid
+    (1-D ascending, > 0). This builder returns a UNIT-AREA density in
+    d ln(theta); summary_figure divides by the peak to render it as relative
+    forecast density.
     """
     center = float(center)
     sigma_ln = float(sigma_ln)
     if not (np.isfinite(center) and center > 0.0):
         raise ValueError(
-            f"lognormal_curve: center must be finite and > 0, got {center!r}")
+            f"ln_gaussian_curve: center must be finite and > 0, got {center!r}")
     if not (np.isfinite(sigma_ln) and sigma_ln > 0.0):
         raise ValueError(
-            f"lognormal_curve: sigma_ln must be finite and > 0, got "
+            f"ln_gaussian_curve: sigma_ln must be finite and > 0, got "
             f"{sigma_ln!r} -- an unconstrained (inf) direction has no curve "
             "by design")
     if grid is None:
@@ -172,16 +185,16 @@ def lognormal_curve(center: float, sigma_ln: float, grid=None) -> dict:
     else:
         theta = np.asarray(grid, float)
         if theta.ndim != 1 or theta.size < 2:
-            raise ValueError("lognormal_curve: grid must be a 1-D array with "
+            raise ValueError("ln_gaussian_curve: grid must be a 1-D array with "
                              f"at least 2 points, got shape {theta.shape}")
     if not np.all(np.isfinite(theta)) or np.any(theta <= 0.0):
         raise ValueError(
-            f"lognormal_curve: the grid around center {center!r} at sigma_ln "
+            f"ln_gaussian_curve: the grid around center {center!r} at sigma_ln "
             f"{sigma_ln!r} is unresolvable in float64 or not positive")
     if np.any(np.diff(theta) <= 0.0):
-        raise ValueError("lognormal_curve: grid must be strictly ascending")
+        raise ValueError("ln_gaussian_curve: grid must be strictly ascending")
     z = np.log(theta / center) / sigma_ln
-    pdf = np.exp(-0.5 * z * z) / (theta * sigma_ln * np.sqrt(2.0 * np.pi))
+    pdf = np.exp(-0.5 * z * z) / (sigma_ln * np.sqrt(2.0 * np.pi))
     return dict(theta=theta, pdf=pdf)
 
 
@@ -189,7 +202,7 @@ def marginalized_posteriors(results, free_names: list[str], centers: dict,
                             params: list[str] | None = None,
                             co_eval: float | None = None,
                             grids: dict | None = None) -> dict:
-    """1D marginalized Fisher-Gaussian posterior curves for chosen parameters.
+    """1D marginalized Fisher-Gaussian forecast densities for chosen parameters.
 
     ``results``: one mode result dict, or a list of them (>= 1) treated as
     a combination. Everything goes through ``fisher.combined_forecast``,
@@ -259,21 +272,22 @@ def marginalized_posteriors(results, free_names: list[str], centers: dict,
         if np.isfinite(s_disp):
             grid = grids.get(name) if grids is not None else None
             if name == "dlnCO":
-                # C/O display: the Fisher Gaussian in ln(C/O) mapped to C/O,
-                # a lognormal at the INTERNAL width (the table's sigma_display
-                # stays the first-order C/O * sigma_lnCO); a caller grid is
-                # honored verbatim
-                curve = lognormal_curve(rec["center"], s_int, grid=grid)
-                rec["curve_family"] = "lognormal"
+                # the forecast density in its OWN coordinate, for the panel's
+                # log C/O axis; sigma_display stays the absolute-C/O width
+                # that meta["target_prec"] is compared against
+                curve = ln_gaussian_curve(rec["center"], s_int, grid=grid)
+                rec["curve_family"] = "ln_gaussian"
+                rec["sigma_ln"] = s_int
             else:
                 curve = gaussian_curve(rec["center"], s_disp, grid=grid)
                 rec["curve_family"] = "gaussian"
+                rec["sigma_ln"] = None
             rec.update(constrained=True, theta=curve["theta"],
                        pdf=curve["pdf"])
         else:
             # null Fisher direction: explicitly unconstrained, no curve
             rec.update(constrained=False, theta=None, pdf=None,
-                       curve_family=None)
+                       curve_family=None, sigma_ln=None)
         out_params[name] = rec
 
     return dict(kind=FORECAST_KIND, label=FORECAST_LABEL,

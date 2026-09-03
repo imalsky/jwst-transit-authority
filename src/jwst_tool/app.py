@@ -1908,6 +1908,10 @@ _cpj = json.loads(str(model["params_json"]))
 _ev = ("eclipse" if str(_cpj.get("science_mode", "transmission")) == "emission"
        else "transit")
 co_eval = float(_cpj.get("co_ratio", forward.CO_BASELINE))
+# the band the chemistry can actually be solved in: a mapped C/O range
+# outside it extrapolates a local derivative, so it is not quoted
+co_bounds = forward.co_bounds(str(_cpj.get("network", "sncho")),
+                              bool(_cpj.get("use_photo", True)))
 
 # Staleness guard: results persist in session_state across sidebar edits, so
 # the spectrum shown can be from DIFFERENT settings than the sidebar now
@@ -2305,13 +2309,23 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
         with_jac = [r for r in results if r.get("jac_bins") is not None]
 
         def _cell(n, s):
-            return _fmt_sigma(tsig_f * fisher_mod.display_sigma(
-                n, s, co_eval=co_eval))
+            """One uncertainty cell at the target significance. C/O reports
+            dex in log10(C/O) -- its fitted coordinate -- with the physical
+            range appended only inside the solver's supported band."""
+            if not np.isfinite(s):
+                return _fmt_sigma(np.inf)
+            if n == "dlnCO":
+                return fisher_mod.format_co_width(
+                    posteriors.param_center(n, _cpj), s, co_bounds,
+                    k=tsig_f, qualify_coord=True)
+            return _fmt_sigma(tsig_f * fisher_mod.display_sigma(n, s))
 
         # long format, one row per mode x parameter, marginalized and conditional
         # side by side -- both read off the SAME nuisance-augmented Fisher matrix
-        _marg_col = f"marginalized ± at {tsig_f:g}σ"
-        _cond_col = "conditional ± (others fixed)"
+        # no "±" in the headers: only some rows are symmetric now, so each
+        # cell carries its own notation
+        _marg_col = f"marginalized at {tsig_f:g}σ"
+        _cond_col = "conditional (others fixed)"
 
         def _param_rows(mode_label, sig, cond):
             return [{"mode": mode_label,
@@ -2390,6 +2404,14 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
                                  for _ in row], axis=1))
         else:
             st.table(_disp_df)
+        # One line, and only when a cell is actually marked: "(local)" means
+        # the mapped C/O range left the network's solvable band, so the dex
+        # width stands alone. Without this the marker is a bare token.
+        if any("(local)" in str(_r.get(_marg_col, ""))
+               or "(local)" in str(_r.get(_cond_col, "")) for _r in frows):
+            st.caption("(local): the Fisher estimate extends beyond the "
+                       "modeled C/O range, so no physical C/O interval is "
+                       "quoted.")
         st.download_button("Constraint forecast (CSV)",
                            _csv_bytes(pd.DataFrame(frows)),
                            f"{_fname_base}_fisher_forecast.csv", "text/csv",
@@ -2548,9 +2570,9 @@ if _have_fisher:
                         # The dotted center line marks the input value.
                         if _p == "dlnCO":
                             # C/O lives on (0, inf): shift multiplicatively by
-                            # the internal ln-space draw and keep the lognormal
-                            # family. Off-scale draws return None (see
-                            # posteriors.mock_center_co) and draw unshifted.
+                            # the internal ln-space draw and keep the
+                            # ln_gaussian family. Off-scale draws return None
+                            # (posteriors.mock_center_co) and draw unshifted.
                             _mu_d = posteriors.mock_center_co(
                                 _pr["center"], _pr["sigma_display"],
                                 _mr["delta"][_p])
@@ -2562,9 +2584,8 @@ if _have_fisher:
                                     "off the panel scale, so the unshifted "
                                     "forecast is drawn")
                             else:
-                                _mc = posteriors.lognormal_curve(
-                                    _mu_d,
-                                    _pr["sigma_display"] / _pr["center"])
+                                _mc = posteriors.ln_gaussian_curve(
+                                    _mu_d, _pr["sigma_ln"])
                         else:
                             _mu_d = _pr["center"] + float(
                                 _mr["delta_display"][_p])
@@ -2583,6 +2604,12 @@ if _have_fisher:
                             # auto-scales to its own +/-5 sigma
                             mu=_mu_d,
                             sigma=_pr["sigma_display"],
+                            sigma_ln=_pr["sigma_ln"],
+                            # the RECOVERED center: this curve was recentred
+                            # on the draw, so its range brackets _mu_d
+                            width_text=(fisher_mod.format_co_width(
+                                _mu_d, _pr["sigma_ln"], co_bounds)
+                                if _p == "dlnCO" else None),
                             curve_family=_pr["curve_family"],
                             color=_col, ls="-", lw=1.8,
                             kind=posteriors.MOCK_RECOVERY_KIND))
@@ -2591,6 +2618,11 @@ if _have_fisher:
                             label=str(_lbl), theta=_pr["theta"],
                             pdf=_pr["pdf"], mu=_pr["center"],
                             sigma=_pr["sigma_display"],
+                            sigma_ln=_pr["sigma_ln"],
+                            # the INPUT center: this curve was not recentred
+                            width_text=(fisher_mod.format_co_width(
+                                _pr["center"], _pr["sigma_ln"], co_bounds)
+                                if _p == "dlnCO" else None),
                             curve_family=_pr["curve_family"],
                             color=_col, ls="-", lw=1.8))
                 else:
@@ -2610,8 +2642,12 @@ if _have_fisher:
                 param=str(_p),
                 axis_label=fisher_mod.param_axis(_p),
                 axis_unit=fisher_mod.PARAM_UNITS.get(_p, ""),
-                density_label=("relative density" if _fitted
-                               else "relative forecast density"),
+                # C/O is displayed as a density per unit d ln(C/O) -- that
+                # measure is a CHOICE, not something the log axis implies --
+                # so the ordinate says so and no 1/(C/O) Jacobian is applied
+                density_label=(("relative density" if _fitted
+                                else "relative forecast density")
+                               + (" per d ln(C/O)" if _p == "dlnCO" else "")),
                 curves=_curves, notes=_notes,
                 center=_centers_all.get(_p)))
 

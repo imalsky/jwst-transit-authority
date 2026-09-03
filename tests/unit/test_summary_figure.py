@@ -83,18 +83,19 @@ def test_panel_xlim_verbatim_when_given_automatic_otherwise():
             plt.close(fig)
 
 
-def test_lognormal_co_panel_window_is_multiplicative():
-    """A lognormal (multiplicative-width) curve takes its automatic window in
-    ln theta, mu * exp(+-3.5 sigma / mu), so the axis stays positive on the
+def test_ln_gaussian_co_panel_window_is_multiplicative():
+    """An ln_gaussian (multiplicative-width) curve takes its automatic window
+    in ln theta, mu * exp(+-3.5 sigma_ln), so the axis stays positive on the
     left and reaches further on the right than a symmetric window would; a
     plain Gaussian panel of the same width does go negative."""
     from jwst_tool import posteriors
     center, sigma = 0.55, 0.479          # weakly constrained C/O
-    curve = posteriors.lognormal_curve(center, sigma / center)
+    curve = posteriors.ln_gaussian_curve(center, sigma / center)
     pan = dict(axis_label="C/O", notes=[], center=center,
                curves=[dict(label="fitted", theta=curve["theta"],
                             pdf=curve["pdf"], mu=center, sigma=sigma,
-                            curve_family="lognormal",
+                            sigma_ln=sigma / center,
+                            curve_family="ln_gaussian",
                             color="#2a78d6")])
     fig = summary_figure.compose_summary_figure(
         _spectrum(), posterior_panels=[pan])
@@ -106,7 +107,7 @@ def test_lognormal_co_panel_window_is_multiplicative():
         assert lo > 0.0
         assert np.all(np.asarray(curve["theta"]) > 0.0)
         # the same width through the plain Gaussian branch DOES go negative,
-        # which is exactly what the lognormal family exists to avoid
+        # which is exactly what the ln_gaussian family exists to avoid
         gfig = summary_figure.compose_summary_figure(
             _spectrum(),
             posterior_panels=[_panel_sized(mu=center, sigma=sigma)])
@@ -220,3 +221,77 @@ def test_validation_is_loud():
             summary_figure.compose_summary_figure(
                 _spectrum(with_points=False),
                 posterior_panels=[_panel_sized()], panel_xlims=[bad_pair])
+
+
+def test_ln_gaussian_panel_is_log_scaled_with_physical_ticks():
+    """Physical C/O values on a LOG axis (house style: never plot logged
+    values on a linear axis, never 'ln' in a label), readable at both a
+    narrow and a wide width. The y label names the measure we chose."""
+    from jwst_tool import posteriors
+    for sigma_ln, want in ((0.0745, ["0.5", "0.6", "0.7"]),
+                           (0.9218, ["0.1", "1", "10"])):
+        c = posteriors.ln_gaussian_curve(0.55, sigma_ln)
+        pan = dict(axis_label="C/O", center=0.55, notes=[],
+                   density_label="relative forecast density per d ln(C/O)",
+                   curves=[dict(label="m", theta=c["theta"], pdf=c["pdf"],
+                                mu=0.55, sigma=0.55 * sigma_ln,
+                                sigma_ln=sigma_ln, curve_family="ln_gaussian",
+                                color="#333333")])
+        fig = summary_figure.compose_summary_figure(_spectrum(),
+                                                    posterior_panels=[pan])
+        try:
+            ax = fig.axes[1]
+            assert ax.get_xscale() == "log"
+            lo, hi = ax.get_xlim()
+            got = [t.get_text() for t, v in zip(ax.get_xticklabels(),
+                                                ax.get_xticks())
+                   if lo <= v <= hi and t.get_text()]
+            assert got == want, got
+            assert "ln" not in ax.get_xlabel()
+            assert ax.get_ylabel() == "relative forecast density per d ln(C/O)"
+        finally:
+            plt.close(fig)
+
+
+def test_window_uses_the_curves_own_ln_width():
+    """mu * exp(+-3.5*sigma_ln) at the width the curve was BUILT with -- not
+    sigma/mu, which equals it only when the mock draw left mu unmoved."""
+    from jwst_tool import posteriors
+    center, sigma_ln = 0.55, 0.9218
+    mu = center * np.exp(1.4)                  # a draw that shifted C/O up
+    c = posteriors.ln_gaussian_curve(mu, sigma_ln)
+    pan = dict(axis_label="C/O", center=center, notes=[],
+               curves=[dict(label="m", theta=c["theta"], pdf=c["pdf"], mu=mu,
+                            sigma=center * sigma_ln, sigma_ln=sigma_ln,
+                            curve_family="ln_gaussian", color="#333333")])
+    fig = summary_figure.compose_summary_figure(_spectrum(),
+                                                posterior_panels=[pan])
+    try:
+        lo, hi = fig.axes[1].get_xlim()
+        s = summary_figure._XLIM_SIGMA * sigma_ln
+        assert hi == pytest.approx(mu * np.exp(s), rel=1e-9)
+        assert lo == pytest.approx(min(mu * np.exp(-s), center), rel=1e-9)
+    finally:
+        plt.close(fig)
+
+
+def test_panel_renders_caller_supplied_width_text():
+    """The C/O width string is built once in fisher.format_co_width and
+    passed in; summary_figure stays parameter-agnostic. A curve without
+    width_text keeps the plain +-sigma."""
+    from jwst_tool import posteriors
+    c = posteriors.ln_gaussian_curve(0.55, 0.0745)
+    base = dict(theta=c["theta"], pdf=c["pdf"], mu=0.55, sigma=0.041,
+                sigma_ln=0.0745, curve_family="ln_gaussian")
+    pan = dict(axis_label="C/O", center=0.55, notes=[], curves=[
+        dict(base, label="A", color="#333333",
+             width_text="\u00b10.0324 dex (C/O 0.511\u20130.593)"),
+        dict(base, label="B", color="#1f4e9c",
+             width_text="\u00b10.4 dex (local)")])
+    fig = summary_figure.compose_summary_figure(_spectrum(),
+                                                posterior_panels=[pan])
+    try:
+        labs = [t.get_text() for t in fig.axes[1].get_legend().get_texts()]
+        assert "A: \u00b10.0324 dex (C/O 0.511\u20130.593)" in labs, labs
+    finally:
+        plt.close(fig)

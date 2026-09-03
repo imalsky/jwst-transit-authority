@@ -787,3 +787,31 @@ def test_mixing_ratio_panel_selects_species_by_name(monkeypatch):
     assert got["H2O"] == pytest.approx(1e-4)
     assert got["CO2"] == pytest.approx(1e-6)
     assert 0.85 not in got.values()
+
+
+def test_co_row_is_dex_primary_and_never_implies_a_negative_co():
+    """C/O reports a dex width in log10(C/O) -- the coordinate the Fisher
+    Gaussian lives in -- with a physical range only where the chemistry can
+    be solved. A symmetric 3-sigma cell used to cross zero."""
+    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
+    at = _run_with_result(out, out_meta)
+    assert not at.exception, at.exception
+    tables = [t.value for t in at.table
+              if "mode" in getattr(t.value, "columns", [])
+              and "parameter" in getattr(t.value, "columns", [])]
+    assert tables, "no constraint-forecast table rendered"
+    df = tables[0]
+    col = next(c for c in df.columns if str(c).startswith("marginalized"))
+    seen = False
+    for _, row in df.iterrows():
+        if str(row["parameter"]) != "C/O ratio":
+            continue
+        cell = str(row[col]).strip()
+        if cell in ("unconstrained", ""):
+            continue
+        seen = True
+        assert "dex in log10(C/O)" in cell, cell
+        if "(C/O " in cell:
+            lo = float(cell.split("(C/O ")[1].split("–")[0])
+            assert lo > 0.0, cell
+    assert seen, "no constrained C/O row to check"
