@@ -789,10 +789,11 @@ def test_mixing_ratio_panel_selects_species_by_name(monkeypatch):
     assert 0.85 not in got.values()
 
 
-def test_co_row_is_dex_primary_and_never_implies_a_negative_co():
-    """C/O reports a dex width in log10(C/O) -- the coordinate the Fisher
-    Gaussian lives in -- with a physical range only where the chemistry can
-    be solved. A symmetric 3-sigma cell used to cross zero."""
+def test_co_row_is_log10_primary_and_never_implies_a_negative_co():
+    """C/O reports its width in log10(C/O) -- the coordinate the Fisher
+    Gaussian lives in, and is symmetric in -- with a mapped physical range
+    only where the chemistry can be solved. A symmetric 3-sigma cell in
+    linear C/O used to cross zero."""
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
     at = _run_with_result(out, out_meta)
     assert not at.exception, at.exception
@@ -810,7 +811,7 @@ def test_co_row_is_dex_primary_and_never_implies_a_negative_co():
         if cell in ("unconstrained", ""):
             continue
         seen = True
-        assert "dex in log10(C/O)" in cell, cell
+        assert "in log10(C/O)" in cell, cell
         if "(C/O " in cell:
             lo = float(cell.split("(C/O ")[1].split("–")[0])
             assert lo > 0.0, cell
