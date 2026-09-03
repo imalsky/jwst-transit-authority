@@ -259,7 +259,10 @@ def format_co_width(center: float, sigma_ln: float, bounds: tuple,
            + (" in log10(C/O)" if qualify_coord else ""))
     lo, hi = co_interval(center, sigma_ln, k=k)
     if lo_b <= center <= hi_b and lo_b <= lo and hi <= hi_b:
-        return f"{dex} (C/O {lo:.3g}\u2013{hi:.3g})"
+        # the range names its quantity only where nothing else does: a panel
+        # legend sits beside a C/O axis, a table cell does not
+        _q = "C/O " if qualify_coord else ""
+        return f"{dex} ({_q}{lo:.3g}\u2013{hi:.3g})"
     return f"{dex} (local)"
 
 

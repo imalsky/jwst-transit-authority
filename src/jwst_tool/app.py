@@ -995,10 +995,7 @@ with st.sidebar:
             format="%.1e", key=K("rtptop"))
         p_ref_bar = st.number_input(
             "Reference pressure for the planet radius (bar)",
-            1.0e-6, 7.0, 1.0e-3, format="%.1e", key=K("pref"),
-            help="The pressure level the planet radius Rp refers to; it "
-                 "sets the absolute depth level of the transmission "
-                 "spectrum.")
+            1.0e-6, 7.0, 1.0e-3, format="%.1e", key=K("pref"))
         # keyed PER GEOMETRY (shipped key contract). The DEFAULT follows the
         # structure mode -- a measured T-P table caps the honest column at its
         # own bottom (7.6 bar for the shipped tables), parametric profiles get
@@ -1025,9 +1022,7 @@ with st.sidebar:
         # re-initializes at exactly that composition. No perturbative knob.
         met = st.number_input(
             "Metallicity (× solar)", 0.1, 100.0, 10.0, 0.5,
-            format="%.2f", key=K("met"),
-            help="Scales O, N and S. Carbon follows C/O at the scaled "
-                 "oxygen, so it sits at this enrichment only at C/O 0.55.")
+            format="%.2f", key=K("met"))
         # The widget spans the WHOLE admissible range over every (network,
         # photolysis) pair; which part of it is legal for the current pair is
         # canonical_params' call, and an illegal value stops the Run with its
@@ -1037,12 +1032,9 @@ with st.sidebar:
             st.session_state[K("co")] = float(forward.CO_DEFAULT)
         # key always seeded above, so no value= default
         co_ratio = st.number_input(
-            "C/O (carbon/oxygen number ratio)",
+            "C/O",
             forward.CO_MIN, forward.CO_MAX_PHOTO_OFF, step=0.05,
-            format="%.3f", key=K("co"),
-            help="Carbon varied at fixed oxygen. How high it may go depends on "
-                 "the kinetics network and photolysis; only the default "
-                 "network with photolysis on is validated.")
+            format="%.3f", key=K("co"))
 
     with st.expander("Vertical mixing (Kzz)"):
         _kzz_opts = ["const", "Pfunc", "JM16"]
@@ -1196,11 +1188,6 @@ with st.sidebar:
             target_mol = st.selectbox(
                 "Molecule to detect", mol_options,
                 index=mol_options.index(_mol_default),
-                help="The comparison spectrum zeroes this species in the "
-                     "OPACITY only. The chemistry is not re-solved, so the "
-                     "T-P profile, mean molecular weight, gravity, continuum "
-                     "and every other species are unchanged -- it is not a "
-                     "model of an atmosphere that lacks the species.",
                 key=K(f"mol_vulcan{_net_sfx}_"
                       + "_".join(sorted(extra_mols))))
             target_sig = st.number_input(
@@ -1243,7 +1230,8 @@ with st.sidebar:
     fisher_params: list = []
     jac_method = "fd"
     if goal == "constrain" or do_fisher:
-        with st.expander("Free parameters", expanded=(goal == "constrain")):
+        with st.expander("Differentiation Method and Free Params",
+                         expanded=(goal == "constrain")):
             if goal == "constrain" and marginalize:
                 # Defaults FILTERED by the live menu, key carries the
                 # provider: Streamlit hard-raises on a default outside the
@@ -1313,11 +1301,6 @@ with st.sidebar:
             "Instrument modes",
             options=list(ins.MODES),
             default=ins.DEFAULT_MODES, key=K("modes"),
-            help="One fixed detector configuration per mode; noise is "
-                 "computed once per star, so adding "
-                 "modes later is instant. Ranges are the modelled bands, not "
-                 "the full instrument coverage; R is the median native "
-                 "resolving power from the Pandeia reference data.",
             format_func=lambda k: (
                 f"{ins.MODES[k]['label']}  "
                 "(" + _MODE_BAND_DISPLAY.get(
@@ -1357,10 +1340,7 @@ with st.sidebar:
         # which stay for mode-specific tuning.
         noise_scale = st.number_input(
             "Global noise multiplier", 0.5, 3.0, 1.0, 0.05,
-            key=K("noisescale"),
-            help="Scales every mode's noise (1.0 = the Pandeia prediction): "
-                 "error bars, S/N, forecast widths and the mock draw "
-                 "together. Composes with the per-mode multipliers.")
+            key=K("noisescale"))
 
     with st.expander("Timing, saturation & binning (Pandeia)"):
         # follow-until-overridden (same pattern as _k("tirr")): while the
@@ -1384,17 +1364,7 @@ with st.sidebar:
                  "convention is baseline = T14.")
         sat_limit = st.number_input(
             "Saturation limit (fraction of Pandeia's saturation level)",
-            0.5, 0.95, 0.80, 0.05, key=K("sat"),
-            help="The longest ramp kept is the one whose brightest pixel "
-                 "stays under this fraction of Pandeia's saturation level "
-                 "for the mode. That level is not the physical full well and "
-                 "is not the same fraction of it on every instrument: "
-                 "Pandeia already holds NIRCam time-series modes at 70% of "
-                 "the well, so 0.80 there is about 56% of it, against 0.80 "
-                 "of NIRSpec's adopted value. 0.80 is PandExo's default and "
-                 "is what the parity comparison uses. STScI's time-series "
-                 "guidance is different: sample up the ramp to about half "
-                 "the saturation level, which is 0.50 here.")
+            0.5, 0.95, 0.80, 0.05, key=K("sat"))
         r_bin = st.number_input(
             "Analysis resolving power, R", 25, 500, 100, 25, key=K("rbin"))
 
@@ -2404,14 +2374,6 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
                                  for _ in row], axis=1))
         else:
             st.table(_disp_df)
-        # One line, and only when a cell is actually marked: "(local)" means
-        # the mapped C/O range left the network's solvable band, so the dex
-        # width stands alone. Without this the marker is a bare token.
-        if any("(local)" in str(_r.get(_marg_col, ""))
-               or "(local)" in str(_r.get(_cond_col, "")) for _r in frows):
-            st.caption("(local): the Fisher estimate extends beyond the "
-                       "modeled C/O range, so no physical C/O interval is "
-                       "quoted.")
         st.download_button("Constraint forecast (CSV)",
                            _csv_bytes(pd.DataFrame(frows)),
                            f"{_fname_base}_fisher_forecast.csv", "text/csv",
@@ -2642,12 +2604,8 @@ if _have_fisher:
                 param=str(_p),
                 axis_label=fisher_mod.param_axis(_p),
                 axis_unit=fisher_mod.PARAM_UNITS.get(_p, ""),
-                # C/O is displayed as a density per unit d ln(C/O) -- that
-                # measure is a CHOICE, not something the log axis implies --
-                # so the ordinate says so and no 1/(C/O) Jacobian is applied
-                density_label=(("relative density" if _fitted
-                                else "relative forecast density")
-                               + (" per d ln(C/O)" if _p == "dlnCO" else "")),
+                density_label=("relative density" if _fitted
+                               else "relative forecast density"),
                 curves=_curves, notes=_notes,
                 center=_centers_all.get(_p)))
 

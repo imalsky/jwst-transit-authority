@@ -335,7 +335,7 @@ def test_co_width_keeps_the_dex_and_gates_only_the_physical_range():
                                       0.55 * np.exp(0.0745)), rel=1e-12)
     # informative mode: range fits at 1 and 3 sigma
     assert fisher.format_co_width(0.55, 0.0745, bounds) == \
-        "±0.0324 dex (C/O 0.511–0.593)"
+        "±0.0324 dex (0.511–0.593)"
     assert fisher.format_co_width(0.55, 0.0745, bounds, k=3.0,
                                   qualify_coord=True) == \
         "±0.0971 dex in log10(C/O) (C/O 0.44–0.688)"
