@@ -530,10 +530,15 @@ def _plot_posterior_panel(axp, pan: dict,
     _q = _sized[0] if len(_sized) == 1 else None
     if _q is not None:
         _mu = _q["mu"] if _q["mu"] is not None else pan["center"]
-        _wt = _q.get("width_text") or f"± {_fmt_val(_q['sigma'])}"
-        axp.set_title(f"{pan['axis_label']} = {_fmt_val(_mu)}; {_wt}"
-                      if _mu is not None
-                      else f"{pan['axis_label']}: {_wt}", fontsize=_AX_LBL)
+        _wt = _q.get("width_text")
+        if _wt:                       # already names its own coordinate
+            axp.set_title(_wt, fontsize=_AX_LBL)
+        else:
+            axp.set_title(
+                f"{pan['axis_label']} = {_fmt_val(_mu)} ± "
+                f"{_fmt_val(_q['sigma'])}" if _mu is not None
+                else f"{pan['axis_label']}: ± {_fmt_val(_q['sigma'])}",
+                fontsize=_AX_LBL)
     # posteriors.gaussian_curve builds its grid as center +/- 5 sigma, where
     # the curve is visually zero across most of the axis, so the automatic
     # window clips to the widest drawn curve at +/-_XLIM_SIGMA (still >99.7% of

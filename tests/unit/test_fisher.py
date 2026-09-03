@@ -325,25 +325,27 @@ def test_fisher_transits_to_target_limits():
 
 
 def test_co_width_keeps_the_dex_and_gates_only_the_physical_range():
-    """dex is always reported when finite -- a 0.4 dex width IS a weak local
-    constraint, not an absence of one. Only the physical range is gated, on
-    whether the center AND the interval stay inside the network's supported
-    C/O band."""
+    """The width is always reported when finite -- a 0.4 width in log10(C/O)
+    IS a weak local constraint, not an absence of one. Only the mapped
+    physical range is gated, on whether the center AND the interval stay
+    inside the network's supported C/O band."""
     bounds = (0.1, 0.99)                     # sncho, photolysis on
     lo, hi = fisher.co_interval(0.55, 0.0745, k=1.0)
     assert (lo, hi) == pytest.approx((0.55 * np.exp(-0.0745),
                                       0.55 * np.exp(0.0745)), rel=1e-12)
-    # informative mode: range fits at 1 and 3 sigma
+    # Panel legend: Batalha & Line's convention -- value and error both in
+    # log10(C/O), the coordinate the Gaussian is symmetric in. Their cases are
+    # tagged "logC/O = -0.26" for exactly this C/O.
     assert fisher.format_co_width(0.55, 0.0745, bounds) == \
-        "±0.0324 dex (0.511–0.593)"
+        "log10(C/O) = -0.26 ± 0.0324"
+    # Table: the error on log10(C/O), plus the mapped C/O range where it fits
     assert fisher.format_co_width(0.55, 0.0745, bounds, k=3.0,
                                   qualify_coord=True) == \
-        "±0.0971 dex in log10(C/O) (C/O 0.44–0.688)"
-    # MIRI LRS: the width survives, the range does not
-    assert fisher.format_co_width(0.55, 0.9218, bounds) == "±0.4 dex (local)"
+        "±0.0971 in log10(C/O) (C/O 0.44–0.688)"
+    # MIRI LRS: the width survives, the mapped range does not
     assert fisher.format_co_width(0.55, 0.9218, bounds, k=3.0,
                                   qualify_coord=True) == \
-        "±1.2 dex in log10(C/O) (local)"
+        "±1.2 in log10(C/O) (local)"
     # plain text only: this string also lands in a Streamlit cell and a CSV
     assert "$" not in fisher.format_co_width(0.55, 0.9218, bounds)
 
@@ -353,9 +355,10 @@ def test_format_co_width_accepts_an_out_of_domain_mock_center():
     mode legitimately lands outside the solver band. That is a local result,
     never an error -- raising there would crash a valid MIRI realization."""
     assert fisher.format_co_width(1.27, 0.9218, (0.1, 0.99)) == \
-        "±0.4 dex (local)"
-    assert fisher.format_co_width(0.05, 0.05, (0.1, 0.99)) == \
-        "±0.0217 dex (local)"
+        "log10(C/O) = 0.104 ± 0.4"
+    assert fisher.format_co_width(1.27, 0.9218, (0.1, 0.99),
+                                  qualify_coord=True) == \
+        "±0.4 in log10(C/O) (local)"
 
 
 @pytest.mark.parametrize("bounds,center", [((0.99, 0.1), 0.55),

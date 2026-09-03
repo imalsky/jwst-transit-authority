@@ -255,15 +255,20 @@ def format_co_width(center: float, sigma_ln: float, bounds: tuple,
     if not (np.isfinite(center) and center > 0.0):
         raise ValueError(f"format_co_width: center must be a finite C/O > 0, "
                          f"got {center!r}")
-    dex = (f"\u00b1{float(sigma_ln) * float(k) / _LN10:.3g} dex"
-           + (" in log10(C/O)" if qualify_coord else ""))
+    sig = float(sigma_ln) * float(k) / _LN10
+    if not qualify_coord:
+        # Panel legend, Batalha & Line's convention: the value AND its error
+        # in log10(C/O) -- "Error on log C/O", their cases tagged
+        # "logC/O = -0.26" for C/O 0.55. Naming the coordinate is what
+        # licenses the "+-": the Gaussian is symmetric there and skewed in
+        # linear C/O. A bare number beside a C/O axis would be read as a
+        # linear-C/O width, which is off by ln 10.
+        return f"log10(C/O) = {np.log10(center):.3g} \u00b1 {sig:.3g}"
     lo, hi = co_interval(center, sigma_ln, k=k)
+    base = f"\u00b1{sig:.3g} in log10(C/O)"
     if lo_b <= center <= hi_b and lo_b <= lo and hi <= hi_b:
-        # the range names its quantity only where nothing else does: a panel
-        # legend sits beside a C/O axis, a table cell does not
-        _q = "C/O " if qualify_coord else ""
-        return f"{dex} ({_q}{lo:.3g}\u2013{hi:.3g})"
-    return f"{dex} (local)"
+        return f"{base} (C/O {lo:.3g}\u2013{hi:.3g})"
+    return f"{base} (local)"
 
 
 def _segment_offset_rows(result: dict) -> np.ndarray:
