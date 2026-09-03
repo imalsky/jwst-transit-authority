@@ -241,9 +241,11 @@ def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
        and the DEFAULT is structure-aware: W39b transmission defaults
        to its measured table's own bottom, emission (Guillot everywhere)
        to the round parametric default.
-    2. AD under a constrain goal forces the photochemistry checkbox ON and
-       disabled; switching back to detect releases it (the photo widget
-       renders before the method menu, so the lock reads session state).
+    2. Photochemistry is always settable -- it used to be force-locked ON
+       whenever a Jacobian was requested, which made the photolysis-off
+       carbon-rich path unreachable from the shipped defaults. AD with it off
+       is refused at the Run block instead, by the message canonical_params
+       already raises.
     3. The noise floor defaults to "constant" (maintainer) -- the
        CONSERVATIVE side, since it claims LESS precision than "No floor";
        "none" stays an explicit choice; "Wavelength table" with no upload is
@@ -264,15 +266,23 @@ def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
     assert at.number_input(key="n0_pbtm_transmission").value == \
         forward.P_BTM_FILE_BAR
 
-    # 2. AD photo-lock
+    # 2. photochemistry stays settable, and AD photo-off is refused loudly
     at.radio(key="n0_goal").set_value("constrain").run()
     at.selectbox(key="n0_jacm").set_value("ad").run()
     assert not at.exception, at.exception
-    photo = at.checkbox(key="n0_photo")
-    assert photo.value is True and photo.disabled
+    assert not at.checkbox(key="n0_photo").disabled
+    at.checkbox(key="n0_photo").set_value(False).run()
+    assert not at.exception, at.exception
+    # the value STICKS (the lock used to overwrite it on every rerun) ...
+    assert at.checkbox(key="n0_photo").value is False
+    at.radio(key="n0_scimode").set_value("transmission").run()   # plain rerun
+    assert at.checkbox(key="n0_photo").value is False
+    # ... and the run is blocked with one sentence naming the fix
+    assert any("photo-on regime" in (e.value or "") for e in at.error), \
+        [e.value for e in at.error]
+    at.checkbox(key="n0_photo").set_value(True).run()
     at.radio(key="n0_goal").set_value("detect").run()
     assert not at.exception, at.exception
-    assert not at.checkbox(key="n0_photo").disabled
 
     # 3. noise-floor gate
     def _floor_error(app):

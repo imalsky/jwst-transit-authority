@@ -451,14 +451,21 @@ def test_network_semantics():
 
 
 @pytest.mark.parametrize("network", sorted(forward.CO_MAX))
-def test_co_bound_is_per_network_and_shared_by_every_surface(network):
-    """One inclusive C/O bound per network, and the API, the GUI widget and
-    share_config all read it -- the three used to disagree (API < 1.0, widget
-    and share file <= 0.95), so an API run at C/O 0.97 could not be restored.
+@pytest.mark.parametrize("use_photo", [True, False])
+def test_co_bound_is_per_network_and_shared_by_every_surface(network, use_photo):
+    """One inclusive C/O bound per (network, photolysis), and the API and
+    share_config both read it -- they used to disagree (API < 1.0, share file
+    <= 0.95), so an API run at C/O 0.97 could not be restored.
 
-    The permissive bounds are the highest value SAMPLED in the 2026-09-02
-    survey, not a measured ceiling: the convergence certificate is what
-    refuses an individual case that does not converge.
+    Photolysis is the second gate axis: the pinned network's wall above
+    C/O 1.02 is photochemical, and photolysis OFF all three networks converge
+    at C/O 10 (121-229 CLI steps, measured 2026-09-03). The permissive bounds
+    are the highest value SAMPLED, not a measured ceiling: the convergence
+    certificate is what refuses an individual case.
+
+    The GUI widget deliberately does NOT track the two axes -- it spans the
+    whole range and lets canonical_params refuse -- because a ceiling that
+    moved with them had to clamp a stored C/O silently.
     """
     import ast
     import importlib.util
@@ -466,23 +473,33 @@ def test_co_bound_is_per_network_and_shared_by_every_surface(network):
 
     from jwst_tool import share_config
 
-    lo, hi = forward.co_bounds(network)
+    lo, hi = forward.co_bounds(network, use_photo)
     assert lo == forward.CO_MIN
-    # both ends inclusive, and nothing past the top
+    # photolysis off lifts every network to the same permissive ceiling
+    assert hi == (forward.CO_MAX[network] if use_photo
+                  else forward.CO_MAX_PHOTO_OFF)
+    # both ends inclusive, and nothing past either
+    _q = {"network": network, "use_photo": use_photo}
     for co in (lo, hi):
         assert forward.canonical_params(
-            _p(network=network, co_ratio=co))["co_ratio"] == co
-    for co in (lo * 0.5, hi * 1.01):
-        with pytest.raises(ValueError, match="outside"):
-            forward.canonical_params(_p(network=network, co_ratio=co))
-    # share_config refuses exactly what the API refuses, for this network
+            _p(co_ratio=co, **_q))["co_ratio"] == co
+    with pytest.raises(ValueError, match="below the modelled minimum"):
+        forward.canonical_params(_p(co_ratio=lo * 0.5, **_q))
+    with pytest.raises(ValueError, match="too high for this setup") as e:
+        forward.canonical_params(_p(co_ratio=hi * 1.01, **_q))
+    # an escape is named only when one exists: at the permissive ceiling all
+    # three are already in force, so suggesting them would be false advice
+    assert ("Try the" in str(e.value)) is (hi < forward.CO_MAX_PHOTO_OFF)
+    # share_config refuses exactly what the API refuses, for this combination
     key = "n0_{}".format
-    state = {key("network"): network, key("co"): hi * 1.01}
+    state = {key("network"): network, key("photo"): use_photo,
+             key("co"): hi * 1.01}
     with pytest.raises(ValueError, match="co_ratio"):
         share_config._check_widget_ranges(state, key, key, "transmission")
     state[key("co")] = hi
     share_config._check_widget_ranges(state, key, key, "transmission")
-    # the GUI widget's ceiling is forward.CO_MAX[<network>], not a literal
+    # the widget spans the WHOLE range, so nothing silently clamps a stored
+    # value when the network or the photolysis switch moves
     src = Path(importlib.util.find_spec("jwst_tool.app").origin).read_text()
     co_calls = [n for n in ast.walk(ast.parse(src))
                 if isinstance(n, ast.Call)
@@ -494,11 +511,33 @@ def test_co_bound_is_per_network_and_shared_by_every_surface(network):
                         for kw in n.keywords)]
     assert len(co_calls) == 1
     assert [ast.unparse(a) for a in co_calls[0].args[1:3]] == [
-        "forward.CO_MIN", "_co_max"]
-    assert "forward.CO_MAX[st.session_state.get(K('network'), 'sncho')]" in [
-        ast.unparse(n.value) for n in ast.walk(ast.parse(src))
-        if isinstance(n, ast.Assign)
-        and any(getattr(t, "id", None) == "_co_max" for t in n.targets)]
+        "forward.CO_MIN", "forward.CO_MAX_PHOTO_OFF"]
+
+
+def test_photo_off_carbon_rich_fd_dlnco_row_is_accepted():
+    """The slice the photolysis axis opened: photolysis off, C/O above the
+    network's photolysis-ON ceiling, with the dlnCO Jacobian row free.
+
+    The stencil SHAPE keys on CO_MAX[network] (photolysis-ON) even photo-off,
+    so the row is one-sided where a central one would also solve. That is
+    conservative, not wrong -- the one-sided reach is never worse against
+    either bound -- and keeping it photolysis-independent is what makes every
+    previously cached Jacobian bit-identical across the widening.
+    """
+    cp = forward.canonical_params(_p(
+        network="sncho", use_photo=False, co_ratio=5.0,
+        jac_method="fd", fisher_params=["dlnCO"]))
+    assert cp["co_ratio"] == 5.0 and cp["use_photo"] is False
+    offs, h = forward.fd_stencil("dlnCO", 5.0, forward.CO_MAX["sncho"])
+    assert offs == (-1, -2, -4) and h == forward.FD_STEPS["dlnCO"] / 2
+    # every stencil point stays inside the photolysis-aware envelope
+    lo, hi = forward.co_bounds("sncho", False)
+    assert all(lo <= 5.0 * math.exp(s * h) <= hi for s in offs)
+    # ... and the same request with photolysis ON is refused before any solve
+    with pytest.raises(ValueError, match="too high for this setup"):
+        forward.canonical_params(_p(
+            network="sncho", use_photo=True, co_ratio=5.0,
+            jac_method="fd", fisher_params=["dlnCO"]))
 
 
 def test_wo_mols_end_to_end_semantics():
@@ -793,7 +832,7 @@ def test_composition_fd_stencil_envelope():
     assert forward.fd_stencil("dlnCO", 0.89, hi) == ((-1, -2, -4), h0 / 2)
     assert forward.fd_stencil("lnZ", 0.89, hi) == ((1, -1, 2, -2),
                                                    forward.FD_STEPS["lnZ"])
-    # the flip follows the network's ceiling, not a literal C/O = 1
+    # the flip follows the network's photolysis-on ceiling, not a literal 1
     hi25 = forward.CO_MAX["sncho2025"]
     assert forward.fd_stencil("dlnCO", 2.0, hi25) == ((1, -1, 2, -2), h0)
     assert forward.fd_stencil("dlnCO", 9.0, hi25) == ((-1, -2, -4), h0 / 2)

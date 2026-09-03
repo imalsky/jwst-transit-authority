@@ -78,10 +78,11 @@ def _check_widget_ranges(state: dict, key, pk, science_mode: str) -> None:
         checks[key(f"floor_{m}")] = (f"floor for {m}", _FLOOR_BOUNDS)
         checks[key(f"infl_{m}")] = (f"noise multiplier for {m}", _INFL_BOUNDS)
     checks[key(f"pbtm_{science_mode}")] = ("p_btm_bar", forward.P_BTM_RANGE)
-    # C/O: the widget's ceiling follows the kinetics network, so the accepted
-    # range is the network's, not one literal pair.
+    # C/O: the widget's ceiling follows the kinetics network AND the
+    # photolysis switch, so the accepted range is theirs, not one literal pair.
     checks[key("co")] = ("co_ratio", forward.co_bounds(
-        str(state.get(key("network"), "sncho"))))
+        str(state.get(key("network"), "sncho")),
+        bool(state.get(key("photo"), True))))
     for p, unit in fisher.PARAM_UNITS.items():
         checks[key(f"tgt_{p}")] = (
             f"target uncertainty for {p}",
@@ -107,8 +108,11 @@ def build_share(canon: dict, goal: dict, observation: dict,
         "canonical_params": dict(canon),
         "goal": dict(goal),
         "observation": dict(observation),
-        # The elemental set the run actually solved (number ratios to H):
+        # The elemental set REQUESTED of FastChem (number ratios to H):
         # informational, derived from met_x_solar + co_ratio, never read back.
+        # NOT what the column ends up carrying -- FastChem places some carbon in
+        # species the network has no slot for, so the solved column runs C/O
+        # short by -0.01% at 0.55 and -1.2% at 10 (notes.md 2026-09-03).
         "elemental_abundances": forward.elemental_abundances(
             canon["met_x_solar"], canon["co_ratio"]),
         # Which software wrote this file is recorded ONCE, inside the

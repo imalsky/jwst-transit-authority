@@ -11,9 +11,9 @@ under the h-vs-2h gate, "ad" one warm-started jvp per row (photo-on required;
 the lnZ jvp is the fixed-structural-grid
 derivative and the dlnCO jvp is refused near O-exhaustion, on the build
 column and again on the converged column). Where the central dlnCO stencil
-would leave the network's accepted C/O range, the FD row steps one-sided
+would leave the network's photolysis-on ceiling, the FD row steps one-sided
 toward lower C/O instead (``fd_stencil``); ``co_ratio`` itself is bounded by
-``CO_MAX[network]``. AD has no such escape.
+``co_bounds(network, use_photo)``. AD has no such escape.
 ``fisher.py`` turns the Jacobian + Pandeia noise into forecasts.
 
 A "removed" spectrum zeroes that molecule's VMR in the RT only, keeping the
@@ -118,27 +118,36 @@ JAC_METHODS = ("fd", "ad")            # certified-FD default / warm-jvp opt-in
 # move the AD gate silently. FD has no equivalent limit: it re-initializes
 # FastChem per stencil point and never uses the b_z map.
 CO_BZ_MIN_AD = 0.1
-# Accepted co_ratio range, INCLUSIVE at both ends. One number per network,
-# read by canonical_params, the GUI widget and share_config so the three
-# cannot drift. Measured on the shipped W39b column (2026-09-02 survey):
-# "sncho" certifies to about 1.02 and fails from 1.03 upward, so it keeps its
-# sub-unity bound; "sncho2025" and "ncho" certified at every sampled value up
-# to 10, which is the highest value SAMPLED and not a measured ceiling. The
-# bound is deliberately permissive: the convergence certificate refuses the
-# individual cases that do not converge (e.g. sncho2025 at C/O 1.03).
+# Accepted co_ratio range, INCLUSIVE at both ends. TWO gate axes, network and
+# photolysis; do NOT add temperature (non-monotonic: +400 K and -200 K both fix
+# C/O 1.087) or Kzz (a tabulated column is not a scalar to gate on).
+# Measured on the shipped W39b column, photolysis ON: "sncho" certifies to 1.02
+# and fails 1.03-4; "ncho" at every sampled value to 10; "sncho2025" at every
+# one EXCEPT 1.03 (capped at 5k and 15k). Photolysis OFF all three reach 10 in
+# 121-229 CLI steps, 1.03 included -- the notch is photochemical. Ten is the
+# highest value SAMPLED, never a ceiling; the bound is deliberately permissive
+# and the convergence certificate refuses the cases that do not converge.
+# COST, not correctness: the same photo-off corner takes 22710 steps HERE vs
+# 121 in the CLI. Cause is the engine's exact-elemental repair, which at C/O 10
+# displaces species 4.4% off the FastChem column; masks mode exits at 121.
+# Negligible below C/O ~2 (repair factor 1.000000).
 CO_MIN = 0.1
-CO_MAX = {"sncho": 0.99, "sncho2025": 10.0, "ncho": 10.0}
+CO_MAX = {"sncho": 0.99, "sncho2025": 10.0, "ncho": 10.0}   # photolysis ON
+CO_MAX_PHOTO_OFF = 10.0
 
 
-def co_bounds(network: str) -> tuple[float, float]:
-    """(min, max) co_ratio for a network, both inclusive."""
-    return CO_MIN, CO_MAX[network]
+def co_bounds(network: str, use_photo: bool) -> tuple[float, float]:
+    """(min, max) co_ratio for a network + photolysis state, both inclusive.
+    Read by canonical_params, the GUI widget and share_config so the three
+    cannot drift."""
+    return CO_MIN, (CO_MAX[network] if use_photo else CO_MAX_PHOTO_OFF)
 
 
 def fd_stencil(name: str, value: float, co_max: float) -> tuple[tuple[int, ...], float]:
     """(step multiples, step) a composition row solves at. Central (+-h, +-2h)
-    at h = FD_STEPS[name], unless the dlnCO stencil would leave the network's
-    accepted C/O range: then the row uses the one-sided stencil (-1, -2, -4)
+    at h = FD_STEPS[name], unless the dlnCO stencil would leave co_max (the
+    network's photolysis-ON ceiling, the conservative choice photo-off too):
+    then the row uses the one-sided stencil (-1, -2, -4)
     toward lower C/O -- third order after Richardson -- at h/2 so its reach
     equals the central stencil's 2h (at the full step the curvature toward the
     boundary fails the h-vs-2h gate on a 1600 K hot Jupiter)."""
@@ -442,7 +451,7 @@ YCONV_RANGE = (1.0e-4, 1.0e-2)  # steady-state convergence tolerance (1e-3 is th
                                 # validated "high" tier; tighter costs runtime
                                 # but is safe -- the longdy gate is loud)
 # The runner certifies on EITHER branch: tight (yconv_cri, slope_cri) or loose
-# (yconv_min, slope_min). Every shipped solve exits on the loose one, so
+# (yconv_min, slope_min). Every cold baseline solve exits on the loose one, so
 # yconv_cri alone cannot tighten a run; this is the knob that can. Its cfg
 # default is the upstream 0.1, and it may only tighten (never above it).
 YCONV_MIN_DEFAULT = 0.1
@@ -973,13 +982,21 @@ def canonical_params(params: dict) -> dict:
                 "molecule via extra_mols.")
         _req = set(cp["wo_mols"])
         cp["wo_mols"] = [m for m in _active if m in _req]
-    _co_lo, _co_hi = co_bounds(network)
-    if not _co_lo <= cp["co_ratio"] <= _co_hi:
+    _co_lo, _co_hi = co_bounds(network, cp["use_photo"])
+    if cp["co_ratio"] < _co_lo:
         raise ValueError(
-            f"co_ratio={cp['co_ratio']} outside [{_co_lo:g}, {_co_hi:g}] for "
-            f"network={network!r}, so it is refused before any solve. The "
-            "carbon-rich path is network='sncho2025' (experimental) or the "
-            "sulfur-free 'ncho'.")
+            f"C/O {cp['co_ratio']:g} is below the modelled minimum {_co_lo:g}.")
+    if cp["co_ratio"] > _co_hi:
+        # Only name an escape that would actually raise the ceiling: at
+        # CO_MAX_PHOTO_OFF every one of them is already in force.
+        _fix = ("" if _co_hi >= CO_MAX_PHOTO_OFF else
+                " Try the sncho2025 network, the sulfur-free ncho network, or"
+                " photolysis off.")
+        raise ValueError(
+            f"C/O {cp['co_ratio']:g} is too high for this setup "
+            f"(network {network!r}, photolysis "
+            f"{'on' if cp['use_photo'] else 'off'}): the limit is "
+            f"{_co_hi:g}.{_fix}")
     if not 0.1 <= cp["met_x_solar"] <= 100.0:
         raise ValueError(
             f"met_x_solar={cp['met_x_solar']} outside [0.1, 100] x solar")
@@ -1018,10 +1035,15 @@ def canonical_params(params: dict) -> dict:
     # window-check every stencil point for the same reason.
     if cp["jac_method"] == "fd":
         for name, key, rng in (("lnZ", "met_x_solar", (0.1, 100.0)),
-                               ("dlnCO", "co_ratio", co_bounds(network))):
+                               ("dlnCO", "co_ratio",
+                                co_bounds(network, cp["use_photo"]))):
             if name not in cp["fisher_params"]:
                 continue
-            offs, h = fd_stencil(name, cp[key], rng[1])
+            # Stencil SHAPE keys on the photolysis-on ceiling even photo-off:
+            # a one-sided row where a central one would also solve is merely
+            # conservative, and a photo-independent threshold keeps every
+            # cached Jacobian identical across this widening (no _VERSION bump).
+            offs, h = fd_stencil(name, cp[key], CO_MAX[network])
             pts = [cp[key] * float(np.exp(s * h)) for s in offs]
             if not all(rng[0] <= p <= rng[1] for p in pts):
                 raise ValueError(
@@ -1210,8 +1232,8 @@ def load_result(params: dict):
 
     Always present: wl_um, depth, depth_wo (n_wo, n_nu), wo_mols (the
     leave-one-out set depth_wo rows align with), mols, ymix, p_bar, T, theta,
-    theta_names, params_json, chem_provider, and the convergence certificate
-    (conv_stages, conv_accept, conv_longdy, conv_gate). With Fisher requested:
+    theta_names, params_json, chem_provider, and unmodeled (network species
+    with no k-table, "<species>|<vmr>"). With Fisher requested:
     jac (n_par, n_nu), jac_names, jac_row_method, fd_h, fd_err.
     """
     return _load_cached_npz(cache_path(params))
@@ -1711,11 +1733,9 @@ def run_model(params: dict, log=print) -> Path:
     # --- chemistry: certified cold solves (no warm continuation) ------------
     t0 = time.time()
     th0 = jnp.asarray(theta)
-    # one CONV_FIELDS tuple per PASSED gate
-    conv_cert = []
-
     def _check_converged(diag, stage):
-        conv_cert.append(check_converged(diag, stage, _species_now, chem, log))
+        """Raise unless the stage certifies; returns its CONV_FIELDS record."""
+        return check_converged(diag, stage, _species_now, chem, log)
 
     # Single certified cold solve, unless an identical chemistry-relevant set
     # already solved: the chem-level cache stores the RAW column, so an RT-only
@@ -1750,23 +1770,13 @@ def run_model(params: dict, log=print) -> Path:
                 f"chem-cache {_chem_out.name}: stored certificate "
                 f"(longdy={_ld:.3g}) fails the current gate "
                 f"yconv_min={float(chem.yconv_min):g}")
-        # certificate detail written since the cell diagnostic existed; an
-        # older chem-cache carries none, and says so rather than inventing one
-        _old = "conv_cell" not in _chem_art
-        conv_cert.append((
-            "baseline solve (chem-cache)", _ac, _ld,
-            float("nan") if _old else float(_chem_art["conv_longdydt"][0]),
-            -1 if _old else int(_chem_art["conv_branch"][0]),
-            float("nan") if _old else float(_chem_art["conv_flux"][0]),
-            "n/a (chem-cache predates the certificate detail)" if _old
-            else str(_chem_art["conv_cell"][0])))
         y_sol = jnp.asarray(y_np)
         log(f"[fwd] chemistry column from chem-cache ({_chem_out.name}, "
             f"{_ac} accepted steps at write); solve skipped")
     else:
         log("[fwd] solving photochemistry (cold, certified) ...")
         y_sol, _cdiag = chem.converged_y(th0, return_conv_diag=True)
-        _check_converged(_cdiag, "baseline solve")
+        _cert = _check_converged(_cdiag, "baseline solve")
         y_np = np.asarray(y_sol)
         if not np.all(np.isfinite(y_np)):
             raise RuntimeError(
@@ -1774,7 +1784,7 @@ def run_model(params: dict, log=print) -> Path:
                 "parameter set outside the modelable range")
         log(f"[fwd] chemistry solved in {time.time()-t0:.0f} s total")
         # persist the certified RAW column (atomic, as for the flat cache)
-        _stage, _ac, _ld, _lddt, _br, _fl, _cell = conv_cert[-1]
+        _stage, _ac, _ld, _lddt, _br, _fl, _cell = _cert
         _chem_arrays = dict(
             y_raw=y_np,
             species=np.array(_species_now, dtype="U16"),
@@ -2047,7 +2057,7 @@ def run_model(params: dict, log=print) -> Path:
                 offs, h = fd_stencil(name,
                                      cp["met_x_solar" if name == "lnZ"
                                         else "co_ratio"],
-                                     co_bounds(cp["network"])[1])
+                                     CO_MAX[cp["network"]])
                 for s in offs:
                     f = float(np.exp(s * h))
                     if name == "lnZ":      # all metals together; C/O preserved
@@ -2140,16 +2150,11 @@ def run_model(params: dict, log=print) -> Path:
         theta_names=np.array(theta_names, dtype="U16"),
         # auto-sized U dtype: a fixed width silently truncated long JSON
         params_json=np.array(json.dumps(cp)),
-        # convergence certificate: the runner's own longdy per gated stage
-        conv_stages=np.array([c[0] for c in conv_cert], dtype="U48"),
-        conv_accept=np.array([c[1] for c in conv_cert], dtype=np.int64),
-        conv_longdy=np.array([c[2] for c in conv_cert], dtype=np.float64),
-        conv_longdydt=np.array([c[3] for c in conv_cert], dtype=np.float64),
-        conv_branch=np.array([c[4] for c in conv_cert], dtype=np.int64),
-        conv_flux=np.array([c[5] for c in conv_cert], dtype=np.float64),
-        conv_cell=np.array([c[6] for c in conv_cert], dtype="U48"),
-        conv_gate=np.array([float(getattr(chem, "yconv_min", np.nan))],
-                           dtype=np.float64),
+        # Network species with no k-table (unmodeled_absorbers). Stored, not
+        # just logged: a model-cache hit never solves, so the GUI has no other
+        # way to say the spectrum is a lower bound on the true contrast.
+        unmodeled=np.array([f"{sp}|{v:.3e}" for sp, v in _unmodeled],
+                           dtype="U32"),
         # AD dlnCO oxygen-reservoir margin on the build column and on the
         # converged column the tangent starts from (NaN when no AD dlnCO row)
         co_bz_margin=np.array([_bz_build, _bz_warm], dtype=np.float64),

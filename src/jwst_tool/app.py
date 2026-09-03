@@ -81,8 +81,6 @@ _FIG_DISPLAY_PX = 1100
 # Display only: never a stored config key.
 _ALL_USABLE = "All usable modes"
 
-# How many forecast-posterior panels the summary figure will draw. A LAYOUT
-# limit, not a science one: every free parameter's width is reported in the
 # Custom-combination palette, deliberately disjoint from instruments.MODE_COLOR
 # so a combo line never collides with a member mode's color. Module level
 # because _series_color() (results section) reads it from further UP the
@@ -828,7 +826,12 @@ with st.sidebar:
             format_func=lambda f: (
                 planets.SFLUX_CHOICES[f]
                 + ("" if _uv_ok.get(f) else "  [FILE MISSING]")),
-            key=_k("sflux"))
+            key=_k("sflux"),
+            # Photo-off canonical_params normalizes this to the registry
+            # default, so gate the widget like every other photolysis knob --
+            # otherwise the pick is silently replaced, and shared that way.
+            # Session state, not use_photo: the checkbox renders further down.
+            disabled=not st.session_state.get(K("photo"), True))
 
     # T_eq is derived from the star and orbit for every planet, registry or
     # custom: a stored literature value is a second source of truth that goes
@@ -1025,36 +1028,21 @@ with st.sidebar:
             format="%.2f", key=K("met"),
             help="Scales O, N and S. Carbon follows C/O at the scaled "
                  "oxygen, so it sits at this enrichment only at C/O 0.55.")
-        # The C/O ceiling follows the kinetics network, whose selectbox renders
-        # further down, so read it from session state. Clamp a stored value the
-        # new ceiling no longer admits: Streamlit discards an out-of-range
-        # session value silently and falls back to the widget default.
-        _co_max = forward.CO_MAX[st.session_state.get(K("network"), "sncho")]
+        # The widget spans the WHOLE admissible range over every (network,
+        # photolysis) pair; which part of it is legal for the current pair is
+        # canonical_params' call, and an illegal value stops the Run with its
+        # one-sentence reason. A widget ceiling that moved with the other two
+        # settings had to clamp a stored value silently to stay in range.
         if K("co") not in st.session_state:
             st.session_state[K("co")] = float(forward.CO_DEFAULT)
-        st.session_state[K("co")] = min(st.session_state[K("co")], _co_max)
         # key always seeded above, so no value= default
         co_ratio = st.number_input(
             "C/O (carbon/oxygen number ratio)",
-            forward.CO_MIN, _co_max, step=0.05,
+            forward.CO_MIN, forward.CO_MAX_PHOTO_OFF, step=0.05,
             format="%.3f", key=K("co"),
-            help="Carbon varied at fixed oxygen. The ceiling follows the "
-                 "kinetics network; only the default network is validated.")
-
-    # Kzz and photochemistry render BEFORE the science-goal step, so the AD
-    # photo-lock reads the EFFECTIVE differentiation method from session
-    # state: the widget value counts only when a Jacobian is actually
-    # requested, matching canonical_params' normalization to "fd" otherwise.
-    _goal_ss = st.session_state.get(K("goal"), "detect")
-    _dofish_ss = bool(st.session_state.get(K("dofish"), False))
-    # fallback "ad" mirrors the method widget's default (index=1), so
-    # the photo-lock is right on the FIRST constrain render, before the
-    # selectbox has seeded session state.
-    # (No condensation term: the GUI offers no condensation widget and
-    # share_config REFUSES a condensing config rather than restoring one.)
-    _jac_hint = (st.session_state.get(K("jacm"), "ad")
-                 if (_goal_ss == "constrain" or _dofish_ss)
-                 else "fd")
+            help="Carbon varied at fixed oxygen. How high it may go depends on "
+                 "the kinetics network and photolysis; only the default "
+                 "network with photolysis on is validated.")
 
     with st.expander("Vertical mixing (Kzz)"):
         _kzz_opts = ["const", "Pfunc", "JM16"]
@@ -1106,12 +1094,13 @@ with st.sidebar:
             format_func={"sncho": "S-N-C-H-O (full, default)",
                          "ncho": "N-C-H-O (no sulfur, faster)",
                          "sncho2025": "S-N-C-H-O 2025 (experimental)"}.get)
-        if K("photo") not in st.session_state or _jac_hint == "ad":
-            st.session_state[K("photo")] = True   # AD needs photolysis ON
-        # key always seeded above, so no value= default
+        if K("photo") not in st.session_state:
+            st.session_state[K("photo")] = True
+        # key always seeded above, so no value= default. AD needs photolysis
+        # on; canonical_params refuses that combination and the Run block
+        # shows its sentence, rather than the widget silently reverting.
         use_photo = st.checkbox(
-            "Photochemistry (UV photolysis)", key=K("photo"),
-            disabled=(_jac_hint == "ad"))
+            "Photochemistry (UV photolysis)", key=K("photo"))
         # default 83 deg = upstream VULCAN's dayside-average zenith angle
         sl_angle_deg = st.number_input(
             "Photolysis zenith angle (degrees)", 0.0, 89.0, 83.0, 1.0,
@@ -1144,10 +1133,6 @@ with st.sidebar:
                    "panel.")
         st.caption(
             f"The base set **{' · '.join(_base_set)}** is always on.")
-        # Species with no published k-table are not in EXTRA_MOLECULES;
-        # this filter only guards a future widening of that list.
-        _extra_set = [m for m in _extra_set
-                      if m not in forward._NO_EXOMOLOP_TABLE]
         _unattributed = [m for m in list(_base_set) + list(_extra_set)
                          if m not in _ksrc]
         if _ksrc_err or _unattributed:
@@ -2157,6 +2142,18 @@ _bin_df = pd.concat(_bin_rows, ignore_index=True)
 _native = {"wl_um": wl_s, "depth_ppm": d_s}
 if d_wo_s is not None:
     _native[f"depth_{meta['target']}_opacity_removed_ppm"] = d_wo_s
+
+# Opacity honesty: a species the network solved but the RT cannot see is
+# missing absorption, so the contrast is a lower bound. Carbon-rich columns are
+# where this bites (C6H6 on sncho2025 at C/O 10). Read from the cache, so a
+# cached run says it too -- run_model logs it, but a cache hit never solves.
+_unmodeled = [str(u).split("|") for u in np.atleast_1d(
+    model.get("unmodeled", np.array([], dtype="U32")))]
+if _unmodeled:
+    st.warning(
+        "No opacity table for "
+        + ", ".join(f"{sp} (VMR {float(v):.1e})" for sp, v in _unmodeled)
+        + ": the modelled feature contrast is a lower bound.")
 
 with st.expander("Physical structure (T-P profile, mixing ratios)"):
     # ONE two-panel figure (plotting.build_structure_figure, pure and

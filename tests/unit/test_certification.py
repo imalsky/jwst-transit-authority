@@ -75,11 +75,10 @@ def test_fd_row_certifies_richardson_and_refuses_an_inconsistent_row():
     zero = np.zeros(3)
     assert forward.fd_row("dlnCO", zero, zero, 0.1) == (pytest.approx(zero), 0.0)
 
-    with pytest.raises(RuntimeError, match="step-size consistency"):
+    with pytest.raises(RuntimeError, match="step-size consistency") as e:
         forward.fd_row("dlnCO", j1, j1 * 1.4, 0.1)
     # the advice names yconv_min: a loose-branch exit ignores yconv_cri
-    with pytest.raises(RuntimeError, match="yconv_min"):
-        forward.fd_row("dlnCO", j1, j1 * 1.4, 0.1)
+    assert "yconv_min" in str(e.value)
     with pytest.raises(RuntimeError, match="non-finite"):
         forward.fd_row("dlnCO", np.array([np.nan, 1.0, 1.0]), j1, 0.1)
 
@@ -99,8 +98,9 @@ def test_ad_dlnco_margin_refuses_on_both_columns_and_on_a_missing_engine():
 
     # build column below the gate: refused before any solve
     tight = SimpleNamespace(co_bz_bound=0.05, co_bz_margin=lambda c: 0.5)
-    with pytest.raises(RuntimeError, match="build column"):
+    with pytest.raises(RuntimeError, match="build column") as e:
         forward.check_ad_co_margin(tight, 0.95)
+    assert f"{gate:g}" in str(e.value)
 
     # build column passes, converged column does not -- the carbon-rich case:
     # a fixed-O column with no oxygen-only carriers left has margin ~0
@@ -118,9 +118,6 @@ def test_ad_dlnco_margin_refuses_on_both_columns_and_on_a_missing_engine():
                     SimpleNamespace(co_bz_bound=0.5)):
         with pytest.raises(RuntimeError, match="does not expose"):
             forward.check_ad_co_margin(missing, 0.55)
-    assert f"{gate:g}" in str(
-        pytest.raises(RuntimeError,
-                      lambda: forward.check_ad_co_margin(tight, 0.95)).value)
 
 
 def test_ad_chemistry_rows_are_never_vmapped_over_tangent_directions():
