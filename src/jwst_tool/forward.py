@@ -257,6 +257,48 @@ def check_ad_co_margin(chem, co_ratio, y=None, build_margin=None,
     return margin
 
 
+# A converged column can put a network species with NO published k-table at an
+# abundance the RT then ignores: at C/O 10 on sncho2025, C6H6 reaches 3.6e-3
+# over 10-0.01 mbar, comparable to CO, and no ExoMolOP table exists for it.
+# The spectrum is a lower bound on the true feature contrast there, so SAY so.
+# 0.01 % is an order of magnitude below the bulk carriers and above every
+# trace species the RT already carries at solar C/O.
+# 0.1 %: a bulk-level carrier. Trace omissions (HSO at 1.2e-4 on the default
+# case) are a standing entry in notes.md, not a per-run warning.
+UNMODELED_VMR_WARN = 1.0e-3
+# Transmission photosphere, the band the warning is measured over (bar).
+_PHOTOSPHERE_BAR = (1.0e-5, 1.0e-2)
+# Absent from the k-table set for a REASON, so not missing opacity. Two
+# classes: the bare atoms (ExoMolOP is a MOLECULAR line-list database -- an
+# atom has no IR bands to tabulate), and the background gases, which are
+# either the CIA continuum and Rayleigh scatterers (H2, He) or homonuclear
+# and so dipole-free (N2, O2, S2 -- notes.md records the same for S2).
+_NOT_A_K_TABLE_ABSORBER = frozenset({
+    "H", "O", "C", "N", "S", "O_1", "N_2D",
+    "H2", "He", "N2", "O2", "S2"})
+
+
+def unmodeled_absorbers(species, y, p_bar, table_species) -> list[tuple]:
+    """Network species with no opacity table that are abundant anyway.
+
+    Returns [(name, mean VMR over the transmission photosphere), ...] above
+    UNMODELED_VMR_WARN, most abundant first. ``table_species`` is the set the
+    engine can build opacity for; the background gases and the homonuclear
+    diatomics are excluded because their absence is deliberate, not a gap.
+    """
+    y = np.asarray(y, dtype=np.float64)
+    vmr = y / y.sum(axis=1, keepdims=True)
+    p_bar = np.asarray(p_bar, dtype=np.float64)
+    band = (p_bar >= _PHOTOSPHERE_BAR[0]) & (p_bar <= _PHOTOSPHERE_BAR[1])
+    if not band.any():
+        return []
+    skip = set(table_species) | _NOT_A_K_TABLE_ABSORBER
+    out = [(sp, float(vmr[band, i].mean()))
+           for i, sp in enumerate(species) if sp not in skip]
+    return sorted([o for o in out if o[1] > UNMODELED_VMR_WARN],
+                  key=lambda o: -o[1])
+
+
 # Cloud-deck Fisher rows: RT-only like lnR0 (one central difference or an RT
 # jvp, no chemistry re-solve, no h-vs-2h gate). Need cloud_on.
 CLOUD_FISHER_PARAMS = ("log_kappa_cloud", "alpha_cloud")
@@ -1750,6 +1792,20 @@ def run_model(params: dict, log=print) -> Path:
         _ins.atomic_write(
             _chem_out, lambda fh: np.savez_compressed(fh, **_chem_arrays))
         log(f"[fwd] chem column cached -> {_chem_out.name}")
+
+    # Opacity honesty: a species the network solves but the RT cannot see is
+    # missing absorption, not a missing trace. Loud, never silent.
+    _unmodeled = unmodeled_absorbers(_species_now, np.asarray(y_sol),
+                                     np.asarray(chem.p_bar),
+                                     set(config.MOLECULES))
+    if _unmodeled:
+        log("[fwd] WARNING: this column carries "
+            + ", ".join(f"{sp} at {v:.2e}" for sp, v in _unmodeled)
+            + f" (mean VMR, {_PHOTOSPHERE_BAR[1]*1e3:g}-"
+              f"{_PHOTOSPHERE_BAR[0]*1e3:g} mbar) with NO published k-table, "
+              "so the RT omits them: the spectrum is a LOWER BOUND on the "
+              "true feature contrast. Carbon-rich compositions are where this "
+              "bites.")
 
     # Emission bottom-boundary certification. The interior source term is a
     # blackbody at the extrapolated bottom temperature, an assumption about

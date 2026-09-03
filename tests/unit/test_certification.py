@@ -183,3 +183,35 @@ def test_emission_tau_bottom_gate_measures_the_flux_that_leaks_through():
     report = forward._tau_bottom_breakdown(wl, tau, flux)
     assert "1.0-2.0 um (no modeled continuum)" in report
     assert "12-15 um" in report
+
+
+def test_an_abundant_species_with_no_k_table_is_named_not_swallowed():
+    """A network species the RT cannot see is missing ABSORPTION, not a
+    missing trace. Measured at C/O 10 on sncho2025: C6H6 reaches 3.6e-3 over
+    the transmission photosphere -- comparable to CO -- and ExoMolOP publishes
+    no benzene table, so the spectrum is a lower bound on the true contrast.
+    The run has to say so."""
+    sp = ["H2O", "CO", "C6H6", "C2H2", "H2", "H"]
+    # two layers inside the photosphere band, one far below it
+    p = np.array([1.0e-3, 1.0e-4, 5.0])
+    y = np.array([[1.0, 1.0e-2, 3.6e-3, 1.0e-6, 0.77, 1.2e-2]] * 3)
+    tables = {"H2O", "CO", "C2H2"}
+
+    found = forward.unmodeled_absorbers(sp, y, p, tables)
+    assert [n for n, _ in found] == ["C6H6"]
+    assert found[0][1] == pytest.approx(3.6e-3 / y[0].sum(), rel=1e-6)
+
+    # H2 (CIA continuum) and atomic H (no IR molecular bands) are absent from
+    # the table set on purpose and must NEVER be reported as missing opacity,
+    # however abundant -- they dominate this column
+    assert "H2" not in dict(found) and "H" not in dict(found)
+    # a species the RT DOES carry is never flagged, however abundant
+    assert forward.unmodeled_absorbers(sp, y, p, tables | {"C6H6"}) == []
+    # and neither is one below the threshold
+    y_low = y.copy()
+    y_low[:, 2] = forward.UNMODELED_VMR_WARN * y[0].sum() * 0.5
+    assert forward.unmodeled_absorbers(sp, y_low, p, tables) == []
+    # most abundant first
+    y2 = np.array([[1.0, 1.0e-2, 3.6e-3, 1.0e-2, 0.77, 1.2e-2]] * 3)
+    assert [n for n, _ in forward.unmodeled_absorbers(sp, y2, p, {"H2O", "CO"})] \
+        == ["C2H2", "C6H6"]
