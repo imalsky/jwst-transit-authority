@@ -270,6 +270,11 @@ def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
     at.radio(key="n0_goal").set_value("constrain").run()
     at.selectbox(key="n0_jacm").set_value("ad").run()
     assert not at.exception, at.exception
+    # Baseline: AD + photo ON is ALLOWED, so whatever errors show here are
+    # environment, not gating (CI has no data root and always shows the
+    # required-data banner). Compare against this rather than against "no
+    # error at all", which is unsatisfiable in CI.
+    allowed_errors = {e.value for e in at.error}
     assert not at.checkbox(key="n0_photo").disabled
     at.checkbox(key="n0_photo").set_value(False).run()
     assert not at.exception, at.exception
@@ -283,13 +288,14 @@ def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
     # ... but the refusal covers CHEMISTRY rows only: an all-RT-only request
     # (a cloud-deck row, plus the auto-appended lnR0) carries no through-solver
     # tangent, so it must stay RUNNABLE with photolysis off and AD on. Assert
-    # NO error at all, not just the absence of this one: a positive test that
-    # only excludes one message passes while something else blocks the Run.
+    # the error set is back to the ALLOWED baseline -- excluding just this one
+    # message would pass while some other error blocked the Run.
     at.checkbox(key="n0_cloud").set_value(True).run()
     at.checkbox(key="n0_marg").set_value(False).run()
     at.selectbox(key="n0_gp_vulcan_file_1").set_value("log_kappa_cloud").run()
     assert not at.exception, at.exception
-    assert not at.error, [e.value for e in at.error]
+    assert {e.value for e in at.error} == allowed_errors, \
+        [e.value for e in at.error]
     at.checkbox(key="n0_cloud").set_value(False).run()
     at.checkbox(key="n0_marg").set_value(True).run()
     at.checkbox(key="n0_photo").set_value(True).run()
