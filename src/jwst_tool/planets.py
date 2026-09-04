@@ -236,3 +236,51 @@ def default_tirr(planet: dict, system: dict | None = None,
     if str(science_mode) == "emission":
         teq *= DAYSIDE_TEQ_FACTOR
     return min(max(round(teq * math.sqrt(2.0) / 20.0) * 20.0, 800.0), 2500.0)
+
+
+# Gray cloud: opacity <-> the pressure it blocks down to.
+#
+# The engine's cloud is a uniformly mixed per-gram opacity, dtau = kappa dP/g
+# (vulcan_forward.exojax_rt._ckd_continuum), so the SLANT optical depth through
+# an exponential atmosphere is tau(P) = kappa (P/g) sqrt(2 pi Rp/H) -- the
+# closed form vulcan-forward gates its own RT against (its
+# tests/test_cloud_deck.py, Heng & Kitzmann 2017; worst case 1.04e-2 H). Setting
+# tau = 1 gives the level the cloud blocks down to:
+#
+#     P_top = (1/kappa) sqrt(g kB T / (2 pi Rp mu m_u))
+#
+# The two coordinates differ by a constant in log space, so a Fisher width in
+# dex is the SAME number for log kappa and for log10 P_top.
+MMW_CLOUD = 2.33          # H2/He mean molecular weight assumed by the mapping
+_K_B_CGS = 1.380649e-16   # erg/K
+_M_U_CGS = 1.66053907e-24  # g
+
+
+def _gray_cloud_offset(gs_cgs: float, rp_rjup: float, t_eq_k: float) -> float:
+    """log10(kappa * P_top_bar), the constant of the mapping."""
+    g, rp = float(gs_cgs), float(rp_rjup) * R_JUP_CM
+    if not (g > 0.0 and rp > 0.0 and float(t_eq_k) > 0.0):
+        raise ValueError(
+            f"gray cloud mapping needs positive gs_cgs/rp_rjup/t_eq_k (got "
+            f"{gs_cgs!r}, {rp_rjup!r}, {t_eq_k!r})")
+    h = _K_B_CGS * float(t_eq_k) / (MMW_CLOUD * _M_U_CGS * g)
+    return math.log10(g / (1.0e6 * math.sqrt(2.0 * math.pi * rp / h)))
+
+
+def gray_cloud_log_kappa(p_top_bar: float, gs_cgs: float, rp_rjup: float,
+                         t_eq_k: float) -> float:
+    """log10 kappa (cm^2/g) of the gray cloud whose slant tau reaches 1 at
+    ``p_top_bar``."""
+    if not float(p_top_bar) > 0.0:
+        raise ValueError(
+            f"cloud top pressure must be > 0 bar (got {p_top_bar!r})")
+    return (_gray_cloud_offset(gs_cgs, rp_rjup, t_eq_k)
+            - math.log10(float(p_top_bar)))
+
+
+def gray_cloud_p_top_bar(log_kappa: float, gs_cgs: float, rp_rjup: float,
+                         t_eq_k: float) -> float:
+    """Inverse of ``gray_cloud_log_kappa``: the pressure a gray kappa blocks
+    down to."""
+    return 10.0 ** (_gray_cloud_offset(gs_cgs, rp_rjup, t_eq_k)
+                    - float(log_kappa))

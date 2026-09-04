@@ -41,7 +41,7 @@ _GLOBAL_BOUNDS = {
     "met": (0.1, 100.0),
     "sza": (0.0, 89.0), "fdiur": (0.1, 1.0),
     "yconv": (1.0e-4, 1.0e-2), "yconvmin": (1.0e-4, 0.1),
-    "ck": (-4.0, 2.0), "ca": (0.0, 4.0),
+    "ck": (-7.0, 2.0), "ca": (0.0, 4.0), "cpt": (-6.0, 1.0),
     "nz": forward.NZ_RANGE,
     "rtptop": (1.0e-9, 1.0e-6),
     "pref": (1.0e-6, 7.0),
@@ -101,7 +101,8 @@ def _check_widget_ranges(state: dict, key, pk, science_mode: str) -> None:
 
 def build_share(canon: dict, goal: dict, observation: dict,
                 tp_table_text: str | None = None,
-                floor_table: list | None = None) -> dict:
+                floor_table: list | None = None,
+                cloud_top_bar: float | None = None) -> dict:
     """Assemble the downloadable configuration dict."""
     share = {
         "jwst_tool_config": SHARE_FORMAT,
@@ -121,6 +122,13 @@ def build_share(canon: dict, goal: dict, observation: dict,
         # version, and widget_state never reads it.
         "provenance": provenance.snapshot(observation.get("seed")),
     }
+    # The pressure a GRAY cloud was entered as; its presence IS the mode.
+    # Not a canonical parameter -- the run is fully determined by cloud_on /
+    # log_kappa_cloud / alpha_cloud / fisher_params, which are. Recorded rather
+    # than re-derived on load because the canonical block zeroes star_teff in
+    # transmission, so the mapping's T_eq cannot be rebuilt from it.
+    if cloud_top_bar and canon.get("cloud_on"):
+        share["cloud_top_bar"] = float(cloud_top_bar)
     if tp_table_text:
         share["tp_table_text"] = str(tp_table_text)
     if floor_table:
@@ -220,12 +228,14 @@ def _resolve_embedded_tp(cp: dict, cfg: dict, tp_mode: str):
 
 
 def _restore_goal(state: dict, cp: dict, goal: dict, key,
-                  tp_mode: str) -> None:
-    cloud_i = int(bool(cp["cloud_on"]))
+                  tp_mode: str, cloud_mode: str = "haze") -> None:
+    cloud_i = (0 if not cp["cloud_on"]
+               else (2 if cloud_mode == "gray" else 1))
     suffix = f"vulcan_{tp_mode}_{cloud_i}"
     avail = list(forward.CHEM_PARAM_NAMES) + list(forward.TP_PARAM_NAMES[tp_mode])
     if cp["cloud_on"]:
-        avail += list(forward.CLOUD_FISHER_PARAMS)
+        avail += [p for p in forward.CLOUD_FISHER_PARAMS
+                  if cloud_mode != "gray" or p != "alpha_cloud"]
     requested = [str(p) for p in (goal.get("fisher_params")
                                   or cp.get("fisher_params") or [])]
     fisher = [p for p in requested if p in avail]
@@ -406,12 +416,18 @@ def _restore_vulcan_physics(state: dict, cp: dict, key, pk) -> None:
     _reject_removed_physics(cp)
 
 
-def _restore_rt_state(state: dict, cp: dict, key) -> None:
+def _restore_rt_state(state: dict, cp: dict, key,
+                      cloud_top_bar: float | None = None) -> None:
     state[key("rayl")] = bool(cp["use_rayleigh"])
     state[key("cloud")] = bool(cp["cloud_on"])
     if cp["cloud_on"]:
-        state[key("ck")] = float(cp["log_kappa_cloud"])
-        state[key("ca")] = float(cp["alpha_cloud"])
+        gray = cloud_top_bar is not None
+        state[key("cmode")] = "gray" if gray else "haze"
+        if gray:
+            state[key("cpt")] = _log10(cloud_top_bar, "cloud_top_bar")
+        else:
+            state[key("ck")] = float(cp["log_kappa_cloud"])
+            state[key("ca")] = float(cp["alpha_cloud"])
     extras_all = list(forward.EXTRA_MOLECULES)
     state[key(f"xmols_vulcan{_network_suffix(cp)}")] = [
         molecule for molecule in (cp.get("extra_mols") or [])
@@ -453,6 +469,11 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key) -> dict:
     def pk(name: str) -> str:            # per-planet widget keys
         return key(f"{planet}_{name}")
 
+    # A gray cloud records the pressure it was entered as; its absence is the
+    # power-law haze -- what every configuration written before this was.
+    cloud_top_bar = cfg.get("cloud_top_bar")
+    cloud_mode = "haze" if cloud_top_bar is None else "gray"
+
     restored_tp, pending_tp = _resolve_embedded_tp(cp, cfg, tp_mode)
     try:
         state = _restore_system_profile(
@@ -460,8 +481,8 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key) -> dict:
 
         _restore_vulcan_physics(state, cp, key, pk)
 
-        _restore_rt_state(state, cp, key)
-        _restore_goal(state, cp, goal, key, tp_mode)
+        _restore_rt_state(state, cp, key, cloud_top_bar)
+        _restore_goal(state, cp, goal, key, tp_mode, cloud_mode)
         _restore_observation(state, obs, cfg, key, pk)
         _check_widget_ranges(state, key, pk,
                              str(cp.get("science_mode", "transmission")))

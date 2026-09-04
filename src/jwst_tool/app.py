@@ -1166,23 +1166,51 @@ with st.sidebar:
             "H2/He Rayleigh scattering", key=K("rayl"),
             disabled=(science_mode == "emission"))
         cloud_on = st.checkbox(
-            "Power-law cloud/haze opacity", value=False, key=K("cloud"))
+            "Cloud / haze opacity", value=False, key=K("cloud"))
+        cloud_mode = "haze"
         if cloud_on:
+            cloud_mode = st.radio(
+                "Cloud model", ["haze", "gray"], horizontal=True,
+                key=K("cmode"),
+                format_func={"haze": "Power-law haze",
+                             "gray": "Gray cloud"}.get)
+        cloud_top_bar = None
+        if cloud_on and cloud_mode == "gray":
+            # Entered where the cloud blocks rather than as an opacity per
+            # gram of atmosphere; the two differ by a constant in log space
+            # (planets.gray_cloud_log_kappa), so the Fisher width in dex is
+            # the same number for either coordinate.
+            log_p_top = st.number_input(
+                "log10 cloud top pressure (bar)", -6.0, 1.0, -3.0, 0.25,
+                key=K("cpt"),
+                help="Pressure where the gray cloud's slant optical depth "
+                     "reaches 1, for mean molecular weight "
+                     f"{planets.MMW_CLOUD} at the system's T_eq.")
+            cloud_top_bar = 10.0 ** log_p_top
+            log_kappa_cloud = planets.gray_cloud_log_kappa(
+                cloud_top_bar, g_ms2 * 100.0, rp, teq)
+            alpha_cloud = 0.0
+        elif cloud_on:
             log_kappa_cloud = st.number_input(
-                "log10 kappa_cloud (cm^2/g at 3.5 µm)", -4.0, 2.0, -1.0, 0.1,
+                "log10 kappa_cloud (cm^2/g at 3.5 µm)", -7.0, 2.0, -1.0, 0.1,
                 key=K("ck"))
             alpha_cloud = st.number_input(
                 "Cloud spectral slope alpha (kappa ∝ nu^alpha)",
                 0.0, 4.0, 0.0, 0.25, key=K("ca"))
         else:
             log_kappa_cloud, alpha_cloud = -1.0, 0.0
+    # off -> 0, haze -> 1, gray -> 2. ONE key axis with three values, not a
+    # second boolean gate; haze is the default so stored keys keep meaning.
+    cloud_sfx = 0 if not cloud_on else (2 if cloud_mode == "gray" else 1)
 
     # Step 3: Science goal (only the controls the selected goal needs)
     st.divider()
     st.markdown("### 3 · Science goal")
     avail_free = list(forward.CHEM_PARAM_NAMES) + forward.TP_PARAM_NAMES[tp_mode]
     if cloud_on:
-        avail_free = avail_free + list(forward.CLOUD_FISHER_PARAMS)
+        avail_free = avail_free + [
+            p for p in forward.CLOUD_FISHER_PARAMS
+            if cloud_mode != "gray" or p != "alpha_cloud"]
     mol_options = forward.active_molecules(
         {"network": network, "extra_mols": extra_mols})
 
@@ -1211,7 +1239,7 @@ with st.sidebar:
             target_mol = None
             goal_param = st.selectbox(
                 "Parameter to constrain", avail_free,
-                key=K(f"gp_vulcan_{tp_mode}_{int(cloud_on)}"),
+                key=K(f"gp_vulcan_{tp_mode}_{cloud_sfx}"),
                 format_func=lambda n: fisher_mod.PARAM_LABELS[n])
             marginalize = st.checkbox(
                 "Marginalize over the other parameters", value=True,
@@ -1251,7 +1279,7 @@ with st.sidebar:
                     # sigmas toward the conditional bound.
                     default=[p for p in ("lnZ", "dlnCO")
                              if p in avail_free],
-                    key=K(f"fx_vulcan_{tp_mode}_{int(cloud_on)}"),
+                    key=K(f"fx_vulcan_{tp_mode}_{cloud_sfx}"),
                     format_func=lambda n: fisher_mod.PARAM_LABELS[n])
                 fisher_params = sorted(set(fisher_extra) | {goal_param})
             elif goal == "constrain":
@@ -1259,7 +1287,7 @@ with st.sidebar:
             else:
                 fisher_params = st.multiselect(
                     "Free parameters", avail_free,
-                    key=K(f"fp_vulcan_{tp_mode}_{int(cloud_on)}"),
+                    key=K(f"fp_vulcan_{tp_mode}_{cloud_sfx}"),
                     default=[p for p in ("lnZ", "dlnCO")
                              if p in avail_free],
                     format_func=lambda n: fisher_mod.PARAM_LABELS[n])
@@ -1657,7 +1685,8 @@ if _canon is not None:
         tp_table_text=(Path(tp_file_path).read_text()
                        if tp_file_path else None),
         floor_table=(np.asarray(floor_table).tolist()
-                     if floor_table is not None else None))
+                     if floor_table is not None else None),
+        cloud_top_bar=cloud_top_bar)
     with _cfg_col:
         st.download_button(
             "Download configuration (JSON)",

@@ -8,7 +8,7 @@ stronger tests).
 """
 import pytest
 
-from jwst_tool import forward, share_config
+from jwst_tool import forward, planets, share_config
 
 
 def _key(name: str) -> str:              # the app's K() with nonce 0
@@ -83,6 +83,50 @@ def test_round_trip_restores_the_full_run():
     state = share_config.widget_state(_canon(), _key)
     assert state["n0_planet"] == "wasp39b"
     assert "n0_modes" not in state          # no observation section to restore
+
+
+def test_a_gray_cloud_round_trips_on_the_pressure_it_was_entered_as():
+    """Gray is a GUI shape, not physics: the file carries only the opacity the
+    engine actually uses, and the restore inverts it back to the pressure that
+    was entered. The slope is pinned at 0 and is NOT offered as a free
+    parameter, so the goal widgets carry their own key suffix. A file with no
+    cloud_mode is the power-law haze -- which is what every configuration
+    written before this mode existed was."""
+    # the app's own T_eq: derived from the star and orbit, not from the
+    # canonical block, which zeroes star_teff in transmission
+    w39 = planets.PLANETS["wasp39b"]
+    teq = planets.system_teq(w39["star"]["teff"], w39["rstar_rsun"],
+                             w39["orbit_au"])
+    canon = _canon(cloud_on=True, alpha_cloud=0.0,
+                   log_kappa_cloud=planets.gray_cloud_log_kappa(
+                       1.0e-3, w39["gs_cgs"], w39["rp_rjup"], teq),
+                   fisher_params=["lnZ", "log_kappa_cloud"])
+    goal = dict(goal="constrain", goal_param="log_kappa_cloud",
+                target_prec=0.3, target_sig=3.0, marginalize=True,
+                do_fisher=False, fisher_params=["lnZ", "log_kappa_cloud"],
+                jac_method="fd")
+    share = share_config.build_share(canon, goal=goal, observation={},
+                                     cloud_top_bar=1.0e-3)
+    assert share["cloud_top_bar"] == 1.0e-3
+    # the opacity is what the run is keyed on; the pressure is display only
+    assert "cloud_top_bar" not in share["canonical_params"]
+
+    state = share_config.widget_state(share, _key)
+    assert state["n0_cmode"] == "gray"
+    assert state["n0_cpt"] == pytest.approx(-3.0)     # 1 mbar, as entered
+    assert "n0_ck" not in state and "n0_ca" not in state
+    # gray asserts the slope, so it moves off the freeable list and the goal
+    # widgets key on their own suffix (off 0 / haze 1 / gray 2)
+    assert state["n0_gp_vulcan_guillot_2"] == "log_kappa_cloud"
+    assert state["n0_fx_vulcan_guillot_2"] == ["lnZ"]
+
+    # no marker -> haze, restoring the opacity widgets exactly as before
+    share.pop("cloud_top_bar")
+    state = share_config.widget_state(share, _key)
+    assert state["n0_cmode"] == "haze"
+    assert state["n0_ck"] == canon["log_kappa_cloud"]
+    assert "n0_cpt" not in state
+    assert "n0_gp_vulcan_guillot_1" in state
 
 
 @pytest.mark.parametrize("network", ["ncho", "sncho2025"])
