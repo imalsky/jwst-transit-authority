@@ -293,9 +293,15 @@ def test_summary_legends_sit_inside_their_axes_and_cover_no_data():
     fig = _summary_fig(with_sigma=True)
     try:
         for i, ax in enumerate(fig.axes[1:], 1):
-            _t = ax.get_title()
-            assert "±" in _t or "dex" in _t, \
-                f"panel title quotes no width: {_t!r}"
+            # No panel carries a title; the width rides its LEGEND entry, so
+            # the number sits with the series it describes.
+            assert not ax.get_title(), \
+                f"axes{i} regained a title: {ax.get_title()!r}"
+            _leg = ax.get_legend()
+            _txt = (" ".join(t.get_text() for t in _leg.get_texts())
+                    if _leg is not None else "")
+            assert "±" in _txt or "dex" in _txt, \
+                f"axes{i} legend quotes no width: {_txt!r}"
             assert not ax.collections, \
                 f"axes{i} regained a shaded band ({len(ax.collections)})"
     finally:

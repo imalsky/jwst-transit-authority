@@ -215,7 +215,12 @@ def _validate_panels(posterior_panels) -> list[dict]:
         # why this has to be threaded explicitly rather than left to pan.get()
         # in the plotting function.
         _dl = pan.get("density_label")
+        _au = pan.get("axis_unit")
         out.append(dict(axis_label=str(_req(pan, "axis_label", where)),
+                        # the unit alone, so the legend can quote it AFTER the
+                        # error ("[M/H] = 0.88 +- 0.37 dex") instead of leaving
+                        # the axis label's "[dex]" token stranded before the "="
+                        axis_unit=("" if _au is None else str(_au)),
                         curves=curves,
                         density_label=(None if _dl is None else str(_dl)),
                         center=(None if center is None else float(center))))
@@ -344,11 +349,13 @@ def _plot_spectrum(ax, spec: dict) -> None:
         # swallows the fill -- every mode's marker renders black and the
         # per-mode color is invisible. That color is the series identity
         # shared with the forecast panels, so it has to read.
-        # ms 3.6 is the smallest size at which the marker shapes still
-        # separate (D/^/v and P/X/*); below it they collapse to a dot and the
-        # per-mode marker encoding is silently lost.
+        # ms 3.0: the points crowd at R=100 over a wide band, and smaller
+        # markers keep the model line readable underneath them. The per-mode
+        # SHAPE (D/^/v, P/X/*) no longer separates at this size -- colour,
+        # shared with the series' forecast panel, plus the legend entry carry
+        # mode identity, and the legend renders the shape at full size.
         ax.errorbar(p["wl_um"], p["depth_ppm"], yerr=p["sigma_ppm"],
-                    fmt=p["marker"], ms=3.6, lw=0.9, color=p["color"],
+                    fmt=p["marker"], ms=3.0, lw=0.9, color=p["color"],
                     markerfacecolor=p["color"], markeredgecolor=p["color"],
                     markeredgewidth=0.4,
                     ecolor=p["color"], elinewidth=0.7, capsize=0,
@@ -483,6 +490,29 @@ def _fmt_val(v: float) -> str:
     return f"{float(v):.3g}"
 
 
+def _width_text(pan: dict, c: dict) -> str | None:
+    """One curve's width statement for its LEGEND entry: no panel carries a
+    title, so this is the only place the number appears on the figure.
+
+    Reads "symbol = value +- error unit" ("[M/H] = 0.88 +- 0.37 dex"). The
+    symbol is the axis label with its unit token removed, because the unit
+    belongs AFTER the error, not between the symbol and the "=". C/O supplies
+    its own text (fisher.format_co_width): its width is in log10 while its
+    axis is physical C/O, so it cannot be built from the axis label.
+    """
+    if c.get("width_text"):
+        return c["width_text"]
+    if c.get("sigma") is None:
+        return None
+    unit = pan.get("axis_unit") or ""
+    sym = str(pan["axis_label"])
+    if unit and sym.endswith(f" [{unit}]"):
+        sym = sym[: -len(unit) - 3]
+    mu = c["mu"] if c.get("mu") is not None else pan.get("center")
+    return (f"{sym} = {fisher.format_pm(mu, c['sigma'])}"
+            + (f" {unit}" if unit else ""))
+
+
 def _plot_posterior_panel(axp, pan: dict,
                           xlim: tuple | None = None) -> None:
     """One marginalized forecast density: its curve, and the width QUOTED in
@@ -509,10 +539,8 @@ def _plot_posterior_panel(axp, pan: dict,
         # the title cannot quote one width without silently picking a source,
         # so each ENTRY carries its own.
         _lab = str(c["label"])
-        _wt = c.get("width_text")
-        if _wt is None and c["sigma"] is not None:
-            _wt = fisher.format_pm(None, c["sigma"])   # generic panels
-        if _wt and len(pan["curves"]) > 1:
+        _wt = _width_text(pan, c)
+        if _wt:
             _lab = f"{_lab}: {_wt}"
         axp.plot(theta, pdf, color=c["color"], ls=c["ls"], lw=c["lw"],
                  zorder=2, label=_lab)
@@ -521,21 +549,6 @@ def _plot_posterior_panel(axp, pan: dict,
         # curve sits OFF it, and that offset is the realization's luck
         axp.axvline(pan["center"], color="#666666", lw=0.8, ls=":", zorder=3,
                     label=f"input value {_fmt_val(pan['center'])}")
-    # width in the TITLE, where corner.py puts it
-    _sized = [c for c in pan["curves"] if c["sigma"] is not None]
-    _q = _sized[0] if len(_sized) == 1 else None
-    if _q is not None:
-        _mu = _q["mu"] if _q["mu"] is not None else pan["center"]
-        _wt = _q.get("width_text")
-        if _wt:                       # already names its own coordinate
-            axp.set_title(_wt, fontsize=_AX_LBL)
-        else:
-            axp.set_title(
-                f"{pan['axis_label']} = {fisher.format_pm(_mu, _q['sigma'])}"
-                if _mu is not None
-                else f"{pan['axis_label']}: "
-                     f"{fisher.format_pm(None, _q['sigma'])}",
-                fontsize=_AX_LBL)
     # posteriors.gaussian_curve builds its grid as center +/- 5 sigma, where
     # the curve is visually zero across most of the axis, so the automatic
     # window clips to the widest drawn curve at +/-_XLIM_SIGMA (still >99.7% of

@@ -397,9 +397,10 @@ def _source_rows(base_set, extra_set, extra_on, rayleigh_on, cloud_on,
          "source page": "https://www.stsci.edu/hst/instrumentation/"
                         "reference-data-for-calibration-and-tools/"
                         "astronomical-catalogs/calspec"},
-        {"component": "JWST exposure & noise model",
+        {"component": "JWST exposure & noise model; instrument bands, "
+                      "dispersion and native resolving power",
          "used in this setup": True,
-         "data set": f"Pandeia {ins.BACKEND_RELEASE}",
+         "data set": f"Pandeia {ins.BACKEND_RELEASE} (incl. dispersion files)",
          "source DOI": "10.1117/12.2231768",
          "source page": "https://jwst-docs.stsci.edu/"
                         "jwst-exposure-time-calculator-overview/"
@@ -1284,22 +1285,15 @@ with st.sidebar:
     # The OUTER endpoints must equal the registry's wl_min/wl_max
     # (test_app_smoke pins that): this string restates a band the registry
     # already owns.
-    _MODE_BAND_DISPLAY = {
-        "nirspec_g140h": "1.00-1.31 + 1.35-1.83 µm",
-        "nirspec_g235h": "1.66-2.20 + 2.27-3.07 µm",
-        "nirspec_g395h": "2.87-3.72 + 3.82-5.18 µm",
-    }
     with st.expander(f"Instrument modes & {_evw}s", expanded=True):
         mode_keys = st.multiselect(
             "Instrument modes",
             options=list(ins.MODES),
             default=ins.DEFAULT_MODES, key=K("modes"),
-            format_func=lambda k: (
-                f"{ins.MODES[k]['label']}  "
-                "(" + _MODE_BAND_DISPLAY.get(
-                    k, f"{ins.MODES[k]['wl_min']:g}-"
-                       f"{ins.MODES[k]['wl_max']:g} µm")
-                + f", R ~ {ins.MODES[k]['r_native_med']})"))
+            # Label only. The band and native R are registry data, checked
+            # against the shipped refdata by test_instruments_registry and
+            # credited in the Data panel -- they are not picker copy.
+            format_func=lambda k: ins.MODES[k]["label"])
         # "per mode" is load-bearing: every selected mode is evaluated at this
         # count, and a combined forecast sums their information at the same
         # count, so K modes cost K x this many events -- except SOSS orders 1
@@ -2681,9 +2675,10 @@ for r in results:
     _sum_points.append(dict(
         label=_lbl,
         color=ins.MODE_COLOR[r["mode_key"]],
-        # Uniform marker for every mode: distinct shapes are
-        # indistinguishable at the ~3.6 pt size these points render at.
-        # Modes are distinguished by color plus the legend entry.
+        # Per-mode marker from the registry. At the size these points
+        # render at the SHAPES do not separate; they read in the legend,
+        # where the handle is drawn full size. On the panel itself modes
+        # are distinguished by colour plus the legend entry.
         marker=ins.MODE_MARKER.get(r["mode_key"], "o"),
         wl_um=_pwl, depth_ppm=_pdep, sigma_ppm=_psig))
 _leg_note = None

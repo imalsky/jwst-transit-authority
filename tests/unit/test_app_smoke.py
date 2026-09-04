@@ -377,34 +377,9 @@ def test_source_pins_fig_width_fisher_table_and_noise_recording():
         "the Fisher CSV is no longer built from the unblanked rows"
 
 
-def test_gap_band_labels_match_the_registry_bands():
-    """The mode picker's hand-written H-grating band strings must keep the
-    registry's own endpoints.
-
-    A duplicated band statement is how the G395M red edge drifted to 5.10
-    while its source (Birkmann et al. 2022 Table 2 / jwst-docs BOTS Table 1)
-    said 5.18. These three strings restate a band the registry already owns,
-    so pin the outer endpoints to it; the inner pair is the measured NRS1/NRS2
-    gap and has no registry counterpart."""
-    from jwst_tool import instruments as ins
-    src = APP.read_text()
-    i = src.index("_MODE_BAND_DISPLAY = {")
-    block = src[i:src.index("}", i)]
-    labels = dict(re.findall(r'"([a-z0-9_]+)":\s*"([^"]+)"', block))
-    assert labels, "the band-label table moved or changed shape"
-    for key, text in labels.items():
-        assert key in ins.MODES, f"{key} is not a registry mode"
-        edges = [float(x) for x in re.findall(r"\d+\.\d+", text)]
-        assert len(edges) == 4, f"{key}: expected two sub-bands, got {text!r}"
-        assert edges == sorted(edges), f"{key}: band edges out of order"
-        m = ins.MODES[key]
-        assert (edges[0], edges[-1]) == (m["wl_min"], m["wl_max"]), (
-            f"{key}: label {text!r} disagrees with the registry band "
-            f"{m['wl_min']}-{m['wl_max']}")
-
-
 def test_mode_picker_native_r_labels_are_measured():
-    """Pins the mode picker's measured native-R labels (r_native_med: display
+    """Pins the registry's measured native-R values (r_native_med: no longer
+    shown in the picker, still cross-checked against the refdata; display
     metadata measured from the 2026.7 refdata dispersion files -- re-measure
     on any refdata change, never edit the numbers freehand)."""
     from jwst_tool import instruments as ins
