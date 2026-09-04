@@ -278,8 +278,19 @@ def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
     at.radio(key="n0_scimode").set_value("transmission").run()   # plain rerun
     assert at.checkbox(key="n0_photo").value is False
     # ... and the run is blocked with one sentence naming the fix
-    assert any("photo-on regime" in (e.value or "") for e in at.error), \
+    assert any("no self-check" in (e.value or "") for e in at.error), \
         [e.value for e in at.error]
+    # ... but the refusal covers CHEMISTRY rows only: an all-RT-only request
+    # (a cloud-deck row, plus the auto-appended lnR0) is photolysis-
+    # independent, so it must stay RUNNABLE with photolysis off and AD on.
+    at.checkbox(key="n0_cloud").set_value(True).run()
+    at.checkbox(key="n0_marg").set_value(False).run()
+    at.selectbox(key="n0_gp_vulcan_file_1").set_value("log_kappa_cloud").run()
+    assert not at.exception, at.exception
+    assert not [e.value for e in at.error if "no self-check" in (e.value or "")], \
+        [e.value for e in at.error]
+    at.checkbox(key="n0_cloud").set_value(False).run()
+    at.checkbox(key="n0_marg").set_value(True).run()
     at.checkbox(key="n0_photo").set_value(True).run()
     at.radio(key="n0_goal").set_value("detect").run()
     assert not at.exception, at.exception

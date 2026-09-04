@@ -7,7 +7,9 @@ reads the npz cache in ``instruments.MODEL_CACHE``: spectra under
 that entry, logging "[fwd] PROG <frac> <label>" for the GUI bar. With
 ``fisher_params`` it also builds the spectrum Jacobian row by row (per-row
 method in ``jac_row_method``): "fd" is certified central finite differences
-under the h-vs-2h gate, "ad" one warm-started jvp per row (photo-on required;
+under the h-vs-2h gate, "ad" one warm-started jvp per row (photo-on required
+for CHEMISTRY rows -- photo-off they are unvalidated and AD cannot self-check;
+cloud-deck rows are RT-only and stay available;
 the lnZ jvp is the fixed-structural-grid
 derivative and the dlnCO jvp is refused near O-exhaustion, on the build
 column and again on the converged column). Where the central dlnCO stencil
@@ -1023,12 +1025,22 @@ def canonical_params(params: dict) -> dict:
     if cp["jac_method"] == "ad" and not cp["fisher_params"]:
         cp["jac_method"] = "fd"   # no Jacobian requested: inert knob --
         #                           normalize so it can't fragment the cache
-    if cp["jac_method"] == "ad" and not cp["use_photo"]:
+    if (cp["jac_method"] == "ad" and not cp["use_photo"]
+            and any(n not in CLOUD_FISHER_PARAMS for n in cp["fisher_params"])):
+        # Only CHEMISTRY rows are gated: a cloud-deck row (and the appended
+        # lnR0) is an RT-only jvp on the converged column, photolysis-
+        # independent. Photo-off no method is certified on the chemistry
+        # rows -- the FD reference itself misses its own h-vs-2h gate by
+        # 23-400x on the shipped W39b column, while two other photo-off
+        # columns certify it at 0.005-0.06 -- so the refusal names the
+        # asymmetry (FD self-checks, AD cannot), not a blanket noise claim.
         raise ValueError(
-            "jac_method='ad' (warm-started jvp Jacobian rows) is validated "
-            "only in the photo-on regime. Enable photochemistry, or use the "
-            "default certified finite differences (jac_method='fd'), which "
-            "work photo-off too.")
+            "jac_method='ad' chemistry rows "
+            f"({[n for n in cp['fisher_params'] if n not in CLOUD_FISHER_PARAMS]}) "
+            "are not validated with photolysis off, and an AD row carries no "
+            "self-check. Enable photochemistry, or use jac_method='fd', whose "
+            "h-vs-2h consistency check may also refuse the row. Cloud-deck "
+            "rows are RT-only and stay available photo-off.")
     # Composition FD rows solve the chemistry at every stencil point, so each
     # point must stay inside the validated envelope (a row requested AT a
     # range edge would otherwise silently solve outside it). T-P rows

@@ -321,6 +321,19 @@ def test_fisher_names_and_jac_method_matrix():
     with pytest.raises(ValueError):
         forward.canonical_params(_p(fisher_params=["lnKzz"], jac_method="ad",
                                     use_photo=False))
+    # ... but the photo-off refusal covers CHEMISTRY rows only: a cloud-deck
+    # row is an RT-only jvp on the converged column, photolysis-independent,
+    # so an all-RT-only request keeps 'ad' photo-off
+    cp = forward.canonical_params(_p(fisher_params=["log_kappa_cloud"],
+                                     jac_method="ad", use_photo=False,
+                                     cloud_on=True))
+    assert cp["jac_method"] == "ad"
+    assert cp["fisher_params"] == ["log_kappa_cloud"]
+    # one chemistry row in the set is enough to refuse the whole request
+    with pytest.raises(ValueError, match="chemistry rows"):
+        forward.canonical_params(_p(fisher_params=["log_kappa_cloud", "lnZ"],
+                                    jac_method="ad", use_photo=False,
+                                    cloud_on=True))
     # with no Jacobian requested the knob is inert -- normalized to 'fd' so
     # it cannot fragment the cache key, and photo-off is then fine
     assert forward.canonical_params(_p(jac_method="ad"))["jac_method"] == "fd"
