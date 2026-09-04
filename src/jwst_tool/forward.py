@@ -1029,11 +1029,12 @@ def canonical_params(params: dict) -> dict:
             and any(n not in CLOUD_FISHER_PARAMS for n in cp["fisher_params"])):
         # Only CHEMISTRY rows are gated: a cloud-deck row (and the appended
         # lnR0) is an RT-only jvp on the converged column, photolysis-
-        # independent. Photo-off no method is certified on the chemistry
-        # rows -- the FD reference itself misses its own h-vs-2h gate by
-        # 23-400x on the shipped W39b column, while two other photo-off
-        # columns certify it at 0.005-0.06 -- so the refusal names the
-        # asymmetry (FD self-checks, AD cannot), not a blanket noise claim.
+        # independent. Photo-off no chemistry row has a certified reference on
+        # the shipped W39b column: every FD row there misses its own h-vs-2h
+        # gate by 23-400x. It is not uniform, though -- on two other photo-off
+        # columns the COMPOSITION rows certify (0.005-0.060) while lnKzz still
+        # fails (0.368, 0.398). So the refusal names the asymmetry (FD
+        # self-checks and can refuse, AD cannot), not a blanket noise claim.
         raise ValueError(
             "jac_method='ad' chemistry rows "
             f"({[n for n in cp['fisher_params'] if n not in CLOUD_FISHER_PARAMS]}) "
