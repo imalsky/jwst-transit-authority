@@ -553,12 +553,26 @@ def _plot_posterior_panel(axp, pan: dict,
                 # multiplicative width: window taken in ln theta at the width
                 # the curve was BUILT with, never sigma/mu (equal only when
                 # the mock draw left the center unmoved)
-                _s_ln = _XLIM_SIGMA * c["sigma_ln"]
-                _spans.append((c["mu"] * float(np.exp(-_s_ln)),
-                               c["mu"] * float(np.exp(_s_ln))))
+                with np.errstate(over="ignore"):
+                    _s_ln = _XLIM_SIGMA * c["sigma_ln"]
+                    _w = (c["mu"] * float(np.exp(-_s_ln)),
+                          c["mu"] * float(np.exp(_s_ln)))
+                # NEVER past the curve that was actually drawn. A wide C/O
+                # forecast is built on a grid clipped to the range the model
+                # solves, and mu*exp(3.5*sigma_ln) overflows to inf well
+                # before that -- set_xlim(inf) is a hard matplotlib error,
+                # and a finite 1e62 frames the panel on empty decades.
+                # The additive branch below needs no such clamp: it cannot
+                # overflow, and its window is allowed to run past its grid
+                # (into negative values, which is what ln_gaussian avoids).
+                _th = np.asarray(c["theta"], float)
+                if _th.size:
+                    _w = (max(_w[0], float(_th[0])),
+                          min(_w[1], float(_th[-1])))
             else:
-                _spans.append((c["mu"] - _XLIM_SIGMA * c["sigma"],
-                               c["mu"] + _XLIM_SIGMA * c["sigma"]))
+                _w = (c["mu"] - _XLIM_SIGMA * c["sigma"],
+                      c["mu"] + _XLIM_SIGMA * c["sigma"])
+            _spans.append(_w)
         if _spans:
             _lo = min(s[0] for s in _spans)
             _hi = max(s[1] for s in _spans)

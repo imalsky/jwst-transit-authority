@@ -13,7 +13,7 @@ import pytest
 matplotlib.use("Agg", force=True)
 import matplotlib.pyplot as plt      # noqa: E402
 
-from jwst_tool import summary_figure  # noqa: E402
+from jwst_tool import posteriors, summary_figure  # noqa: E402
 
 
 def _spectrum(n=60, with_points=True):
@@ -294,3 +294,53 @@ def test_panel_renders_caller_supplied_width_text():
         assert "A: \u00b10.0324 dex (C/O 0.511\u20130.593)" in labs, labs
     finally:
         plt.close(fig)
+
+
+@pytest.mark.parametrize("sigma_ln", [1.3259, 41.0, 920.0])
+def test_wide_co_panel_frames_the_curve_it_drew(sigma_ln):
+    """A wide C/O forecast must RENDER, and inside the range the model solves.
+
+    The panel window is recomputed from mu and sigma_ln rather than read off
+    the grid, and mu*exp(3.5*sigma_ln) overflows to inf long before the grid
+    does -- set_xlim(inf) is a hard matplotlib error, and a merely large 1e62
+    frames the panel on empty decades. So the window is clamped to the curve
+    that was actually drawn. 1.33 is a real HD 149026 b run; 41 and 920 are
+    niriss_soss_ord2 (notes.md), the widths that used to read "unconstrained".
+    """
+    lo, hi = posteriors.co_curve_bounds()
+    curve = posteriors.ln_gaussian_curve(0.55, sigma_ln, bounds=(lo, hi))
+    assert lo <= curve["theta"][0] and curve["theta"][-1] <= hi
+    pan = dict(axis_label="C/O", curves=[dict(
+        label="G395H", theta=curve["theta"], pdf=curve["pdf"], color="#2a78d6",
+        mu=0.55, sigma=0.55 * sigma_ln, sigma_ln=sigma_ln,
+        curve_family="ln_gaussian")], center=0.55)
+    fig = summary_figure.compose_summary_figure(
+        _spectrum(), posterior_panels=[pan])
+    x0, x1 = fig.axes[1].get_xlim()
+    assert np.isfinite([x0, x1]).all(), (x0, x1)
+    assert lo <= x0 < x1 <= hi, (x0, x1)
+    plt.close(fig)
+
+
+def test_co_panel_accepts_a_center_on_the_solvable_boundary():
+    """CO_MIN and CO_MAX are legal C/O values, so a forecast centred on one
+    must still get a bounded grid -- the clamp is inclusive at both ends."""
+    lo, hi = posteriors.co_curve_bounds()
+    for center in (lo, hi):
+        theta = posteriors.ln_gaussian_curve(center, 920.0,
+                                             bounds=(lo, hi))["theta"]
+        assert np.all(np.isfinite(theta)) and np.all(np.diff(theta) > 0.0)
+        assert theta[0] >= lo and theta[-1] <= hi
+
+
+def test_mock_center_outside_the_solvable_range_is_refused():
+    """A draw recovering a C/O the forward model cannot produce is off scale:
+    it would have to be drawn outside every C/O panel's window, so the caller
+    draws the unshifted forecast instead. Before this, such a centre reached
+    ln_gaussian_curve, which ignores bounds that exclude the centre, and the
+    unbounded grid then overflowed."""
+    lo, hi = posteriors.co_curve_bounds()
+    assert posteriors.mock_center_co(0.55, 506.0, 6.0) is None   # -> 221.9
+    assert posteriors.mock_center_co(0.55, 506.0, -3.0) is None  # -> 0.027
+    inside = posteriors.mock_center_co(0.55, 506.0, 1.0)
+    assert inside is not None and lo <= inside <= hi

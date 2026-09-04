@@ -174,7 +174,9 @@ def ln_gaussian_curve(center: float, sigma_ln: float, grid=None,
     sigma_ln 142 the auto grid overflows float64 outright. The density is
     unchanged: only the drawn window moves, so the curve runs off the panel
     edge instead of being rescaled. Bounds that exclude ``center`` are ignored
-    (the peak must stay in the window). A caller ``grid`` is never clipped.
+    (the peak must stay in the window) -- callers keep their centers in range
+    instead, which is what mock_center_co's range test is for. A caller
+    ``grid`` is never clipped.
     """
     center = float(center)
     sigma_ln = float(sigma_ln)
@@ -188,14 +190,20 @@ def ln_gaussian_curve(center: float, sigma_ln: float, grid=None,
             "by design")
     if grid is None:
         u_lo, u_hi = -_AUTO_SIGMA * sigma_ln, _AUTO_SIGMA * sigma_ln
+        clip = None
         if bounds is not None:
             b_lo, b_hi = float(bounds[0]), float(bounds[1])
-            if b_lo < center < b_hi:
+            if b_lo <= center <= b_hi:
                 lnc = float(np.log(center))
                 u_lo = max(u_lo, float(np.log(b_lo)) - lnc)
                 u_hi = min(u_hi, float(np.log(b_hi)) - lnc)
+                clip = (b_lo, b_hi)
         with np.errstate(over="ignore"):
             theta = center * np.exp(np.linspace(u_lo, u_hi, _AUTO_POINTS))
+        if clip is not None:
+            # exp(log(hi) - log(center)) * center lands a few ulp outside;
+            # the window is a promise, so make the endpoints exact
+            theta = np.clip(theta, *clip)
     else:
         theta = np.asarray(grid, float)
         if theta.ndim != 1 or theta.size < 2:
@@ -657,7 +665,8 @@ def mock_center_co(center: float, sigma_display: float, delta_ln: float):
     information -- its curve degenerates to one float64 value and the panel
     axis stretches to the shifted center. Such a draw returns None; the
     caller reports it and draws the unshifted forecast, never an off-scale
-    spike.
+    spike. A center outside the range the model solves (co_curve_bounds) is
+    off scale for the same reason and returns None too.
     """
     center = float(center)
     sigma_display = float(sigma_display)
@@ -675,4 +684,10 @@ def mock_center_co(center: float, sigma_display: float, delta_ln: float):
         mu = center * float(np.exp(delta_ln))
     if not (np.isfinite(mu) and mu > 0.0):
         return None          # exp() overflowed, or underflowed to a finite 0.0
-    return mu if abs(mu - center) <= _AUTO_SIGMA * sigma_display else None
+    if abs(mu - center) > _AUTO_SIGMA * sigma_display:
+        return None
+    # A recovered C/O the forward model cannot produce is off scale in the
+    # other sense: its curve would have to be drawn outside the window every
+    # C/O panel uses, so the caller draws the unshifted forecast instead.
+    lo, hi = co_curve_bounds()
+    return mu if lo <= mu <= hi else None
