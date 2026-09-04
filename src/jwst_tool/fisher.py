@@ -48,10 +48,7 @@ NULL_LOAD_TOL = 1e-6
 # This is a CHOSEN policy threshold, not a derived one: sigma_lnCO = 1 is one
 # e-fold each way, which is where a C/O width stops being worth printing. It
 # also guards the numerics -- at sigma_lnCO of 41-920 (niriss_soss_ord2, see
-# notes.md) a shifted mock center collapses the curve grid. It is NOT the
-# reporting gate: format_co_width decides separately whether a PHYSICAL range
-# can be quoted, from the solver's own supported band, and keeps the dex
-# width either way.
+# notes.md) a shifted mock center collapses the curve grid.
 UNINFORMATIVE_SIGMA = {"dlnCO": 1.0}
 
 
@@ -213,62 +210,22 @@ def display_sigma(name: str, sigma: float, co_eval: float | None = None) -> floa
     return sigma * _TO_DISPLAY.get(name, 1.0)
 
 
-def co_interval(center: float, sigma_ln: float, k: float = 1.0) -> tuple:
-    """(lo, hi) physical C/O at k sigma: center * exp(+-k*sigma_ln).
+def format_co_width(center: float, sigma_ln: float, k: float = 1.0) -> str:
+    """The C/O legend string: the value AND its error in log10(C/O), Batalha
+    & Line's convention ("Error on log C/O", their cases tagged
+    "logC/O = -0.26" for C/O 0.55).
 
-    Positive by construction. These are the k-sigma quantiles of the
-    log-coordinate Gaussian the panel draws -- exact UNDER that local
-    approximation, which is a quadratic expansion at the input C/O. They are
-    not a globally evaluated credible interval; see format_co_width."""
-    center, w = float(center), float(sigma_ln) * float(k)
-    if not (np.isfinite(center) and center > 0.0):
-        raise ValueError(f"co_interval: center must be a finite C/O > 0, "
-                         f"got {center!r}")
-    if not (np.isfinite(w) and w > 0.0):
-        raise ValueError(f"co_interval: sigma_ln*k must be finite and > 0, "
-                         f"got {w!r}")
-    return (center * np.exp(-w), center * np.exp(w))
-
-
-def format_co_width(center: float, sigma_ln: float, bounds: tuple,
-                    k: float = 1.0, qualify_coord: bool = False) -> str:
-    """The C/O width string. dex is PRIMARY -- it is the coordinate the Fisher
-    Gaussian lives in -- and is ALWAYS reported when finite: a wide dex width
-    is a weak local constraint, not the absence of one.
-
-    Independently, the physical C/O range is appended only when the center AND
-    the interval stay inside ``bounds`` (forward.co_bounds(network,
-    use_photo)). Outside it the forward model cannot be evaluated, so a mapped
-    range there would extrapolate a local derivative; the width is marked
-    "(local)" instead. The CENTER is not required to sit in the band --
-    mock_center_co shifts a recovered center multiplicatively and a broad mode
-    lands outside it legitimately, which is a local result, never an error.
-
-    ``qualify_coord`` names the coordinate the dex belongs to, for surfaces
-    with no C/O axis beside them (the constraint table). PLAIN TEXT, never
-    mathtext: this string also lands in a Streamlit table cell and a CSV."""
-    lo_b, hi_b = float(bounds[0]), float(bounds[1])
-    if not (np.isfinite(lo_b) and np.isfinite(hi_b) and 0.0 < lo_b < hi_b):
-        raise ValueError(f"format_co_width: bounds must be finite, positive "
-                         f"and ordered, got {bounds!r}")
+    log10(C/O) is the coordinate the Fisher Gaussian lives in, and naming it
+    is what licenses the "+-": the Gaussian is symmetric there and skewed in
+    linear C/O, so a bare number beside a C/O axis would be read as a
+    linear-C/O width, off by ln 10. PLAIN TEXT, never mathtext: this string
+    lands in a matplotlib legend and in Streamlit markdown alike."""
     center = float(center)
     if not (np.isfinite(center) and center > 0.0):
         raise ValueError(f"format_co_width: center must be a finite C/O > 0, "
                          f"got {center!r}")
     sig = float(sigma_ln) * float(k) / _LN10
-    if not qualify_coord:
-        # Panel legend, Batalha & Line's convention: the value AND its error
-        # in log10(C/O) -- "Error on log C/O", their cases tagged
-        # "logC/O = -0.26" for C/O 0.55. Naming the coordinate is what
-        # licenses the "+-": the Gaussian is symmetric there and skewed in
-        # linear C/O. A bare number beside a C/O axis would be read as a
-        # linear-C/O width, which is off by ln 10.
-        return f"log10(C/O) = {np.log10(center):.3g} \u00b1 {sig:.3g}"
-    lo, hi = co_interval(center, sigma_ln, k=k)
-    base = f"\u00b1{sig:.3g} in log10(C/O)"
-    if lo_b <= center <= hi_b and lo_b <= lo and hi <= hi_b:
-        return f"{base} (C/O {lo:.3g}\u2013{hi:.3g})"
-    return f"{base} (local)"
+    return f"log10(C/O) = {np.log10(center):.3g} ± {sig:.3g}"
 
 
 def _segment_offset_rows(result: dict) -> np.ndarray:

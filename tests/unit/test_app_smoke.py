@@ -807,11 +807,11 @@ def test_mixing_ratio_panel_selects_species_by_name(monkeypatch):
     assert 0.85 not in got.values()
 
 
-def test_co_row_is_log10_primary_and_never_implies_a_negative_co():
-    """C/O reports its width in log10(C/O) -- the coordinate the Fisher
-    Gaussian lives in, and is symmetric in -- with a mapped physical range
-    only where the chemistry can be solved. A symmetric 3-sigma cell in
-    linear C/O used to cross zero."""
+def test_co_row_is_log10_value_and_error():
+    """C/O is reported in log10(C/O) -- the coordinate the Fisher Gaussian
+    lives in, and is symmetric in. The row NAMES that coordinate and the
+    marginalized cell is the value and its error there, nothing else: a
+    symmetric 3-sigma cell in linear C/O used to cross zero."""
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
     at = _run_with_result(out, out_meta)
     assert not at.exception, at.exception
@@ -823,14 +823,14 @@ def test_co_row_is_log10_primary_and_never_implies_a_negative_co():
     col = next(c for c in df.columns if str(c).startswith("marginalized"))
     seen = False
     for _, row in df.iterrows():
-        if str(row["parameter"]) != "C/O ratio":
+        if str(row["parameter"]) != "log10 C/O":
             continue
         cell = str(row[col]).strip()
         if cell in ("unconstrained", ""):
             continue
         seen = True
-        assert "in log10(C/O)" in cell, cell
-        if "(C/O " in cell:
-            lo = float(cell.split("(C/O ")[1].split("–")[0])
-            assert lo > 0.0, cell
+        assert "log10" not in cell and "(C/O" not in cell, cell
+        centre, width = cell.split("±")
+        assert float(centre) == pytest.approx(np.log10(0.55), abs=5e-3), cell
+        assert float(width) > 0.0, cell
     assert seen, "no constrained C/O row to check"

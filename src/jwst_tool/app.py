@@ -140,12 +140,7 @@ def _show_fig(fig, tight: bool = True, png: bytes | None = None) -> None:
 # A forecast this wide carries no information; say so rather than print a
 # number the Fisher linearization cannot support.
 _UNCONSTRAINED_ABOVE = 1e4
-
-
-def _fmt_sigma(v: float) -> str:
-    """One display-unit uncertainty cell."""
-    return ("unconstrained" if not np.isfinite(v) or v > _UNCONSTRAINED_ABOVE
-            else f"{v:.3g}")
+_LN10 = np.log(10.0)                    # ln-coordinate sigma -> dex
 
 
 def _csv_bytes(df: pd.DataFrame) -> bytes:
@@ -184,7 +179,7 @@ st.markdown(
     "coarser than the model, then binned to the analysis res. For an "
     "observation that uses more than one mode, add the modes as a set in "
     "'Parameter constraint forecast' (in the results), then select that set "
-    "in 'Spectrum & forecast series' under the figure.\n\n"
+    "in 'Modes' under the figure.\n\n"
     "The tool computes a forward "
     "spectrum and a Pandeia noise forecast, ranks the selected modes, and "
     "reports how many transits or eclipses reach your target. "
@@ -194,8 +189,11 @@ st.markdown(
 
 # The Run row renders HERE (above the explainers). Its widgets depend on
 # sidebar state that is read further down, so the slot is reserved now and
-# filled once those values exist.
+# filled once those values exist. The staleness warning is filled the same
+# way: it belongs with the Run button it tells the user to press, not
+# hundreds of lines down beside the results it qualifies.
 _run_slot = st.container()
+_stale_slot = st.container()
 
 # Mirrors the README "Validation" section; nothing here runs.
 with st.expander("Validation"):
@@ -384,11 +382,6 @@ with st.expander("Data" +
                  (f" ({len(_missing_req)} required item(s) missing)"
                   if _missing_req else "")):
     _opacity_slot = st.container()
-
-# Measured AD Fisher-row wall time (WASP-39b defaults), threaded through the
-# GUI mention below so a re-measurement updates one place. (FD costs come
-# from the run-time estimator's own model -- "Jacobian-row cost model".)
-_AD_ROW_MIN, _AD_ROW_MAX = 1, 2        # minutes per AD row
 
 # All wall-time constants below were measured on the maintainer's laptop; the
 # HF Space (SPACE_ID set there and only there) is slower, so every DISPLAYED
@@ -1261,23 +1254,9 @@ with st.sidebar:
                 format_func={"fd": "Finite differences",
                              "ad": "Automatic differentiation "
                                    "(forward-mode, default)"}.get)
-            # Loud slow-path flag: FD re-solves the chemistry per row, so
-            # point the user at AD before a multi-hour run.
+            # Loud slow-path flag: FD re-solves the chemistry per row.
             if fisher_params and jac_method == "fd":
-                _n_comp = sum(p in ("lnZ", "dlnCO") for p in fisher_params)
-                _n_theta = sum(p in ("lnKzz", "Tirr", "Tint", "log_kappa",
-                                     "log_gamma") for p in fisher_params)
-                _est_min = int((_n_comp * 7 + _n_theta * 4) * _RUNTIME_SCALE)
-                if _est_min >= 20:
-                    st.warning(
-                        f"Finite differences with {len(fisher_params)} free "
-                        f"parameters is slow: roughly {_est_min}-"
-                        f"{int(_est_min * 1.4)} min. Switch the "
-                        "differentiation method to AD "
-                        f"(~{int(_AD_ROW_MIN * _RUNTIME_SCALE)}-"
-                        f"{int(_AD_ROW_MAX * _RUNTIME_SCALE)} min per row, "
-                        "photochemistry locked on) or free fewer "
-                        "parameters.")
+                st.warning("FD can be quite slow.")
 
     # Step 4: Observation
     st.divider()
@@ -1551,22 +1530,11 @@ with _opacity_slot:
                 # pages span ExoMol, HITRAN, STScI and others.
                 "source page": st.column_config.LinkColumn("source page")},
             width="stretch", hide_index=True)
-        # A shared range is valid only when the full numerical grid signatures
-        # agree. Never turn incompatible table domains into a plausible union.
-        if _ksrc:
-            _signatures = {r["grid_sha256"] for r in _ksrc.values()}
-            if len(_signatures) != 1:
-                st.error(
-                    "Installed k-tables use incompatible numerical grids. "
-                    "They cannot be mixed; re-fetch all species from one release.")
-            else:
-                _one = next(iter(_ksrc.values()))
-                _tr, _pr, _wr = (_one[k] for k in
-                                 ("t_range_K", "p_range_bar", "wl_range_um"))
-                st.caption(
-                    f"Common k-table grid: T {_tr[0]:g}-{_tr[1]:g} K, "
-                    f"P {_pr[0]:g}-{_pr[1]:g} bar, "
-                    f"λ {_wr[0]:.2g}-{_wr[1]:.3g} µm.")
+        # Never turn incompatible table domains into a plausible union.
+        if _ksrc and len({r["grid_sha256"] for r in _ksrc.values()}) != 1:
+            st.error(
+                "Installed k-tables use incompatible numerical grids. "
+                "They cannot be mixed; re-fetch all species from one release.")
 
 # rough runtime hint keyed off the resolution settings
 base_min = 0.1 + 0.010 * nz
@@ -1878,10 +1846,6 @@ _cpj = json.loads(str(model["params_json"]))
 _ev = ("eclipse" if str(_cpj.get("science_mode", "transmission")) == "emission"
        else "transit")
 co_eval = float(_cpj.get("co_ratio", forward.CO_BASELINE))
-# the band the chemistry can actually be solved in: a mapped C/O range
-# outside it extrapolates a local derivative, so it is not quoted
-co_bounds = forward.co_bounds(str(_cpj.get("network", "sncho")),
-                              bool(_cpj.get("use_photo", True)))
 
 # Staleness guard: results persist in session_state across sidebar edits, so
 # the spectrum shown can be from DIFFERENT settings than the sidebar now
@@ -1922,8 +1886,8 @@ if _shown_stale:
     _chg = ((" Changed: " + ", ".join(f"`{c}`" for c in _changed[:8])
              + (", …" if len(_changed) > 8 else "") + ".")
             if _changed else "")
-    st.warning("Showing your previous run." + _chg
-               + " Press **Run** to recompute.")
+    _stale_slot.warning("Showing your previous run." + _chg
+                        + " Press **Run** to recompute.")
 
 for k, err in out["failed"]:
     first = str(err).strip().splitlines()[-1] if "Traceback" in str(err) else \
@@ -2278,30 +2242,50 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
         tsig_f = float(meta.get("target_sig") or 3.0)
         with_jac = [r for r in results if r.get("jac_bins") is not None]
 
-        def _cell(n, s):
-            """One uncertainty cell at the target significance. C/O reports
-            dex in log10(C/O) -- its fitted coordinate -- with the physical
-            range appended only inside the solver's supported band."""
-            if not np.isfinite(s):
-                return _fmt_sigma(np.inf)
-            if n == "dlnCO":
-                return fisher_mod.format_co_width(
-                    posteriors.param_center(n, _cpj), s, co_bounds,
-                    k=tsig_f, qualify_coord=True)
-            return _fmt_sigma(tsig_f * fisher_mod.display_sigma(n, s))
+        # The row NAMES its coordinate, and every cell in it is a plain number
+        # there: C/O is fitted in ln and reported in log10, so the row is
+        # "log10 C/O" and its numbers are dex. Metallicity and Kzz are already
+        # log quantities under their own names.
+        def _row_label(n):
+            return "log10 C/O" if n == "dlnCO" else fisher_mod.PARAM_LABELS[n]
+
+        _row_center = {
+            n: (None if (c := posteriors.param_center(n, _cpj)) is None
+                else float(np.log10(c)) if n == "dlnCO" else float(c))
+            for n in fisher_names}
+
+        def _cell(n, w, center=None):
+            """One cell at the target significance. ``w`` is the 1-sigma width
+            in the row's own coordinate. The marginalized column leads with the
+            input-model value so the cell reads as the forecast interval; the
+            conditional column carries the width alone (same center)."""
+            w = tsig_f * float(w)
+            if not np.isfinite(w) or w > _UNCONSTRAINED_ABOVE:
+                return "unconstrained"
+            return (f"±{w:.3g}" if center is None
+                    else f"{center:.3g} ± {w:.3g}")
+
+        def _w_int(n, s):
+            """Internal sigma -> the row's coordinate: dex for log10 C/O
+            (internal is ln), display units for everything else."""
+            return s / _LN10 if n == "dlnCO" else fisher_mod.display_sigma(n, s)
+
+        def _w_disp(n, s):
+            """A combo record's DISPLAY sigma -> the row's coordinate. Its C/O
+            width is the absolute ratio (sigma_lnCO * C/O), so it divides back
+            through the same C/O and ln 10."""
+            return s / (co_eval * _LN10) if n == "dlnCO" else s
 
         # long format, one row per mode x parameter, marginalized and conditional
         # side by side -- both read off the SAME nuisance-augmented Fisher matrix
-        # no "±" in the headers: only some rows are symmetric now, so each
-        # cell carries its own notation
         _marg_col = f"marginalized at {tsig_f:g}σ"
         _cond_col = "conditional (others fixed)"
 
         def _param_rows(mode_label, sig, cond):
             return [{"mode": mode_label,
-                     "parameter": fisher_mod.PARAM_LABELS[n],
-                     _marg_col: _cell(n, sig[n]),
-                     _cond_col: _cell(n, cond[n])}
+                     "parameter": _row_label(n),
+                     _marg_col: _cell(n, _w_int(n, sig[n]), _row_center[n]),
+                     _cond_col: _cell(n, _w_int(n, cond[n]))}
                     for n in fisher_names]
 
         frows = []
@@ -2328,14 +2312,15 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
         # applied, so the rows re-scale to tsig directly)
         for _rec in combo_recs:
             for n in fisher_names:
-                _sm = tsig_f * float(_rec["sigma_marginalized_display"][n])
-                _sc = tsig_f * float(_rec["sigma_conditional_display"][n])
                 frows.append({
                     # the user's own name for the set, unprefixed
                     "mode": str(_rec["name"]),
-                    "parameter": fisher_mod.PARAM_LABELS[n],
-                    _marg_col: _fmt_sigma(_sm),
-                    _cond_col: _fmt_sigma(_sc)})
+                    "parameter": _row_label(n),
+                    _marg_col: _cell(
+                        n, _w_disp(n, float(_rec["sigma_marginalized_display"][n])),
+                        _row_center[n]),
+                    _cond_col: _cell(
+                        n, _w_disp(n, float(_rec["sigma_conditional_display"][n])))})
         # Custom combinations FIRST: they are what the user built, so they
         # lead the table. Order within each group is preserved.
         _combo_names = {str(_rec["name"]) for _rec in combo_recs}
@@ -2456,7 +2441,7 @@ if _have_fisher:
             st.session_state.pop(_pp_key, None)
         with _post_box:
             _post_sel = st.multiselect(
-                "Marginalized forecast curves to draw", fisher_names,
+                "Marginalized parameters", fisher_names,
                 default=fisher_names[:2], key=_pp_key,
                 max_selections=summary_figure.MAX_POST_PANELS,
                 format_func=lambda n: fisher_mod.PARAM_LABELS[n])
@@ -2570,7 +2555,7 @@ if _have_fisher:
                             # the RECOVERED center: this curve was recentred
                             # on the draw, so its range brackets _mu_d
                             width_text=(fisher_mod.format_co_width(
-                                _mu_d, _pr["sigma_ln"], co_bounds)
+                                _mu_d, _pr["sigma_ln"])
                                 if _p == "dlnCO" else None),
                             curve_family=_pr["curve_family"],
                             color=_col, ls="-", lw=1.8,
@@ -2583,7 +2568,7 @@ if _have_fisher:
                             sigma_ln=_pr["sigma_ln"],
                             # the INPUT center: this curve was not recentred
                             width_text=(fisher_mod.format_co_width(
-                                _pr["center"], _pr["sigma_ln"], co_bounds)
+                                _pr["center"], _pr["sigma_ln"])
                                 if _p == "dlnCO" else None),
                             curve_family=_pr["curve_family"],
                             color=_col, ls="-", lw=1.8))
@@ -2681,7 +2666,7 @@ _series_lbl = {f"{kind}:{key}": lbl for kind, key, lbl in _series_opts}
 _fig_ctx = _fig_box.container()
 with _fig_ctx:
     _sel_series = st.multiselect(
-        "Spectrum & forecast series", _series_ids,
+        "Modes", _series_ids,
         default=[i for i in _series_ids if i.startswith("mode:")],
         format_func=lambda i: _series_lbl[i], key=K("sum_series"))
 
