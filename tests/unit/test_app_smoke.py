@@ -833,3 +833,33 @@ def test_co_row_is_log10_value_and_error():
         assert float(centre) == pytest.approx(np.log10(0.55), abs=5e-3), cell
         assert float(width) > 0.0, cell
     assert seen, "no constrained C/O row to check"
+
+
+def _render_order(at):
+    """Main-area elements in render order (AppTest exposes children per
+    block, so the tree has to be flattened to compare positions)."""
+    def walk(node, out):
+        ch = getattr(node, "children", None)
+        for c in (ch.values() if isinstance(ch, dict) else (ch or [])):
+            out.append(c)
+            walk(c, out)
+        return out
+    return walk(at.main, [])
+
+
+def test_the_verdict_renders_above_the_explainers():
+    """The shortfall line is the ANSWER -- which mode, what significance,
+    against the target -- so it renders with the Run button that produced it,
+    not hundreds of lines down beside the figure it summarizes. Anything
+    below Validation is reference material the user reads once."""
+    at = _run_with_result(*_synthetic_out())
+    assert not at.exception, at.exception
+    order = _render_order(at)
+    verdict = next(i for i, e in enumerate(order)
+                   if type(e).__name__ == "Warning"
+                   and "template S/N" in str(getattr(e, "value", "")))
+    validation = next(i for i, e in enumerate(order)
+                      if type(e).__name__ == "Expander"
+                      and getattr(e, "label", "") == "Validation")
+    assert verdict < validation, (
+        f"the verdict renders at {verdict}, below Validation at {validation}")

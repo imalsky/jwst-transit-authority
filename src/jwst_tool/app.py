@@ -220,6 +220,10 @@ st.markdown(
 # hundreds of lines down beside the results it qualifies.
 _run_slot = st.container()
 _stale_slot = st.container()
+# The shortfall verdict is the ANSWER -- which mode, what significance,
+# against the target -- so it sits above the explainers too, not below them
+# with the figure it summarizes. Filled only when the target is missed.
+_verdict_slot = st.container()
 
 # Mirrors the README "Validation" section; nothing here runs.
 with st.expander("Validation"):
@@ -1951,15 +1955,15 @@ if goal_r == "detect":
             tt = detect.transits_to_target(
                 best, tsig, projected=_best_projected)
             if tt["reachable"]:
-                st.warning(verdict + f"  {tt['n']} {_ev}s reach it.")
+                _verdict_slot.warning(verdict + f"  {tt['n']} {_ev}s reach it.")
             elif detect.has_floor(best):
-                st.warning(verdict
+                _verdict_slot.warning(verdict
                            + f"  Floor caps it at {tt['sig_inf']:.1f}σ.")
             else:
-                st.warning(verdict + f"  >{detect.N_TRANSITS_CAP} {_ev}s "
+                _verdict_slot.warning(verdict + f"  >{detect.N_TRANSITS_CAP} {_ev}s "
                            "(scan limit).")
         else:
-            st.warning(verdict + "  No signal.")
+            _verdict_slot.warning(verdict + "  No signal.")
 else:
     gp = meta["goal_param"]
     unit = fisher_mod.PARAM_UNITS[gp]
@@ -1994,19 +1998,19 @@ else:
     if bs <= target:
         pass                      # target met: nothing to add
     elif np.isfinite(comb) and comb <= target:
-        st.warning(verdict + f"  Combined modes: ±{comb:.3g}{usp}.")
+        _verdict_slot.warning(verdict + f"  Combined modes: ±{comb:.3g}{usp}.")
     else:
         best_r = next(r for r in usable_jac if r["mode_key"] == bk)
         tt = fisher_mod.transits_to_target(best_r, fisher_names, gp,
                                            target / tsig,
                                            co_eval=co_eval)
         if tt["reachable"]:
-            st.warning(verdict + f"  {tt['n']} {_ev}s reach it.")
+            _verdict_slot.warning(verdict + f"  {tt['n']} {_ev}s reach it.")
         elif detect.has_floor(best_r):
-            st.warning(verdict + "  Floor caps it at "
+            _verdict_slot.warning(verdict + "  Floor caps it at "
                        f"±{tsig * tt['sig_inf']:.3g}{usp}.")
         else:
-            st.warning(verdict + f"  >{detect.N_TRANSITS_CAP} {_ev}s "
+            _verdict_slot.warning(verdict + f"  >{detect.N_TRANSITS_CAP} {_ev}s "
                        "(scan limit).")
 
 # --- spectrum data (rendered ONCE, on the summary figure below) -------------
