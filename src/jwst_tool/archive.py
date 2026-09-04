@@ -169,101 +169,48 @@ def _is_limit(row: dict, col: str) -> bool:
     return v is not None and v != 0.0
 
 
-def custom_fill(row: dict) -> tuple[dict, list[str]]:
+def custom_fill(row: dict) -> dict:
     """Map an archive row onto the custom form's widget fields.
 
-    Returns ``(values, notes)``: ``values`` keys are the widget-key suffixes
-    (teff, logg, feh, ks, rstar, rp, g, a, t14, sflux) in widget units
-    (g in m s^-2); ``notes`` are per-field disclosures (missing archive
-    values, out-of-range refusals, mass provenance, metallicity basis, the
-    nearest-spectral-type UV choice). Never clamps, never guesses."""
-    name = row.get("pl_name", "this planet")
-    direct = [("teff", "st_teff", "stellar Teff (K)"),
-              ("logg", "st_logg", "stellar log g"),
-              ("ks", "sy_kmag", "Ks magnitude"),
-              ("rstar", "st_rad", "stellar radius (R_sun)"),
-              ("a", "pl_orbsmax", "semi-major axis (AU)"),
-              ("t14", "pl_trandur", "transit duration, T14 (hours)")]
+    Returns ``values``: keys are the widget-key suffixes (teff, logg, feh,
+    ks, rstar, rp, g, a, t14) in widget units (g in m s^-2). A missing
+    value, an out-of-range value, a one-sided limit and a metallicity on
+    another basis all leave their field UNCHANGED -- silently, and without
+    a substitute. Never clamps, never guesses, and never selects a UV
+    spectrum."""
+    direct = [("teff", "st_teff"), ("logg", "st_logg"), ("ks", "sy_kmag"),
+              ("rstar", "st_rad"), ("a", "pl_orbsmax"), ("t14", "pl_trandur")]
     values: dict = {}
-    notes: list[str] = []
 
-    def _take(field: str, val: float | None, label: str) -> None:
+    def _take(field: str, val: float | None) -> None:
         if val is None:
-            notes.append(f"the archive has no {label} for {name}; "
-                         "field left unchanged.")
             return
         lo, hi = planets.CUSTOM_FIELD_RANGES[field]
-        if not (lo <= val <= hi):
-            notes.append(f"{label} {val:g} is outside this tool's supported "
-                         f"range {lo:g}-{hi:g}; field left unchanged.")
-            return
-        values[field] = float(val)
+        if lo <= val <= hi:
+            values[field] = float(val)
 
-    for field, col, label in direct:
-        _take(field, _cell(row, col), label)
+    for field, col in direct:
+        _take(field, _cell(row, col))
 
     # planet radius: never adopted from a one-sided limit
-    if _is_limit(row, "pl_radjlim"):
-        notes.append(f"the archive planet radius for {name} is a one-sided "
-                     "limit, not a measurement; field left unchanged.")
-    else:
-        _take("rp", _cell(row, "pl_radj"), "planet radius (R_jup)")
+    if not _is_limit(row, "pl_radjlim"):
+        _take("rp", _cell(row, "pl_radj"))
 
     # metallicity: entered ONLY on the [Fe/H] basis (never re-based)
-    met = _cell(row, "st_met")
-    ratio = str(row.get("st_metratio", "")).strip()
-    if met is None:
-        notes.append(f"the archive has no stellar metallicity for {name}; "
-                     "field left unchanged.")
-    elif ratio != "[Fe/H]":
-        notes.append(f"the archive metallicity basis is "
-                     f"{ratio or 'unstated'}, not [Fe/H]; field left "
-                     "unchanged rather than entered on a different basis.")
-    else:
-        _take("feh", met, "stellar metallicity (dex)")
+    if str(row.get("st_metratio", "")).strip() == "[Fe/H]":
+        _take("feh", _cell(row, "st_met"))
 
     # gravity, derived from the archive best mass + radius in widget units;
     # a nominal COMPOSITE planning value (PSCompPars can adopt mass and
     # radius from different publications), never derived from a limit
     mass = _cell(row, "pl_bmassj")
     radj = _cell(row, "pl_radj")
-    if mass is None or radj is None or radj <= 0:
-        notes.append(f"the archive has no mass and radius pair for {name}; "
-                     "surface gravity left unchanged.")
-    elif _is_limit(row, "pl_bmassjlim") or _is_limit(row, "pl_radjlim"):
-        notes.append(f"the archive mass or radius for {name} is a one-sided "
-                     "limit; surface gravity was not derived from it.")
-    else:
-        g_ms2 = (planets.G_CGS * mass * planets.M_JUP_G
-                 / (radj * planets.R_JUP_CM) ** 2) / 100.0
-        _take("g", g_ms2, "surface gravity (m s^-2, from archive mass+radius)")
-        if "g" in values:
-            prov = str(row.get("pl_bmassprov", "")).strip()
-            extra = (f"; mass provenance {prov!r}, not a directly measured "
-                     "true mass" if prov and prov.lower() != "mass" else "")
-            notes.append("gravity is a nominal composite planning value "
-                         "derived from the archive best mass and radius, "
-                         f"which may come from different publications{extra}.")
-
-    # The UV-spectrum menu is NEVER touched by the fill (standing rule:
-    # no substitute value stands in for the actual star). The
-    # archive carries no UV spectra; the note below only points at the
-    # nearest-Teff shipped template so the user can choose it deliberately,
-    # and the GUI caption shows the same suggestion live.
-    if "teff" in values:
-        sflux = planets.nearest_sflux(values["teff"])
-        spectype = str(row.get("st_spectype", "")).strip()
-        stype = f"; archive spectral type {spectype}" if spectype else ""
-        notes.append(
-            "the UV spectrum menu was NOT changed (the archive carries no "
-            "UV spectra, and this tool never substitutes one). Nearest-Teff "
-            f"shipped template for Teff {values['teff']:.0f} K{stype}: "
-            f"{planets.SFLUX_CHOICES[sflux]} -- select it yourself if it "
-            "fits your star.")
-    else:
-        notes.append("the UV spectrum menu was not changed (this tool never "
-                     "substitutes one).")
-    return values, notes
+    if (mass is not None and radj is not None and radj > 0
+            and not _is_limit(row, "pl_bmassjlim")
+            and not _is_limit(row, "pl_radjlim")):
+        _take("g", (planets.G_CGS * mass * planets.M_JUP_G
+                    / (radj * planets.R_JUP_CM) ** 2) / 100.0)
+    return values
 
 
 def refresh_snapshot(dest: Path | None = None, url: str = TAP_SYNC_URL) -> tuple[int, int]:

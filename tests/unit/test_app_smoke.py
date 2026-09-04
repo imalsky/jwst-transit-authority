@@ -230,7 +230,7 @@ def test_every_download_button_is_plain_and_click_safe():
     at2.session_state["n0_wasp39b_tpsrc"] = "upload"   # forward.TP_FILE_UPLOAD
     at2.run()
     assert not at2.exception, at2.exception
-    assert "Download this example (edit and re-upload)" in \
+    assert "Download this example" in \
         {b.label for b in at2.get("download_button")}
 
 
@@ -456,10 +456,11 @@ def test_emission_results_use_eclipse_terms():
 
 
 def test_all_saturated_run_has_no_best_mode_score_or_points():
-    """All modes saturated: warning verdict, no "best" mode, no error alert
-    for a valid calculation -- and no detection score or simulated points in
-    the figure, matching the exclusion every ranking, combination and
-    forecast already applies."""
+    """All modes saturated: no "best" mode, no error alert for a valid
+    calculation -- and no detection score or simulated points in the figure,
+    matching the exclusion every ranking, combination and forecast already
+    applies. Saturation shows as the absence of a ranked mode; the page says
+    nothing about it."""
     import jwst_tool.summary_figure as sf
 
     seen = {}
@@ -477,8 +478,6 @@ def test_all_saturated_run_has_no_best_mode_score_or_points():
         sf.compose_summary_figure = _real
     assert not at.exception, at.exception
     warns = [w.value for w in at.warning]
-    assert any("all selected modes saturate" in w for w in warns), warns
-    assert any("saturated at the shortest ramp" in w for w in warns), warns
     assert not at.success
     assert not any("Best mode" in w for w in warns)
     assert not any("Best mode" in e.value for e in at.error)
@@ -504,14 +503,13 @@ def test_custom_archive_fill_and_uv_menu_never_moves():
     at.button(key="n0_custom_arch_fill").click().run()
     assert not at.exception, at.exception
     from jwst_tool import archive
-    values, _ = archive.custom_fill(archive.lookup("HD 189733 b"))
+    values = archive.custom_fill(archive.lookup("HD 189733 b"))
     assert at.number_input(key="n0_custom_teff").value == values["teff"]
     assert at.number_input(key="n0_custom_g").value == \
         pytest.approx(values["g"])
     # the UV menu is NEVER written by the fill
     assert at.selectbox(key="n0_custom_sflux").value == \
         "sflux-W39b_Tsai2023.txt"
-    assert any("archive snapshot" in s.value for s in at.success)
 
 
 def test_mock_observation_disclosure_and_recovery_overlay():
@@ -611,7 +609,7 @@ def test_combo_builder_fisher_table_naming_and_reset():
 
 def test_emission_mode_archive_fill_skips_transit_duration():
     """The archive duration is the PRIMARY-TRANSIT duration; in emission
-    mode the fill must leave the event-duration widget alone and say why."""
+    mode the fill leaves the event-duration widget alone, silently."""
     at = _run_app()
     at.selectbox(key="n0_planet").set_value("custom").run()
     at.radio(key="n0_scimode").set_value("emission").run()
@@ -620,11 +618,9 @@ def test_emission_mode_archive_fill_skips_transit_duration():
     at.button(key="n0_custom_arch_fill").click().run()
     assert not at.exception, at.exception
     from jwst_tool import archive
-    values, _ = archive.custom_fill(archive.lookup("HD 189733 b"))
+    values = archive.custom_fill(archive.lookup("HD 189733 b"))
     assert at.number_input(key="n0_custom_t14").value == t14_before
     assert at.number_input(key="n0_custom_teff").value == values["teff"]
-    warns = " | ".join(w.value for w in at.warning)
-    assert "secondary-eclipse duration can differ" in warns
 
 
 @pytest.mark.parametrize(

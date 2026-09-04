@@ -41,8 +41,7 @@ def test_round_trip_restores_the_full_run():
                          floors={"nirspec_g395h": 15.0},
                          noise_infl={"nirspec_g395h": 1.05},
                          show_noise=False, seed=0))
-    state, notes = share_config.widget_state(share, _key)
-    assert not notes
+    state = share_config.widget_state(share, _key)
     # target + system (per-planet keys); the Pandeia star restores from the
     # observation block (the transmission canonical block zeroes it)
     assert state["n0_planet"] == "wasp39b"
@@ -76,13 +75,12 @@ def test_round_trip_restores_the_full_run():
                   jac_method="fd"),
         observation=dict(modes=["nirspec_prism"], n_transits=1,
                          star_teff=5485.0, star_logg=4.47, star_feh=0.0))
-    state, notes = share_config.widget_state(share, _key)
-    assert not notes
+    state = share_config.widget_state(share, _key)
     assert state["n0_mol_vulcan_C2H2_HCN"] == "SO2"
     assert state["n0_dofish"] is False
 
     # a bare canonical dict is accepted
-    state, _ = share_config.widget_state(_canon(), _key)
+    state = share_config.widget_state(_canon(), _key)
     assert state["n0_planet"] == "wasp39b"
     assert "n0_modes" not in state          # no observation section to restore
 
@@ -104,8 +102,7 @@ def test_a_non_default_network_round_trips_on_its_own_widget_keys(network):
                          modes=["nirspec_g395h"], n_transits=1, r_bin=100,
                          floor_mode="none", floors={}, noise_infl={},
                          show_noise=True, seed=0))
-    state, notes = share_config.widget_state(share, _key)
-    assert not notes
+    state = share_config.widget_state(share, _key)
     assert state["n0_network"] == network and state["n0_co"] == co
     sfx = f"_{network}"
     assert state[f"n0_xmols_vulcan{sfx}"] == ["HCN", "NH3"]
@@ -153,9 +150,8 @@ def test_invalid_input_is_refused_before_anything_applies():
     share = share_config.build_share(
         _canon(), goal={},
         observation=dict(modes=["nirspec_g395h", "not_a_mode"]))
-    state, notes = share_config.widget_state(share, _key)
+    state = share_config.widget_state(share, _key)
     assert state["n0_modes"] == ["nirspec_g395h"]
-    assert any("not_a_mode" in n for n in notes)
 
 
 def test_embedded_tp_table_is_all_or_nothing(tmp_path):
@@ -180,7 +176,7 @@ def test_embedded_tp_table_is_all_or_nothing(tmp_path):
     canon = forward.canonical_params(dict(
         planet="wasp39b", tp_mode="file", tp_file=forward.TP_FILE_UPLOAD,
         tp_file_path=str(src)))
-    state, _notes = share_config.widget_state(
+    state = share_config.widget_state(
         {"canonical_params": canon, "tp_table_text": text}, _key)
     p = Path(state["restored_tp_path"])
     assert p.parent == forward._uploads_dir()
@@ -270,8 +266,7 @@ def test_combos_round_trip_and_invalid_entries_are_noted():
                              dict(name="SOSS + G395H + MIRI",
                                   modes=["niriss_soss", "nirspec_g395h",
                                          "miri_lrs"])]))
-    state, notes = share_config.widget_state(share, _key)
-    assert not notes
+    state = share_config.widget_state(share, _key)
     assert state["n0_seed"] == 42 and state["n0_shownoise"] is True
     assert state["n0_combos"] == [
         dict(name="SOSS + G395H", modes=["niriss_soss", "nirspec_g395h"]),
@@ -286,12 +281,9 @@ def test_combos_round_trip_and_invalid_entries_are_noted():
         dict(name="", modes=["nirspec_g395h"]),
         dict(name="partial", modes=["miri_lrs"]),
     ]
-    state, notes = share_config.widget_state(share, _key)
+    state = share_config.widget_state(share, _key)
     assert state["n0_combos"] == [
         dict(name="partial", modes=["nirspec_g395h"])]
-    joined = " | ".join(notes)
-    assert "not_a_mode" in joined and "hollow" in joined
-    assert "without a name" in joined and "duplicate" in joined.lower()
 
 
 def test_noise_model_config_evolution_round_trips():
@@ -315,35 +307,30 @@ def test_noise_model_config_evolution_round_trips():
 
     share = share_config.build_share(
         _canon(), goal=goal, observation=_obs(noise_scale=2.0))
-    state, notes = share_config.widget_state(share, _key)
-    assert not notes, notes
+    state = share_config.widget_state(share, _key)
     assert state[_key("infl_nirspec_g395h")] == 1.5, state
     assert state[_key("noisescale")] == 2.0, state
 
     # a config written before the global knob existed
     share = share_config.build_share(_canon(), goal=goal, observation=_obs())
     share["observation"].pop("noise_scale", None)
-    state, notes = share_config.widget_state(share, _key)
-    assert not notes, notes
+    state = share_config.widget_state(share, _key)
     assert state[_key("infl_nirspec_g395h")] == 1.5, state
     assert _key("noisescale") not in state, state
 
     # unknown floor type: noted, floor settings keep their current values
     share2 = share_config.build_share(_canon(), goal=goal,
                                       observation=_obs(floor_mode="bogus"))
-    state2, notes2 = share_config.widget_state(share2, _key)
+    state2 = share_config.widget_state(share2, _key)
     assert _key("floormode") not in state2
-    assert any("noise-floor type" in n for n in notes2)
 
     # removed correlated-floor scenario: noted, never restored
     share["observation"]["scenario"] = "conservative"
-    state, notes = share_config.widget_state(share, _key)
+    state = share_config.widget_state(share, _key)
     assert not any("scenario" in k for k in state)
-    assert any("scenario" in n for n in notes)
     share["observation"]["scenario"] = "random"
-    state, notes = share_config.widget_state(share, _key)
+    state = share_config.widget_state(share, _key)
     assert not any("scenario" in k for k in state)
-    assert not any("scenario" in n for n in notes)
 
 
 def test_out_of_range_values_refuse_loudly():
@@ -390,21 +377,19 @@ def test_noise_star_round_trips_and_legacy_files_get_a_note():
     share = share_config.build_share(
         canon, goal={}, observation=dict(
             ks_mag=9.0, star_teff=5485.0, star_logg=4.47, star_feh=0.0))
-    state, notes = share_config.widget_state(share, _key)
+    state = share_config.widget_state(share, _key)
     assert state["n0_wasp39b_teff"] == 5485.0
     assert state["n0_wasp39b_logg"] == 4.47
-    assert not any("stellar parameters" in n for n in notes)
     # legacy file: an observation block without the star record
     share = share_config.build_share(canon, goal={},
                                      observation=dict(ks_mag=9.0))
-    state, notes = share_config.widget_state(share, _key)
+    state = share_config.widget_state(share, _key)
     assert "n0_wasp39b_teff" not in state
-    assert any("stellar parameters" in n for n in notes)
     # emission: the canonical block carries the real star
     canon_em = forward.canonical_params(dict(
         planet="wasp39b", tp_mode="guillot", science_mode="emission",
         star_teff=5485.0, star_logg=4.47, star_feh=0.0))
-    state, notes = share_config.widget_state(
+    state = share_config.widget_state(
         share_config.build_share(canon_em, {}, {}), _key)
     assert state["n0_wasp39b_teff"] == 5485.0
 
@@ -535,8 +520,7 @@ def test_gui_removed_physics_defaults_load_and_nondefaults_refuse():
     assert canon["use_condense"] is False and canon["use_settling"] is False
     assert not canon["diff_esc"] and not canon["top_flux"]
     assert not canon["bot_flux"]
-    state, notes = share_config.widget_state(canon, _key)
-    assert not notes
+    state = share_config.widget_state(canon, _key)
     assert state["n0_planet"] == "wasp39b"
 
     canon = _canon(use_condense=True, use_photo=True, use_moldiff=True)

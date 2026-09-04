@@ -210,6 +210,29 @@ def display_sigma(name: str, sigma: float, co_eval: float | None = None) -> floa
     return sigma * _TO_DISPLAY.get(name, 1.0)
 
 
+def format_pm(center, width: float) -> str:
+    """``value ± error`` with the ERROR setting the precision: the error is
+    rounded to 2 significant figures and the value to that SAME decimal
+    place. ``center`` None reports the error alone.
+
+    This is the reason a bare "%.3g" on each is wrong -- it printed
+    "1 ± 0.922" and "-0.26 ± 0.599", quoting a value to a precision its own
+    uncertainty does not support and an error to one more digit than it
+    carries. A zero or non-finite width has no scale to round against and
+    falls back to fixed precision. PLAIN TEXT: this lands in a Streamlit
+    cell, a CSV and a matplotlib legend alike."""
+    w = abs(float(width))
+    if not np.isfinite(w) or w == 0.0:
+        return (f"±{float(width):.3g}" if center is None
+                else f"{float(center):.3g} ± {float(width):.3g}")
+    d = 1 - int(np.floor(np.log10(w)))          # decimals for 2 sig figs
+    dec = max(d, 0)
+    err = f"{round(w, d) + 0.0:.{dec}f}"        # +0.0 kills a "-0.00"
+    if center is None:
+        return f"±{err}"
+    return f"{round(float(center), d) + 0.0:.{dec}f} ± {err}"
+
+
 def format_co_width(center: float, sigma_ln: float, k: float = 1.0) -> str:
     """The C/O legend string: the value AND its error in log10(C/O), Batalha
     & Line's convention ("Error on log C/O", their cases tagged
@@ -225,7 +248,7 @@ def format_co_width(center: float, sigma_ln: float, k: float = 1.0) -> str:
         raise ValueError(f"format_co_width: center must be a finite C/O > 0, "
                          f"got {center!r}")
     sig = float(sigma_ln) * float(k) / _LN10
-    return f"log10(C/O) = {np.log10(center):.3g} ± {sig:.3g}"
+    return f"log10(C/O) = {format_pm(np.log10(center), sig)}"
 
 
 def _segment_offset_rows(result: dict) -> np.ndarray:

@@ -61,10 +61,9 @@ def _row(**over):
 
 def test_custom_fill_maps_derives_gravity_and_never_selects_uv():
     """A complete row maps every field and derives gravity from mass +
-    radius, with exactly two disclosures. Standing maintainer rule: the
-    fill NEVER writes the UV menu -- no substitute is ever selected; the note
-    names the nearest-Teff shipped template as a suggestion only."""
-    values, notes = archive.custom_fill(_row())
+    radius. Standing maintainer rule: the fill NEVER writes the UV menu --
+    no substitute is ever selected, and nothing is said about it."""
+    values = archive.custom_fill(_row())
     assert values["teff"] == 5485.0 and values["logg"] == 4.5
     assert values["feh"] == 0.10 and values["ks"] == 10.20
     assert values["rstar"] == 0.932 and values["rp"] == 1.279
@@ -72,58 +71,35 @@ def test_custom_fill_maps_derives_gravity_and_never_selects_uv():
     g_expect = (planets.G_CGS * 0.281 * planets.M_JUP_G
                 / (1.279 * planets.R_JUP_CM) ** 2) / 100.0
     assert values["g"] == pytest.approx(g_expect, rel=1e-12)
-    assert len(notes) == 2
-    assert any("nominal composite planning value" in n for n in notes)
-    uv = [n for n in notes if "Nearest-Teff shipped template" in n]
-    assert len(uv) == 1 and "G8 V" in uv[0]
     assert "sflux" not in values
-    assert any("was NOT changed" in n and "never substitutes" in n
-               for n in notes)
 
 
-def test_custom_fill_refusals_and_disclosures():
-    """Every refusal path, all fail-closed with a named note: out-of-range
-    values are never clamped, missing cells are named, non-[Fe/H]
-    metallicities are never re-based (the never-guess rule), one-sided limits
-    never become values, malformed cells raise SnapshotError."""
-    # out of range: never clamped, partial fill disclosed
-    values, notes = archive.custom_fill(_row(st_teff="8850.0"))
-    assert "teff" not in values                       # never clamped
-    hits = [n for n in notes if "8850" in n and "3000" in n and "7000" in n
-            and "left unchanged" in n]
-    assert len(hits) == 1
-    # no Teff filled -> not even a nearest-template suggestion
+def test_custom_fill_refusals():
+    """Every refusal path fails closed and SILENTLY: out-of-range values are
+    never clamped, missing cells fill nothing, non-[Fe/H] metallicities are
+    never re-based (the never-guess rule), one-sided limits never become
+    values, malformed cells raise SnapshotError."""
+    # out of range: never clamped
+    values = archive.custom_fill(_row(st_teff="8850.0"))
+    assert "teff" not in values
     assert "sflux" not in values
-    assert any("UV spectrum menu was not changed" in n for n in notes)
     assert values["rp"] == 1.279          # in-range fields still fill
 
-    # missing values are named; Msini provenance disclosed
-    values, notes = archive.custom_fill(
-        _row(sy_kmag="", pl_bmassj="", st_met=""))
+    # missing values fill nothing; Msini provenance still derives gravity
+    values = archive.custom_fill(_row(sy_kmag="", pl_bmassj="", st_met=""))
     for absent in ("ks", "g", "feh"):
         assert absent not in values
-    assert any("no Ks magnitude" in n for n in notes)
-    assert any("no mass and radius pair" in n for n in notes)
-    assert any("no stellar metallicity" in n for n in notes)
-    v2, n2 = archive.custom_fill(_row(pl_bmassprov="Msini"))
-    assert "g" in v2
-    assert any("mass provenance 'Msini'" in n for n in n2)
+    assert "g" in archive.custom_fill(_row(pl_bmassprov="Msini"))
 
-    # [M/H] and [Fe/H] are different archive quantities: refused with a note
-    v, n = archive.custom_fill(_row(st_metratio="[M/H]"))
-    assert "feh" not in v
-    assert any("[M/H]" in x and "not [Fe/H]" in x for x in n)
-    v2, n2 = archive.custom_fill(_row(st_metratio=""))
-    assert "feh" not in v2
-    assert any("unstated" in x for x in n2)
+    # [M/H] and [Fe/H] are different archive quantities: never re-based
+    assert "feh" not in archive.custom_fill(_row(st_metratio="[M/H]"))
+    assert "feh" not in archive.custom_fill(_row(st_metratio=""))
 
     # one-sided limits never become values
-    v, n = archive.custom_fill(_row(pl_bmassjlim="1"))
+    v = archive.custom_fill(_row(pl_bmassjlim="1"))
     assert "g" not in v and "rp" in v
-    assert any("one-sided limit" in x and "gravity" in x for x in n)
-    v2, n2 = archive.custom_fill(_row(pl_radjlim="-1"))
+    v2 = archive.custom_fill(_row(pl_radjlim="-1"))
     assert "rp" not in v2 and "g" not in v2
-    assert any("planet radius" in x and "one-sided limit" in x for x in n2)
 
     # malformed cells raise: unreadable text and a non-finite number
     for cell in ("five thousand", "nan"):
@@ -146,7 +122,7 @@ def test_archive_fill_feeds_canonical_params():
     x100 widget-unit conversion and the derived-T_irr path."""
     from jwst_tool import forward
 
-    values, _ = archive.custom_fill(archive.lookup("HD 189733 b"))
+    values = archive.custom_fill(archive.lookup("HD 189733 b"))
     assert "sflux" not in values          # the fill never selects one
     cp = forward.canonical_params(dict(
         planet="custom", tp_mode="guillot",

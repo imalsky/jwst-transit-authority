@@ -135,14 +135,14 @@ def _log10(value, name: str) -> float:
     return math.log10(v)
 
 
-def widget_state(cfg: dict, key) -> tuple[dict, list[str]]:
+def widget_state(cfg: dict, key) -> dict:
     """Map a shared configuration onto widget session-state keys.
 
-    ``key`` is the app's widget-key namespacer (``app.K``). Returns
-    ``(state, notes)``: the complete {session_key: value} mapping and
-    human-readable notes about anything that could not be restored.
-    Raises ValueError on an invalid file; nothing is partially applied
-    because nothing is applied here at all.
+    ``key`` is the app's widget-key namespacer (``app.K``). Returns the
+    complete {session_key: value} mapping. Anything the file records that
+    this version cannot restore is dropped SILENTLY, and the corresponding
+    widget keeps its current value. Raises ValueError on an invalid file;
+    nothing is partially applied because nothing is applied here at all.
     """
     if not isinstance(cfg, dict):
         raise ValueError("the configuration file must contain a JSON object")
@@ -165,9 +165,8 @@ def widget_state(cfg: dict, key) -> tuple[dict, list[str]]:
             "this is not a jwst-tool configuration file (no canonical "
             "parameter set with a 'planet' entry)")
 
-    notes: list[str] = []
     try:
-        return _widget_state(cp, goal, obs, cfg, key, notes)
+        return _widget_state(cp, goal, obs, cfg, key)
     except KeyError as e:
         raise ValueError(
             f"the configuration file is missing entry {e}; re-download it "
@@ -221,7 +220,7 @@ def _resolve_embedded_tp(cp: dict, cfg: dict, tp_mode: str):
 
 
 def _restore_goal(state: dict, cp: dict, goal: dict, key,
-                  tp_mode: str, notes: list[str]) -> None:
+                  tp_mode: str) -> None:
     cloud_i = int(bool(cp["cloud_on"]))
     suffix = f"vulcan_{tp_mode}_{cloud_i}"
     avail = list(forward.CHEM_PARAM_NAMES) + list(forward.TP_PARAM_NAMES[tp_mode])
@@ -230,15 +229,8 @@ def _restore_goal(state: dict, cp: dict, goal: dict, key,
     requested = [str(p) for p in (goal.get("fisher_params")
                                   or cp.get("fisher_params") or [])]
     fisher = [p for p in requested if p in avail]
-    dropped_fp = [p for p in requested if p not in avail]
-    if dropped_fp:
-        notes.append(f"free parameter(s) {dropped_fp} are not available "
-                     "under the restored settings and were dropped")
     selected_goal = str(goal.get("goal", "") or "")
     if selected_goal not in ("detect", "constrain"):
-        if goal:
-            notes.append(f"unknown science goal {selected_goal!r}; the goal "
-                         "settings keep their current values")
         return
     state[key("goal")] = selected_goal
     if goal.get("target_sig") is not None:
@@ -246,8 +238,6 @@ def _restore_goal(state: dict, cp: dict, goal: dict, key,
     method = str(goal.get("jac_method", cp.get("jac_method", "fd")))
     if method in ("fd", "ad"):
         state[key("jacm")] = method
-    else:
-        notes.append(f"unknown Jacobian method {method!r} was not restored")
     if selected_goal == "detect":
         net_sfx = _network_suffix(cp)
         extras = state[key(f"xmols_vulcan{net_sfx}")]
@@ -258,9 +248,6 @@ def _restore_goal(state: dict, cp: dict, goal: dict, key,
         if target in mol_opts:
             state[key(f"mol_vulcan{net_sfx}_"
                       + "_".join(sorted(extras)))] = target
-        elif target:
-            notes.append(f"detection target {target} is not in the restored "
-                         "molecule set and was not restored")
         state[key("dofish")] = bool(goal.get("do_fisher", bool(fisher)))
         if fisher:
             state[key(f"fp_{suffix}")] = fisher
@@ -270,42 +257,28 @@ def _restore_goal(state: dict, cp: dict, goal: dict, key,
         state[key(f"gp_{suffix}")] = goal_param
         if goal.get("target_prec") is not None:
             state[key(f"tgt_{goal_param}")] = float(goal["target_prec"])
-    elif goal_param:
-        notes.append(f"constraint parameter {goal_param} is not available "
-                     "under the restored settings")
     marginalize = bool(goal.get("marginalize", True))
     state[key("marg")] = marginalize
     if marginalize and fisher:
         state[key(f"fx_{suffix}")] = [p for p in fisher if p != goal_param]
 
 
-def _restore_combos(obs: dict, valid_modes: dict,
-                    notes: list[str]) -> list[dict]:
-    combos = []
+def _restore_combos(obs: dict, valid_modes: dict) -> list[dict]:
+    """Saved mode combinations. A nameless entry, one whose modes are all
+    unknown, and a duplicate name are dropped without a word."""
+    combos: list[dict] = []
     for candidate in obs.get("combos") or []:
         if not isinstance(candidate, dict) \
                 or not str(candidate.get("name", "")).strip():
-            notes.append("a saved mode combination without a name was not restored")
             continue
         name = str(candidate["name"]).strip()
         modes = [m for m in (candidate.get("modes") or []) if m in valid_modes]
-        dropped = [m for m in (candidate.get("modes") or []) if m not in valid_modes]
-        if dropped:
-            notes.append(f"combination {name!r}: unknown instrument mode(s) "
-                         f"{dropped} were dropped")
-        if not modes:
-            notes.append(f"combination {name!r} has no valid instrument "
-                         "modes and was not restored")
-        elif any(item["name"] == name for item in combos):
-            notes.append(f"duplicate combination name {name!r}: only the "
-                         "first was restored")
-        else:
+        if modes and not any(item["name"] == name for item in combos):
             combos.append({"name": name, "modes": modes})
     return combos
 
 
-def _restore_observation(state: dict, obs: dict, cfg: dict, key, pk,
-                         notes: list[str]) -> None:
+def _restore_observation(state: dict, obs: dict, cfg: dict, key, pk) -> None:
     if not obs:
         return
     from jwst_tool import instruments as ins
@@ -316,9 +289,6 @@ def _restore_observation(state: dict, obs: dict, cfg: dict, key, pk,
         if obs.get(source) is not None:
             state[pk(widget)] = cast(obs[source])
     modes = [m for m in (obs.get("modes") or []) if m in ins.MODES]
-    dropped = [m for m in (obs.get("modes") or []) if m not in ins.MODES]
-    if dropped:
-        notes.append(f"unknown instrument mode(s) {dropped} were not restored")
     if modes:
         state[key("modes")] = modes
     for source, widget, cast in (
@@ -328,11 +298,7 @@ def _restore_observation(state: dict, obs: dict, cfg: dict, key, pk,
         if obs.get(source) is not None:
             state[key(widget)] = cast(obs[source])
     floor_mode = obs.get("floor_mode")
-    if floor_mode not in ("constant", "none", "file"):
-        if floor_mode is not None:
-            notes.append(f"unknown noise-floor type {floor_mode!r}; the "
-                         "floor settings keep their current values")
-    else:
+    if floor_mode in ("constant", "none", "file"):
         state[key("floormode")] = floor_mode
         if floor_mode == "constant":
             for mode, value in (obs.get("floors") or {}).items():
@@ -340,45 +306,27 @@ def _restore_observation(state: dict, obs: dict, cfg: dict, key, pk,
                     continue
                 if isinstance(value, (int, float)):
                     state[key(f"floor_{mode}")] = float(value)
-                else:
-                    notes.append(f"the constant noise floor for {mode} is "
-                                 "not numeric and was not restored")
         elif floor_mode == "file":
             table = cfg.get("floor_table")
             if table:
                 state["restored_floor_table"] = [
                     [float(a), float(b)] for a, b in table]
-            else:
-                notes.append("the wavelength-table noise floor is not embedded "
-                             "in this file; upload it again")
     for mode, value in (obs.get("noise_infl") or {}).items():
         if mode not in ins.MODES:
             continue
         if isinstance(value, (int, float)):
             state[key(f"infl_{mode}")] = float(value)
-        else:
-            notes.append(f"the noise multiplier for {mode} is not numeric "
-                         "and was not restored")
     scale = obs.get("noise_scale")
     if isinstance(scale, (int, float)):
         # range-checked by _check_widget_ranges, never silently dropped
         state[key("noisescale")] = float(scale)
-    elif scale is not None:
-        notes.append("the global noise multiplier is not numeric and was "
-                     "not restored")
-    if obs.get("scenario") not in (None, "random"):
-        notes.append(
-            f"this configuration selected the removed experimental noise "
-            f"scenario {obs['scenario']!r}; the standard (diagonal) noise "
-            "model is used instead")
-    combos = _restore_combos(obs, ins.MODES, notes)
+    combos = _restore_combos(obs, ins.MODES)
     if combos:
         state[key("combos")] = combos
 
 
 def _restore_system_profile(cp: dict, key, pk, planet: str,
-                            tp_mode: str, restored_tp: str | None,
-                            notes: list[str]) -> dict:
+                            tp_mode: str, restored_tp: str | None) -> dict:
     state = {
         key("planet"): planet,
         key("scimode"): str(cp.get("science_mode", "transmission")),
@@ -400,9 +348,6 @@ def _restore_system_profile(cp: dict, key, pk, planet: str,
         state[pk("feh")] = float(cp["star_feh"])
     if str(cp.get("sflux", "")) in planets.SFLUX_CHOICES:
         state[pk("sflux")] = str(cp["sflux"])
-    else:
-        notes.append("the configuration names no stellar UV spectrum; the "
-                     "menu keeps its current selection")
     if tp_mode == "guillot":
         state.update({
             pk("tirr"): float(cp["Tirr"]), pk("tirr_auto"): None,
@@ -486,8 +431,7 @@ def _restore_rt_state(state: dict, cp: dict, key) -> None:
     })
 
 
-def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
-                  notes: list[str]) -> tuple[dict, list[str]]:
+def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key) -> dict:
     planet = str(cp["planet"])
     provider = str(cp.get("chem_provider", "vulcan"))
     tp_mode = str(cp.get("tp_mode", "guillot"))
@@ -512,23 +456,13 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
     restored_tp, pending_tp = _resolve_embedded_tp(cp, cfg, tp_mode)
     try:
         state = _restore_system_profile(
-            cp, key, pk, planet, tp_mode, restored_tp, notes)
+            cp, key, pk, planet, tp_mode, restored_tp)
 
         _restore_vulcan_physics(state, cp, key, pk)
 
         _restore_rt_state(state, cp, key)
-        _restore_goal(state, cp, goal, key, tp_mode, notes)
-        _restore_observation(state, obs, cfg, key, pk, notes)
-
-        # A transmission-mode file that predates the observation block's star
-        # record: the Pandeia noise simulation still needs Teff/log g/[Fe/H],
-        # so the fields keeping their current values must be said, not silent.
-        if obs and pk("teff") not in state:
-            notes.append(
-                "this file does not record the stellar parameters used for the "
-                "noise simulation (Teff, log g, [Fe/H]); those fields keep "
-                "their current values")
-
+        _restore_goal(state, cp, goal, key, tp_mode)
+        _restore_observation(state, obs, cfg, key, pk)
         _check_widget_ranges(state, key, pk,
                              str(cp.get("science_mode", "transmission")))
     except Exception:
@@ -538,4 +472,4 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key,
     if pending_tp is not None:
         os.replace(pending_tp[0], pending_tp[1])
         state["restored_tp_path"] = str(pending_tp[1])
-    return state, notes
+    return state

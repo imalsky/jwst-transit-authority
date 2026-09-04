@@ -175,11 +175,9 @@ st.markdown(
     "analysis bins (default R = 100).\n"
     "3. **Science goal**: detect a molecule, or constrain a parameter.\n"
     "4. **Observation**: select instrument modes and noise assumptions. "
-    "The model is smoothed to the instrument resolution where that is "
-    "coarser than the model, then binned to the analysis res. For an "
-    "observation that uses more than one mode, add the modes as a set in "
-    "'Parameter constraint forecast' (in the results), then select that set "
-    "in 'Modes' under the figure.\n\n"
+    "For an observation that uses more than one mode, add the modes as a "
+    "set in 'Parameter constraint forecast' (in the results), then select "
+    "that set in 'Modes' under the figure.\n\n"
     "The tool computes a forward "
     "spectrum and a Pandeia noise forecast, ranks the selected modes, and "
     "reports how many transits or eclipses reach your target. "
@@ -609,14 +607,14 @@ def _populate_config() -> None:
     the widget state. A callback runs to completion before the script, so no
     widget has instantiated yet and a rerun cannot interrupt it half-way;
     either the whole mapping applies or nothing does."""
-    for k in ("_cfg_load_error", "_cfg_load_notes", "_cfg_populated"):
+    for k in ("_cfg_load_error", "_cfg_populated"):
         st.session_state.pop(k, None)
     up = st.session_state.get(K("cfg_upload"))
     if up is None:
         return
     try:
         cfg = json.loads(up.getvalue().decode())
-        state, notes = share_config.widget_state(cfg, K)
+        state = share_config.widget_state(cfg, K)
     except (ValueError, RuntimeError, TypeError, UnicodeDecodeError) as e:
         st.session_state["_cfg_load_error"] = str(e)
         return
@@ -626,10 +624,9 @@ def _populate_config() -> None:
     # banner: the fill notes describe values the restore may have just
     # replaced, so leaving them would misattribute the form to the archive.
     st.session_state.pop("_archive_fill_pending", None)
-    st.session_state.pop("_archive_fill_notes", None)
+    st.session_state.pop("_archive_fill_error", None)
     for k, v in state.items():
         st.session_state[k] = v
-    st.session_state["_cfg_load_notes"] = notes
     st.session_state["_cfg_populated"] = True
 
 
@@ -647,9 +644,9 @@ def _apply_pending_archive_fill() -> None:
     if not name:
         return
     try:
-        values, notes = archive.custom_fill(archive.lookup(name))
+        values = archive.custom_fill(archive.lookup(name))
     except (KeyError, archive.SnapshotError) as e:
-        st.session_state["_archive_fill_notes"] = [("error", str(e))]
+        st.session_state["_archive_fill_error"] = str(e)
         return
     # The archive duration is the PRIMARY-TRANSIT duration; in emission mode
     # the event is the secondary eclipse, whose duration can differ (eccentric
@@ -657,17 +654,9 @@ def _apply_pending_archive_fill() -> None:
     if (st.session_state.get(K("scimode")) == "emission"
             and "t14" in values):
         values.pop("t14")
-        notes = list(notes) + [
-            "the archive transit duration was not applied: the observation "
-            "type is emission, and a secondary-eclipse duration can differ "
-            "from the transit duration; set the event duration yourself."]
     for suffix, v in values.items():
         st.session_state[K(f"custom_{suffix}")] = v
-    st.session_state["_archive_fill_notes"] = (
-        [("success", f"Initial values filled from the archive snapshot row "
-                     f"for {name}. Later edits and loaded configurations "
-                     "are not from the archive; review every field.")]
-        + [("warning", n) for n in notes])
+    st.session_state.pop("_archive_fill_error", None)
 
 
 _apply_pending_archive_fill()
@@ -733,8 +722,6 @@ with st.sidebar:
                  + st.session_state["_cfg_load_error"])
     elif st.session_state.get("_cfg_populated"):
         st.success("Populated")
-        for _n in st.session_state.get("_cfg_load_notes") or []:
-            st.warning(f"Not restored: {_n}")
     elif _cfg_up is not None:
         st.info("File selected. Press Populate to apply it.")
     st.divider()
@@ -780,9 +767,8 @@ with st.sidebar:
                           disabled=(_arch_sel is None),
                           on_click=_queue_archive_fill,
                           key=K("custom_arch_fill"))
-            for _kind, _msg in st.session_state.get(
-                    "_archive_fill_notes") or []:
-                getattr(st, _kind)(_msg)
+            if st.session_state.get("_archive_fill_error"):
+                st.error(st.session_state["_archive_fill_error"])
         _R = planets.CUSTOM_FIELD_RANGES   # single source with archive fill
         teff = st.number_input(
             "Stellar effective temperature, Teff (K)", *_R["teff"],
@@ -935,10 +921,10 @@ with st.sidebar:
                     "1.000e+02   890.  1.0e+10\n"
                     "1.000e+01   875.  3.0e+10\n"
                     "1.000e+00   870.  1.0e+11\n")
-                with st.expander("Example array (what the file must look like)"):
+                with st.expander("Example array"):
                     st.code(_tp_example)
                     st.download_button(
-                        "Download this example (edit and re-upload)",
+                        "Download this example",
                         _tp_example, "example_atm.txt",
                         key=_k("tpex"), on_click="ignore")
                 up_tp = st.file_uploader(
@@ -1197,10 +1183,6 @@ with st.sidebar:
             marginalize = st.checkbox(
                 "Marginalize over the other parameters", value=True,
                 key=K("marg"))
-            if not marginalize:
-                st.warning(
-                    "Marginalization is off: every other parameter is held "
-                    "fixed, so the bound is a best-case sensitivity.")
             unit = fisher_mod.PARAM_UNITS[goal_param]
             # label uses the unit when there is one (dex / K), else the bare
             # symbol -- C/O is a dimensionless number ratio
@@ -1301,10 +1283,7 @@ with st.sidebar:
     # stays realization-independent by construction.
     with st.expander("Mock noise draw & noise multiplier"):
         show_noise = st.checkbox(
-            "Mock noise draw", value=True, key=K("shownoise"),
-            help="One seeded Gaussian draw per point at its own error bar, "
-                 "fitted in the forecast panels; the forecast numbers do "
-                 "not depend on the draw.")
+            "Mock noise draw", value=True, key=K("shownoise"))
         seed = st.number_input(
             "Seed", 0, 9999, 0, key=K("seed"), disabled=not show_noise)
         # ONE knob for "more jitter". It scales the
@@ -1338,9 +1317,7 @@ with st.sidebar:
             st.session_state[_k("tbase")] = _tb_auto
         t_base = st.number_input(
             f"Out-of-{_evw} baseline (hours)", 0.5, 10.0,
-            step=0.1, key=_k("tbase"),
-            help="Out-of-event time anchoring the stellar flux; the PandExo "
-                 "convention is baseline = T14.")
+            step=0.1, key=_k("tbase"))
         sat_limit = st.number_input(
             "Saturation limit (fraction of Pandeia's saturation level)",
             0.5, 0.95, 0.80, 0.05, key=K("sat"))
@@ -1369,10 +1346,7 @@ with st.sidebar:
         elif floor_mode == "file":
             up = st.file_uploader(
                 "Two columns: wavelength (µm), floor (ppm)",
-                type=["txt", "csv", "dat"], key=K("floorfile"),
-                help="Whitespace- or comma-separated; interpolated to the "
-                     "final bins with constant edge extension; applied to "
-                     "every selected mode.")
+                type=["txt", "csv", "dat"], key=K("floorfile"))
             if up is not None:
                 try:
                     raw = up.getvalue().decode()
@@ -1532,9 +1506,7 @@ with _opacity_slot:
             width="stretch", hide_index=True)
         # Never turn incompatible table domains into a plausible union.
         if _ksrc and len({r["grid_sha256"] for r in _ksrc.values()}) != 1:
-            st.error(
-                "Installed k-tables use incompatible numerical grids. "
-                "They cannot be mixed; re-fetch all species from one release.")
+            st.error("Incompatible k-table grids installed.")
 
 # rough runtime hint keyed off the resolution settings
 base_min = 0.1 + 0.010 * nz
@@ -1895,16 +1867,6 @@ for k, err in out["failed"]:
     st.error(f"{ins.MODES[k]['label']}: the calculation failed. {first}")
     with st.expander(f"{ins.MODES[k]['label']}: technical details"):
         st.code(str(err)[-2500:])
-for k, reason in out["unusable"]:
-    # ngroup_min equals pandeia's permitted minimum ramp for the mode (the
-    # same floor PandExo searches to), so "saturated at the shortest ramp"
-    # is a real brightness limit, not a tool policy bound.
-    st.warning(f"**{ins.MODES[k]['label']}**: unusable, {reason}.")
-for r in results:
-    if r["saturated"]:
-        st.warning(f"**{r['label']}**: saturated at the shortest ramp, "
-                   "excluded from the ranking.")
-
 if not results:
     st.stop()
 
@@ -1940,11 +1902,8 @@ elif _combos_cfg:
 if goal_r == "detect":
     tsig = float(meta.get("target_sig") or 3.0)
     ntr = meta["n_transits"]
-    if not ok:
-        # every selected mode saturates: never rank saturated results
-        st.warning(f"**No usable mode**: all selected modes saturate "
-                   f"(Ks = {star['ks_mag']:g}).")
-    else:
+    # every selected mode saturates: never rank saturated results
+    if ok:
         ranked = sorted(ok, key=lambda r: -detect.detection_metric(r)[0])
         best = ranked[0]
         bsig, _best_projected = detect.detection_metric(best)
@@ -1995,11 +1954,8 @@ else:
         if len(usable_jac) >= 2 else np.inf)
     # distinguish "all modes saturated" from "no spectral response"
     if with_jac and not usable_jac:
-        st.warning(f"**No usable mode**: all selected modes saturate "
-                   f"(Ks = {star['ks_mag']:g}).")
         st.stop()
     if not per_mode:
-        st.warning(f"No selected mode constrains {glabel}.")
         st.stop()
     bk = min(per_mode, key=per_mode.get)
     bs = per_mode[bk]
@@ -2202,11 +2158,7 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
                          placeholder="e.g. SOSS + G395H")
         _cbc2.multiselect("Modes in the combination", _cb_opts,
                           key=K("cb_modes"),
-                          format_func=lambda k: ins.MODES[k]["label"],
-                          help="Pick the modes the observation would use "
-                               "together. The set gets one combined "
-                               "forecast row and can be drawn as one "
-                               "series in the figure.")
+                          format_func=lambda k: ins.MODES[k]["label"])
         # Buttons on their OWN row, not in a third column beside the inputs:
         # the inputs carry labels, so a column-mounted button floats to the
         # top of the row and lines up with nothing.
@@ -2256,14 +2208,13 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
 
         def _cell(n, w, center=None):
             """One cell at the target significance. ``w`` is the 1-sigma width
-            in the row's own coordinate. The marginalized column leads with the
-            input-model value so the cell reads as the forecast interval; the
-            conditional column carries the width alone (same center)."""
+            in the row's own coordinate. Both columns lead with the
+            input-model value so each cell reads as an interval; they share
+            that center and differ only in width."""
             w = tsig_f * float(w)
             if not np.isfinite(w) or w > _UNCONSTRAINED_ABOVE:
                 return "unconstrained"
-            return (f"±{w:.3g}" if center is None
-                    else f"{center:.3g} ± {w:.3g}")
+            return fisher_mod.format_pm(center, w)
 
         def _w_int(n, s):
             """Internal sigma -> the row's coordinate: dex for log10 C/O
@@ -2285,7 +2236,7 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
             return [{"mode": mode_label,
                      "parameter": _row_label(n),
                      _marg_col: _cell(n, _w_int(n, sig[n]), _row_center[n]),
-                     _cond_col: _cell(n, _w_int(n, cond[n]))}
+                     _cond_col: _cell(n, _w_int(n, cond[n]), _row_center[n])}
                     for n in fisher_names]
 
         frows = []
@@ -2301,10 +2252,9 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
             cond = {}
             sig = fisher_mod.mode_forecast(r, fisher_names, conditional=cond)
             frows.extend(_param_rows(r["label"], sig, cond))
-        fdiag = {}
         if len(usable_f) >= 2:
             cond = {}
-            sig = fisher_mod.combined_forecast(usable_f, fisher_names, diag=fdiag,
+            sig = fisher_mod.combined_forecast(usable_f, fisher_names,
                                                conditional=cond)
             frows.extend(_param_rows(_ALL_USABLE, sig, cond))
         # named combinations: long-format rows from the SAME records feeding the
@@ -2320,7 +2270,8 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
                         n, _w_disp(n, float(_rec["sigma_marginalized_display"][n])),
                         _row_center[n]),
                     _cond_col: _cell(
-                        n, _w_disp(n, float(_rec["sigma_conditional_display"][n])))})
+                        n, _w_disp(n, float(_rec["sigma_conditional_display"][n])),
+                        _row_center[n])})
         # Custom combinations FIRST: they are what the user built, so they
         # lead the table. Order within each group is preserved.
         _combo_names = {str(_rec["name"]) for _rec in combo_recs}
@@ -2363,23 +2314,10 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
                            _csv_bytes(pd.DataFrame(frows)),
                            f"{_fname_base}_fisher_forecast.csv", "text/csv",
                            key=K("dl_fisher_csv"), on_click="ignore")
-        # No full-rank numerical-health prose; a rank DEFICIENCY is still
-        # disclosed -- degenerate directions would otherwise read as
-        # silently missing rows
-        if fdiag and fdiag["fisher_rank"] < fdiag["fisher_dimension"]:
-            st.caption(
-                f"**Fisher matrix is rank-deficient ({fdiag['fisher_rank']} "
-                f"of {fdiag['fisher_dimension']}): degenerate directions "
-                "read as unconstrained.**")
-        # Reference material on reading this table belongs in README.md, not
-        # in the GUI.
         st.divider()
         # Filled by the marginalized-forecast block below, which needs the
         # posterior records built after this panel renders.
         _post_slot = st.container()
-    elif out.get("fisher_names"):
-        st.info("A constraint forecast was requested but the cached model has "
-                "no Jacobian. Press Run to compute it.")
 
 
 
@@ -2428,11 +2366,7 @@ if _have_fisher:
         _sources[str(_rec["name"])] = [
             _results_by_mode[k] for k in _rec["usable_modes"]]
 
-    if not _sources:
-        with _post_box:
-            st.info("No usable mode carries a Jacobian, so there is no "
-                    "forecast to draw.")
-    else:
+    if _sources:
         _centers_all = {n: posteriors.param_center(n, _cpj) for n in fisher_names}
         _pp_key = K("post_params_" + "_".join(fisher_names))
         # a stored selection can go stale across runs (different free set)
@@ -2472,12 +2406,6 @@ if _have_fisher:
                 elif _kind == "combo":                # modes drop out here
                     _want.append(_key)
             _sources = {k: v for k, v in _sources.items() if k in _want}
-        if not _sources:
-            with _post_box:
-                st.info("No selected series carries a Jacobian, so there is "
-                        "no forecast curve to draw. Widen 'Spectrum & "
-                        "forecast series' below, or read the widths from "
-                        "the table above.")
         _src_labels_drawn = list(_sources)
 
         _mock_rec = {}
@@ -2489,7 +2417,7 @@ if _have_fisher:
                     _sources[_lbl], fisher_names, _mock, co_eval=co_eval)
 
         for _p in _post_sel:
-            _curves, _notes = [], []
+            _curves = []
             for _lbl in _src_labels_drawn:
                 # one curve per SELECTED SERIES, colored to match its series
                 # on the spectrum so the two halves of the figure read
@@ -2497,16 +2425,8 @@ if _have_fisher:
                 _pr = _recs_by_src[_lbl]["params"].get(_p)
                 _col = _series_color(_lbl)
                 if _pr is None:
-                    _sig = _recs_by_src[_lbl]["sigma_marginalized"][_p]
-                    if np.isfinite(_sig):
-                        _notes.append(f"{_lbl}: no input-model center is "
-                                      "defined for this parameter under "
-                                      "the run's settings, so no curve is "
-                                      "drawn (its forecast width is in the "
-                                      "table above)")
-                    else:
-                        _notes.append(f"{_lbl}: unconstrained (no curve)")
-                elif _pr["constrained"]:
+                    continue          # no center: no curve, no prose
+                if _pr["constrained"]:
                     _mr = _mock_rec.get(_lbl)
                     _mc = None
                     if _mr is not None and _mr["recovered"].get(_p):
@@ -2523,14 +2443,9 @@ if _have_fisher:
                             _mu_d = posteriors.mock_center_co(
                                 _pr["center"], _pr["sigma_display"],
                                 _mr["delta"][_p])
-                            if _mu_d is None:
-                                _notes.append(
-                                    f"{_lbl}: C/O is effectively "
-                                    "unconstrained -- the jitter shifts "
-                                    f"ln(C/O) by {_mr['delta'][_p]:+.3g}, "
-                                    "off the panel scale, so the unshifted "
-                                    "forecast is drawn")
-                            else:
+                            # off-scale draws (mock_center_co -> None) fall
+                            # through and draw the unshifted forecast
+                            if _mu_d is not None:
                                 _mc = posteriors.ln_gaussian_curve(
                                     _mu_d, _pr["sigma_ln"])
                         else:
@@ -2572,10 +2487,6 @@ if _have_fisher:
                                 if _p == "dlnCO" else None),
                             curve_family=_pr["curve_family"],
                             color=_col, ls="-", lw=1.8))
-                else:
-                    _notes.append(f"{_lbl}: unconstrained -- this "
-                                  "direction carries no information in "
-                                  "the fitted band (no curve, by design)")
             # A panel whose curves are FITS to the jitter draw is not a
             # forecast: its centers move with the realization, while a
             # forecast's center is the input value by construction. The y-axis
@@ -2591,7 +2502,7 @@ if _have_fisher:
                 axis_unit=fisher_mod.PARAM_UNITS.get(_p, ""),
                 density_label=("relative density" if _fitted
                                else "relative forecast density"),
-                curves=_curves, notes=_notes,
+                curves=_curves,
                 center=_centers_all.get(_p)))
 
 # --- the results figure (spectrum + forecast posteriors, rendered once) -----
@@ -2822,7 +2733,6 @@ except ValueError as _e:
     # Any other ValueError is a real defect and must not be swallowed.
     if "y_log=True" not in str(_e):
         raise
-    _fig_box.warning("Log axis unavailable; linear shown.")
     _sum_spectrum["y_log"] = False
     fig_sum = _compose(_sum_spectrum)
 _sum_png = _fig_bytes(fig_sum, "png")

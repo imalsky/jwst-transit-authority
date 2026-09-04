@@ -16,7 +16,8 @@ questions in one graphic:
 * CENTER and RIGHT -- what would the measurement look like? Up to three 1D
   marginalized Fisher-Gaussian forecast curves (linearized Cramer-Rao
   forecasts, never sampled retrieval posteriors). An unconstrained direction
-  renders as an explicit annotation, never a fake finite curve.
+  renders as an EMPTY panel, never a fake finite curve and never a caption
+  on the axes: no figure this module draws carries prose.
 
 House style: the vendored science.mplstyle plus the serif/STIX overrides
 this module owns (_STYLE_OVERRIDES, which the GUI applies globally), so a
@@ -32,7 +33,7 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import (FuncFormatter, LogLocator, MaxNLocator,
                               NullFormatter, NullLocator, ScalarFormatter)
 
-from jwst_tool import plotting
+from jwst_tool import fisher, plotting
 
 _STYLE_FILE = Path(__file__).resolve().parent / "science.mplstyle"
 
@@ -208,11 +209,6 @@ def _validate_panels(posterior_panels) -> list[dict]:
                                color=str(c.get("color", "#333333")),
                                ls=str(c.get("ls", "-")),
                                lw=float(c.get("lw", 1.6))))
-        notes = [str(n) for n in (pan.get("notes") or [])]
-        if not curves and not notes:
-            raise ValueError(f"{where}: needs curves or notes (an empty "
-                             "panel says nothing; annotate unconstrained "
-                             "directions explicitly)")
         center = pan.get("center")
         # density_label overrides the y axis text. The validator REBUILDS each
         # panel dict, so any key not listed here is silently dropped -- which is
@@ -220,7 +216,7 @@ def _validate_panels(posterior_panels) -> list[dict]:
         # in the plotting function.
         _dl = pan.get("density_label")
         out.append(dict(axis_label=str(_req(pan, "axis_label", where)),
-                        curves=curves, notes=notes,
+                        curves=curves,
                         density_label=(None if _dl is None else str(_dl)),
                         center=(None if center is None else float(center))))
 
@@ -515,7 +511,7 @@ def _plot_posterior_panel(axp, pan: dict,
         _lab = str(c["label"])
         _wt = c.get("width_text")
         if _wt is None and c["sigma"] is not None:
-            _wt = f"±{_fmt_val(c['sigma'])}"          # generic panels
+            _wt = fisher.format_pm(None, c["sigma"])   # generic panels
         if _wt and len(pan["curves"]) > 1:
             _lab = f"{_lab}: {_wt}"
         axp.plot(theta, pdf, color=c["color"], ls=c["ls"], lw=c["lw"],
@@ -535,9 +531,10 @@ def _plot_posterior_panel(axp, pan: dict,
             axp.set_title(_wt, fontsize=_AX_LBL)
         else:
             axp.set_title(
-                f"{pan['axis_label']} = {_fmt_val(_mu)} ± "
-                f"{_fmt_val(_q['sigma'])}" if _mu is not None
-                else f"{pan['axis_label']}: ± {_fmt_val(_q['sigma'])}",
+                f"{pan['axis_label']} = {fisher.format_pm(_mu, _q['sigma'])}"
+                if _mu is not None
+                else f"{pan['axis_label']}: "
+                     f"{fisher.format_pm(None, _q['sigma'])}",
                 fontsize=_AX_LBL)
     # posteriors.gaussian_curve builds its grid as center +/- 5 sigma, where
     # the curve is visually zero across most of the axis, so the automatic
@@ -614,10 +611,6 @@ def _plot_posterior_panel(axp, pan: dict,
                          handletextpad=0.5, borderaxespad=0.4,
                          labelspacing=0.3)
         leg.set_zorder(5)
-    for k, note in enumerate(pan["notes"]):
-        axp.text(0.5, 0.5 - 0.18 * k, note, transform=axp.transAxes,
-                 ha="center", va="center", fontsize=7,
-                 color="#883333", wrap=True)
 
 
 def compose_summary_figure(spectrum: dict, posterior_panels=None,
@@ -633,9 +626,10 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
 
     ``posterior_panels``: up to three dicts, one per parameter:
     dict(axis_label, curves=[dict(label, theta, pdf, color, ls, lw), ...],
-    notes=[...], center=float|None). An unconstrained direction belongs in
-    ``notes`` (rendered as an in-panel annotation), never as a curve. A
-    panel must carry curves or notes -- silence is not allowed.
+    center=float|None). An unconstrained direction draws no curve and gets
+    no annotation: the figure carries axis labels, ticks, title and legend
+    and NOTHING else -- prose about a panel belongs in the page, never on
+    the axes.
 
     ``panel_xlims``: one entry per forecast panel, each ``(lo, hi)`` in that
     panel's own parameter units or None for the automatic +/-_XLIM_SIGMA

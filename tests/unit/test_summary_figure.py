@@ -164,15 +164,19 @@ def test_figure_composes_exports_and_never_mutates_inputs():
         plt.close(fig)
 
 
-def test_unconstrained_panel_renders_note_without_curve():
+def test_unconstrained_panel_draws_no_curve_and_no_text():
+    """An unconstrained direction renders an EMPTY panel: the figure never
+    carries prose (the page says it, under the figure), and a caller's
+    ``notes`` key cannot put any there."""
     pan = dict(axis_label="C/O", curves=[],
                notes=["G395H: unconstrained -- no curve, by design"],
                center=None)
     fig = summary_figure.compose_summary_figure(
         _spectrum(with_points=False), posterior_panels=[pan])
     try:
-        texts = [t.get_text() for ax in fig.axes for t in ax.texts]
-        assert any("unconstrained" in t for t in texts)
+        texts = [t.get_text() for ax in fig.axes for t in ax.texts
+                 if t.get_text().strip()]
+        assert texts == []
     finally:
         plt.close(fig)
 
@@ -192,11 +196,6 @@ def test_validation_is_loud():
     nonfinite["depth_ppm"][3] = np.nan
     with pytest.raises(ValueError, match="depth_ppm contains non-finite"):
         summary_figure.compose_summary_figure(nonfinite)
-    # an empty posterior panel says nothing -- refused, never silent
-    with pytest.raises(ValueError, match="needs curves or notes"):
-        summary_figure.compose_summary_figure(
-            _spectrum(with_points=False),
-            posterior_panels=[dict(axis_label="x", curves=[], notes=[])])
     # one cap, exported for the GUI multiselect: if the two drifted, a
     # selection the widget allows would raise here instead of rendering
     assert summary_figure.MAX_POST_PANELS == 3

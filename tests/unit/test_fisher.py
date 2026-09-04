@@ -329,17 +329,37 @@ def test_co_width_is_the_value_and_error_in_log10():
     the coordinate the Gaussian is symmetric in. Their cases are tagged
     "logC/O = -0.26" for exactly this C/O. A wide width is still reported:
     it IS a weak local constraint, not the absence of one."""
-    assert fisher.format_co_width(0.55, 0.0745) == "log10(C/O) = -0.26 ± 0.0324"
+    # the ERROR sets the precision (format_pm): 2 sig figs on it, the value
+    # rounded to the same decimal place -- never "-0.26 ± 0.0324".
+    assert fisher.format_co_width(0.55, 0.0745) == "log10(C/O) = -0.260 ± 0.032"
     assert fisher.format_co_width(0.55, 0.0745, k=3.0) == \
-        "log10(C/O) = -0.26 ± 0.0971"
+        "log10(C/O) = -0.260 ± 0.097"
     assert fisher.format_co_width(0.55, 0.9218, k=3.0) == \
-        "log10(C/O) = -0.26 ± 1.2"
+        "log10(C/O) = -0.3 ± 1.2"
     # plain text only: this string also lands in a Streamlit cell and a CSV
     assert "$" not in fisher.format_co_width(0.55, 0.9218)
     # mock_center_co shifts a recovered center MULTIPLICATIVELY, so a broad
     # mode legitimately lands outside the solver band -- a local result, not
     # an error: raising there would crash a valid MIRI realization.
-    assert fisher.format_co_width(1.27, 0.9218) == "log10(C/O) = 0.104 ± 0.4"
+    assert fisher.format_co_width(1.27, 0.9218) == "log10(C/O) = 0.10 ± 0.40"
+
+
+@pytest.mark.parametrize("center,width,want", [
+    # the error carries 2 significant figures and the value is rounded to
+    # the SAME decimal place, in both directions across the decimal point
+    (1.0, 0.922, "1.00 ± 0.92"),
+    (-0.26, 0.599, "-0.26 ± 0.60"),
+    (-0.26, 0.0324, "-0.260 ± 0.032"),
+    (1200.0, 45.0, "1200 ± 45"),
+    (5678.0, 1234.0, "5700 ± 1200"),
+    (None, 0.0324, "±0.032"),
+    (None, 45.0, "±45"),
+    # no scale to round against: fixed precision rather than a crash
+    (1.0, 0.0, "1 ± 0"),
+    (1.0, np.inf, "1 ± inf"),
+])
+def test_format_pm_lets_the_error_set_the_precision(center, width, want):
+    assert fisher.format_pm(center, width) == want
 
 
 @pytest.mark.parametrize("center", [0.0, -0.55, np.nan, np.inf])
