@@ -96,7 +96,12 @@ VMR_XLIM_DEFAULT = (1e-12, 1.0)
 # mixing-ratio legend strip on the right. Both panels get the SAME allocated
 # rect and set_box_aspect(1.0), so matplotlib squares them identically -- the
 # two can never drift to different sizes the way two separate figures did.
-STRUCT_FIG_DPI = 200
+# Raster resolution for every PNG this app hands out or displays. Matplotlib
+# takes the dpi from the SAVE, not from the figure, so the figure-construction
+# value below only matters for interactive backends -- app._fig_bytes is what
+# actually sets the resolution of the bytes a user gets.
+FIG_DPI = 300
+STRUCT_FIG_DPI = FIG_DPI
 STRUCT_FIG_W_IN = 11.0
 STRUCT_FIG_H_IN = 4.8
 STRUCT_AXES_RECT = dict(left=0.078, right=0.863, bottom=0.13, top=0.97,

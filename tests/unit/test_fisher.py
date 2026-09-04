@@ -89,15 +89,17 @@ def test_degenerate_directions_read_inf_never_garbage():
     assert np.all(np.isfinite(np.linalg.inv(F2)))
 
 
-def test_uninformative_width_reads_unconstrained():
-    """A C/O width past the no-information scale is not a constraint. The C/O
-    display transform sigma_CO = C/O * sigma_lnCO is a linearization; at
-    sigma_lnCO = 1 its minus-1-sigma edge sits exactly on the physical
-    boundary C/O = 0. Past that the forecast must read unconstrained (inf)
-    end to end -- reported width AND posterior curve -- never a finite number
-    that looks like a weak measurement. Sigma scales linearly with the per-bin
-    noise, so one design brackets the cut from both sides. Rows with an exact
-    display transform (lnZ) are never cut, however wide."""
+def test_wide_co_width_is_reported_not_hidden():
+    """A wide C/O width is a weak measurement, not a missing one: it must come
+    back as a NUMBER end to end -- reported width AND a drawable curve -- at
+    every width the tool can compute. The old no-information cut hid anything
+    past sigma_lnCO = 1, which was derived for a LINEAR C/O display (where the
+    minus-1-sigma edge reached C/O = 0); every surface now reports log10 C/O,
+    where the Gaussian is symmetric and nothing crosses a boundary. "inf" is
+    reserved for a genuine null direction (test_degenerate_directions_...).
+    Sigma scales linearly with the per-bin noise, so one design reaches any
+    target width. 920 is the real extreme from notes.md (niriss_soss_ord2),
+    the width at which the UNBOUNDED curve grid overflows float64."""
     rng = np.random.default_rng(7)
     nb = 40
     free = ["dlnCO", "lnZ"]
@@ -106,17 +108,22 @@ def test_uninformative_width_reads_unconstrained():
                 depth=np.full(nb, 0.02))
     s0 = fisher.mode_forecast(base, free)["dlnCO"]
     assert np.isfinite(s0)
-    for target, constrained in ((0.9, True), (1.1, False)):
+    lo, hi = posteriors.co_curve_bounds()
+    for target in (0.9, 1.1, 5.0, 920.0):
         r = dict(base, sigma=base["sigma"] * (target / s0))
         sig = fisher.mode_forecast(r, free)
-        assert bool(np.isfinite(sig["dlnCO"])) is constrained
-        if constrained:
-            assert sig["dlnCO"] == pytest.approx(target, rel=1e-9)
+        assert sig["dlnCO"] == pytest.approx(target, rel=1e-9)
         assert np.isfinite(sig["lnZ"])
         out = posteriors.marginalized_posteriors(
             r, free, {"dlnCO": 0.55, "lnZ": 1.0}, co_eval=0.55)
-        assert out["params"]["dlnCO"]["constrained"] is constrained
-        assert (out["params"]["dlnCO"]["theta"] is None) is not constrained
+        rec = out["params"]["dlnCO"]
+        assert rec["constrained"] is True
+        theta = rec["theta"]
+        # the curve is drawn over the range the forward model solves, so it
+        # stays resolvable however wide the width gets
+        assert theta is not None and np.all(np.isfinite(theta))
+        assert np.all(np.diff(theta) > 0.0)
+        assert theta[0] >= lo - 1e-12 and theta[-1] <= hi + 1e-9
 
 
 def test_combined_forecast_structure_and_order_invariance():

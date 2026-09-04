@@ -89,8 +89,12 @@ _COMBO_COLORS = ("#6a3d9a", "#117733", "#882255", "#88ccee")
 
 
 def _fig_bytes(fig, fmt: str, tight: bool = True) -> bytes:
-    """Export a figure for download: raster PNG at dpi 200 (house convention)
+    """Export a figure for download: raster PNG at plotting.FIG_DPI
     or vector PDF (proposal-ready; text and lines stay vector).
+
+    This savefig is what sets the resolution of every PNG the app produces:
+    matplotlib takes dpi from the save, not from the Figure, so the dpi passed
+    to plt.figure()/subplots() does not reach the output.
 
     ``tight=True`` crops to the figure's OWN ink, so two figures on the same
     canvas come out different sizes when one carries a legend the other lacks;
@@ -106,7 +110,7 @@ def _fig_bytes(fig, fmt: str, tight: bool = True) -> bytes:
     with plotting.render_lock:
         fig.savefig(buf, format=fmt, facecolor="white",
                     bbox_inches=("tight" if tight else fig.bbox_inches),
-                    **({"dpi": 200} if fmt == "png" else {}))
+                    **({"dpi": plotting.FIG_DPI} if fmt == "png" else {}))
     return buf.getvalue()
 
 
@@ -117,10 +121,13 @@ def _show_fig(fig, tight: bool = True, png: bytes | None = None) -> None:
     layout does -- it belongs inside the lock like every other
     materialization (plotting.py has the full argument). ``tight=False``
     shows the full canvas at a fixed size: st.pyplot accepts no savefig
-    keywords any more, so that branch rasterizes through ``_fig_bytes`` (the
-    same dpi 200 as st.pyplot's default) and displays the PNG with st.image.
+    keywords any more, so that branch rasterizes through ``_fig_bytes`` and
+    displays the PNG with st.image.
+
     A caller that already has those bytes (for a download button) passes them
-    as ``png`` rather than paying a second dpi-200 savefig of the same figure.
+    as ``png``; they are shown as-is, which both skips a second savefig of the
+    same figure and is the ONLY way to display above 200 dpi -- st.pyplot
+    hardcodes dpi 200 in its own savefig defaults and ignores the Figure's.
 
     FIXED DISPLAY WIDTH: st.pyplot's width defaults to "stretch", which
     re-scales the figure on every window resize while its text stays at
@@ -128,12 +135,13 @@ def _show_fig(fig, tight: bool = True, png: bytes | None = None) -> None:
     Streamlit still caps the element at the container width on a narrower
     screen.
     """
-    if tight:
+    if png is not None:
+        st.image(png, width=_FIG_DISPLAY_PX)
+    elif tight:
         with plotting.render_lock:
             st.pyplot(fig, width=_FIG_DISPLAY_PX)
     else:
-        st.image(png if png is not None else _fig_bytes(fig, "png", tight=False),
-                 width=_FIG_DISPLAY_PX)
+        st.image(_fig_bytes(fig, "png", tight=False), width=_FIG_DISPLAY_PX)
     plt.close(fig)
 
 
@@ -141,6 +149,26 @@ def _show_fig(fig, tight: bool = True, png: bytes | None = None) -> None:
 # number the Fisher linearization cannot support.
 _UNCONSTRAINED_ABOVE = 1e4
 _LN10 = np.log(10.0)                    # ln-coordinate sigma -> dex
+
+
+# The reporting coordinate of a WIDTH, for every surface that prints one.
+# C/O is fitted in ln and reported in log10, so its numbers are dex; the other
+# rows are already log quantities under their own names. fisher.param_axis
+# stays the PHYSICAL C/O the forecast panel's x axis draws -- that is a
+# different thing from the coordinate its width is quoted in, and printing one
+# under the other's name is how the table and the figure legend drifted apart.
+def _row_label(n):
+    return "log10 C/O" if n == "dlnCO" else fisher_mod.PARAM_LABELS[n]
+
+
+def _row_axis(n):
+    return "log10 C/O [dex]" if n == "dlnCO" else fisher_mod.param_axis(n)
+
+
+def _w_int(n, s):
+    """Internal sigma -> that row's coordinate: dex for log10 C/O (internal
+    is ln), display units for everything else."""
+    return s / _LN10 if n == "dlnCO" else fisher_mod.display_sigma(n, s)
 
 
 def _csv_bytes(df: pd.DataFrame) -> bytes:
@@ -2194,13 +2222,6 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
         tsig_f = float(meta.get("target_sig") or 3.0)
         with_jac = [r for r in results if r.get("jac_bins") is not None]
 
-        # The row NAMES its coordinate, and every cell in it is a plain number
-        # there: C/O is fitted in ln and reported in log10, so the row is
-        # "log10 C/O" and its numbers are dex. Metallicity and Kzz are already
-        # log quantities under their own names.
-        def _row_label(n):
-            return "log10 C/O" if n == "dlnCO" else fisher_mod.PARAM_LABELS[n]
-
         _row_center = {
             n: (None if (c := posteriors.param_center(n, _cpj)) is None
                 else float(np.log10(c)) if n == "dlnCO" else float(c))
@@ -2215,11 +2236,6 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
             if not np.isfinite(w) or w > _UNCONSTRAINED_ABOVE:
                 return "unconstrained"
             return fisher_mod.format_pm(center, w)
-
-        def _w_int(n, s):
-            """Internal sigma -> the row's coordinate: dex for log10 C/O
-            (internal is ln), display units for everything else."""
-            return s / _LN10 if n == "dlnCO" else fisher_mod.display_sigma(n, s)
 
         def _w_disp(n, s):
             """A combo record's DISPLAY sigma -> the row's coordinate. Its C/O
@@ -2447,7 +2463,8 @@ if _have_fisher:
                             # through and draw the unshifted forecast
                             if _mu_d is not None:
                                 _mc = posteriors.ln_gaussian_curve(
-                                    _mu_d, _pr["sigma_ln"])
+                                    _mu_d, _pr["sigma_ln"],
+                                    bounds=posteriors.co_curve_bounds())
                         else:
                             _mu_d = _pr["center"] + float(
                                 _mr["delta_display"][_p])
@@ -2543,9 +2560,10 @@ elif _have_fisher:
             key=_rk_key, format_func=lambda n: fisher_mod.PARAM_LABELS[n])
     for r in [x for x in results if x.get("jac_bins") is not None
               and not x["saturated"]]:
-        _v = _target_sig * fisher_mod.display_sigma(
-            _rk_param, fisher_mod.mode_forecast(r, fisher_names)[_rk_param],
-            co_eval=co_eval)
+        # _w_int, not display_sigma: this number sits on the same page as the
+        # constraint table and must be in the same coordinate (dex for C/O).
+        _v = _target_sig * _w_int(
+            _rk_param, fisher_mod.mode_forecast(r, fisher_names)[_rk_param])
         if np.isfinite(_v):
             _leg_num[r["mode_key"]] = f"±{_v:.3g}"
 
@@ -2675,7 +2693,7 @@ if _leg_num:
         f"{meta['n_transits']} {_ev}"
         f"{'s' if meta['n_transits'] > 1 else ''}"
         if goal_r == "detect" else
-        f"Fisher ±{fisher_mod.param_axis(_rk_param)} per mode "
+        f"Fisher ±{_row_axis(_rk_param)} per mode "
         f"at {_target_sig:g}σ")
 _combo_order = [str(c["name"])
                 for c in (st.session_state.get(K("combos")) or [])]
@@ -2738,7 +2756,7 @@ except ValueError as _e:
 _sum_png = _fig_bytes(fig_sum, "png")
 _sum_pdf = _fig_bytes(fig_sum, "pdf")
 with _fig_box:
-    _show_fig(fig_sum)
+    _show_fig(fig_sum, png=_sum_png)
 _s1, _s2, _s3, _s4, _s5 = _fig_box.columns([1.5, 1.2, 1.5, 1.5, 1.9])
 _s1.download_button("Figure (PDF, vector)", _sum_pdf,
                     f"{_fname_base}_proposal_summary.pdf",

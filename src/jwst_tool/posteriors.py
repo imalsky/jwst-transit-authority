@@ -155,7 +155,8 @@ def gaussian_curve(center: float, sigma: float, grid=None) -> dict:
     return dict(theta=theta, pdf=pdf)
 
 
-def ln_gaussian_curve(center: float, sigma_ln: float, grid=None) -> dict:
+def ln_gaussian_curve(center: float, sigma_ln: float, grid=None,
+                      bounds: tuple | None = None) -> dict:
     """The normalized marginalized Fisher forecast density in ln(theta), on a
     geometric theta grid: the curve for a LOG-scaled physical axis.
 
@@ -166,6 +167,14 @@ def ln_gaussian_curve(center: float, sigma_ln: float, grid=None) -> dict:
     (1-D ascending, > 0). This builder returns a UNIT-AREA density in
     d ln(theta); summary_figure divides by the peak to render it as relative
     forecast density.
+
+    ``bounds`` (lo, hi) clips the AUTO window to the range the caller can
+    actually produce -- for C/O, the range the forward model solves. A wide
+    forecast otherwise spans decades of theta the model cannot reach, and past
+    sigma_ln 142 the auto grid overflows float64 outright. The density is
+    unchanged: only the drawn window moves, so the curve runs off the panel
+    edge instead of being rescaled. Bounds that exclude ``center`` are ignored
+    (the peak must stay in the window). A caller ``grid`` is never clipped.
     """
     center = float(center)
     sigma_ln = float(sigma_ln)
@@ -178,10 +187,15 @@ def ln_gaussian_curve(center: float, sigma_ln: float, grid=None) -> dict:
             f"{sigma_ln!r} -- an unconstrained (inf) direction has no curve "
             "by design")
     if grid is None:
+        u_lo, u_hi = -_AUTO_SIGMA * sigma_ln, _AUTO_SIGMA * sigma_ln
+        if bounds is not None:
+            b_lo, b_hi = float(bounds[0]), float(bounds[1])
+            if b_lo < center < b_hi:
+                lnc = float(np.log(center))
+                u_lo = max(u_lo, float(np.log(b_lo)) - lnc)
+                u_hi = min(u_hi, float(np.log(b_hi)) - lnc)
         with np.errstate(over="ignore"):
-            theta = center * np.exp(np.linspace(-_AUTO_SIGMA * sigma_ln,
-                                                _AUTO_SIGMA * sigma_ln,
-                                                _AUTO_POINTS))
+            theta = center * np.exp(np.linspace(u_lo, u_hi, _AUTO_POINTS))
     else:
         theta = np.asarray(grid, float)
         if theta.ndim != 1 or theta.size < 2:
@@ -275,7 +289,8 @@ def marginalized_posteriors(results, free_names: list[str], centers: dict,
                 # the forecast density in its OWN coordinate, for the panel's
                 # log C/O axis; sigma_display stays the absolute-C/O width
                 # that meta["target_prec"] is compared against
-                curve = ln_gaussian_curve(rec["center"], s_int, grid=grid)
+                curve = ln_gaussian_curve(rec["center"], s_int, grid=grid,
+                                          bounds=co_curve_bounds())
                 rec["curve_family"] = "ln_gaussian"
                 rec["sigma_ln"] = s_int
             else:
@@ -619,6 +634,14 @@ def param_center(name: str, cpj: dict):
     return None
 
 
+def co_curve_bounds() -> tuple:
+    """The C/O window every forecast curve is drawn in: the range the forward
+    model solves (the span the GUI C/O widget offers), not the +-5 sigma the
+    width alone implies."""
+    from jwst_tool import forward   # light path: no JAX/VULCAN imports
+    return float(forward.CO_MIN), float(forward.CO_MAX_PHOTO_OFF)
+
+
 def mock_center_co(center: float, sigma_display: float, delta_ln: float):
     """Recovered absolute C/O for ONE draw, or None when it is off scale.
 
@@ -650,6 +673,6 @@ def mock_center_co(center: float, sigma_display: float, delta_ln: float):
                          f"{delta_ln!r}")
     with np.errstate(over="ignore"):
         mu = center * float(np.exp(delta_ln))
-    if not np.isfinite(mu):
-        return None
+    if not (np.isfinite(mu) and mu > 0.0):
+        return None          # exp() overflowed, or underflowed to a finite 0.0
     return mu if abs(mu - center) <= _AUTO_SIGMA * sigma_display else None

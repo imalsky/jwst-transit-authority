@@ -688,7 +688,7 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
               / (_right - _left))
         _axes_h = _FIG_W_IN / _k
         fig = plt.figure(figsize=(_FIG_W_IN, _axes_h / (_top - _bottom)),
-                         dpi=200)
+                         dpi=plotting.FIG_DPI)
         gs = fig.add_gridspec(1, _ncols,
                               width_ratios=[_PHI] + [1.0] * _npan,
                               wspace=_wspace,

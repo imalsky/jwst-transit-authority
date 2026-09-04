@@ -352,7 +352,10 @@ def test_source_pins_fig_width_fisher_table_and_noise_recording():
         "the full-canvas branch no longer pins the display width"
     assert "_show_fig(fig3, tight=False, png=_struct_png)" in src, \
         "the structure figure must reuse the PNG the download button already " \
-        "rasterized, not pay a second dpi-200 savefig of the same figure"
+        "rasterized, not pay a second savefig of the same figure"
+    assert "_show_fig(fig_sum, png=_sum_png)" in src, \
+        "the summary figure must display the bytes the download button " \
+        "rasterized: st.pyplot hardcodes dpi 200 and would ignore FIG_DPI"
     assert 'st.pyplot(fig, width="stretch"' not in src
     assert not [ln for ln in src.splitlines()
                 if "st.pyplot(" in ln and "bbox_inches" in ln], \
