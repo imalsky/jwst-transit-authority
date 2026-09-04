@@ -1028,8 +1028,12 @@ def canonical_params(params: dict) -> dict:
     if (cp["jac_method"] == "ad" and not cp["use_photo"]
             and any(n not in CLOUD_FISHER_PARAMS for n in cp["fisher_params"])):
         # Only CHEMISTRY rows are gated: a cloud-deck row (and the appended
-        # lnR0) is an RT-only jvp on the converged column, photolysis-
-        # independent. Photo-off no chemistry row has a certified reference on
+        # lnR0) is an RT-only jvp taken AT the converged column, so it carries
+        # no through-solver tangent -- which is the thing that is unvalidated
+        # photo-off. Its VALUE still depends on the photo-off column y_sol it
+        # is evaluated at, exactly as the spectrum does; the row is not
+        # "photolysis-independent", it just does not differentiate the solve.
+        # Photo-off no chemistry row has a certified reference on
         # the shipped W39b column: every FD row there misses its own h-vs-2h
         # gate by 23-400x. It is not uniform, though -- on two other photo-off
         # columns the COMPOSITION rows certify (0.005-0.060) while lnKzz still
