@@ -133,14 +133,6 @@ PANDEXO_MODES = {
                       {"detector": {"subarray": "sub2048",
                                     "readout_pattern": "nrsrapid",
                                     "readmode": "nrsrapid"}}),
-    # PandExo has no order-2 SOSS template: reuse the SOSS template and pin
-    # the extraction order through the strategy override channel (top-level
-    # "strategy" section, applied to inst["strategy"] in pandexo_worker).
-    "niriss_soss_ord2": ("NIRISS SOSS",
-                         {"detector": {"subarray": "substrip256",
-                                       "readout_pattern": "nisrapid",
-                                       "readmode": "nisrapid"},
-                          "strategy": {"order": 2}}),
     # PandExo has no F277W template: reuse the F322W2 grism template with the
     # filter pinned, the same way both NIRCam entries already pin theirs.
     "nircam_f277w": ("NIRCam F322W2",

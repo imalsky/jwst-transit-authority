@@ -70,7 +70,8 @@ if mode == "transmission":
     out.update(wl_um=rt.wl_um, depth_ppm=d * 1e6)
 else:
     emis = exojax_rt.build_emis_model(rt, profile)
-    fp = np.asarray(emis.emission_flux(vmr_j, J(h2), J(T_art), J(mmw), vmr_he=J(he)))
+    # eclipse flux: carries the tau = 2/3 photospheric radius per wavelength
+    fp = np.asarray(emis.eclipse_flux_tau(vmr_j, J(h2), J(T_art), J(mmw), vmr_he=J(he))[0])
     fs = phoenix_surface_flux(rt.nu_grid, cp["star_teff"], cp["star_logg"], cp["star_feh"])
     r_em = float(emis.emission_radius(J(T_art), J(mmw)))
     out.update(wl_um=rt.wl_um, fp=fp, fs=np.asarray(fs), r_em_cm=r_em,

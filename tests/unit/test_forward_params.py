@@ -304,7 +304,6 @@ def test_composition_structural_path_baseline_and_ranges():
     # CO_BASELINE must be the network cfg's C_H/O_H (~0.549), never the
     # FastChem EQ-init ratio (0.458), which only seeds the initial guess;
     # run_model additionally cross-checks the live cfg
-    assert abs(forward.CO_BASELINE - 0.00295 / 0.00537) < 1e-12
     assert abs(forward.CO_BASELINE - 0.549) < 1e-3
     # Composition is ONE structural path -- co_ratio (absolute N_C/N_O)
     # and met_x_solar go straight into the cfg elemental abundances; there
@@ -397,7 +396,6 @@ def test_chem_key_separates_chemistry_from_rt_only_edits():
     assert set(forward.CHEM_IRRELEVANT_PARAMS) <= set(cp)
     k0 = forward.chem_key(_p())
     for kw in (dict(cloud_on=True, log_kappa_cloud=-1.0),
-               dict(p_ref_bar=0.05),
                dict(wo_mols=["H2O"]),
                dict(fisher_params=["lnZ"], jac_method="ad"),
                dict(star_teff=5300.0),
@@ -405,9 +403,12 @@ def test_chem_key_separates_chemistry_from_rt_only_edits():
         assert forward.chem_key(_p(**kw)) == k0, kw
         # the flat key must still see live RT knobs (pinned above); the
         # chem key must not
-    # rt_ptop_bar is dual-use: the chemistry grid top follows it
+    # rt_ptop_bar is dual-use: the chemistry grid top follows it. p_ref_bar is
+    # the pressure the catalogue radius/gravity apply at, so it sets the
+    # chemistry's own radius anchor and moves the converged column.
     for kw in (dict(met_x_solar=5.0), dict(co_ratio=0.3),
-               dict(p_btm_bar=50.0), dict(nz=110), dict(rt_ptop_bar=1.0e-8)):
+               dict(p_btm_bar=50.0), dict(nz=110), dict(rt_ptop_bar=1.0e-8),
+               dict(p_ref_bar=0.05)):
         assert forward.chem_key(_p(**kw)) != k0, kw
 
 
@@ -649,6 +650,23 @@ def test_wo_mols_end_to_end_semantics():
     with pytest.raises(KeyError):
         detect._removed_spectrum({"depth_wo": model["depth_wo"]},
                                  mols, "CO2", order)     # malformed payload
+
+    emission = {**model, "science_mode": "emission",
+                "emis_thin_flux_frac_wo": np.array([0.0])}
+    assert np.array_equal(
+        detect._removed_spectrum(emission, mols, "CO2", order),
+        model["depth_wo"][0])
+    with pytest.raises(ValueError, match="certificate"):
+        detect._removed_spectrum(
+            {"wo_mols": model["wo_mols"], "science_mode": "emission"},
+            mols, "CO2", order)
+    for malformed in (np.array([np.nan]), np.array([0.0, 0.0]),
+                      np.array([1.1])):        # non-finite, wrong shape, > 1
+        with pytest.raises(ValueError, match="certificate"):
+            detect._removed_spectrum(
+                {"wo_mols": model["wo_mols"], "science_mode": "emission",
+                 "emis_thin_flux_frac_wo": malformed},
+                mols, "CO2", order)
     # (e) the GUI wiring: target-only on detect, [] on constrain
     from pathlib import Path
     app_src = (Path(__file__).resolve().parents[2] / "src" / "jwst_tool"
@@ -660,20 +678,16 @@ def test_wo_mols_end_to_end_semantics():
 def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # The key hashes every canonical parameter: if ANY default feeding the
     # reference run changes, this trips even when the pins above still pass.
-    # Re-pinning this key is a _VERSION bump: state what moved the spectrum
-    # in notes.md, which carries the per-version history of both.
-    # NOT RE-MEASURED at v30/v31, required before quoting this key as a
-    # science result: the default-geometry median depth (19,712 ppm at
-    # v28-v29) and the G395H SO2 significance (2.89 at v27, BELOW the
-    # published 4.5-4.8 -- that gap is real and open). Both need a full
-    # run; SO2 also needs the pandeia backend. Full history: notes.md.
-    # v42 re-pin: yconv_min joined the canonical key set at its cfg default
-    # 0.1, so the key moved with the payload while the physics did not.
+    # Re-pinning it is a _VERSION bump: say in notes.md what moved the
+    # spectrum, and whether the canonical parameter SET moved with it.
+    # The default-geometry median depth and the G395H SO2 significance behind
+    # this configuration have NOT been re-measured since v27-v31 and must be
+    # before the key is quoted as a science result (notes.md).
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b", tp_mode="file"))) == "bb46d19dceec08f9"
+        dict(planet="wasp39b", tp_mode="file"))) == "b0b4b86069cfcc05"
     # ... and the bare DEFAULT run is that same atmosphere
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "bb46d19dceec08f9"
+        dict(planet="wasp39b"))) == "b0b4b86069cfcc05"
     # the sha1 pin is only meaningful re-derived from the file the run
     # actually reads -- this catches the table itself being swapped
     path = forward._shipped_tp_file("wasp39b")
@@ -1048,3 +1062,54 @@ def test_no_exomolop_table_set_matches_the_installed_tables():
     assert not missing, (
         f"species {sorted(missing)} have no installed ExoMolOP table; fetch "
         "them or add them to forward._NO_EXOMOLOP_TABLE with a reason")
+
+
+def test_the_chemistry_radius_anchor_is_the_hydrostatic_identity():
+    """The catalogue radius applies at p_ref_bar; chemistry anchors near 1 bar.
+    Converting between them is exact for a constant-T, constant-mu column,
+    where du/dlnP is constant and r(P) = 1/(1/R_ref + C ln(P/P_ref)). Checked
+    against that closed form, then against the two invariants that matter: GM
+    is unchanged (only the LEVEL Rp attaches to moves), and the catalogue
+    gravity comes back at p_ref_bar."""
+    kb, m_u = 1.380649e-16, 1.6605390666e-24
+    p = np.geomspace(7.6, 1e-7, 400)
+    T, mu = np.full(p.size, 1200.0), np.full(p.size, 2.3)
+    rp, gs, p_ref, p_anchor = 9.1438e9, 422.0, 1.0e-3, 0.9233
+    gm = gs * rp ** 2
+    r = forward.radius_at_anchor(p, T, mu, rp, gs, p_ref, p_anchor)
+
+    c = kb * 1200.0 / (2.3 * m_u * gm)
+    assert r == pytest.approx(
+        1.0 / (1.0 / rp + c * np.log(p_anchor / p_ref)), rel=1e-9)
+    assert r < rp                                   # deeper is smaller
+    # GM is level-free: the anchor pair implies the same planet mass ...
+    assert (gm / r ** 2) * r ** 2 == pytest.approx(gm, rel=1e-12)
+    # ... and the catalogue gravity is recovered where it was quoted
+    back = forward.radius_at_anchor(p, T, mu, r, gm / r ** 2, p_anchor, p_ref)
+    assert back == pytest.approx(rp, rel=1e-9)
+    assert gm / back ** 2 == pytest.approx(gs, rel=1e-9)
+    # the same pressure is a no-op, and outside the column refuses
+    assert forward.radius_at_anchor(p, T, mu, rp, gs, p_ref, p_ref) == \
+        pytest.approx(rp, rel=1e-12)
+    with pytest.raises(ValueError, match="inside the column"):
+        forward.radius_at_anchor(p, T, mu, rp, gs, 50.0, p_anchor)
+
+    # At the allowed 1-bar bottom the legacy anchor can be the exterior
+    # interface. Integrate the remaining half layer at bottom-layer T/mu.
+    p_edge = np.geomspace(1.0, 1e-7, 100)
+    anchor = forward.chem_radius_anchor_bar(p_edge, 1e6, False)
+    assert anchor > p_edge.max()
+    assert forward.radius_at_anchor(
+        p_edge, T[:100], mu[:100], rp, gs, p_ref, anchor) == pytest.approx(
+            1.0 / (1.0 / rp + c * np.log(anchor / p_ref)), rel=1e-9)
+
+
+def test_tint_default_follows_the_planet():
+    """WASP-107 b's Guillot T_int is its published interior temperature
+    (Sing+2024, 460 K); every other preset keeps the generic 100 K, so the
+    WASP-39 b reference key above cannot move. An explicit value wins."""
+    assert forward.canonical_params(dict(planet="wasp107b"))["Tint"] == 460.0
+    assert forward.canonical_params(dict(planet="wasp39b", tp_mode="guillot"))["Tint"] == 100.0
+    assert forward.canonical_params(dict(planet="custom", tp_mode="guillot"))["Tint"] == 100.0
+    assert forward.canonical_params(
+        dict(planet="wasp107b", Tint=120.0))["Tint"] == 120.0

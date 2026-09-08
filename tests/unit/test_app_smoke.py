@@ -838,3 +838,26 @@ def test_the_verdict_renders_above_the_explainers():
                       and getattr(e, "label", "") == "Validation")
     assert verdict < validation, (
         f"the verdict renders at {verdict}, below Validation at {validation}")
+
+
+@pytest.mark.parametrize("case", ["all_unusable", "mixed", "saturated_only"])
+def test_exclusions_are_reported_once_even_without_usable_results(case):
+    from jwst_tool import instruments as ins
+
+    out, meta = _synthetic_out(saturated=case == "saturated_only")
+    if case != "saturated_only":
+        out["unusable"] = [("nirspec_prism", "no usable pixels")]
+    if case == "all_unusable":
+        out["results"] = []
+    if case == "saturated_only":
+        out["results"][0]["warnings"] = {"full_saturated": "duplicate risk note"}
+    at = _run_with_result(out, meta)
+    assert not at.exception, at.exception
+    excluded = [w.value for w in at.warning if "excluded from every ranking" in w.value]
+    assert len(excluded) == 1
+    key = "nirspec_g395h" if case == "saturated_only" else "nirspec_prism"
+    assert f"{ins.MODES[key]['label']} ({ins.config_label(key)})" in excluded[0]
+    assert ("saturated" if case == "saturated_only" else "no usable pixels") in excluded[0]
+    assert not any("duplicate risk note" in w.value for w in at.warning)
+    if case == "mixed":
+        assert any(b.label == "Binned points (CSV)" for b in at.get("download_button"))

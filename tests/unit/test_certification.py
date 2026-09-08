@@ -74,6 +74,10 @@ def test_fd_row_certifies_richardson_and_refuses_an_inconsistent_row():
 
     zero = np.zeros(3)
     assert forward.fd_row("dlnCO", zero, zero, 0.1) == (pytest.approx(zero), 0.0)
+    # ... but only when BOTH estimates vanish: J(h) == 0 with J(2h) != 0 is
+    # contradictory evidence, not an insensitive parameter.
+    with pytest.raises(RuntimeError, match="step-size consistency"):
+        forward.fd_row("dlnCO", zero, np.array([0.0, 0.006, 0.0]), 0.1)
 
     with pytest.raises(RuntimeError, match="step-size consistency") as e:
         forward.fd_row("dlnCO", j1, j1 * 1.4, 0.1)
@@ -81,6 +85,26 @@ def test_fd_row_certifies_richardson_and_refuses_an_inconsistent_row():
     assert "yconv_min" in str(e.value)
     with pytest.raises(RuntimeError, match="non-finite"):
         forward.fd_row("dlnCO", np.array([np.nan, 1.0, 1.0]), j1, 0.1)
+
+
+def test_element_gate_refuses_a_leaked_column_and_names_the_element():
+    """The convergence certificate cannot see a slow uniform leak; the element
+    gate compares each certified column's X/H with the build column's."""
+    # species H2, H2O, CO, CO2 over atoms (H, O, C); 3 layers
+    compo = np.array([[2, 0, 0], [2, 1, 0], [0, 1, 1], [0, 2, 1]], float)
+    y0 = np.array([[1.0, 4e-3, 5e-3, 1e-5]] * 3)
+    chem = SimpleNamespace(compo_array=compo, y0=y0, atom_list=("H", "O", "C"))
+    log = []
+    worst = forward.check_elements(y0 * np.array([[1.0], [2.0], [0.5]]), chem,
+                                   "baseline solve", log.append)
+    assert worst == pytest.approx(0.0) and "within 0.00%" in log[-1]
+    # 20 percent of the water gone in every layer: O/H drifts, C/H does not
+    leaked = y0.copy(); leaked[:, 1] *= 0.8
+    with pytest.raises(RuntimeError, match=r"O/H drifted 8\.\d%"):
+        forward.check_elements(leaked, chem, "baseline solve", log.append)
+    # a top-layer separation alone stays inside the layer median
+    top = y0.copy(); top[0, 1] *= 0.5
+    assert forward.check_elements(top, chem, "s", log.append) == pytest.approx(0.0)
 
 
 def test_ad_dlnco_margin_refuses_on_both_columns_and_on_a_missing_engine():
@@ -165,21 +189,66 @@ def test_emission_tau_bottom_gate_measures_the_flux_that_leaks_through():
     """The emission bottom-boundary certification: the fix for a thin bottom
     is a deeper column, never a wider tolerance, so the gate has to be a
     flux-weighted fraction and its report has to say WHERE."""
-    wl = np.array([1.5, 2.5, 4.0, 8.0, 13.0])
-    thick = np.full(5, 50.0)
-    flux = np.ones(5)
-    assert forward.thin_flux_fraction(thick, flux) == 0.0
+    # Constant-R band grid, the shape the ExoMolOP tables impose (dnu ~ nu).
+    # Flux density is per WAVENUMBER, so the energy each sample carries is
+    # F * dnu -- a flat F over 1-15 um puts 54% of the energy shortward of
+    # 2 um while only 26% of the SAMPLES sit there.
+    nu = 1.0e4 / np.geomspace(15.0, 1.0, 400)
+    wl = 1.0e4 / nu
+    flux = np.ones_like(nu)
+    assert forward.thin_flux_fraction(np.full(nu.size, 50.0), flux, nu) == 0.0
 
-    tau = np.array([0.5, 50.0, 50.0, 50.0, 50.0])   # only the 1-2 um bin leaks
-    assert forward.thin_flux_fraction(tau, flux) == pytest.approx(0.2)
-    # flux-weighted, not bin-counted
-    assert forward.thin_flux_fraction(
-        tau, np.array([9.0, 1.0, 1.0, 1.0, 1.0])) == pytest.approx(9.0 / 13.0)
-    assert forward.EMIS_THIN_FLUX_FRAC < 0.2      # that column would refuse
+    thin = wl < 2.0                                 # only the short edge leaks
+    tau = np.where(thin, 0.5, 50.0)
+    frac = forward.thin_flux_fraction(tau, flux, nu)
+    # flat F_nu: the energy share is the WAVENUMBER span, derived here
+    # independently of the implementation
+    assert frac == pytest.approx(
+        (nu.max() - 1.0e4 / 2.0) / (nu.max() - nu.min()), rel=0.01)
+    # THE regression: an unweighted sample sum reports half of that, which is
+    # what turned a 1% gate into a ~3% one
+    assert frac > 1.5 * float(thin.sum()) / thin.size
+
+    # Same fraction, now as the gate every consumed emission spectrum passes.
+    # Fp times any positive scalar must give the same verdict: the fraction is
+    # a ratio, which is what lets the callers hand it depth * F_star.
+    with pytest.raises(RuntimeError, match="FD lnZ [+]2h"):
+        forward.check_emission_thin(tau, flux, nu, "FD lnZ +2h")
+    with pytest.raises(RuntimeError, match="emission unreliable"):
+        forward.check_emission_thin(tau, 3.7e8 * flux, nu, "baseline")
+    assert forward.check_emission_thin(
+        np.full(nu.size, 50.0), flux, nu, "baseline") == 0.0
 
     report = forward._tau_bottom_breakdown(wl, tau, flux)
     assert "1.0-2.0 um (no modeled continuum)" in report
     assert "12-15 um" in report
+
+
+# one case per raise site: shape/ndim, alignment, size, tau, flux, grid,
+# monotonicity
+@pytest.mark.parametrize("tau, flux, nu", [
+    ([[1.0, 2.0]], [1.0, 1.0], [1.0, 2.0]),
+    ([1.0, 2.0, 3.0], [1.0, 1.0], [1.0, 2.0]),
+    ([1.0], [1.0], [1.0]),
+    ([np.nan, 2.0], [1.0, 1.0], [1.0, 2.0]),
+    ([-1.0, 2.0], [1.0, 1.0], [1.0, 2.0]),
+    ([1.0, 2.0], [np.inf, 1.0], [1.0, 2.0]),
+    ([1.0, 2.0], [1.0, 1.0], [0.0, 2.0]),
+    ([1.0, 2.0, 3.0], [1.0, 1.0, 1.0], [1.0, 3.0, 2.0]),
+])
+def test_emission_tau_bottom_gate_rejects_malformed_evidence(tau, flux, nu):
+    """Malformed arrays must not be promoted into an emission certificate."""
+    with pytest.raises((ValueError, RuntimeError)):
+        forward.thin_flux_fraction(tau, flux, nu)
+
+
+def test_emission_tau_bottom_gate_accepts_either_grid_direction():
+    tau = np.array([1.0, 5.0, 5.0])
+    flux = np.array([2.0, 3.0, 4.0])
+    nu = np.array([1.0, 2.0, 4.0])
+    increasing = forward.thin_flux_fraction(tau, flux, nu)
+    decreasing = forward.thin_flux_fraction(tau[::-1], flux[::-1], nu[::-1])
+    assert decreasing == pytest.approx(increasing)
 
 
 def test_an_abundant_species_with_no_k_table_is_named_not_swallowed():

@@ -43,3 +43,31 @@ def test_every_committed_figure_embeds_its_committed_generator(png):
     assert script.exists(), f"{png.name}: generator {meta['Source']} is not committed"
     assert _code(meta["Generator-Source"]) == _code(script.read_text()), \
         f"{png.name} was not made by the committed {script.name}; regenerate it"
+
+
+def test_six_atmosphere_references_are_paired_and_stale_input_is_refused(tmp_path, monkeypatch):
+    import hashlib
+    import runpy
+    import shutil
+    import numpy as np
+
+    for atmosphere in sorted((VAL / "data").glob("atmos_*.npz")):
+        reference = atmosphere.with_name(atmosphere.name.replace("atmos_", "prt_"))
+        with np.load(reference) as ref:
+            assert "source_atmosphere_sha256" in ref, reference.name
+            assert str(ref["source_atmosphere_sha256"]) == hashlib.sha256(atmosphere.read_bytes()).hexdigest()
+            assert str(ref["prt_version"]).strip()
+        shutil.copy2(atmosphere, tmp_path / atmosphere.name)
+        shutil.copy2(reference, tmp_path / reference.name)
+
+    altered = tmp_path / "atmos_wasp39b_transmission.npz"
+    with np.load(altered) as data:
+        values = dict(data)
+    values["T_art"] = values["T_art"] + 1.0
+    np.savez_compressed(altered, **values)
+    monkeypatch.setattr(figstyle, "DATA", tmp_path)
+    def no_figure(*args, **kwargs):
+        pytest.fail("a mismatched comparison must fail before saving a figure")
+    monkeypatch.setattr(figstyle, "save", no_figure)
+    with pytest.raises(ValueError, match="(?i)(mismatch|stale)"):
+        runpy.run_path(str(VAL / "scripts" / "fig_rt_verification_six_atmospheres.py"), run_name="__main__")

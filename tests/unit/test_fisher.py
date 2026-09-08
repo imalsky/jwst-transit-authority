@@ -98,7 +98,7 @@ def test_wide_co_width_is_reported_not_hidden():
     where the Gaussian is symmetric and nothing crosses a boundary. "inf" is
     reserved for a genuine null direction (test_degenerate_directions_...).
     Sigma scales linearly with the per-bin noise, so one design reaches any
-    target width. 920 is the real extreme from notes.md (niriss_soss_ord2),
+    target width. 920 is the real extreme from notes.md (a SOSS order-2 run),
     the width at which the UNBOUNDED curve grid overflows float64."""
     rng = np.random.default_rng(7)
     nb = 40

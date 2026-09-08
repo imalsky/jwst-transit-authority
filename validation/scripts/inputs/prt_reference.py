@@ -8,6 +8,9 @@ vulcan_forward.paths.exomolop_dir() resolves):
 
     ~/venvs/prt/bin/python validation/scripts/inputs/prt_reference.py validation/data/atmos_*.npz
 """
+import hashlib
+from importlib.metadata import version
+from io import BytesIO
 import json
 import os
 import sys
@@ -21,7 +24,8 @@ PROV = json.load(open(Path(os.environ["VULCAN_FORWARD_DATA"]) / "exomolop" / "pr
 NAME = {m: f"{m}__{v['dataset']}" for m, v in PROV.items()}
 
 for f in sys.argv[1:]:
-    z = np.load(f)
+    source = Path(f).read_bytes()
+    z = np.load(BytesIO(source))
     mode = "emission" if "flux_cmp" in z else "transmission"
     mols = [str(m) for m in z["mols"]]
     p, T, mmw = z["p_art"], z["T_art"], z["mmw"]
@@ -46,5 +50,7 @@ for f in sys.argv[1:]:
         nu = 1.0 / wl[o]                        # cm^-1; pRT flux is per cm of wavelength
         res = dict(wl_um=wl_um[o], flux_per_cm1=fl[o] / nu ** 2)
     out = Path(f).with_name(Path(f).name.replace("atmos_", "prt_"))
+    res.update(source_atmosphere_sha256=hashlib.sha256(source).hexdigest(),
+               prt_version=version("petitRADTRANS"))
     np.savez_compressed(out, **res)
     print("wrote", out)

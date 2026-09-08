@@ -19,9 +19,9 @@ questions in one graphic:
   renders as an EMPTY panel, never a fake finite curve and never a caption
   on the axes: no figure this module draws carries prose.
 
-House style: the vendored science.mplstyle plus the serif/STIX overrides
-this module owns (_STYLE_OVERRIDES, which the GUI applies globally), so a
-standalone render matches the in-app figures.
+House style: science.mplstyle (byte-identical to validation/science.mplstyle)
+plus the white-face overrides this module owns (_STYLE_OVERRIDES, which the
+GUI applies globally), so a standalone render matches the in-app figures.
 """
 from __future__ import annotations
 
@@ -37,16 +37,14 @@ from jwst_tool import fisher, plotting
 
 _STYLE_FILE = Path(__file__).resolve().parent / "science.mplstyle"
 
-# ONE typography scale across the three square panels: the vendored style is
+# ONE typography scale across the three square panels: the house style is
 # sized for a single full-width axes, so a third-width panel needs its own.
 _AX_LBL, _TICK, _LEG = 9.0, 8.0, 7.0
 
-# The overrides on top of the vendored style, applied here per figure and
+# The overrides on top of the house style, applied here per figure and
 # globally by the GUI (app.py imports this dict), so a headless render and an
 # in-app figure match.
 _STYLE_OVERRIDES = {
-    "font.family": "serif",
-    "mathtext.fontset": "stix",
     "figure.facecolor": "white", "axes.facecolor": "white",
     "savefig.facecolor": "white",
 }
@@ -344,10 +342,9 @@ def _plot_spectrum(ax, spec: dict) -> None:
         ax.plot(spec["wl_um"], spec["depth2_ppm"], color="#888888",
                 lw=1.0, ls="--", zorder=3.5, label=spec["depth2_label"])
     for p in spec["points"]:
-        # markeredgecolor MUST be set: science.mplstyle leaves it "auto" with
-        # markeredgewidth 1.0, and on a 3.6 pt marker a 1 pt black edge
-        # swallows the fill -- every mode's marker renders black and the
-        # per-mode color is invisible. That color is the series identity
+        # markeredgecolor is set explicitly: with the rc default a 1 pt dark
+        # edge on a 3.6 pt marker swallows the fill and every mode's marker
+        # renders the same. That color is the series identity
         # shared with the forecast panels, so it has to read.
         # ms 3.0: the points crowd at R=100 over a wide band, and smaller
         # markers keep the model line readable underneath them. The per-mode
@@ -380,6 +377,9 @@ def _plot_spectrum(ax, spec: dict) -> None:
         if ticks:
             ax.set_xticks(ticks)
             ax.set_xticklabels([f"{t:g}" for t in ticks])
+        # explicit: the log minor formatter would label a lone minor tick
+        # (3 x 10^0) in the axis font; the chosen major ticks are the labels
+        ax.xaxis.set_minor_formatter(NullFormatter())
     else:
         ax.xaxis.set_major_locator(MaxNLocator(nbins=7, steps=[1, 2, 5, 10]))
     ax.set_xlim(lo, hi)

@@ -119,7 +119,6 @@ _BAND_SOURCES = {
     "nirspec_g395h": (2.87, 5.18),     # Birkmann T2 2.87-3.72, 3.82-5.18
     "nirspec_g395m": (2.87, 5.18),     # Birkmann T2 2.87-5.18 (same as G395H)
     "niriss_soss": (1.0, 2.8),         # pandeia gr700xd_1 clear 0.83-2.81
-    "niriss_soss_ord2": (1.0, 1.26),   # pandeia gr700xd_2 0.63-1.26
     "nircam_f277w": (2.45, 3.10),      # F277W HWHM 2.419-3.130
     "nircam_f322w2": (2.45, 4.00),     # F322W2 HWHM 2.425-4.012
     "nircam_f444w": (3.9, 5.00),       # F444W HWHM 3.881-5.009
@@ -222,3 +221,58 @@ def test_lsf_width_table_is_well_formed():
         assert np.allclose(ins.lsf_r(key, lam, r), r / width)
     assert np.array_equal(ins.lsf_r("nirspec_g395h", [3.0, 4.0], [2000.0, 2500.0]),
                           [2000.0, 2500.0])
+
+
+def test_saturation_advice_is_REPORTED_and_never_applied():
+    """The published per-mode ceiling is advice. Applying it silently would
+    break two things at once: the GUI would show one saturation limit while
+    two modes ran at another (and the exported config would assert the looser
+    one), and it would change MEASURED worker output for two modes in
+    parity_gate.MODE_KEYS without moving any gate key, so the committed parity
+    artifact would go on certifying code that no longer runs."""
+    from jwst_tool import noise
+    star = dict(teff=5500.0, log_g=4.5, metallicity=0.0, ks_mag=9.0)
+    advised = ins.SAT_LIMIT_ADVISED["niriss_soss"]
+    assert 0.5 < advised < 0.80, "the advice must bite below the 0.80 default"
+    assert ins.sat_limit_advisory("niriss_soss", 0.95)          # above -> say so
+    assert not ins.sat_limit_advisory("niriss_soss", advised)   # at it -> silent
+    assert not ins.sat_limit_advisory("nirspec_prism", 0.95)    # no advice published
+    # NOTHING the run depends on may move: the job the worker receives and the
+    # cache key it is filed under must be byte-identical to the pre-advice one
+    job = noise.noise_job(star, list(ins.MODES), sat_limit=0.80)
+    assert all("sat_limit" not in m for m in job["modes"])
+    assert (noise._mode_key(star, "niriss_soss", 0.80)
+            != noise._mode_key(star, "niriss_soss", advised)), \
+        "the cache key must follow the user's setting, not the advice"
+
+
+def test_ramp_advisory_distinguishes_early_saturation_from_selected_length():
+    """Only MIRI's selected ramp drives short-ramp advice; the other
+    thresholds refer to the estimated group at saturation, including BOTS."""
+    assert ins.ngroup_advisory("miri_lrs", 5, sat_ngroups=50)
+    assert not ins.ngroup_advisory("miri_lrs", 6, sat_ngroups=50)
+    for key, threshold in [("nircam_f322w2", 4), ("niriss_soss", 3),
+                           ("nirspec_prism", 3), ("miri_lrs", 3)]:
+        assert not ins.ngroup_advisory(key, 6, sat_ngroups=threshold)
+        assert "saturat" in ins.ngroup_advisory(key, 6, sat_ngroups=threshold - 0.1)
+        if key != "miri_lrs":
+            assert not ins.ngroup_advisory(key, 1, sat_ngroups=50)
+            assert not ins.ngroup_advisory(key, 1)
+    assert "calibrat" in ins.ngroup_advisory("miri_lrs", 5)
+    assert "SUBSTRIP256" in ins.config_label("niriss_soss")
+    assert all(ins.config_label(k) for k in ins.MODES), \
+        "an unusable mode must always be reportable with its configuration"
+
+
+def test_nircam_data_excess_reproduces_pandexo():
+    """The estimate is PandExo's (`estimate_nircam_data_excess`), pinned to the
+    parity artifact's NIRCam timing rows: subgrism64/rapid, the W39b-like
+    visit of 2 x T14. The only term dropped is PandExo's half-frame overhead
+    allocation, 1.5e-4 GB here."""
+    f = ins.nircam_data_excess_gb
+    assert f("nircam_f444w", 100, 5.618929633333334) == pytest.approx(
+        27.820665751950003, abs=1e-3)
+    assert f("nircam_f322w2", 67, 5.610225155555556) == pytest.approx(
+        27.541948063172, abs=1e-3)
+    assert f("nircam_f322w2", 100, 0.3) == 0.0            # short visit: clipped
+    assert f("nirspec_prism", 100, 5.6) == 0.0            # not a NIRCam mode

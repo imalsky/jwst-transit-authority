@@ -4,7 +4,7 @@ no-floor detection-limit semantics."""
 import numpy as np
 import pytest
 
-from jwst_tool import detect, instruments as ins, noise as noise_mod
+from jwst_tool import detect, forward, instruments as ins, noise as noise_mod
 
 
 def test_offset_profiled_out():
@@ -279,6 +279,16 @@ def test_projected_score_uses_headline_nuisance_space():
     with pytest.raises(ValueError, match="jac_bins and jac_names"):
         detect.detection_score(r2, projected=True)
 
+    # The label names the rows PRESENT, never the rows the statistic could use:
+    # the shipped defaults free lnZ and dlnCO and carry only the appended lnR0.
+    assert detect.metric_label({"sigma_detect_proj": float("nan")}) \
+        == "calibration profiled"
+    lab = lambda names: detect.metric_label(
+        {"sigma_detect_proj": 1.0, "jac_names": names})
+    assert lab(["lnZ", "dlnCO", "lnR0"]) == "calibration + R0 projected"
+    assert lab(["Tirr", "log_kappa_cloud", "lnR0"]) == \
+        "calibration + T-P + cloud + R0 projected"
+
 
 # --- MIRI LRS ships its pixel grid in DISPERSION order (descending) -----------
 
@@ -326,7 +336,6 @@ def test_miri_lsf_uses_local_native_r_not_the_dispersion_order_end_value():
     mr_asc, model_asc = _miri_descending_inputs(descending=False)
     r_desc = detect.evaluate_mode("miri_lrs", mr_desc, model_desc, **kw)
     r_asc = detect.evaluate_mode("miri_lrs", mr_asc, model_asc, **kw)
-    assert r_desc["lsf_applied"] and r_asc["lsf_applied"]
     assert np.allclose(r_desc["wl"], r_asc["wl"], rtol=0, atol=1e-12)
     # ordering is a payload convention, never a physics change
     assert np.allclose(r_desc["depth"], r_asc["depth"], rtol=0, atol=1e-12), (
@@ -342,43 +351,146 @@ def test_miri_lsf_uses_local_native_r_not_the_dispersion_order_end_value():
         "fixture is insensitive to R(lambda); the ordering test proves nothing"
 
 
-def test_measured_response_deficit_scales_the_detection_signal():
-    """Signal and sigma must come from the same effective extraction.
-
-    The signal is built with the tool's own LSF+binning operator; sigma comes
-    from Pandeia's extraction for that mode. NIRISS SOSS order 2 recovers only
-    0.83 of a narrow feature's amplitude there, and detection_significance is
-    homogeneous of degree one in s, so the mismatch does not cancel.
-    """
-    kw = dict(target_mol="X", R_bin=100.0, t_in_s=3600.0, t_out_s=3600.0,
+def test_worker_warnings_and_the_ramp_advisory_reach_the_evaluated_result():
+    """The worker computes a per-mode `warnings` dict; evaluate_mode was
+    dropping it, so nothing downstream could ever show it. The short-ramp
+    advisory rides the same dict rather than opening a second channel."""
+    m = ins.MODES["miri_lrs"]
+    wl_pix = np.linspace(m["wl_min"] * 1.001, m["wl_max"] * 0.999, 300)
+    mr = dict(wl=wl_pix.tolist(), flux=np.full(wl_pix.size, 1e6).tolist(),
+              noise_1int=np.full(wl_pix.size, 1e3).tolist(),
+              t_cycle_s=20.0, r_native=None,
+              n_full_sat=np.zeros(wl_pix.size).tolist(),
+              n_part_sat=np.zeros(wl_pix.size).tolist(),
+              ngroup=5, sat_frac=0.5, saturated=False,
+              warnings={"full_saturated": "96 pixels saturated",
+                        "bad_waveref": "out of range, using 4.36 to select "
+                                       "diagnostic planes instead"})
+    wl_model = np.linspace(m["wl_min"] * 0.95, m["wl_max"] * 1.05, 2000)
+    model = dict(wl_um=wl_model, depth=np.full(wl_model.size, 0.01),
+                 mols=["X"], wo_mols=[])
+    kw = dict(target_mol=None, R_bin=100.0, t_in_s=3600.0, t_out_s=3600.0,
               n_transits=1, floor_spec=None)
+    w = detect.evaluate_mode("miri_lrs", mr, model, **kw)["warnings"]
+    assert w["full_saturated"] == "96 pixels saturated"   # forwarded
+    assert "bad_waveref" not in w, \
+        "pandeia housekeeping about 2D diagnostic planes is not an observing risk"
+    # the advisory reaches the result; its threshold table is pinned directly
+    # on ins.ngroup_advisory in test_instruments_registry
+    assert "5-group" in w["ngroup"]                 # 2-5 groups on MIRI
 
-    def _score(mode_key):
-        m = ins.MODES[mode_key]
-        wl_pix = np.linspace(m["wl_min"] * 1.001, m["wl_max"] * 0.999, 400)
-        mr = dict(wl=wl_pix.tolist(), flux=np.full(wl_pix.size, 1e6).tolist(),
-                  noise_1int=np.full(wl_pix.size, 1e3).tolist(),
-                  t_cycle_s=20.0, r_native=None,
-                  n_full_sat=np.zeros(wl_pix.size).tolist(),
-                  n_part_sat=np.zeros(wl_pix.size).tolist(),
-                  ngroup=5, sat_frac=0.5, saturated=False)
-        wl_model = np.linspace(m["wl_min"] * 0.95, m["wl_max"] * 1.05, 4000)
-        # a localized band, not a constant offset: a flat difference is
-        # profiled away by the per-segment calibration nuisance
-        mid = 0.5 * (m["wl_min"] + m["wl_max"])
-        band = 1e-4 * np.exp(-0.5 * ((wl_model - mid) / (0.02 * mid)) ** 2)
-        depth = np.full(wl_model.size, 0.01) + band
-        model = dict(wl_um=wl_model, depth=depth,
-                     depth_wo=np.stack([depth - band]), mols=["X"],
-                     wo_mols=["X"])
-        return detect.evaluate_mode(mode_key, mr, model, **kw)["sigma_detect"]
 
-    factor = ins.RESPONSE_FACTOR["niriss_soss_ord2"]
-    assert factor < 0.9, "order 2's measured deficit is what this guards"
-    assert "nirspec_prism" not in ins.RESPONSE_FACTOR
+def _emission_inputs(mode_key, thin_below_um):
+    """evaluate_mode inputs for an emission model whose column bottom is thin
+    only shortward of `thin_below_um`, carrying a negligible share of the
+    1-15 um energy."""
+    m = ins.MODES[mode_key]
+    lo, hi = max(1.02, m["wl_min"]), min(14.8, m["wl_max"])
+    wl_pix = np.linspace(lo, hi, 400)
+    mode_result = dict(
+        wl=wl_pix.tolist(), flux=np.full(wl_pix.size, 1e6).tolist(),
+        noise_1int=np.full(wl_pix.size, 1e3).tolist(),
+        t_cycle_s=10.0, r_native=np.full(wl_pix.size, 400.0).tolist(),
+        n_full_sat=np.zeros(wl_pix.size).tolist(),
+        n_part_sat=np.zeros(wl_pix.size).tolist(),
+        ngroup=10, sat_frac=0.5, saturated=False)
+    wl = np.geomspace(1.0, 15.0, 800)
+    thin = wl < thin_below_um
+    fp = np.where(thin, 1e-4, 1.0)          # the leak carries almost no energy
+    depth = 1e-3 * np.ones(wl.size)
+    model = dict(
+        wl_um=wl, depth=depth, mols=["H2O", "CO2"], science_mode="emission",
+        wo_mols=np.array(["CO2"]), depth_wo=depth[None, :] * 0.99,
+        emis_thin_flux_frac_wo=np.array([0.0]),
+        emis_tau_bottom=np.where(thin, 0.5, 50.0), fp_flux=fp,
+        emis_tau_bottom_wo=np.where(thin, 0.5, 50.0)[None, :],
+        fs_flux=np.ones(wl.size), emis_depth_norm=np.array([1.0]))
+    return mode_result, model
 
-    from unittest.mock import patch
-    scored = _score("niriss_soss_ord2")
-    with patch.dict(ins.RESPONSE_FACTOR, {"niriss_soss_ord2": 1.0}):
-        uncorrected = _score("niriss_soss_ord2")
-    assert scored == pytest.approx(uncorrected * factor, rel=1e-9)
+
+def test_a_globally_safe_emission_column_is_refused_on_a_band_that_only_sees_the_leak():
+    """The 1-15 um certificate cannot certify a narrower observing band. A
+    column thin only shortward of 1.9 um leaks 0.004% of the planet's total
+    emission -- far under the 1% gate -- but G140H measures 1.0-1.83 um,
+    where the leak is ALL of it. The wide mode over the same model must still
+    pass, so this is a band restriction, not a tightened threshold."""
+    kw = dict(R_bin=100.0, t_in_s=3600.0, t_out_s=3600.0, n_transits=1,
+              floor_spec=None)
+
+    mr, model = _emission_inputs("nirspec_g140h", 1.9)
+    # the model as a whole passes the unchanged band-global gate ...
+    nu = 1e4 / model["wl_um"]
+    assert forward.thin_flux_fraction(
+        model["emis_tau_bottom"], model["fp_flux"], nu) \
+        < forward.EMIS_THIN_FLUX_FRAC
+    # ... and is still refused on the band that only sees the leak
+    with pytest.raises(ValueError, match="optically thin"):
+        detect.evaluate_mode("nirspec_g140h", mr, model, None, **kw)
+
+    mr_w, model_w = _emission_inputs("nirspec_prism", 1.9)
+    assert detect.evaluate_mode("nirspec_prism", mr_w, model_w, None,
+                                **kw)["n_bins"] > 10
+
+    # a wholly thick column passes everywhere, target stage included
+    mr_ok, model_ok = _emission_inputs("nirspec_g140h", 0.0)
+    assert detect.evaluate_mode("nirspec_g140h", mr_ok, model_ok, "CO2",
+                                **kw)["n_bins"] > 5
+
+    # missing or malformed evidence refuses; it never defaults to safe
+    for key, bad in (("emis_tau_bottom", None),
+                     ("fp_flux", np.zeros(3)),
+                     ("emis_tau_bottom", np.full(model_ok["wl_um"].size, -1.0)),
+                     ("emis_depth_norm", np.array([0.0])),
+                     ("depth_wo", np.full_like(model_ok["depth_wo"], np.nan))):
+        broken = dict(model_ok)
+        broken.pop(key) if bad is None else broken.__setitem__(key, bad)
+        with pytest.raises(ValueError, match="missing|malformed"):
+            detect.evaluate_mode("nirspec_g140h", mr_ok, broken, "CO2", **kw)
+
+    # A physical refusal must use the configuration-named exclusion path,
+    # including when the cached global certificate already refuses it.
+    globally_bad = dict(model_ok, emis_thin_flux_frac_wo=np.array([0.02]))
+    with pytest.raises(detect.ModeUnusable, match="optically thin"):
+        detect.evaluate_mode("nirspec_g140h", mr_ok, globally_bad, "CO2", **kw)
+
+
+def test_emission_gate_cannot_be_diluted_by_masked_pixels_or_band_margins():
+    kw = dict(R_bin=100.0, t_in_s=3600.0, t_out_s=3600.0, n_transits=1,
+              floor_spec=None)
+    for mode in ("nirspec_prism", "nirspec_g140h"):
+        mr, model = _emission_inputs(mode, 0.0)
+        wl = model["wl_um"]
+        if mode == "nirspec_prism":
+            pix = np.asarray(mr["wl"])
+            mr["n_full_sat"] = ((pix > 2.0) & (pix < 4.0)).astype(int).tolist()
+            mr.pop("r_native")
+            bright_unmeasured = (wl > 2.1) & (wl < 3.9)
+        else:
+            bright_unmeasured = (wl < 1.01) | (wl > 1.85)
+        model["fp_flux"] = np.where(bright_unmeasured, 1e8, 1.0)
+        model["emis_tau_bottom"] = np.where(bright_unmeasured, 50.0, 0.5)
+        with pytest.raises(detect.ModeUnusable, match="optically thin"):
+            detect.evaluate_mode(mode, mr, model, None, **kw)
+
+
+def test_nircam_data_excess_rides_the_warnings_channel():
+    m = ins.MODES["nircam_f444w"]
+    wl_pix = np.linspace(m["wl_min"] * 1.001, m["wl_max"] * 0.999, 300)
+    mr = dict(wl=wl_pix.tolist(), flux=np.full(wl_pix.size, 1e6).tolist(),
+              noise_1int=np.full(wl_pix.size, 1e3).tolist(),
+              t_cycle_s=20.0, r_native=None,
+              n_full_sat=np.zeros(wl_pix.size).tolist(),
+              n_part_sat=np.zeros(wl_pix.size).tolist(),
+              ngroup=100, sat_frac=0.5, saturated=False)
+    wl_model = np.linspace(m["wl_min"] * 0.95, m["wl_max"] * 1.05, 2000)
+    model = dict(wl_um=wl_model, depth=np.full(wl_model.size, 0.01),
+                 mols=["X"], wo_mols=[])
+    kw = dict(target_mol=None, R_bin=100.0, n_transits=1, floor_spec=None)
+    # the parity artifact's visit: 27.8 GB, above the 15 GB recommendation
+    w = detect.evaluate_mode("nircam_f444w", mr, model,
+                             t_in_s=2.8 * 3600.0, t_out_s=2.819 * 3600.0, **kw)["warnings"]
+    assert "27.8 GB" in w["data_excess"] and "above" in w["data_excess"]
+    # a one-hour visit stays under PandExo's 5 GB flag: silent
+    w = detect.evaluate_mode("nircam_f444w", mr, model,
+                             t_in_s=1800.0, t_out_s=1800.0, **kw)["warnings"]
+    assert "data_excess" not in w

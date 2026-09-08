@@ -85,3 +85,28 @@ def test_jacobian_row_matches_finite_difference():
     scale = float(np.dot(row, fd) / np.dot(fd, fd))
     assert corr > 0.99
     assert scale == pytest.approx(1.0, abs=0.15)
+
+
+@pytest.mark.skipif(os.environ.get("JWST_TOOL_RUN_SLOW") != "1",
+                    reason="slow: FD (4 solves) + AD emission runs "
+                           "(~10 min, JAX required); set JWST_TOOL_RUN_SLOW=1")
+def test_emission_ad_row_matches_the_certified_fd_row():
+    """Default WASP-39 b eclipse case, lnZ row: the warm-jvp AD row must agree
+    with the certified central-difference row to the transmission gate. Every
+    stencil point and the AD primal pass the thin-bottom certificate, so this
+    is the emission Fisher path end to end."""
+    from jwst_tool import forward
+
+    rows = {}
+    for method in ("fd", "ad"):
+        p = dict(planet="wasp39b", science_mode="emission",
+                 fisher_params=["lnZ"], jac_method=method)
+        if forward.load_result(p) is None:
+            forward.run_model(p, log=lambda _s: None)
+        m = forward.load_result(p)
+        names = [str(x) for x in m["jac_names"]]
+        rows[method] = np.asarray(m["jac"][names.index("lnZ")])
+    corr = np.corrcoef(rows["ad"], rows["fd"])[0, 1]
+    scale = float(np.dot(rows["ad"], rows["fd"]) / np.dot(rows["fd"], rows["fd"]))
+    assert corr > 0.99
+    assert scale == pytest.approx(1.0, abs=0.15)

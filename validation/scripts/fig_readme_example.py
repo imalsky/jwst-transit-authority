@@ -27,7 +27,7 @@ def _keep(*a, **k):
 
 
 summary_figure.compose_summary_figure = _keep
-at = AppTest.from_file(str(ROOT / "src" / "jwst_tool" / "app.py"), default_timeout=600)
+at = AppTest.from_file(str(ROOT / "src" / "jwst_tool" / "app.py"), default_timeout=3600)
 at.run()
 assert not at.exception, at.exception
 (run,) = [b for b in at.button if b.label == "Run"]

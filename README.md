@@ -99,14 +99,22 @@ the current JWST ETC and APT.
 - The default covariance treats spectral bins as independent. It does not model
   time-correlated systematics, stellar heterogeneity, or visit-long trends.
 - A noise floor can be added, but one fixed floor cannot represent every
-  target, mode, and reduction method.
+  target, mode, and reduction method. Where the floor dominates, the score
+  also depends on the analysis resolving power: every final bin carries its
+  own independent floor, so a resolved band scores as the square root of the
+  bin count. On identical data with a 15 ppm floor, the same feature reads
+  13 sigma at R = 30 and 49 sigma at R = 400. Compare modes at one R.
 - The comparison curve is the same model with the target species removed from
   the OPACITY. The chemistry is not re-solved, so the T-P profile, mean
   molecular weight, gravity, continuum, and every other species are unchanged.
-- Eclipse depths use a single planet radius (the emission photosphere near
-  0.1 bar), not the wavelength-dependent tau = 2/3 radius. Fortney et al.
-  (2019) put the resulting eclipse-depth error at 10-25% for a hot Jupiter,
-  wavelength-dependent and largest in the deepest bands.
+- Eclipse depths use the wavelength-dependent tau = 2/3 photospheric radius
+  (Fortney et al. 2019). Emission is absorption-only: no scattering.
+- The emission validity check certifies the share of the emitted energy that
+  comes from wavelengths where the model column is transparent at its bottom,
+  for the full spectrum, each removed-molecule spectrum, and every spectrum a
+  Fisher row is built from, over the whole 1-15 um band and again over the
+  wavelengths each selected mode measures. A mode that fails is excluded and
+  named.
 - The depth uncertainty counts all of T14 as full depth (a box transit). For a
   typical hot Jupiter that is optimistic by roughly 5% in sigma, partly offset
   by the conservatism of the symmetric in/out variance term.

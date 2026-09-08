@@ -74,10 +74,8 @@ saturation comes from the report's 1d curves so the host can exclude or
 flag per pixel.
 
 Both the search and the "saturated" verdict read the SCENE-WIDE
-fraction_saturation, matching PandExo. On a multi-order mode (SOSS) that is
-the brightest order, so an order-2 selection inherits order 1's saturation
-even though its own extraction may be clean; the registry entry
-instruments.MODES["niriss_soss_ord2"] records why it is not overridden here.
+fraction_saturation, matching PandExo (on SOSS that is the whole detector
+image, every order).
 
 The seed formulas assume saturation_time grows linearly with ngroup. That is
 EXACT for every shipped mode: pandeia's saturation_time is
@@ -142,9 +140,9 @@ def _make_calc(build_default_calc, m, star, star_spectrum=None):
 
 def _native_r(refdata, m, wl):
     """Native resolving power R(lambda) interpolated onto the extracted grid,
-    from the mode's refdata dispersion file. Returns (list|None, source str).
-    Missing file -> (None, note): the host applies no LSF blur, safe only
-    for high-R modes.
+    from the mode's refdata dispersion file. Returns (list, source file).
+    A missing or malformed file RAISES: the host would otherwise apply no
+    LSF blur without saying so.
     """
     disp = (m.get("config", {}).get("instrument", {}) or {}).get("disperser")
     if m["instrument"] == "miri" and m["mode"] == "lrsslitless":
@@ -153,7 +151,8 @@ def _native_r(refdata, m, wl):
         order = int((m.get("strategy") or {}).get("order", 1))
         disp = f"gr700xd-ord{order}"
     if not disp:
-        return None, "no disperser token for this mode"
+        raise RuntimeError("native resolving power: no disperser token for "
+                           f"{m['instrument']}/{m['mode']}")
     pat = os.path.join(refdata, "jwst", m["instrument"], "dispersion",
                        f"*{disp}*disp*.fits")
     if m["instrument"] == "nircam" and m["mode"] == "lw_tsgrism":
@@ -166,12 +165,13 @@ def _native_r(refdata, m, wl):
                            "jwst_nircam_disp_*.fits")
     hits = sorted(glob.glob(pat))
     if not hits:
-        return None, f"no dispersion file matching {pat}"
+        raise RuntimeError(f"native resolving power: no dispersion file matching {pat}")
     from astropy.io import fits
     with fits.open(hits[0]) as h:
         cols = {c.upper(): c for c in h[1].columns.names}
         if "R" not in cols or "WAVELENGTH" not in cols:
-            return None, f"{os.path.basename(hits[0])} lacks WAVELENGTH/R columns"
+            raise RuntimeError(f"native resolving power: {os.path.basename(hits[0])} "
+                               "lacks WAVELENGTH/R columns")
         w = np.asarray(h[1].data[cols["WAVELENGTH"]], float)
         r = np.asarray(h[1].data[cols["R"]], float)
     order_ix = np.argsort(w)

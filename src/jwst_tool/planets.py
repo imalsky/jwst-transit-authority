@@ -50,7 +50,7 @@ SFLUX_CHOICES = {
     "sflux-W39b_Tsai2023.txt": "WASP-39 (G8V, Tsai 2023)",
     "Gueymard_solar.txt": "Sun (G2V, Gueymard 2003)",
     "sflux-HD189_Moses11.txt": "HD 189733 (K1.5V, Moses 2011)",
-    "sflux-epseri.txt": "eps Eridani (K2V, MUSCLES)",
+    "sflux-epseri.txt": "eps Eridani (K2V, StarCAT)",
     "sflux-GJ436.txt": "GJ 436 (M2.5V, MUSCLES)",
     "sflux-GJ1214.txt": "GJ 1214 (M4.5V, MUSCLES)",
 }
@@ -69,12 +69,16 @@ SFLUX_SOURCES = {
     "sflux-HD189_Moses11.txt": (
         "Moses et al. 2011", "10.1088/0004-637X/737/1/15",
         "https://doi.org/10.1088/0004-637X/737/1/15"),
+    # upstream VULCAN built this file from the HST/STIS StarCAT UVSum
+    # spectrum of HD 22049 (atm/make_spectra_in_nm.py), not from MUSCLES
     "sflux-epseri.txt": (
+        "StarCAT (Ayres 2010)", "10.1088/0067-0049/187/1/149",
+        "https://archive.stsci.edu/prepds/starcat/"),
+    "sflux-GJ436.txt": (
         "MUSCLES Treasury Survey", "10.3847/0004-637X/820/2/89",
         "https://archive.stsci.edu/prepds/muscles/"),
 }
-SFLUX_SOURCES["sflux-GJ436.txt"] = SFLUX_SOURCES["sflux-epseri.txt"]
-SFLUX_SOURCES["sflux-GJ1214.txt"] = SFLUX_SOURCES["sflux-epseri.txt"]
+SFLUX_SOURCES["sflux-GJ1214.txt"] = SFLUX_SOURCES["sflux-GJ436.txt"]
 
 # Host Teff per shipped UV spectrum, powering a SUGGESTION caption on custom
 # planets only ("nearest-Teff shipped template: ..."). It is never applied:
@@ -169,10 +173,26 @@ PLANETS = {
         sflux="sflux-epseri.txt",
         tp_table=None, tp_table_default=False,
         tp_table_note="vulcan_jax bundles no measured T-P/Kzz table for this planet.",
+        # Guillot T_int: Sing et al. 2024 (Nature 630, 831) retrieve
+        # T_int = 460 +/- 40 K from the CH4 depletion; Welbanks et al. 2024
+        # (Nature 630, 836) give > 345 K. The generic 100 K put the quench
+        # level, and with it this planet's headline CH4 result, in the wrong
+        # place.
+        tint_k=460.0,
         note="Warm Neptune-mass super-puff: very low gravity means huge "
              "spectral features (K6V host; eps Eri UV proxy).",
     ),
 }
+
+# Guillot T_int for a planet without a published interior temperature.
+TINT_DEFAULT_K = 100.0
+
+
+def default_tint(planet: dict) -> float:
+    """Guillot T_int default: the planet's published value when the registry
+    carries one, else TINT_DEFAULT_K. ONE definition for canonical_params and
+    the sidebar widget, like default_tirr."""
+    return float(planet.get("tint_k", TINT_DEFAULT_K))
 
 # The "custom" planet starts from these (WASP-39b) values; everything editable.
 CUSTOM_DEFAULTS = PLANETS["wasp39b"]

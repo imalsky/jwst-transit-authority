@@ -56,9 +56,9 @@ from jwst_tool import instruments as ins
 from jwst_tool import planets
 from jwst_tool import runlimit
 
-# House figure style: the vendored science.mplstyle plus summary_figure's
-# overrides (serif + STIX math; white faces so a downloaded figure stays white
-# on any Streamlit theme). ONE definition of the overrides, applied globally
+# House figure style: science.mplstyle (byte-identical to the validation
+# copy) plus summary_figure's white-face overrides, so a downloaded figure
+# stays white on any Streamlit theme. ONE definition of the overrides, applied globally
 # here and per-figure there, so an in-app figure and a headless render match.
 # Data colors/markers stay the fixed per-mode palette in
 # instruments.MODE_COLOR / MODE_MARKER (no series relies on color alone).
@@ -906,8 +906,10 @@ with st.sidebar:
                 st.session_state[_k("tirr")] = tirr0
             tp_kwargs["Tirr"] = st.number_input(
                 "T_irr (K)", 800.0, 2500.0, step=20.0, key=_k("tirr"))
+            if _k("tint") not in st.session_state:
+                st.session_state[_k("tint")] = planets.default_tint(pdef)
             tp_kwargs["Tint"] = st.number_input(
-                "T_int (K)", 50.0, 500.0, 100.0, 25.0, key=_k("tint"))
+                "T_int (K)", 50.0, 500.0, step=25.0, key=_k("tint"))
             # default 0.01 cm^2/g, Guillot (2010)'s canonical thermal opacity
             tp_kwargs["log_kappa"] = st.number_input(
                 "log10 kappa_IR (cm^2/g)", -4.0, 0.0, -2.0, 0.1, key=_k("lk"))
@@ -1370,8 +1372,12 @@ with st.sidebar:
         if _k("tbase") not in st.session_state:
             st.session_state[_k("tbase")] = _tb_auto
         t_base = st.number_input(
-            f"Out-of-{_evw} baseline (hours)", 0.5, 10.0,
-            step=0.1, key=_k("tbase"))
+            # max 20 h, not 10: t14 itself spans 0.5-10 h, so a 2 x T14
+            # baseline is unreachable above T14 = 5 h and Streamlit would
+            # clamp the seeded value silently.
+            f"Out-of-{_evw} baseline (hours)", 0.5, 20.0,
+            step=0.1, key=_k("tbase"),
+            help="Total out-of-event time per visit. Default T14 (PandExo).")
         sat_limit = st.number_input(
             "Saturation limit (fraction of Pandeia's saturation level)",
             0.5, 0.95, 0.80, 0.05, key=K("sat"))
@@ -1825,6 +1831,10 @@ def _compute_locked():
                 results.append(detect.evaluate_mode(
                     k, etc[k], model, target_mol, r_bin, t_in_s, t_out_s,
                     n_transits, floors[k], noise_inflation=infl[k]))
+            except detect.ModeUnusable as e:
+                # not a failed calculation: this mode's data cannot support
+                # the measurement, so it is excluded WITH its configuration
+                unusable.append((k, str(e)))
             except Exception as e:
                 # one bad mode must not kill the whole run -- report it with
                 # its label + the actual reason, keep evaluating the rest
@@ -1853,6 +1863,9 @@ if run_clicked:
             # the SELECTED floor, not the registry suggestion: a result must
             # carry the number that produced it
             floor_selected=_obs_meta["floors"],
+            # same reason: the limit the ramp search actually ran at, so the
+            # per-mode saturation advisory is measured against THIS run
+            sat_limit=_obs_meta["sat_limit"],
             # the COMPLETE non-canonical input set, for the staleness guard
             run_sig=_run_sig)
 
@@ -1922,12 +1935,47 @@ for k, err in out["failed"]:
     st.error(f"{ins.MODES[k]['label']}: the calculation failed. {first}")
     with st.expander(f"{ins.MODES[k]['label']}: technical details"):
         st.code(str(err)[-2500:])
+# A mode with no usable data is dropped from every ranking, combination and
+# forecast below, so SAY which and say which CONFIGURATION failed: only the
+# pinned one was evaluated (instruments.py SCOPE note).
+_excluded = ([(r["mode_key"], "saturated") for r in results if r["saturated"]]
+             + [(k, str(why)) for k, why in out["unusable"]])
+if _excluded:
+    st.warning(
+        "No usable data, excluded from every ranking and forecast: "
+        + "; ".join(f"{ins.MODES[k]['label']} ({ins.config_label(k)}) "
+                    f"\u2014 {why}" for k, why in _excluded)
+        + ". Alternative subarrays and readout patterns are not evaluated.")
+
 if not results:
     st.stop()
 
 fisher_names = ([str(x) for x in model["jac_names"][:-1]]
                 if "jac_names" in model else [])
 ok = [r for r in results if not r["saturated"]]
+
+# Per-mode risk notes: Pandeia's curated warnings, the short-ramp advisory, and
+# the published saturation advice for the run's own limit. Reported, never
+# acted on -- the ramp search already returned the largest measured-safe count,
+# and the saturation limit stays exactly what the user set. Modes already named
+# in _excluded are skipped, so a saturated mode is not reported twice.
+_ex_keys = {k for k, _ in _excluded}
+_warn_rows = []
+for r in results:
+    if r["mode_key"] in _ex_keys:
+        continue
+    notes = [str(v) for v in (r.get("warnings") or {}).values()]
+    # .get: a result restored from an older session carries no sat_limit, and
+    # guessing one would report advice against a number this run never used
+    _sl = meta.get("sat_limit")
+    adv = ins.sat_limit_advisory(r["mode_key"], _sl) if _sl is not None else ""
+    if adv:
+        notes.append(adv)
+    if notes:
+        _warn_rows.append(f"{r['label']} ({ins.config_label(r['mode_key'])}): "
+                          + "; ".join(notes))
+if _warn_rows:
+    st.warning("\n\n".join(_warn_rows))
 
 # --- named mode combinations (results-side builder) -------------------------
 # Evaluated through posteriors.combo_forecast (the SAME combination math as
@@ -1967,7 +2015,7 @@ if goal_r == "detect":
         # directions as well as the per-segment calibration offsets, so the two
         # are different statistics and must never share one bare label.
         verdict = (f"**{best['label']}**: template S/N {bsig:.1f}σ "
-                   f"({detect.METRIC_LABEL[_best_projected]}) in {ntr} "
+                   f"({detect.metric_label(best)}) in {ntr} "
                    f"{_ev}{'s' if ntr > 1 else ''} (target {tsig:g}σ).")
         if bsig >= tsig:
             pass        # target met: the figure and table carry the number
@@ -2093,16 +2141,18 @@ if d_wo_s is not None:
     _native[f"depth_{meta['target']}_opacity_removed_ppm"] = d_wo_s
 
 # Opacity honesty: a species the network solved but the RT cannot see is
-# missing absorption, so the contrast is a lower bound. Carbon-rich columns are
-# where this bites (C6H6 on sncho2025 at C/O 10). Read from the cache, so a
-# cached run says it too -- run_model logs it, but a cache hit never solves.
+# missing absorption, and the sign of the resulting error is NOT known -- see
+# the matching note in forward.py. Carbon-rich columns are where this bites
+# (C6H6 on sncho2025 at C/O 10). Read from the cache, so a cached run says it
+# too -- run_model logs it, but a cache hit never solves.
 _unmodeled = [str(u).split("|") for u in np.atleast_1d(
     model.get("unmodeled", np.array([], dtype="U32")))]
 if _unmodeled:
     st.warning(
         "No opacity table for "
         + ", ".join(f"{sp} (VMR {float(v):.1e})" for sp, v in _unmodeled)
-        + ": the modelled feature contrast is a lower bound.")
+        + ": the modelled feature contrast carries an unquantified error, in "
+          "either direction.")
 
 with st.expander("Physical structure (T-P profile, mixing ratios)"):
     # ONE two-panel figure (plotting.build_structure_figure, pure and
@@ -2570,10 +2620,10 @@ if goal_r == "detect":
     # combinations, forecasts); they get no score in the legend either
     _leg_projected = set()
     for r in results:
-        _score, _proj = detect.detection_metric(r)
+        _score, _ = detect.detection_metric(r)
         if not r["saturated"] and np.isfinite(_score):
             _leg_num[r["mode_key"]] = f"S/N {_score:.1f}σ"
-            _leg_projected.add(_proj)
+            _leg_projected.add(detect.metric_label(r))
 elif _have_fisher:
     _rk_key = K("sum_rank_param_" + "_".join(fisher_names))
     if st.session_state.get(_rk_key) not in fisher_names:
@@ -2717,7 +2767,7 @@ if _leg_num:
     # row spacing). Says what the per-mode numbers are, nothing more.
     _leg_note = (
         f"{meta['target']} template S/N per mode "
-        f"({'/'.join(detect.METRIC_LABEL[p] for p in sorted(_leg_projected))}), "
+        f"({'/'.join(sorted(_leg_projected))}), "
         f"{meta['n_transits']} {_ev}"
         f"{'s' if meta['n_transits'] > 1 else ''}"
         if goal_r == "detect" else

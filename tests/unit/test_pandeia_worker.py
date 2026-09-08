@@ -43,6 +43,14 @@ def test_native_r_finds_the_tokenless_nircam_grism_file(tmp_path):
         assert r == [1400.0], (key, r)
 
 
+def test_missing_dispersion_file_raises(tmp_path):
+    """No dispersion file must never become a silent no-blur on the host."""
+    m = {"instrument": "nirspec", "mode": "bots",
+         "config": {"instrument": {"disperser": "g395h"}}, "strategy": {}}
+    with pytest.raises(RuntimeError, match="dispersion"):
+        pw._native_r(str(tmp_path), m, [3.0, 4.0, 5.0])
+
+
 def test_release_segment():
     """Leading numeric release segment; rc/dev suffixes drop, non-numeric
     strings read None."""
@@ -218,12 +226,15 @@ def _run_one_mode(wl, flux, noise, n_full, n_part, sat_frac=0.5,
     if added:
         sys.modules["pandeia"] = stub
         sys.modules["pandeia.engine"] = stub_engine
+    # _native_r reads refdata dispersion files (and raises without them);
+    # stub it so this stays a saturation/census test with no 20 MiB tree.
+    real_native_r = pw._native_r
+    pw._native_r = lambda _refdata, _m, w: ([400.0] * len(w), "stub")
     try:
-        # _native_r reads refdata dispersion files; point it at nothing so it
-        # reports "unavailable" rather than reaching for a 20 MiB tree.
         return pw._one_mode(build_default_calc, perform_calculation, mode, star,
                             sat_limit=0.80, refdata="/nonexistent-refdata")
     finally:
+        pw._native_r = real_native_r
         if added:
             sys.modules.pop("pandeia.engine", None)
             sys.modules.pop("pandeia", None)

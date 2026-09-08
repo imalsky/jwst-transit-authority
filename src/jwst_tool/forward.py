@@ -68,7 +68,8 @@ _S_MOLECULES = frozenset({"SO2", "H2S", "OCS", "SO", "SH", "CS", "NS"})
 # Network species with no published ExoMolOP k-table: never offered anywhere
 # (correlated-k over the published tables is the only opacity path).
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
-_VERSION = 42  # model_cache buster (identity = canonical params + this
+DT_MAX_S = 1.0e13   # chemistry step-size cap (s); prevents the adaptive-dt balloon
+_VERSION = 46  # model_cache buster (identity = canonical params + this
                # number, never a content hash); bump on any physics or
                # canonical-key-set change.
 
@@ -181,7 +182,17 @@ def fd_row(name, j1, j2, h):
         raise RuntimeError(f"FD Jacobian for {name}: non-finite entries")
     scale = float(np.max(np.abs(j1)))
     if scale == 0.0:
-        return j1, 0.0
+        # The no-response escape needs BOTH estimates to vanish: with no scale
+        # to divide by there is no h-vs-2h certificate, and an uncertified
+        # derivative is never reported however plausible its Richardson value.
+        if np.all(j2 == 0.0):
+            return j1, 0.0
+        raise RuntimeError(
+            f"FD Jacobian for {name} FAILED the step-size consistency check: "
+            f"max|J(h)| is exactly zero but max|J(2h)| = "
+            f"{float(np.max(np.abs(j2))):.3e} (h = {h:g}). The h-vs-2h "
+            "certificate is undefined at zero scale, and an uncertified "
+            "derivative is never reported.")
     err = float(np.max(np.abs(j1 - j2)) / scale)
     if err > FD_CONSISTENCY_TOL:
         raise RuntimeError(
@@ -198,6 +209,40 @@ def fd_row(name, j1, j2, h):
 CONV_FIELDS = ("stage", "accept", "longdy", "longdydt", "branch", "flux", "cell")
 # ConvDiag.conv_branch legend (0 = not certified).
 CONV_BRANCH = {1: "tight (yconv_cri)", 2: "loose (yconv_min)"}
+
+
+ELEMENT_TOL = 0.05   # max |element/H drift| of a certified column vs its build column
+
+
+def check_elements(y, chem, stage, log=print) -> float:
+    """Refuse a certified column whose element budget drifted from its build
+    column. Per layer, every atom column of ``chem.compo_array`` over the H
+    column; the layer median (molecular diffusion legitimately separates
+    elements at the very top) against the same ratio on ``chem.y0``, which
+    carries the requested composition exactly. The convergence certificate
+    watches the change per step and is blind to a slow uniform leak: at the
+    old dt_max = 1e11 the WASP-39 b photo-off column certified after 5040
+    steps having lost 46% of its oxygen and 98% of its sulfur. Returns the
+    worst relative drift."""
+    compo = np.asarray(chem.compo_array, dtype=np.float64)        # (ni, natom)
+    atoms = list(getattr(chem, "atom_list", range(compo.shape[1])))
+    tot = np.asarray(y, dtype=np.float64) @ compo                  # (nz, natom)
+    tot0 = np.asarray(chem.y0, dtype=np.float64) @ compo
+    i_h = atoms.index("H") if "H" in atoms else int(np.argmax(tot0.sum(axis=0)))
+    r = np.median(tot / tot[:, [i_h]], axis=0)
+    r0 = np.median(tot0 / tot0[:, [i_h]], axis=0)
+    ok = r0 > 0.0
+    dev = np.abs(r[ok] / r0[ok] - 1.0)
+    worst = float(dev.max())
+    el = atoms[int(np.flatnonzero(ok)[int(dev.argmax())])]
+    log(f"[fwd] {stage}: element budget within {worst:.2%} of the build column "
+        f"(worst {el})")
+    if worst > ELEMENT_TOL:
+        raise RuntimeError(
+            f"{stage}: the converged column's {el}/H drifted {worst:.1%} from the "
+            f"requested composition (gate {ELEMENT_TOL:.0%}); the solve leaked "
+            "material and is not a steady state of this atmosphere")
+    return worst
 
 
 def check_converged(diag, stage, species, chem, log=print) -> tuple:
@@ -271,7 +316,7 @@ def check_ad_co_margin(chem, co_ratio, y=None, build_margin=None,
 # A converged column can put a network species with NO published k-table at an
 # abundance the RT then ignores: at C/O 10 on sncho2025, C6H6 reaches 3.6e-3
 # over 10-0.01 mbar, comparable to CO, and no ExoMolOP table exists for it.
-# The spectrum is a lower bound on the true feature contrast there, so SAY so.
+# The contrast there carries an unsigned, unquantified error, so SAY so.
 # 0.01 % is an order of magnitude below the bulk carriers and above every
 # trace species the RT already carries at solar C/O.
 # 0.1 %: a bulk-level carrier. Trace omissions (HSO at 1.2e-4 on the default
@@ -377,7 +422,8 @@ def _tau_bottom_breakdown(wl_um, tau, flux=None) -> str:
     else:
         lines[0] += ")"
     if flux is not None:
-        lines.append(f"  carrying {100.0 * thin_flux_fraction(tau, flux):.3f}% "
+        frac = thin_flux_fraction(tau, flux, 1.0e4 / wl)
+        lines.append(f"  carrying {100.0 * frac:.3f}% "
                      "of the planet's emitted flux")
     for label, lo, hi in _TAU_WINDOWS:
         m = (wl >= lo) & (wl <= hi)
@@ -388,16 +434,122 @@ def _tau_bottom_breakdown(wl_um, tau, flux=None) -> str:
     return "\n".join(lines)
 
 
-def thin_flux_fraction(tau, flux) -> float:
-    """Share of the emitted flux coming from wavelengths whose bottom optical
-    depth is below the gate. The emission certificate."""
-    tau, flux = np.asarray(tau, float), np.abs(np.asarray(flux, float))
-    tot = float(flux.sum())
+def thin_flux_fraction(tau, flux, nu) -> float:
+    """Share of the emitted ENERGY coming from wavelengths whose bottom optical
+    depth is below the gate. The emission certificate.
+
+    ``flux`` is spectral flux density per unit WAVENUMBER and ``nu`` (cm^-1) is
+    its band-centre grid, which the ExoMolOP k-tables make constant-R, so
+    dnu ~ nu and the widest band is ~15x the narrowest over the engine's
+    667-10000 cm^-1 window (166x across the untrimmed table). Summing the samples
+    unweighted is therefore not an energy fraction: it under-reports the
+    short-wavelength share by up to ~3x on a real hot-Jupiter spectrum --
+    exactly where a see-through bottom shows up -- and turned this 1% gate
+    into a ~3% one. ``nu`` is REQUIRED, never defaulted: a silent fallback to
+    the unweighted sum is the bug this signature exists to prevent.
+    """
+    tau, flux = np.asarray(tau, float), np.asarray(flux, float)
+    nu = np.asarray(nu, dtype=np.float64)
+    if (tau.ndim != 1 or flux.ndim != 1 or nu.ndim != 1
+            or tau.shape != flux.shape or nu.shape != flux.shape
+            or nu.size < 2):
+        raise ValueError(
+            "thin_flux_fraction needs aligned 1-D tau, flux, and wavenumber "
+            f"arrays (>= 2 bands); got {tau.shape}, {flux.shape}, {nu.shape}")
+    if not np.all(np.isfinite(tau)) or np.any(tau < 0.0):
+        raise ValueError("bottom optical depth must be finite and non-negative")
+    if not np.all(np.isfinite(flux)) or np.any(flux < 0.0):
+        raise ValueError("emission flux must be finite and non-negative")
+    if not np.all(np.isfinite(nu)) or np.any(nu <= 0.0):
+        raise ValueError("wavenumber grid must be finite and positive")
+    dnu = np.diff(nu)
+    if not (np.all(dnu > 0.0) or np.all(dnu < 0.0)):
+        raise ValueError("wavenumber grid must be strictly monotonic")
+    # band width per sample; exact to 1e-6 against the k-table bin_edges on the
+    # constant-R grid, and it needs no edges the RT namespace does not carry
+    w = np.abs(np.gradient(nu))
+    tot = float((flux * w).sum())
     if not np.isfinite(tot) or tot <= 0.0:
         raise RuntimeError(
             "emission flux is zero or non-finite across the whole band; the "
             "thin-bottom certificate cannot be evaluated")
-    return float(flux[tau < EMIS_TAU_THIN].sum() / tot)
+    return float((flux * w)[tau < EMIS_TAU_THIN].sum() / tot)
+
+
+def check_emission_thin(tau, flux, nu, stage, detail="") -> float:
+    """Refuse an emission spectrum whose column bottom leaks too much flux.
+
+    The gate ``thin_flux_fraction`` computes, applied to ONE spectrum and
+    raising with the stage that produced it. Every emission spectrum the
+    results consume goes through here -- the baseline, each removed-molecule
+    spectrum, and every FD stencil point and AD primal a Fisher row is built
+    from. ``flux`` may be Fp times any positive scalar: the fraction is a
+    ratio, so an eclipse-depth prefactor cancels."""
+    frac = thin_flux_fraction(tau, flux, nu)
+    if frac > EMIS_THIN_FLUX_FRAC:
+        raise RuntimeError(
+            f"emission unreliable ({stage}): {100.0 * frac:.1f}% of the "
+            "emitted flux comes from wavelengths where the RT column bottom "
+            f"is optically thin (tau < {EMIS_TAU_THIN:g}), above the "
+            f"{100.0 * EMIS_THIN_FLUX_FRAC:g}% tolerance -- that flux is set "
+            "by the interior source term, an assumption about everything "
+            "below the column." + detail)
+    return frac
+
+
+def chem_radius_anchor_bar(p_bar, p_btm_dyn: float, rocky: bool) -> float:
+    """Pressure (bar) VULCAN anchors ``g = G*Mp/Rp**2`` at, for a built grid.
+
+    Mirrors ``vulcan_jax.atm_setup.compute_mu_dz_g``: the grid INTERFACE
+    nearest 1 bar for a non-rocky planet whose column reaches 1 bar, else the
+    column bottom. Test-pinned against the engine, since it is the one rule
+    this module restates rather than imports."""
+    from vulcan_jax.atm_setup import compute_pico
+
+    pico = np.asarray(compute_pico(np.asarray(p_bar, dtype=np.float64) * 1.0e6))
+    if rocky or float(p_btm_dyn) < 1.0e6:
+        return float(pico[0]) / 1.0e6
+    return float(pico[int(np.argmin(np.abs(np.log10(pico) - 6.0)))]) / 1.0e6
+
+
+def radius_at_anchor(p_bar, T, mu, rp_cm: float, gs_cgs: float,
+                     p_ref_bar: float, p_anchor_bar: float) -> float:
+    """Radius (cm) at ``p_anchor_bar`` given ``rp_cm`` at ``p_ref_bar``.
+
+    Hydrostatic equilibrium at fixed GM, ``g(r) = G*M/r**2``, linearises
+    exactly in ``u = 1/r``::
+
+        du/dlnP = k_B T / (mu m_u G M)
+
+    so the anchor needs one cumulative integral and no ODE solve. The same
+    identity ``vulcan_forward.exojax_rt._radius_at`` integrates to place the RT
+    grid bottom; deeper means smaller radius and stronger gravity. Evaluated at
+    the exact anchor pressure, so the partial layer between it and the nearest
+    grid point is accounted for rather than snapped away."""
+    from vulcan_forward import constants as _vc
+
+    p = np.asarray(p_bar, dtype=np.float64)
+    order = np.argsort(p)
+    lnp, T, mu = np.log(p[order]), np.asarray(T)[order], np.asarray(mu)[order]
+    # The engine can anchor at the exterior bottom interface (not a cell
+    # centre), e.g. when p_btm_bar is exactly 1 bar. Continue the bottom
+    # layer's T/mu across that half cell, as the RT radius integral does.
+    ln_bottom = 1.5 * lnp[-1] - 0.5 * lnp[-2]
+    ln_ref, ln_anchor = np.log(p_ref_bar), np.log(p_anchor_bar)
+    if not (lnp[0] <= ln_ref <= ln_bottom + 1e-12
+            and lnp[0] <= ln_anchor <= ln_bottom + 1e-12):
+        raise ValueError(
+            f"radius reference {p_ref_bar:g} bar and chemistry anchor "
+            f"{p_anchor_bar:g} bar must both lie inside the column "
+            f"[{p.min():g}, {np.exp(ln_bottom):g}] bar including its bottom interface")
+    gm = float(gs_cgs) * float(rp_cm) ** 2          # the true GM, level-free
+    c = _vc.K_B_CGS * T / (mu * _vc.M_U_CGS * gm)
+    cum = np.concatenate([[0.0], np.cumsum(0.5 * (c[1:] + c[:-1]) * np.diff(lnp))])
+    integral = (np.interp(np.log(p_anchor_bar), lnp, cum)
+                - np.interp(np.log(p_ref_bar), lnp, cum))
+    integral += c[-1] * (max(0.0, ln_anchor - lnp[-1])
+                         - max(0.0, ln_ref - lnp[-1]))
+    return 1.0 / (1.0 / float(rp_cm) + float(integral))
 
 
 def chem_p_span_dyn(cp: dict) -> tuple:
@@ -873,7 +1025,10 @@ def canonical_params(params: dict) -> dict:
             planet, system=dict(star_teff=_teff, rstar_rsun=_rstar,
                                 orbit_au=_orbit),
             science_mode=science_mode))), 2),
-        "Tint": round(float(params.get("Tint", 100.0)), 2),
+        # the planet's published interior temperature where the registry
+        # carries one (WASP-107 b), via planets.default_tint like Tirr
+        "Tint": round(float(params.get("Tint", planets.default_tint(
+            planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS)))), 2),
         # 0.01 cm^2/g, Guillot (2010); the GUI default (app.py) must agree
         "log_kappa": round(float(params.get("log_kappa", -2.0)), 3),
         "log_gamma": round(float(params.get("log_gamma", -1.0)), 3),
@@ -1199,14 +1354,17 @@ def cache_path(params: dict) -> Path:
 
 # Canonical keys that change the SPECTRUM but never the converged chemistry
 # column, so chem_key strips them and an RT-only edit reuses the solved column
-# (adjoint_diag.adjoint_key's strip list plus p_ref_bar). Dual-use keys -- nz,
-# p_btm_bar, rt_ptop_bar (the chemistry top follows it), rp_rjup, gs_cgs, T-P,
+# (adjoint_diag.adjoint_key's strip list). Dual-use keys -- nz, p_btm_bar,
+# rt_ptop_bar (the chemistry top follows it), rp_rjup, gs_cgs, T-P,
 # composition, Kzz -- stay in the key, as does "version" via canonical_params.
+# p_ref_bar is NOT irrelevant: it is the pressure the catalogue radius and
+# gravity apply at, so it sets the chemistry's own radius anchor and moves the
+# converged column (_assemble_chem, "ONE gravity per run").
 CHEM_IRRELEVANT_PARAMS = (
     "fisher_params", "jac_method", "use_rayleigh",
     "cloud_on", "log_kappa_cloud", "alpha_cloud", "extra_mols", "wo_mols",
     "rt_integration",
-    "science_mode", "star_teff", "star_logg", "star_feh", "p_ref_bar",
+    "science_mode", "star_teff", "star_logg", "star_feh",
 )
 
 
@@ -1251,7 +1409,11 @@ def load_result(params: dict):
     leave-one-out set depth_wo rows align with), mols, ymix, p_bar, T, theta,
     theta_names, params_json, chem_provider, and unmodeled (network species
     with no k-table, "<species>|<vmr>"). With Fisher requested:
-    jac (n_par, n_nu), jac_names, jac_row_method, fd_h, fd_err.
+    jac (n_par, n_nu), jac_names, jac_row_method, fd_h, fd_err. In emission,
+    the thin-bottom evidence detect REQUIRES and refuses without: fp_flux,
+    fs_flux, emis_depth_norm, emis_thin_flux_frac_wo (n_wo), and the
+    per-wavelength emis_tau_bottom (n_nu) / emis_tau_bottom_wo (n_wo, n_nu)
+    the band-restricted gate re-evaluates.
     """
     return _load_cached_npz(cache_path(params))
 
@@ -1404,6 +1566,7 @@ def _assemble_chem(cp: dict, log):
             f"atoms {_net_atoms})")
     from vulcan_forward import vulcan_chem
     import jax
+    import jax.numpy as jnp
 
     # Persistent XLA compile cache: ESSENTIAL for adjoint_diag, whose step-VJP
     # is a multi-hour cold compile on CPU.
@@ -1429,8 +1592,7 @@ def _assemble_chem(cp: dict, log):
     profile["abundance_mode"] = "elemental"
     profile["co_mode"] = "fixed_O"
     profile["reanchor_atom_ini"] = True   # finite-Z steps must re-anchor atom totals
-    # step-size cap: prevents the adaptive-dt non-convergence at high Kzz
-    profile["dt_max"] = 1.0e11
+    profile["dt_max"] = DT_MAX_S
     rp_cm = profile["rp_cm"]
     ovr = {                              # chemistry side (applied pre-pre-loop)
         # VULCAN derives g = G*Mp/Rp^2, so convert gs_cgs to a planet mass
@@ -1550,6 +1712,43 @@ def _assemble_chem(cp: dict, log):
                                               n_tp_params=n_tp)
         log(f"[fwd] chemistry model ({tag}) ready in {time.time()-t_b:.0f} s")
         return chem_b
+
+    # --- ONE gravity per run ------------------------------------------------
+    # rp_rjup/gs_cgs are quoted at p_ref_bar (a transit radius, ~1 mbar) and
+    # the RT honors that. VULCAN instead anchors g = G*Mp/Rp^2 at the grid
+    # interface nearest 1 bar, so handing it the same pair put the radius ~7%
+    # high and every gravity ~13% low, and the chemistry's dz, eddy/molecular
+    # transport and photolysis shielding column with them. Mp is already right
+    # -- G*Mp is the true GM whichever level it is quoted at -- so only the
+    # level Rp attaches to has to move. Guillot's tau = kappa*P/g takes the
+    # same gravity, hence the joint iteration: it converges in two passes
+    # (g shifts tau by ~13%, which moves T by ~1% and the integral by ~0.1% of
+    # Rp) and costs no solve. One probe build supplies the initial-equilibrium
+    # mean molecular weight the integral needs; mu varies 0.12% over the
+    # column but its VALUE tracks metallicity, so it is never a literal.
+    probe = _build_chem(tag="geometry probe")
+    _y0 = np.asarray(probe.y0, dtype=np.float64)
+    mu_col = ((_y0 / _y0.sum(axis=1, keepdims=True))
+              @ np.asarray(probe.species_masses, dtype=np.float64))
+    p_anchor = chem_radius_anchor_bar(probe.p_bar, chem_p_span_dyn(cp)[1],
+                                      bool(getattr(_cfg_chk, "rocky", False)))
+    g_anchor, r_anchor = cp["gs_cgs"], rp_cm
+    for _ in range(3):
+        T_col = (np.asarray(probe.T_base, dtype=np.float64) if tp_eval is None
+                 else np.asarray(_build_tp(cp, g_anchor)[0](
+                     jnp.asarray(theta[3:]), jnp.asarray(probe.p_bar))))
+        r_anchor = radius_at_anchor(probe.p_bar, T_col, mu_col, rp_cm,
+                                    cp["gs_cgs"], cp["p_ref_bar"], p_anchor)
+        g_anchor = cp["gs_cgs"] * (rp_cm / r_anchor) ** 2
+    ovr["Rp"] = r_anchor          # Mp untouched; VULCAN derives gs from the pair
+    tp_eval = _build_tp(cp, g_anchor)[0]
+    log(f"[fwd] radius anchor: chemistry runs R_p = {r_anchor:.4e} cm, "
+        f"g = {g_anchor:.1f} cm/s2 at its {p_anchor:g} bar grid anchor, from "
+        f"the catalogue {rp_cm:.4e} cm / {cp['gs_cgs']:.1f} cm/s2 at "
+        f"p_ref_bar = {cp['p_ref_bar']:g} bar "
+        f"({100.0 * (1.0 - r_anchor / rp_cm):.2f}% smaller radius, "
+        f"{100.0 * (g_anchor / cp['gs_cgs'] - 1.0):.1f}% stronger gravity); "
+        "the Guillot T-P uses the same gravity")
 
     return SimpleNamespace(
         profile=profile, theta=theta, theta_names=theta_names,
@@ -1719,12 +1918,18 @@ def run_model(params: dict, log=print) -> Path:
             return (vmr, to_art_b(ymix[:, h2_b]), T_art, mmw_art,
                     to_art_b(ymix[:, he_b]))
 
-        def depth_fn(y, th, lnR0=0.0, cloud=None, wo_mols=None):
+        def depth_fn(y, th, lnR0=0.0, cloud=None, wo_mols=None,
+                     return_tau=False):
             # cloud=None -> the baseline deck; an explicit vector overrides it
             # (the cloud Fisher rows differentiate through this argument).
             # wo_mols is transmission only: emission gets its leave-one-out
-            # batch from emis.emission_flux_tau in run_model, whose tau-bottom
+            # batch from emis.eclipse_flux_tau in run_model, whose tau-bottom
             # gate needs the same optical depth.
+            # return_tau=True also hands back the bottom optical depth, so
+            # every emission spectrum a Fisher row is built from can be gated.
+            # eclipse_flux_tau, not emission_flux_tau: the flux carries the
+            # tau = 2/3 photospheric radius per wavelength relative to the
+            # single anchor radius rp_em below (Fortney et al. 2019).
             vmr, vmr_h2, T_art, mmw_art, vmr_he = _art_profiles(y, th)
             cl = cloud_vec if cloud is None else cloud
             if emis is not None:
@@ -1732,12 +1937,16 @@ def run_model(params: dict, log=print) -> Path:
                     raise ValueError(
                         "depth_fn(wo_mols=...) is transmission-only; emission "
                         "removed-molecule spectra come from "
-                        "emis.emission_flux_tau (run_model owns that call).")
-                fp = emis.emission_flux(vmr, vmr_h2, T_art, mmw_art,
-                                        vmr_he=vmr_he, cloud=cl)
+                        "emis.eclipse_flux_tau (run_model owns that call).")
+                fp, tau = emis.eclipse_flux_tau(
+                    vmr, vmr_h2, T_art, mmw_art, vmr_he=vmr_he, cloud=cl)
                 rp_em = emis.emission_radius(T_art, mmw_art)
-                return (fp / fs_j) * (rp_em ** 2 / _rstar_cm_sq) * jnp.exp(
+                dep = (fp / fs_j) * (rp_em ** 2 / _rstar_cm_sq) * jnp.exp(
                     2.0 * jnp.asarray(lnR0))
+                # Tau is gate evidence, not a differentiated observable.
+                return (dep, jax.lax.stop_gradient(tau)) if return_tau else dep
+            if return_tau:
+                raise ValueError("return_tau is emission-only")
             return rt.transmission_depth_r(
                 vmr, vmr_h2, T_art, mmw_art,
                 jnp.asarray(lnR0), vmr_he=vmr_he, cloud=cl,
@@ -1787,6 +1996,7 @@ def run_model(params: dict, log=print) -> Path:
                 f"chem-cache {_chem_out.name}: stored certificate "
                 f"(longdy={_ld:.3g}) fails the current gate "
                 f"yconv_min={float(chem.yconv_min):g}")
+        check_elements(y_np, chem, "chem-cache column", log)
         y_sol = jnp.asarray(y_np)
         log(f"[fwd] chemistry column from chem-cache ({_chem_out.name}, "
             f"{_ac} accepted steps at write); solve skipped")
@@ -1799,6 +2009,7 @@ def run_model(params: dict, log=print) -> Path:
             raise RuntimeError(
                 "chemistry solve returned non-finite abundances -- "
                 "parameter set outside the modelable range")
+        check_elements(y_np, chem, "baseline solve", log)
         log(f"[fwd] chemistry solved in {time.time()-t0:.0f} s total")
         # persist the certified RAW column (atomic, as for the flat cache)
         _stage, _ac, _ld, _lddt, _br, _fl, _cell = _cert
@@ -1821,7 +2032,11 @@ def run_model(params: dict, log=print) -> Path:
         log(f"[fwd] chem column cached -> {_chem_out.name}")
 
     # Opacity honesty: a species the network solves but the RT cannot see is
-    # missing absorption, not a missing trace. Loud, never silent.
+    # missing absorption, not a missing trace. Loud, never silent. The error it
+    # leaves is UNSIGNED: the tool scores depth - depth_wo, which in the
+    # isothermal limit is H ln(1 + k_X/k_bkg), so an omitted background
+    # absorber INFLATES the target's apparent contrast as readily as an
+    # omitted overlapping band deflates it.
     _unmodeled = unmodeled_absorbers(_species_now, np.asarray(y_sol),
                                      np.asarray(chem.p_bar),
                                      set(config.MOLECULES))
@@ -1830,19 +2045,18 @@ def run_model(params: dict, log=print) -> Path:
             + ", ".join(f"{sp} at {v:.2e}" for sp, v in _unmodeled)
             + f" (mean VMR, {_PHOTOSPHERE_BAR[1]*1e3:g}-"
               f"{_PHOTOSPHERE_BAR[0]*1e3:g} mbar) with NO published k-table, "
-              "so the RT omits them: the spectrum is a LOWER BOUND on the "
-              "true feature contrast. Carbon-rich compositions are where this "
-              "bites.")
+              "so the RT omits them: the modeled feature contrast carries an "
+              "UNQUANTIFIED error that can run in EITHER direction -- omitted "
+              "background opacity inflates it, an omitted overlapping band "
+              "deflates it. Carbon-rich compositions are where this bites.")
 
     # Emission bottom-boundary certification. The interior source term is a
     # blackbody at the extrapolated bottom temperature, an assumption about
     # everything below the grid: the fix for a thin bottom is a deeper column
     # (p_btm_bar), never a wider tolerance.
-    emis_tau_min = float("nan")
     _depth_norm_em0 = float("nan")
     wo_list = list(cp["wo_mols"])
     depth_wo = None
-    emis_tau_min_wo = np.full(len(wo_list), np.nan)
     emis_thin_wo = np.full(len(wo_list), np.nan)
     if emis is not None:
         t0 = time.time()
@@ -1862,35 +2076,29 @@ def run_model(params: dict, log=print) -> Path:
         # stored depth AND the removed-molecule spectra; the batch's full total
         # is bitwise the standalone call.
         if wo_list:
-            _fp_j, _tau_j, _fp_wo_j, _tau_wo_j = emis.emission_flux_tau(
+            _fp_j, _tau_j, _fp_wo_j, _tau_wo_j = emis.eclipse_flux_tau(
                 *_prof0, cloud=cloud_vec, wo_mols=wo_list)
         else:
-            _fp_j, _tau_j = emis.emission_flux_tau(*_prof0, cloud=cloud_vec)
+            _fp_j, _tau_j = emis.eclipse_flux_tau(*_prof0, cloud=cloud_vec)
         _tau_b = np.asarray(_tau_j)
         emis_tau_min = float(_tau_b.min())
+        emis_tau_min_wo = np.full(len(wo_list), np.nan)
         _wl_thin = float(rt.wl_um[int(np.argmin(_tau_b))])
         # FLUX-WEIGHTED, not min() over the band: the column being transparent
         # somewhere only matters to the extent the planet emits there.
         _fp = np.asarray(_fp_j)
-        emis_thin_frac = thin_flux_fraction(_tau_b, _fp)
         _report = _tau_bottom_breakdown(rt.wl_um, _tau_b, flux=_fp)
-        if emis_thin_frac > EMIS_THIN_FLUX_FRAC:
-            raise RuntimeError(
-                f"emission unreliable: {100.0 * emis_thin_frac:.1f}% of this "
-                f"planet's emitted flux comes from wavelengths where the RT "
-                f"column bottom ({emis.art_pbtm_bar:g} bar) is optically thin "
-                f"(tau < {EMIS_TAU_THIN:g}), above the "
-                f"{100.0 * EMIS_THIN_FLUX_FRAC:g}% tolerance -- that flux is "
-                "set by the interior source term, an assumption about "
-                "everything below the column.\n\n"
-                + _report +
-                "\n\nThin only at the SHORT-wavelength edge means missing "
-                "opacity, not a shallow column: below ~2 um the continuum "
-                "that fills the window in a real hot atmosphere (H- bound-free "
-                "and free-free, the Na and K wings, TiO/VO) is not modeled "
-                "here, and deepening p_btm_bar would hide that rather than fix "
-                "it. Thin across the band means the column really is too "
-                f"shallow -- raise p_btm_bar (now {cp['p_btm_bar']:g} bar).")
+        emis_thin_frac = check_emission_thin(
+            _tau_b, _fp, rt.nu_grid,
+            f"baseline, column bottom {emis.art_pbtm_bar:g} bar",
+            detail="\n\n" + _report +
+            "\n\nThin only at the SHORT-wavelength edge means missing "
+            "opacity, not a shallow column: below ~2 um the continuum "
+            "that fills the window in a real hot atmosphere (H- bound-free "
+            "and free-free, the Na and K wings, TiO/VO) is not modeled "
+            "here, and deepening p_btm_bar would hide that rather than fix "
+            "it. Thin across the band means the column really is too "
+            f"shallow -- raise p_btm_bar (now {cp['p_btm_bar']:g} bar).")
         log("[fwd] " + _report.replace("\n", "\n[fwd] "))
         if emis_thin_frac > 0.0:
             log(f"[fwd] NOTE: {100.0 * emis_thin_frac:.3f}% of the emitted "
@@ -1901,8 +2109,12 @@ def run_model(params: dict, log=print) -> Path:
 
         # the stored depth via the exact expression depth_fn uses (bitwise)
         _rp_em = emis.emission_radius(_prof0[2], _prof0[3])
-        depth = np.asarray((_fp_j / fs_j) * (_rp_em ** 2 / _rstar_cm_sq)
-                           * jnp.exp(2.0 * jnp.asarray(0.0)))
+
+        def _emis_depth(fp):
+            return np.asarray((fp / fs_j) * (_rp_em ** 2 / _rstar_cm_sq)
+                              * jnp.exp(2.0 * jnp.asarray(0.0)))
+
+        depth = _emis_depth(_fp_j)
         if not wo_list:
             log(f"[fwd] full spectrum in {time.time()-t0:.0f} s")
 
@@ -1914,15 +2126,13 @@ def run_model(params: dict, log=print) -> Path:
             # absorber can open see-through windows that inflate the contrast.
             _fp_wo, _tau_wo = _fp_wo_j, _tau_wo_j
             for i, mol in enumerate(wo_list):
-                depth_wo[i] = np.asarray(
-                    (_fp_wo[i] / fs_j) * (_rp_em ** 2 / _rstar_cm_sq)
-                    * jnp.exp(2.0 * jnp.asarray(0.0)))
+                depth_wo[i] = _emis_depth(_fp_wo[i])
                 _tau_i = np.asarray(_tau_wo[i])
                 emis_tau_min_wo[i] = float(_tau_i.min())
                 _wl_i = float(rt.wl_um[int(np.argmin(_tau_i))])
                 # flux-weighted, same reasoning as the baseline gate above
-                emis_thin_wo[i] = thin_flux_fraction(_tau_i,
-                                                     np.asarray(_fp_wo[i]))
+                emis_thin_wo[i] = thin_flux_fraction(
+                    _tau_i, np.asarray(_fp_wo[i]), rt.nu_grid)
                 if emis_thin_wo[i] > EMIS_THIN_FLUX_FRAC:
                     # Per-molecule, never whole-run: only THIS molecule's
                     # detection is unreliable, and detect refuses that target.
@@ -1963,11 +2173,27 @@ def run_model(params: dict, log=print) -> Path:
     jac = np.zeros((len(jac_names) + 1, depth.shape[0])) if jac_names else None
     fd_h, fd_err, row_method = [], [], []
     if jac_names:
+        def _gate_emis(dep, tau, stage):
+            """Thin-bottom gate for a perturbed emission spectrum. `dep * fs_j`
+            is Fp times the eclipse prefactor, and the fraction is a ratio, so
+            the scalar cancels."""
+            check_emission_thin(np.asarray(tau), np.asarray(dep) * np.asarray(fs_j),
+                                rt.nu_grid, stage)
+            return dep
+
         def _certified_depth(chem_b, th, stage):
+            """One stencil point: the chemistry certificate AND, in emission,
+            the thin-bottom certificate. A Fisher row is never built from a
+            spectrum neither gate has passed."""
             y_b, diag_b = chem_b.converged_y(jnp.asarray(th),
                                              return_conv_diag=True)
             _check_converged(diag_b, stage)
-            return np.asarray(make_depth_fn(chem_b)(y_b, jnp.asarray(th)))
+            check_elements(np.asarray(y_b), chem_b, stage, log)
+            _dep_fn = make_depth_fn(chem_b)
+            if emis is None:
+                return np.asarray(_dep_fn(y_b, jnp.asarray(th)))
+            dep, tau = _dep_fn(y_b, jnp.asarray(th), return_tau=True)
+            return np.asarray(_gate_emis(dep, tau, stage))
 
         def _ad_theta_depth_diag(th):
             # warm continuation from the converged column: the primal is a
@@ -1977,7 +2203,10 @@ def run_model(params: dict, log=print) -> Path:
             # certifies the point it differentiates from that same solve.
             y_w, diag = chem.converged_y(th, warm_y=y_sol, lnZ_ref=0.0,
                                          c_o_ref=0.0, return_conv_diag=True)
-            return depth_from_y(y_w, th), diag
+            if emis is None:
+                return depth_from_y(y_w, th), diag, None, y_w
+            dep, tau = depth_from_y(y_w, th, return_tau=True)
+            return dep, diag, tau, y_w
 
         _ad_chem_rows = ([n for n in jac_names
                           if n not in CLOUD_FISHER_PARAMS]
@@ -2002,9 +2231,15 @@ def run_model(params: dict, log=print) -> Path:
             for _n in _ad_chem_rows:
                 _e = np.zeros(theta.size)
                 _e[theta_names.index(_n)] = 1.0
-                (_pd, _pdiag), (_dd, _) = jax.jvp(
+                (_pd, _pdiag, _ptau, _py), (_dd, _, _, _) = jax.jvp(
                     _ad_theta_depth_diag, (th0,), (jnp.asarray(_e),))
                 _check_converged(_pdiag, f"AD warm re-converge ({_n})")
+                check_elements(np.asarray(_py), chem,
+                               f"AD warm re-converge ({_n})", log)
+                # the jvp's own primal, not y_sol: certify the point the
+                # tangent is actually taken at
+                if emis is not None:
+                    _gate_emis(_pd, _ptau, f"AD warm re-converge ({_n})")
                 _ad_cols[_n] = np.asarray(_dd)
             log(f"[fwd] AD Jacobian: {len(_ad_chem_rows)} rows, one warm jvp "
                 f"each, in {time.time()-t1:.0f} s")
@@ -2028,8 +2263,13 @@ def run_model(params: dict, log=print) -> Path:
             def _d(step):
                 v = base_vec.copy()
                 v[idx] += step
-                return np.asarray(depth_from_y(y_sol, th0,
-                                               **{kwarg: jnp.asarray(v)}))
+                if emis is None:
+                    return np.asarray(depth_from_y(y_sol, th0,
+                                                   **{kwarg: jnp.asarray(v)}))
+                dep, tau = depth_from_y(y_sol, th0, return_tau=True,
+                                        **{kwarg: jnp.asarray(v)})
+                return np.asarray(_gate_emis(dep, tau,
+                                             f"FD {name} {step:+g}"))
             j1 = (_d(h) - _d(-h)) / (2.0 * h)
             return j1, h, np.nan, "fd-rt"   # truncation unmeasured, not 0
 
@@ -2038,7 +2278,10 @@ def run_model(params: dict, log=print) -> Path:
             if name not in _ad_cols:
                 advance()        # batched AD rows advanced once, above
             if name in CLOUD_FISHER_PARAMS:
-                # RT-only deck row: the power-law deck is smooth, so ungated
+                # RT-only deck row: no chemistry certificate (the analytic deck
+                # carries no solver noise). Its AD primal sits at cloud_vec,
+                # i.e. the already-gated baseline; the FD points are gated in
+                # _d, since a perturbed deck is a different opacity.
                 jac[j], _h, _err, _m = _rt_deck_row(
                     name, [cp["log_kappa_cloud"], cp["alpha_cloud"]],
                     CLOUD_FISHER_PARAMS.index(name), "cloud")
@@ -2107,6 +2350,8 @@ def run_model(params: dict, log=print) -> Path:
                     dvals[s] = _certified_depth(chem, th_s,
                                                 f"FD {name} {s:+d}h")
             method = "fd-central" if len(offs) == 4 else "fd-onesided"
+            # the one-sided anchor is the BASELINE point (y_sol, th0, baseline
+            # deck, lnR0 = 0), already gated above -- no second certificate
             f0 = (None if method == "fd-central"
                   else np.asarray(depth_from_y(y_sol, th0)))
             jac[j], err = fd_row(name, *fd_estimates(offs, dvals, f0, h), h)
@@ -2130,6 +2375,8 @@ def run_model(params: dict, log=print) -> Path:
             fd_err.append(np.nan)
             row_method.append("ad-jvp")
         else:
+            # lnR0 scales the depth by exp(2 lnR0) and nothing else: Fp and
+            # the bottom tau are bitwise the gated baseline's
             d_rp = np.asarray(depth_from_y(y_sol, th0, lnR0=+FD_LNR0_STEP))
             d_rm = np.asarray(depth_from_y(y_sol, th0, lnR0=-FD_LNR0_STEP))
             jac[-1] = (d_rp - d_rm) / (2.0 * FD_LNR0_STEP)
@@ -2169,7 +2416,7 @@ def run_model(params: dict, log=print) -> Path:
         params_json=np.array(json.dumps(cp)),
         # Network species with no k-table (unmodeled_absorbers). Stored, not
         # just logged: a model-cache hit never solves, so the GUI has no other
-        # way to say the spectrum is a lower bound on the true contrast.
+        # way to say the contrast carries an unsigned opacity error.
         unmodeled=np.array([f"{sp}|{v:.3e}" for sp, v in _unmodeled],
                            dtype="U32"),
         # AD dlnCO oxygen-reservoir margin on the build column and on the
@@ -2182,12 +2429,18 @@ def run_model(params: dict, log=print) -> Path:
         arrays["fs_flux"] = np.asarray(fs_j, dtype=np.float64)
         # Fp derived exactly from the stored eclipse depth (lnR0 = 0 baseline)
         arrays["fp_flux"] = depth * np.asarray(fs_j) / _depth_norm_em0
-        arrays["emis_tau_bottom_min"] = np.array([emis_tau_min])
-        # per-removed-molecule bottom-tau certificate (aligned with wo_mols)
-        arrays["emis_tau_bottom_min_wo"] = emis_tau_min_wo
-        # The FLUX-WEIGHTED certificate is what the gates use; the min-tau
-        # arrays above are provenance only.
-        arrays["emis_thin_flux_frac"] = np.array([emis_thin_frac])
+        # ... and the same scalar lets detect recover every removed-molecule
+        # Fp from its stored depth, which the band-restricted gate needs.
+        arrays["emis_depth_norm"] = np.array([_depth_norm_em0])
+        # PER-WAVELENGTH bottom optical depth. The band-global fraction below
+        # cannot certify a narrower observing band -- a mode measuring 8% of
+        # the emitted energy amplifies a local leak ~12x -- so detect
+        # re-evaluates the gate over the wavelengths its operator actually
+        # covers, which needs tau, not a reduction of it.
+        arrays["emis_tau_bottom"] = _tau_b
+        arrays["emis_tau_bottom_wo"] = (np.asarray(_tau_wo_j) if wo_list
+                                        else np.zeros((0, _tau_b.size)))
+        # the BAND-GLOBAL per-molecule certificate detect enforces per target
         arrays["emis_thin_flux_frac_wo"] = emis_thin_wo
     if jac is not None:
         arrays["jac"] = jac

@@ -53,7 +53,7 @@ _GLOBAL_BOUNDS = {
 # planets.CUSTOM_FIELD_RANGES with the widgets; the rest are widget literals.
 _PLANET_BOUNDS = {
     **planets.CUSTOM_FIELD_RANGES,
-    "tbase": (0.5, 10.0),
+    "tbase": (0.5, 20.0),
     "tirr": (800.0, 2500.0), "tint": (50.0, 500.0),
     "lk": (-4.0, 0.0), "lg": (-2.0, 0.3),
     "kzz": (6.0, 12.0), "kzkmax": (4.0, 11.0), "kzplev": (-5.0, 2.0),

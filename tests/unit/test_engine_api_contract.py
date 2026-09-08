@@ -179,3 +179,33 @@ def test_pinned_engine_floor_is_recorded():
     to_t = lambda v: tuple(int(x) for x in v.split(".")[:3])   # noqa: E731
     assert to_t(got) >= to_t(floor), (
         f"installed vulcan-forward {got} is below this tool's floor {floor}")
+
+
+def test_the_chemistry_radius_anchor_matches_the_engines_own_rule():
+    """`forward.chem_radius_anchor_bar` RESTATES one engine rule -- which grid
+    interface VULCAN anchors g = G*Mp/Rp**2 at -- because the engine offers no
+    way to ask. Restating is only safe while it agrees, so check it against
+    `compute_mu_dz_g` on both branches (gas giant reaching 1 bar; shallow or
+    rocky column). If this fails the engine moved its anchor and the tool is
+    handing chemistry a radius quoted at the wrong pressure."""
+    if importlib.util.find_spec("vulcan_jax") is None:        # pragma: no cover
+        pytest.skip("VULCAN-JAX not installed (light CI job)")
+    import numpy as np
+    from types import SimpleNamespace
+    from jwst_tool import forward
+    from vulcan_jax.atm_setup import compute_mu_dz_g, compute_pico
+
+    for p_b_bar, p_t_bar, nz, rocky in ((7.6, 1e-7, 100, False),
+                                        (300.0, 1e-7, 60, False),
+                                        (7.6, 1e-7, 100, True),
+                                        (0.5, 1e-7, 40, False)):
+        pco = np.logspace(np.log10(p_b_bar * 1e6), np.log10(p_t_bar * 1e6), nz)
+        pico = np.asarray(compute_pico(pco))
+        cfg = SimpleNamespace(Mp=5.4e29, Rp=9.1e9, rocky=rocky,
+                              P_b=p_b_bar * 1e6, use_moldiff=False)
+        out = compute_mu_dz_g(cfg, np.full((nz, 1), 1.0), np.array([2.3]),
+                              pico, np.full(nz, 1200.0))
+        engine = float(pico[int(out["pref_indx"])]) / 1e6
+        assert forward.chem_radius_anchor_bar(
+            pco / 1e6, p_b_bar * 1e6, rocky) == pytest.approx(engine, rel=0), (
+            f"anchor rule drifted at P_b={p_b_bar} rocky={rocky}")

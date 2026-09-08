@@ -46,8 +46,7 @@ STARS = {
 MODE_KEYS = ("nirspec_prism", "nirspec_g395h", "nirspec_g235h", "niriss_soss",
              "nircam_f322w2", "nircam_f444w", "miri_lrs",
              "nirspec_g395m",
-             "nirspec_g140h", "nirspec_g235m", "niriss_soss_ord2",
-             "nircam_f277w")
+             "nirspec_g140h", "nirspec_g235m", "nircam_f277w")
 
 # Modes that MUST produce a valid unsaturated comparison somewhere in the
 # matrix; a silently missing row would otherwise shrink the claim.

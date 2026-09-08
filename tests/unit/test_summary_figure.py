@@ -7,6 +7,8 @@ saves to both PNG and vector PDF.
 import io
 
 import matplotlib
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -305,7 +307,7 @@ def test_wide_co_panel_frames_the_curve_it_drew(sigma_ln):
     does -- set_xlim(inf) is a hard matplotlib error, and a merely large 1e62
     frames the panel on empty decades. So the window is clamped to the curve
     that was actually drawn. 1.33 is a real HD 149026 b run; 41 and 920 are
-    niriss_soss_ord2 (notes.md), the widths that used to read "unconstrained".
+    real SOSS order-2 widths (notes.md) that used to read "unconstrained".
     """
     lo, hi = posteriors.co_curve_bounds()
     curve = posteriors.ln_gaussian_curve(0.55, sigma_ln, bounds=(lo, hi))
@@ -344,3 +346,9 @@ def test_mock_center_outside_the_solvable_range_is_refused():
     assert posteriors.mock_center_co(0.55, 506.0, -3.0) is None  # -> 0.027
     inside = posteriors.mock_center_co(0.55, 506.0, 1.0)
     assert inside is not None and lo <= inside <= hi
+
+
+def test_gui_style_is_the_validation_style():
+    root = Path(__file__).resolve().parents[2]
+    assert (root / "src/jwst_tool/science.mplstyle").read_bytes() == \
+           (root / "validation/science.mplstyle").read_bytes()

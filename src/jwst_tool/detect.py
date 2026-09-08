@@ -25,10 +25,10 @@ is held at the specified state, and a retrieval that frees more parameters
 under the same model and noise assumptions will usually report a lower
 significance (a best-case comparison under those conditions, not a universal
 bound). When a Fisher Jacobian is available, ``sigma_detect_proj``
-additionally projects out the available T-P, lnR0, AND cloud derivative
-directions (_NUISANCE_JAC below; still conditional) and is the number to
-prefer for narrow margins -- any caption describing it must include the
-cloud directions.
+additionally projects out whichever of the T-P, lnR0 and cloud derivative
+directions the run actually built (_NUISANCE_JAC below; still conditional) and
+is the number to prefer for narrow margins -- any caption describing it must
+name the rows that were present, which metric_label does.
 
 Multi-transit extrapolation: the random term scales as 1/N; the minimum
 floor is a hard lower bound at every N, so "transits to target" saturates
@@ -122,10 +122,23 @@ def detection_significance(signal: np.ndarray, sigma: np.ndarray,
 
 
 # Which statistic a reported template S/N actually is. They are not
-# interchangeable: the projected one additionally profiles the T-P / cloud /
-# lnR0 directions, so it answers "after those are fitted away", and a bare
-# number that could be either is not a reportable quantity.
-METRIC_LABEL = {True: "T-P + cloud projected", False: "calibration profiled"}
+# interchangeable: the projected one additionally profiles whichever of the
+# T-P / cloud / lnR0 directions the run BUILT, so it answers "after those are
+# fitted away", and a bare number that could be either is not a reportable
+# quantity.
+def metric_label(r: dict) -> str:
+    """Name the nuisance directions the reported score actually profiled.
+
+    The rows actually PRESENT, never the rows the statistic could use."""
+    if not np.isfinite(float(r.get("sigma_detect_proj", float("nan")))):
+        return "calibration profiled"
+    cloud = frozenset(forward.CLOUD_FISHER_PARAMS)
+    have = {str(n) for n in r.get("jac_names", [])}
+    parts = ["calibration"] + [
+        lab for lab, grp in (("T-P", _NUISANCE_JAC - cloud - {"lnR0"}),
+                             ("cloud", cloud),
+                             ("R0", frozenset({"lnR0"}))) if have & grp]
+    return " + ".join(parts) + " projected"
 
 
 def detection_metric(r: dict) -> tuple[float, bool]:
@@ -273,18 +286,117 @@ def _removed_spectrum(model: dict, mols: list[str], target_mol,
         # carrying a thousandth of the emitted flux must not refuse a target.
         # run_model writes this key with every emission model, and _VERSION
         # rides in the cache key, so a readable model always carries it.
-        if "emis_thin_flux_frac_wo" in model:
-            frac = float(np.asarray(model["emis_thin_flux_frac_wo"])[index])
-            if np.isfinite(frac) and frac > forward.EMIS_THIN_FLUX_FRAC:
-                raise ValueError(
-                    f"{target_mol} emission detection is not supported for "
-                    f"this atmosphere: with {target_mol} removed, "
-                    f"{100.0 * frac:.1f}% of the emitted flux comes from "
-                    "wavelengths where the RT column bottom is optically thin, "
-                    "so its eclipse detection contrast would be overstated. "
-                    "Detect a molecule with deeper opacity, or use "
-                    "transmission.")
+        if "emis_thin_flux_frac_wo" not in model:
+            raise ValueError("cached emission model is missing its removed-molecule certificate")
+        try:
+            cert = np.asarray(model["emis_thin_flux_frac_wo"], dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("cached emission model has a malformed certificate") from exc
+        if (cert.ndim != 1 or cert.shape != (len(wo),)
+                or not np.all(np.isfinite(cert))
+                or np.any((cert < 0.0) | (cert > 1.0))):
+            raise ValueError(
+                "cached emission model has a malformed removed-molecule certificate")
+        frac = float(cert[index])
+        if frac > forward.EMIS_THIN_FLUX_FRAC:
+            raise ModeUnusable(
+                f"{target_mol} emission detection is not supported for "
+                f"this atmosphere: with {target_mol} removed, "
+                f"{100.0 * frac:.1f}% of the emitted flux comes from "
+                "wavelengths where the RT column bottom is optically thin, "
+                "so its eclipse detection contrast would be overstated. "
+                "Detect a molecule with deeper opacity, or use "
+                "transmission.")
+        return _emis_evidence(model, "depth_wo", (len(wo), order.size))[index][order]
     return np.asarray(model["depth_wo"])[index][order]
+
+
+class ModeUnusable(ValueError):
+    """This mode's data cannot support the requested measurement.
+
+    Distinct from a calculation failure: the caller reports it with the mode's
+    CONFIGURATION and drops the mode from every ranking and forecast, rather
+    than showing a traceback for something that is a property of the target."""
+
+
+# Keep the existing padded-band check and check usable cells separately:
+# thick flux in gaps or margins can dilute a fraction, so a wider band is
+# not conservative. The margin is a support approximation; the smoother
+# internally extends its working grid further to evaluate its kernels.
+_LSF_BAND_MARGIN = (0.97, 1.03)
+
+
+def _emis_evidence(model: dict, key: str, shape: tuple) -> np.ndarray:
+    """A cached emission-evidence array, validated. A missing or malformed one
+    refuses; it never defaults to safe."""
+    if key not in model:
+        raise ValueError(f"cached emission model is missing {key!r}")
+    try:
+        a = np.asarray(model[key], dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"cached emission model has a malformed {key!r}") from exc
+    if a.shape != shape or not np.all(np.isfinite(a)) or np.any(a < 0.0):
+        raise ValueError(f"cached emission model has a malformed {key!r}")
+    return a
+
+
+def _certify_emission_band(model: dict, order: np.ndarray, wl_model: np.ndarray,
+                           cell_lo, cell_hi, mode_key: str, target_mol,
+                           blurred: bool) -> None:
+    """Re-evaluate the thin-bottom gate over the wavelengths THIS mode measures.
+
+    The band-global certificate cannot certify a narrower band: a mode
+    measuring a small share of the emitted energy amplifies a local leak by the
+    inverse of that share (measured on the shipped columns: 5.9x for MIRI LRS,
+    11.9x for SOSS order 2), so a spectrum can pass at 1% globally while the
+    band actually being measured is far thinner. Same gate, same threshold,
+    restricted support. Raises so the mode is excluded from every ranking and
+    forecast rather than reporting a contrast the column cannot support."""
+    n = wl_model.size
+    tau = _emis_evidence(model, "emis_tau_bottom", (n,))[order]
+    flux = _emis_evidence(model, "fp_flux", (n,))[order]
+    lo, hi = float(np.min(cell_lo)), float(np.max(cell_hi))
+    measured = np.zeros(n, dtype=bool)
+    for a, b in zip(cell_lo, cell_hi):
+        measured |= (wl_model >= a) & (wl_model <= b)
+    if blurred:
+        lo, hi = lo * _LSF_BAND_MARGIN[0], hi * _LSF_BAND_MARGIN[1]
+    m = (wl_model >= lo) & (wl_model <= hi)
+    if int(measured.sum()) < 2:
+        raise ValueError(
+            f"{mode_key}: fewer than two model bands inside its measured "
+            f"support {lo:.3f}-{hi:.3f} um; the emission certificate cannot "
+            "be evaluated")
+    nu = 1.0e4 / wl_model
+    stages = [("baseline", tau, flux)]
+    if target_mol is not None:
+        wo = [str(x) for x in np.asarray(model["wo_mols"])]
+        i = wo.index(target_mol)
+        norm = float(_emis_evidence(model, "emis_depth_norm", (1,))[0])
+        if norm <= 0.0:
+            raise ValueError("cached emission model has a malformed emis_depth_norm: must be positive")
+        fs = _emis_evidence(model, "fs_flux", (n,))[order]
+        d_wo = _emis_evidence(model, "depth_wo", (len(wo), n))
+        stages.append((
+            f"with {target_mol} removed",
+            _emis_evidence(model, "emis_tau_bottom_wo", (len(wo), n))[i][order],
+            d_wo[i][order] * fs / norm))
+    for stage, tau_s, flux_s in stages:
+        frac = forward.thin_flux_fraction(tau_s[m], flux_s[m], nu[m])
+        # Retain the contiguous grid for bandwidths: slicing out gaps would
+        # make gradient(nu) assign the missing bandwidth to their neighbours.
+        core_frac = forward.thin_flux_fraction(
+            tau_s[m], np.where(measured[m], flux_s[m], 0.0), nu[m])
+        frac = max(frac, core_frac)
+        if frac > forward.EMIS_THIN_FLUX_FRAC:
+            # one line: this goes into the GUI's exclusion warning beside up
+            # to eleven others, so it states what and where, not what to do
+            raise ModeUnusable(
+                f"over the {lo:.2f}-{hi:.2f} um it measures, "
+                f"{100.0 * frac:.1f}% of the emitted flux ({stage}) comes "
+                "from wavelengths where the RT column bottom is optically "
+                f"thin (tau < {forward.EMIS_TAU_THIN:g}), above the "
+                f"{100.0 * forward.EMIS_THIN_FLUX_FRAC:g}% tolerance")
 
 
 def _usable_pixels(mode_key: str, mode_result: dict) -> tuple:
@@ -358,7 +470,6 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
     # high-R modes. Pixel cells extend at most one native pixel past the
     # bin span, hence the margin.
     r_native = mode_result.get("r_native")
-    lsf_applied = False
     jac_rows = None
     if "jac" in model:
         jac_rows = [np.asarray(row)[order] for row in model["jac"]]
@@ -373,7 +484,11 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         # operator; the R(lambda) table excludes them too, since a repeated
         # abscissa is not a strictly ascending curve.
         po = np.flatnonzero(~degen)[np.argsort(wl_pix[~degen])]
-        flux_model = np.maximum(np.interp(wl_model, wl_pix[po], flux_pix[po]), 0.0)
+        # count DENSITY per d ln(lambda): pandeia's flux is counts per pixel
+        # COLUMN, whose widths vary across a band, and smooth_to_native_r
+        # integrates on a uniform ln-lambda grid
+        dens = flux_pix[po] / np.gradient(np.log(wl_pix[po]))
+        flux_model = np.maximum(np.interp(wl_model, wl_pix[po], dens), 0.0)
         # R(lambda) must go in ASCENDING wavelength order: the pandeia pixel
         # grid is dispersion order (MIRI LRS ships it 13.86 -> 5.02 um) and
         # smooth_to_native_r refuses an out-of-order curve, so this sort is
@@ -385,10 +500,6 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         r_curve = ins.lsf_r(mode_key, wl_r, r_nat[po])
         depth_sm = binning.smooth_to_native_r(wl_model, depth, wl_r, r_curve,
                                               b_lo, b_hi, weight=flux_model)
-        # metadata ONLY -- never gate the blur of OTHER vectors on this: a
-        # flat baseline is a fixed point of the LSF while a narrow Jacobian
-        # feature is not
-        lsf_applied = bool(np.any(depth_sm != depth))
         depth = depth_sm
         if depth_wo is not None:
             depth_wo = binning.smooth_to_native_r(wl_model, depth_wo, wl_r,
@@ -399,13 +510,18 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
                                                    r_curve, b_lo, b_hi,
                                                    weight=flux_model)
                         for row in jac_rows]
-    # else: no native-R exported, depth and Jacobians stay unblurred (every
-    # shipped low-R mode has a dispersion file)
+    # else: no native-R curve (synthetic input), depth and Jacobians stay unblurred
 
     edges = noise_mod.make_bins(lo, hi, R_bin)
     op = binning.build_operator(wl_pix, flux_pix, edges,
                                 wl_lo=float(wl_model.min()),
                                 wl_hi=float(wl_model.max()), valid=usable)
+    if str(model.get("science_mode", "transmission")) == "emission":
+        # over the support the operator ACTUALLY integrates, not the 1-15 um
+        # model band the cached certificate was measured on
+        _certify_emission_band(model, order, wl_model,
+                               op["cell_lo"], op["cell_hi"],
+                               mode_key, target_mol, r_native is not None)
     nz = noise_mod.depth_error_bins(mode_result, edges, t_in_s, t_out_s,
                                     n_transits, floor_spec, op=op,
                                     noise_inflation=noise_inflation)
@@ -425,13 +541,8 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         jac_bins = np.stack([binning.bin_model(op, wl_model, row)
                              for row in jac_rows])
     if depth_wo is not None:
-        d_wo_b = binning.bin_model(op, wl_model, depth_wo)
-        # The signal is built with the TOOL's operator while sigma comes from
-        # Pandeia's own extraction for this mode. Where the two disagree on how
-        # much of a narrow feature survives extraction, scale the signal to the
-        # measured response -- detection_significance is homogeneous of degree
-        # one in s, so the mismatch does not cancel.
-        s_b = (d_full_b - d_wo_b) * ins.RESPONSE_FACTOR.get(mode_key, 1.0)
+        s_b = d_full_b - binning.bin_model(op, wl_model, depth_wo)
+        d_wo_b = d_full_b - s_b
         sigma_detect = detection_significance(s_b, nz["sigma"], nuisance=steps)
         # also profile the T-P/cloud/lnR0 Jacobian directions (conditional)
         sigma_detect_proj = float("nan")
@@ -443,15 +554,34 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
     else:
         d_wo_b, sigma_detect, sigma_detect_proj = None, float("nan"), float("nan")
 
+    # CURATED, never passed through (ins.REPORTED_WARNINGS).
+    warnings = {k: str(v) for k, v in (mode_result.get("warnings") or {}).items()
+                if k in ins.REPORTED_WARNINGS}
+    _adv = ins.ngroup_advisory(
+        mode_key, mode_result["ngroup"], mode_result.get("sat_ngroups"))
+    if _adv:
+        warnings["ngroup"] = _adv
+    # per VISIT (one event plus its baseline): APT's data allocation is per
+    # visit, and so is PandExo's estimate this reproduces
+    _gb = ins.nircam_data_excess_gb(mode_key, mode_result["ngroup"],
+                                    (t_in_s + t_out_s) / 3600.0)
+    if _gb >= ins.NIRCAM_DATA_EXCESS_GB[0]:
+        _lim = ins.NIRCAM_DATA_EXCESS_GB[1]
+        warnings["data_excess"] = (
+            f"estimated data excess {_gb:.1f} GB per visit, "
+            f"{'above' if _gb > _lim else 'within'} the {_lim:g} GB APT "
+            "recommendation (PandExo's estimate of what APT computes; verify "
+            "there)")
+
     return dict(
         jac_bins=jac_bins, jac_names=jac_names,
+        warnings=warnings,
         mode_key=mode_key, label=m["label"],
         wl=nz["wl_center"],
         wl_eff=binning.bin_values(op, wl_pix),
         seg=seg,
         depth=d_full_b, depth_wo=d_wo_b, sigma=nz["sigma"],
         var_phot=nz["var_phot"], floor=nz["floor"],
-        lsf_applied=lsf_applied,
         n_transits_eval=int(nz["n_transits"]),
         sigma_detect=sigma_detect, sigma_detect_proj=sigma_detect_proj,
         median_sigma_ppm=float(np.median(nz["sigma"]) * 1e6),

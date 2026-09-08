@@ -28,8 +28,8 @@ a published source, intersected with the forward model's 1-15 um coverage
     2022 (A&A 661, A83) Table 2. NOT the nominal disperser table, which is
     wider: the BOTS values already carry the red-end detector cutoffs
     (G235x 3.07/3.12 there against a nominal 3.17).
-  * NIRISS -- the Pandeia order ranges for GR700XD (0.83-2.81 order 1,
-    0.63-1.26 order 2), rounded inward.
+  * NIRISS -- the Pandeia order-1 range for GR700XD (0.83-2.81), rounded
+    inward.
   * NIRCam -- the filter half-power points measured from the shipped
     transmission curves, rounded INWARD to 0.05 um.
   * MIRI -- LRS 5-12 um; the 5.0 short edge is the jwst-docs caution about
@@ -226,8 +226,10 @@ PANDEXO_UNBOUNDED_NGROUP = 65535
 # SCOPE (deliberate): each entry is ONE fixed detector configuration
 # (subarray + readout pattern), not the whole instrument mode. The tool ranks
 # these fixed configurations; it does NOT search alternate subarrays (PRISM
-# multistripe, other SOSS substrips) or optimize the readout pattern. The GUI
-# says so and shows each mode's configuration in the details table.
+# multistripe, other SOSS substrips) or optimize the readout pattern. Anywhere
+# a mode is reported unusable the GUI must NAME that configuration
+# (config_label): "NIRISS SOSS: saturated" reads as the instrument being
+# incapable of the target when it is one pinned subarray that is.
 #
 # ngroup_min equals pandeia 2026.7 `mingroups` for each mode's detector
 # (pandeia_data-2026.7-jwst/jwst/<instrument>/config.json detector_config:
@@ -392,7 +394,7 @@ MODES = {
         floor_ppm_suggested=15.0, ngroup_min=1,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
-    # Slots 9-12, appended in this order on purpose -- see the palette note
+    # Slots 9-11, appended in this order on purpose -- see the palette note
     # above. Tokens verified against pandeia_data-2026.7-jwst config.json
     # files and one live Pandeia 2026.7 calculation per mode; r_native_med is
     # the median R(lambda) of the refdata dispersion file over the registry
@@ -434,38 +436,6 @@ MODES = {
         floor_ppm_suggested=15.0, ngroup_min=1,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
-    # SOSS order 2: same optics and subarray as order 1, extracted at
-    # strategy order=2. Instrument order-2 band is 0.63-1.26 um
-    # (pandeia range gr700xd_2), so the model's 1.0 um short edge leaves a
-    # NARROW usable band, 1.0-1.26 um -- deliberate: it is the only
-    # higher-R-than-PRISM coverage at the short end besides G140H.
-    #
-    # ORDER 1 AND ORDER 2 ARE ONE EXPOSURE, not two. SUBSTRIP256 records both
-    # traces in a single readout, so selecting both registry modes costs one
-    # observation, not two, while the tool's transit count is per mode.
-    # Saturation follows from the same fact: Pandeia builds one CombinedSignal
-    # over all SOSS orders, so `fraction_saturation` (and therefore the
-    # `saturated` verdict) is measured over the WHOLE detector image and is
-    # driven by the brighter order-1 trace -- the two modes always report the
-    # identical ramp, sat_frac and cadence. jwst-docs puts the SUBSTRIP256
-    # bright limit at J ~ 8.5 in order 1 but J ~ 6.3 in order 2, so between
-    # those magnitudes the order-2 trace is still clean while this mode is
-    # reported saturated. That is conservative, not optimistic; changing the
-    # verdict would mean giving the ramp search a per-order saturation
-    # measure, which also drops PandExo parity.
-    "niriss_soss_ord2": dict(
-        label="NIRISS SOSS (ord 2)",
-        instrument="niriss", mode="soss",
-        config=dict(instrument=dict(filter="clear", disperser="gr700xd"),
-                    detector=dict(subarray="substrip256",
-                                  readout_pattern="nisrapid")),
-        strategy=dict(order=2),
-        background="ecliptic", background_level="medium",
-        wl_min=1.0, wl_max=1.26,
-        r_native_med=1140,   # measured median 1137 over 1.0-1.26 um
-        floor_ppm_suggested=20.0, ngroup_min=1,
-        ngroup_max=30,
-    ),
     # F277W: the fourth NIRCam LW grism TSO filter this registry covers.
     # Band 2.45-3.1 = the filter's half-power points (2.419-3.130, measured
     # from the shipped transmission curve) rounded inward to 0.05, the same
@@ -497,7 +467,6 @@ MODES = {
 # 0.94-1.02 and are left at 1. RE-MEASURE ON ANY REFDATA OR PSF CHANGE.
 LSF_WIDTH = {
     "niriss_soss": ((1.1, 1.39), (1.5, 1.41), (2.0, 1.48), (2.6, 1.58)),
-    "niriss_soss_ord2": ((1.1, 1.33),),
     "nircam_f277w": ((2.6, 1.37),),
     "nircam_f322w2": ((2.6, 1.37), (3.1, 1.43), (3.6, 1.45)),
     "nircam_f444w": ((4.1, 1.46), (4.6, 1.44)),
@@ -505,19 +474,108 @@ LSF_WIDTH = {
 }
 
 
-# Amplitude of the extracted line response relative to what the tool's own
-# LSF + binning operator predicts, per mode: obs(Pandeia)/pred(tool) for a
-# narrow line at R=100 (parity_summary.json ["lsf_impulse"][mode][line]
-# ["applied"]["r100_bin_ratio"]). The width fit above is amplitude-free and
-# cannot absorb this. 34 of 35 measured mode/wavelength entries sit at
-# 0.95-1.004 and need no correction; NIRISS SOSS order 2 recovers only 0.83,
-# because its order-2 extraction is not the primary trace. Without this the
-# detection signal comes from the tool's operator while sigma comes from
-# Pandeia's extraction, and the score is inflated by 1/0.83 = 1.20x.
-# RE-MEASURE ON ANY REFDATA OR PSF CHANGE.
-RESPONSE_FACTOR = {
-    "niriss_soss_ord2": 0.832,
+# Per-mode advised ceiling on the saturation fraction. STScI's SOSS Known
+# Issues, from commissioning PID 1541 on HAT-P-14 b: keep counts below
+# 56,000 e-, above which the light curves "exhibited degraded precision".
+# Pandeia's NIRISS saturation_fullwell is 72,000 e- (jwst/niriss/config.json,
+# detector_config default), so the advised fraction is 56000/72000 = 0.778 --
+# below the 0.80 default, which allows 57,600 e-. It is a PRECISION ceiling,
+# not physical saturation.
+#
+# REPORTED, NEVER APPLIED (no silent substitution, and applying it would move
+# measured worker output without moving a parity gate key). The user lowers
+# the slider; the tool says so.
+SAT_LIMIT_ADVISED = {
+    "niriss_soss": 56000.0 / 72000.0,
 }
+
+# Pandeia warning keys worth showing. The rest of its dict is housekeeping the
+# tool never consumes -- `bad_waveref` is about 2D diagnostic planes (only
+# rpt["1d"] is read), `wavelength_truncated_blue_0` / `scene_range_truncated`
+# are a 0.51-vs-0.50 um SED blue-limit mismatch -- and forwarding it verbatim
+# put a permanent yellow box of internal tokens on nearly every NIRCam run.
+REPORTED_WARNINGS = frozenset({"full_saturated", "partial_saturated"})
+
+
+def config_label(mode_key: str) -> str:
+    """The pinned detector configuration, for any message that reports a mode
+    as unusable -- the SCOPE note above is why this is never omitted."""
+    det = MODES[mode_key].get("config", {}).get("detector", {})
+    return "/".join(str(det[k]).upper() for k in ("subarray", "readout_pattern")
+                    if det.get(k))
+
+
+# MIRI's advice concerns the selected ramp; NIRCam and general TSO advice
+# concern the estimated group at saturation. These notes never change the
+# worker's ramp search or its minimum group count.
+def ngroup_advisory(mode_key: str, ngroup, sat_ngroups=None) -> str:
+    """Selected-ramp and early-saturation risks, when supported by the result."""
+    instrument = MODES[mode_key]["instrument"]
+    notes = []
+    if instrument == "miri" and int(ngroup) < 6:
+        notes.append(f"{int(ngroup)}-group ramp; STScI describes MIRI ramps with "
+                     "2-5 groups as very difficult to calibrate accurately")
+    # A missing saturation estimate is not evidence of early saturation.
+    if sat_ngroups is not None and np.isfinite(float(sat_ngroups)):
+        threshold = 4 if instrument == "nircam" else 3
+        if 0 <= float(sat_ngroups) < threshold:
+            notes.append(
+                f"estimated saturation at {float(sat_ngroups):.2g} groups; "
+                + ("STScI advises avoiding NIRCam saturation before 4 groups"
+                   if instrument == "nircam" else
+                   "STScI identifies saturation before 3 groups as a risk "
+                   "requiring instrument-specific guidance"))
+    return "; ".join(notes)
+
+
+def sat_limit_advisory(mode_key: str, sat_limit: float) -> str:
+    """Note for a run whose saturation limit exceeds this mode's published
+    advice, or "" when it does not. Advice only -- nothing is changed."""
+    advised = SAT_LIMIT_ADVISED.get(mode_key)
+    if advised is None or float(sat_limit) <= advised:
+        return ""
+    return (f"saturation limit {float(sat_limit):.2f} is above the "
+            f"{advised:.3f} (56,000 e-) STScI advises for SOSS precision")
+
+
+# NIRCam grism TSO data excess: PandExo's estimate of what APT computes
+# (pandexo/engine/jwst.py `estimate_nircam_data_excess`; reproduces the
+# parity artifact's 27.82 / 27.54 GB rows to 2e-4 GB). Raw data-generation
+# rate of the standard grism template (two SW + one LW detector) on a
+# 4-output subgrism subarray, the sustainable downlink rate, and the no-TA
+# overhead APT allocates nominal volume over (694 s scheduling + 2100 s
+# initial slew; PandExo's extra half frame is < 1e-3 GB and dropped).
+# Reported per visit, never ranked on: APT decides.
+NIRCAM_RAW_GROUP_RATE_GB_PER_HOUR = 8.60103
+NIRCAM_SUSTAINABLE_GB_PER_HOUR = 3.132
+NIRCAM_ALLOCATION_OVERHEAD_S = 694.0 + 2100.0
+NIRCAM_DATA_EXCESS_GB = (5.0, 15.0)         # PandExo's flag threshold, APT limit
+# readout pattern -> (frame cadence per group, frames averaged per group)
+NIRCAM_READOUT = {"rapid": (1, 1), "bright1": (2, 1), "bright2": (2, 2),
+                  "shallow2": (5, 2), "shallow4": (5, 4), "medium2": (10, 2),
+                  "medium8": (10, 8), "mediumdeep2": (15, 2),
+                  "mediumdeep8": (15, 8), "deep2": (20, 2), "deep8": (20, 8)}
+
+
+def nircam_data_excess_gb(mode_key: str, ngroup, exposure_hours: float) -> float:
+    """Estimated data excess (GB) of one visit of ``exposure_hours`` on a
+    NIRCam grism mode; 0.0 for every other instrument."""
+    m = MODES[mode_key]
+    if m["instrument"] != "nircam":
+        return 0.0
+    det = m["config"]["detector"]
+    if not str(det["subarray"]).startswith("subgrism"):
+        raise ValueError(f"{mode_key}: data-excess rate is known for the "
+                         "4-output subgrism subarrays only")
+    cadence, nframe = NIRCAM_READOUT[str(det["readout_pattern"]).lower()]
+    ngroup = int(ngroup)
+    clock_frames = 1 + nframe + (ngroup - 1) * cadence
+    saved_groups = ngroup + int(nframe > 1)
+    rate = (NIRCAM_RAW_GROUP_RATE_GB_PER_HOUR * saved_groups / clock_frames
+            - NIRCAM_SUSTAINABLE_GB_PER_HOUR)
+    allocation = (NIRCAM_SUSTAINABLE_GB_PER_HOUR
+                  * NIRCAM_ALLOCATION_OVERHEAD_S / 3600.0)
+    return max(0.0, rate * float(exposure_hours) - allocation)
 
 
 def lsf_r(key: str, wl, r_native):
