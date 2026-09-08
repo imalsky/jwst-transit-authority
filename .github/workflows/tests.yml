@@ -43,7 +43,7 @@ jobs:
         # keeps the two in lock-step), so CI validates the sibling code that
         # actually deploys, not whatever main points to at run time.
         run: |
-          pip install "jax>=0.6" numpy scipy matplotlib pytest
+          pip install "jax>=0.6" numpy scipy matplotlib pytest pyyaml
           source deploy/pins.env
           pip install --no-deps "vulcan-jax @ git+https://github.com/imalsky/jax-vulcan.git@${VULCAN_JAX_SHA}"
           pip install --no-deps "vulcan-forward @ git+https://github.com/imalsky/vulcan-forward.git@${VULCAN_FORWARD_SHA}"
