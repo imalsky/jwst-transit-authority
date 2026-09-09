@@ -75,7 +75,9 @@ def detection_significance(signal: np.ndarray, sigma: np.ndarray,
     is Jacobi-normalized (correlation form) before the rank-revealing
     eigen-threshold -- never threshold raw eigenvalues of a mixed-unit
     matrix. Numerically null directions are dropped rather than inverted;
-    zero-norm rows are excluded outright.
+    zero-norm rows are excluded outright. A profiled chi^2 below 1e-12 of
+    the raw chi^2 is the projection's own rounding noise and returns
+    exactly 0.
 
     The metric is the exact diagonal W = diag(1/sigma^2).
 
@@ -101,7 +103,7 @@ def detection_significance(signal: np.ndarray, sigma: np.ndarray,
     rows = [np.ones_like(signal)] if marginalize_offset else []
     rows += [np.asarray(r, float) for r in (nuisance or [])]
     w = 1.0 / np.asarray(sigma, float) ** 2
-    chi2 = float(np.sum(w * signal ** 2))
+    chi2 = chi2_raw = float(np.sum(w * signal ** 2))
     if rows:
         U = np.stack(rows)
         A = (U * w) @ U.T
@@ -118,6 +120,10 @@ def detection_significance(signal: np.ndarray, sigma: np.ndarray,
             if good.any():
                 proj = ev[:, good].T @ bn
                 chi2 -= float(np.sum(proj ** 2 / ew[good]))
+    if chi2 <= 1e-12 * chi2_raw:
+        # below the eigen-threshold's own resolution: the projection's
+        # rounding noise, not shape information -- report exactly 0
+        chi2 = 0.0
     return float(np.sqrt(max(chi2, 0.0)))
 
 
@@ -216,21 +222,32 @@ def transits_to_target(result: dict, target_sig: float, *,
 
     Returns dict(n=int|None, reachable=bool, sig_inf=float). ``sig_inf`` is
     the infinite-transit (floor-only) limit; the score is monotone in N
-    (diagonal noise; sigma_N = max(sigma_random_N, floor)), so sig_inf is an
-    exact ceiling and a target above it is unreachable. With no floor set
-    anywhere, ``sig_inf`` is inf and unreachable means "needs more than the
-    N_TRANSITS_CAP scan limit", not a systematic ceiling.
+    (diagonal noise; sigma_N = max(sigma_random_N, floor)), so when every
+    bin carries a positive floor sig_inf is an exact ceiling and a target
+    above it is unreachable. With no floor set anywhere ``sig_inf`` is inf,
+    or 0 when the signal lies entirely in the profiled nuisance span
+    (unreachable at every N); with a mixed floor (some bins at 0 ppm) it is
+    nan and only the N_TRANSITS_CAP scan decides. Unreachable without a
+    finite sig_inf means "needs more than the scan limit", not a systematic
+    ceiling.
     """
     if result.get("depth_wo") is None:
         return dict(n=None, reachable=False, sig_inf=float("nan"))
     floor = np.asarray(result["floor"])
     if not has_floor(result):
-        # no floor: the limit is genuinely INFINITE (report inf, not the
-        # ~1e26 the 1e-30 clip would give)
-        sig_inf = float("inf")
+        # no floor: the score grows as sqrt(N) without bound, so the limit
+        # is inf -- unless the signal lies in the nuisance span, where it is
+        # 0 at every N (exactly 0: detection_significance snaps it)
+        sig_inf = (float("inf")
+                   if detection_score(result, sigma_at_transits(result, 1),
+                                      projected=projected) > 0.0
+                   else 0.0)
+    elif np.all(floor > 0.0):
+        sig_inf = detection_score(result, floor, projected=projected)
     else:
-        sig_inf = detection_score(result, np.maximum(floor, 1e-30),
-                                  projected=projected)
+        # mixed floor (some bins at 0 ppm): a clipped zero bin would weigh
+        # 1e60 and is not a limit; report nan and let the bounded scan decide
+        sig_inf = float("nan")
     if target_sig > sig_inf:
         return dict(n=None, reachable=False, sig_inf=sig_inf)
     for n in range(1, N_TRANSITS_CAP + 1):

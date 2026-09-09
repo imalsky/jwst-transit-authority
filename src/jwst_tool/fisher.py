@@ -334,11 +334,15 @@ def transits_to_target(result: dict, free_names: list[str], gp: str,
     on ``gp`` reaches ``target_display``, with the systematic floor respected.
 
     Returns dict(n, reachable, sig_inf); ``sig_inf`` is the infinite-transit
-    (floor-only) limit in display units. The forecast is monotone in N
-    (diagonal noise), so a target below sig_inf short-circuits to
-    unreachable. With no floor set anywhere, sig_inf is 0.0 and
-    unreachability then means the target needs more than N_TRANSITS_CAP
-    transits.
+    (floor-only) limit in display units, evaluated only when every bin
+    carries a positive floor. The forecast is monotone in N (diagonal
+    noise), so a target below sig_inf then short-circuits to unreachable.
+    With no floor set anywhere sig_inf is 0.0, or inf when ``gp`` is a null
+    direction of the Fisher matrix (unconstrained at every N); with a mixed
+    floor (some bins at 0 ppm) it is nan and only the N_TRANSITS_CAP scan
+    decides.
+    Unreachable without a positive finite sig_inf means the target needs
+    more than N_TRANSITS_CAP transits.
     """
     from . import detect as _detect  # local import: fisher stays numpy-only otherwise
 
@@ -349,13 +353,21 @@ def transits_to_target(result: dict, free_names: list[str], gp: str,
 
     _floor = np.asarray(result["floor"])
     if not _detect.has_floor(result):
-        # No floor: nothing caps the precision, so report 0.0 -- the
-        # 1e-30-clipped value would be a spurious reachability gate.
-        sig_inf = 0.0
-    else:
-        sig_inf = _sig_with(np.maximum(_floor, 1e-30))
+        # no floor: precision improves without bound, so the limit is 0.0 --
+        # unless gp is a null direction, which stays null at every N (inf;
+        # the whitened rank decision is invariant under the uniform
+        # rescaling of a no-floor sigma_N)
+        sig_inf = 0.0 if np.isfinite(_sig_with(result["sigma"])) else float("inf")
+    elif np.all(_floor > 0.0):
+        sig_inf = _sig_with(_floor)
         if not np.isfinite(sig_inf):
+            # a null direction at the floor stays null at every finite N
             return dict(n=None, reachable=False, sig_inf=sig_inf)
+    else:
+        # mixed floor (some bins at 0 ppm): a clipped zero bin would weigh
+        # 1e60 and collapse the whitened rank; report nan and let the
+        # bounded scan decide
+        sig_inf = float("nan")
     if target_display < sig_inf:
         return dict(n=None, reachable=False, sig_inf=sig_inf)
     for n in range(1, _detect.N_TRANSITS_CAP + 1):

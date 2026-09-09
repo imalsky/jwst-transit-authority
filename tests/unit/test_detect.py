@@ -25,6 +25,13 @@ def test_offset_profiled_out():
     s2 = detect.detection_significance(np.array([3e-4]), np.array([1e-4]),
                                        marginalize_offset=False)
     assert s2 == pytest.approx(3.0, rel=1e-12)
+    # an in-span signal scores EXACTLY 0 under any positive weights: the
+    # projection's rounding residual (up to ~4e-8 relative) is snapped, so
+    # "score > 0" is a real test of identifiability, never a coin flip
+    rng = np.random.default_rng(0)
+    for _ in range(50):
+        err = 10.0 ** rng.uniform(-5, -3, sig.size)
+        assert detect.detection_significance(sig, err) == 0.0
 
 
 def test_segment_step_profiled_out_but_real_feature_survives():

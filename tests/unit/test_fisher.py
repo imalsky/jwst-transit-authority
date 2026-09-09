@@ -321,14 +321,32 @@ def _fisher_result(floor_ppm: float, n=60) -> dict:
 
 def test_fisher_transits_to_target_limits():
     """Precision improves without bound with no floor, so the display-unit
-    limit is exactly 0.0 (never a finite clip artifact like 1e-26) and the
-    scan stays monotone; a floored result keeps a finite positive limit."""
+    limit is exactly 0.0 (never a finite clip artifact like 1e-26), or inf
+    for a direction the Jacobian never constrains, and the scan stays
+    monotone; a floored result keeps a finite positive limit; a
+    MIXED floor (one bin at 0 ppm) reports nan and scans instead of gating
+    on the ill-conditioned floor-only limit."""
     names = ["lnZ", "lnKzz", "lnR0"]
     tt = fisher.transits_to_target(_fisher_result(0.0), names, "lnZ", 1e9)
     assert tt["sig_inf"] == 0.0
     assert tt["reachable"]
     tt2 = fisher.transits_to_target(_fisher_result(100.0), names, "lnZ", 1e9)
     assert np.isfinite(tt2["sig_inf"]) and tt2["sig_inf"] > 0.0
+    # one transit already meets the 0.1 dex target here (0.031 dex); the
+    # clipped zero bin used to collapse the whitened rank -> unreachable
+    r = dict(jac_bins=1e-3 * np.array([[1, 0, -1, 0], [0, 1, 0, -1.0]]),
+             sigma=np.full(4, 1e-4), var_phot=np.full(4, 1e-8),
+             floor=np.array([0.0, 1e-5, 1e-5, 1e-5]), n_transits_eval=1,
+             seg=np.zeros(4, int))
+    tt3 = fisher.transits_to_target(r, ["lnZ"], "lnZ", 0.1)
+    assert tt3["reachable"] and tt3["n"] == 1 and np.isnan(tt3["sig_inf"])
+    # an unconstrained direction (zero Jacobian row) stays unconstrained at
+    # every N: the limit is inf, never "0.0" with a failed scan
+    rz = _fisher_result(0.0)
+    rz["jac_bins"] = rz["jac_bins"].copy()
+    rz["jac_bins"][0] = 0.0
+    assert fisher.transits_to_target(rz, names, "lnZ", 0.1) == \
+        dict(n=None, reachable=False, sig_inf=float("inf"))
 
 
 def test_co_width_is_the_value_and_error_in_log10():

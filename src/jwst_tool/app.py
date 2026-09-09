@@ -1184,10 +1184,7 @@ with st.sidebar:
             # the same number for either coordinate.
             log_p_top = st.number_input(
                 "log10 cloud top pressure (bar)", -6.0, 1.0, -3.0, 0.25,
-                key=K("cpt"),
-                help="Pressure where the gray cloud's slant optical depth "
-                     "reaches 1, for mean molecular weight "
-                     f"{planets.MMW_CLOUD} at the system's T_eq.")
+                key=K("cpt"))
             cloud_top_bar = 10.0 ** log_p_top
             log_kappa_cloud = planets.gray_cloud_log_kappa(
                 cloud_top_bar, g_ms2 * 100.0, rp, teq)
@@ -2027,7 +2024,7 @@ if goal_r == "detect":
                 best, tsig, projected=_best_projected)
             if tt["reachable"]:
                 _verdict_slot.warning(verdict + f"  {tt['n']} {_ev}s reach it.")
-            elif detect.has_floor(best):
+            elif detect.has_floor(best) and not np.isnan(tt["sig_inf"]):
                 _verdict_slot.warning(verdict
                            + f"  Floor caps it at {tt['sig_inf']:.1f}σ.")
             else:
@@ -2077,7 +2074,10 @@ else:
                                            co_eval=co_eval)
         if tt["reachable"]:
             _verdict_slot.warning(verdict + f"  {tt['n']} {_ev}s reach it.")
-        elif detect.has_floor(best_r):
+        elif np.isinf(tt["sig_inf"]):
+            _verdict_slot.warning(verdict + f"  {glabel} is unconstrained "
+                       f"at any {_ev} count.")
+        elif detect.has_floor(best_r) and not np.isnan(tt["sig_inf"]):
             _verdict_slot.warning(verdict + "  Floor caps it at "
                        f"±{tsig * tt['sig_inf']:.3g}{usp}.")
         else:
