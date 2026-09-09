@@ -195,23 +195,16 @@ st.title("How to use this tool")
 st.subheader("Warning: This tool is in beta mode. That means if you find "
              "a bug, you beta email isaacmalsky@gmail.com")
 st.markdown(
-    "0. **Configuration**: load a shared configuration file, or start "
-    "fresh.\n"
-    "1. **Target**: select the system and the observation type.\n"
-    "2. **Atmosphere**: set up the atmosphere model. By default the model "
-    "spectrum is computed at R = 1000 (correlated-k) and scored on the "
-    "analysis bins (default R = 100).\n"
-    "3. **Science goal**: detect a molecule, or constrain a parameter.\n"
-    "4. **Observation**: select instrument modes and noise assumptions. "
-    "For an observation that uses more than one mode, add the modes as a "
-    "set in 'Parameter constraint forecast' (in the results), then select "
-    "that set in 'Modes' under the figure.\n\n"
-    "The tool computes a forward "
-    "spectrum and a Pandeia noise forecast, ranks the selected modes, and "
-    "reports how many transits or eclipses reach your target. "
-    "Detection values are conditional template "
-    "S/N estimates, and parameter constraints are local Fisher "
-    "estimates.")
+    "- Set up the star, planet, and atmosphere conditions\n"
+    r"- Pick a science goal (e.g. detect SO$_2$ at $3\sigma$)" "\n"
+    "- Select the instrument modes, noise assumptions, analysis $R$, etc. "
+    "You can combine multiple modes in \"Parameter constraint forecast\" "
+    "after the run, then pick that set under \"Modes\" below the figure"
+    "\n\n"
+    "The tool computes a forward spectrum and a Pandeia noise forecast and "
+    "reports how many transits or eclipses reach your target. Detection "
+    "values are template S/N estimates, not retrieval results; parameter "
+    "constraints are local Fisher estimates.")
 
 # The Run row renders HERE (above the explainers). Its widgets depend on
 # sidebar state that is read further down, so the slot is reserved now and
@@ -1598,15 +1591,8 @@ _n_mols_est = len(_base_set) + len(extra_mols)
 _wo_min = ((0.05 * _n_mols_est * (nz / forward.NZ_DEFAULT))
            if goal == "detect" else 0.0)
 
-# The resolving power the run uses: the k-tables' own band grid, R=1000.
-grid_lbl = f"{nz}-layer, correlated-k R=1000"
-# One scaled total feeds the estimate string AND the progress-bar prior,
-# so the number the user reads is the number the bar starts from.
+# One scaled total is the progress-bar prior (no runtime text is shown).
 _est_total_min = (base_min + _wo_min + fd_min) * _RUNTIME_SCALE
-est = "instant (cached)" if cached else (
-    f"~{_est_total_min:.0f} min ({grid_lbl} run"
-    + (f" + {len(fisher_params)} Jacobian rows" if fisher_params else "")
-    + ")")
 
 # --- Run row: validation messages, run button, review summary --------------
 with _run_slot:
@@ -1628,7 +1614,6 @@ with _run_slot:
     run_clicked = col_btn.button("Run", type="primary", width="stretch",
                                  disabled=(bool(params_error) or not mode_keys
                                            or not floor_choice_made))
-    st.caption(f"Estimated runtime: {est}")
 
 # ONE description of everything a run consumes OUTSIDE the canonical model
 # parameters: the science goal and the observation setup. Built once and used

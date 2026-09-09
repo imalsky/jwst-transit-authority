@@ -93,10 +93,24 @@ fi
 # root-owned and the forward subprocess inherits CWD from here).
 cd "$STATE/cwd"
 
-# Warm the data-status report in the BACKGROUND: the full scan stats thousands
-# of remote-volume files, and without this the first visitor pays it behind a
-# spinner. The GUI serves the disk-cached report the moment it exists.
-(python -c "from jwst_tool import datacheck; datacheck.warm_report_cache()"     >/dev/null 2>&1 &)
+# Warm the data-status report and the app's imports BEFORE serving. The full
+# scan stats thousands of remote-volume files; when it ran in the background a
+# visitor arriving during the first minute paid it again behind the GUI (the
+# first page load sat on the how-to text for that long). One foreground pass
+# costs the boot about a minute and the first visitor nothing; the duration
+# is logged so a slow boot can be read off the container log.
+_t0=$(date +%s)
+python - <<'PY' || echo "[entrypoint] WARNING: warm-up failed; the first visitor pays the data scan"
+from jwst_tool import datacheck, forward
+datacheck.warm_report_cache(base_mols=forward.MOLECULES, extra_mols=forward.EXTRA_MOLECULES)
+import matplotlib; matplotlib.use("Agg", force=True)
+from streamlit.testing.v1 import AppTest
+import jwst_tool, pathlib
+at = AppTest.from_file(str(pathlib.Path(jwst_tool.__file__).with_name("app.py")), default_timeout=1800)
+at.run()
+assert not at.exception, [e.value for e in at.exception]
+PY
+echo "[entrypoint] warm-up (data report + one headless app pass) took $(( $(date +%s) - _t0 )) s"
 
 # CORS/XSRF off: required for uploads (T-P tables, noise-floor tables) to
 # work behind the Spaces proxy.

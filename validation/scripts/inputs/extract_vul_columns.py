@@ -3,8 +3,9 @@ the chemistry validation figure (VULCAN 2.0 vs VULCAN 3.0 on identical inputs).
 
     python validation/scripts/inputs/extract_vul_columns.py <master.vul> <jax.vul>
 
-Sources: jax_paper/data/W39b_master_paper.vul and W39b_jax_paper.vul (28 MB of
-solver pickles, not committed). Writes validation/data/chemistry_w39b_vulcan2_vs_vulcan3.npz."""
+Sources: the W39b pair that `VULCAN-JAX/tools/bench_table1.sh W39b` writes
+(master_W39b/output/W39b.vul, upstream with the declared oracle deltas applied,
+and jax_W39b/output/W39b.vul; 28 MB of solver pickles, not committed). Writes validation/data/chemistry_w39b_vulcan2_vs_vulcan3.npz."""
 import pickle
 import sys
 from pathlib import Path

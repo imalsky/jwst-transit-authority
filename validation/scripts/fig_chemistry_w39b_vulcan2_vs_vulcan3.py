@@ -1,8 +1,9 @@
 """WASP-39 b chemistry: VULCAN 2.0 vs VULCAN 3.0 (JAX) on identical inputs --
 six species' volume mixing ratios against pressure, and their relative
 difference. Input: validation/data/chemistry_w39b_vulcan2_vs_vulcan3.npz
-(extracted by inputs/extract_vul_columns.py from the two solver outputs
-jax_paper/data/W39b_{master,jax}_paper.vul). numpy + matplotlib only.
+(extracted by inputs/extract_vul_columns.py from the W39b pair that
+VULCAN-JAX/tools/bench_table1.sh writes: upstream with the declared oracle
+deltas applied, and the port). numpy + matplotlib only.
 
     python validation/scripts/fig_chemistry_w39b_vulcan2_vs_vulcan3.py
 """
