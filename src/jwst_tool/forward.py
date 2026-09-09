@@ -69,7 +69,7 @@ _S_MOLECULES = frozenset({"SO2", "H2S", "OCS", "SO", "SH", "CS", "NS"})
 # (correlated-k over the published tables is the only opacity path).
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
 DT_MAX_S = 1.0e13   # chemistry step-size cap (s); prevents the adaptive-dt balloon
-_VERSION = 48  # model_cache buster (identity = canonical params + this
+_VERSION = 49  # model_cache buster (identity = canonical params + this
                # number, never a content hash); bump on any physics or
                # canonical-key-set change.
 

@@ -202,8 +202,8 @@ st.markdown(
     "after the run, then pick that set under \"Modes\" below the figure"
     "\n\n"
     "The tool computes a forward spectrum and a Pandeia noise forecast and "
-    "reports how many transits or eclipses reach your target. Detection "
-    "values are template S/N estimates, not retrieval results; parameter "
+    "reports how many transits/eclipses are needed for the science target. "
+    "The Detection values are template S/N estimates and the parameter "
     "constraints are local Fisher estimates.")
 
 # The Run row renders HERE (above the explainers). Its widgets depend on
@@ -1942,7 +1942,11 @@ ok = [r for r in results if not r["saturated"]]
 # and the saturation limit stays exactly what the user set. Modes already named
 # in _excluded are skipped, so a saturated mode is not reported twice.
 _ex_keys = {k for k, _ in _excluded}
-_warn_rows = []
+# A mode with a Jacobian carries its notes in the constraint-forecast table
+# (a "notes" column on its first row); the banner keeps only the modes that
+# table cannot show, so nothing is reported twice or lost.
+_in_table = {r["mode_key"] for r in results if r.get("jac_bins") is not None}
+_mode_notes, _warn_rows = {}, []
 for r in results:
     if r["mode_key"] in _ex_keys:
         continue
@@ -1953,7 +1957,10 @@ for r in results:
     adv = ins.sat_limit_advisory(r["mode_key"], _sl) if _sl is not None else ""
     if adv:
         notes.append(adv)
-    if notes:
+    if not notes:
+        continue
+    _mode_notes[r["mode_key"]] = "; ".join(notes)
+    if r["mode_key"] not in _in_table:
         _warn_rows.append(f"{r['label']} ({ins.config_label(r['mode_key'])}): "
                           + "; ".join(notes))
 if _warn_rows:
@@ -2310,12 +2317,14 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
         _marg_col = f"marginalized at {tsig_f:g}σ"
         _cond_col = "conditional (others fixed)"
 
-        def _param_rows(mode_label, sig, cond):
+        def _param_rows(mode_label, sig, cond, note=""):
+            # the mode's risk notes ride on its first row only
             return [{"mode": mode_label,
                      "parameter": _row_label(n),
                      _marg_col: _cell(n, _w_int(n, sig[n]), _row_center[n]),
-                     _cond_col: _cell(n, _w_int(n, cond[n]), _row_center[n])}
-                    for n in fisher_names]
+                     _cond_col: _cell(n, _w_int(n, cond[n]), _row_center[n]),
+                     "notes": note if i == 0 else ""}
+                    for i, n in enumerate(fisher_names)]
 
         frows = []
         usable_f = [r for r in with_jac if not r["saturated"]]
@@ -2325,11 +2334,13 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
                 # data (same exclusion policy as the verdict + combined)
                 frows.append({"mode": r["label"],
                               "parameter": "(saturated, excluded)",
-                              _marg_col: "", _cond_col: ""})
+                              _marg_col: "", _cond_col: "",
+                              "notes": _mode_notes.get(r["mode_key"], "")})
                 continue
             cond = {}
             sig = fisher_mod.mode_forecast(r, fisher_names, conditional=cond)
-            frows.extend(_param_rows(r["label"], sig, cond))
+            frows.extend(_param_rows(r["label"], sig, cond,
+                                     note=_mode_notes.get(r["mode_key"], "")))
         if len(usable_f) >= 2:
             cond = {}
             sig = fisher_mod.combined_forecast(usable_f, fisher_names,
@@ -2349,7 +2360,8 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
                         _row_center[n]),
                     _cond_col: _cell(
                         n, _w_disp(n, float(_rec["sigma_conditional_display"][n])),
-                        _row_center[n])})
+                        _row_center[n]),
+                    "notes": ""})
         # Custom combinations FIRST: they are what the user built, so they
         # lead the table. Order within each group is preserved.
         _combo_names = {str(_rec["name"]) for _rec in combo_recs}
