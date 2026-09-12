@@ -373,7 +373,7 @@ def test_source_pins_fig_width_fisher_table_and_noise_recording():
         "the Fisher table must stay a static st.table (blanked mode names)"
     assert '_r2["mode"] = ""' in block, \
         "mode names are no longer blanked; re-check whether st.table is needed"
-    assert "_csv_bytes(pd.DataFrame(frows))" in src, \
+    assert "_csv_bytes(pd.DataFrame(frows), _model_caveats)" in src, \
         "the Fisher CSV is no longer built from the unblanked rows"
 
 
@@ -391,15 +391,28 @@ def test_mode_picker_native_r_labels_are_measured():
     assert ins.MODES["nirspec_g395h"]["r_native_med"] == 2700
 
 
-def test_results_render_and_below_target_is_warning_not_error():
+def test_results_render_and_below_target_is_warning_not_error(monkeypatch):
     """Full post-Run render path on a synthetic result: every figure and
     table offers a download, and a run that works but finds no signal is a
     scientific outcome, not a software failure -- a warning, never an
     error."""
-    out, out_meta = _synthetic_out()          # sigma_detect=0.0
+    from streamlit.delta_generator import DeltaGenerator
+    downloads = {}
+    original = DeltaGenerator.download_button
+
+    def capture(self, label, data, *args, **kwargs):
+        if isinstance(data, bytes) and "CSV" in label:
+            downloads[label] = data.decode()
+        return original(self, label, data, *args, **kwargs)
+
+    monkeypatch.setattr(DeltaGenerator, "download_button", capture)
+    monkeypatch.setattr(st, "download_button",
+                        capture.__get__(st.download_button.__self__))
+    out, out_meta = _synthetic_out(with_jac=True)  # sigma_detect=0.0
     # an escalated column must SAY so on the page: the flag is in the artifact
     # precisely because a cache hit never solves and never logs (forward.py)
     out["model"]["photo_escalated"] = np.array(["FD dlnCO row"], dtype="U48")
+    out["model"]["unmodeled"] = np.array(["C6H6|1e-5"])
     at = _run_with_result(out, out_meta)
     assert not at.exception, at.exception
     assert any("FD dlnCO row" in w.value for w in at.warning), \
@@ -410,6 +423,11 @@ def test_results_render_and_below_target_is_warning_not_error():
             "Mixing ratios (CSV)"} <= dl_labels
     assert any("No signal" in w.value for w in at.warning)
     assert not any("Best mode" in e.value for e in at.error)
+    assert "Constraint forecast (CSV)" in downloads
+    for label, payload in downloads.items():
+        assert "FD dlnCO row" in payload, label
+        assert "unquantified derivative error" in payload, label
+        assert "No opacity table for C6H6" in payload, label
 
 
 def test_emission_results_use_eclipse_terms():

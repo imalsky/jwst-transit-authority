@@ -57,6 +57,9 @@ def _whitened_eig(F: np.ndarray) -> tuple:
     """
     F = np.asarray(F, float)
     F = 0.5 * (F + F.T)
+    if not np.all(np.isfinite(F)):
+        raise ValueError("Fisher matrix contains non-finite values; "
+                         "cannot forecast from invalid derivatives or noise")
     n = F.shape[0]
     d = np.sqrt(np.clip(np.diag(F), 0.0, None))
     nz = d > 0.0

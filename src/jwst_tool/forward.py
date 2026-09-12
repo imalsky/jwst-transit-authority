@@ -1368,6 +1368,19 @@ def canonical_params(params: dict) -> dict:
         cp["kzz_kmax"] = cp["kzz_plev"] = 0.0
     if cp["kzz_mode"] != "JM16":
         cp["kzz_kdeep"] = 0.0
+    # Science-data identity. Every key above describes the MODEL; none of them
+    # moves when a k-table or CIA file is corrected under the same filename,
+    # and the deployment preserves its caches across restarts while serving
+    # exomolop/ off a dataset mount that live-updates as commits land. So the
+    # deployment stamps its data revision and it keys the cache. It stays out
+    # of CHEM_IRRELEVANT_PARAMS on purpose: the mount is synced wholesale, an
+    # extra chemistry miss is cheap and a false hit is not. Unset (a local tree
+    # that only changes by hand) means omitted, so existing keys are unchanged.
+    # NB exomolop's own grid_sha256 is NOT a substitute -- it digests t, p,
+    # bin_edges, samples and weights, never kcoeff.
+    rev = os.environ.get("JWST_TOOL_DATA_REVISION", "").strip()
+    if rev:
+        cp["data_revision"] = rev
     return cp
 
 

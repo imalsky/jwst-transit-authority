@@ -194,6 +194,10 @@ def test_detection_significance_rejects_bad_inputs():
     with pytest.raises(ValueError):                           # nuisance shape
         detect.detection_significance(good_s, good_sig,
                                       nuisance=[np.ones(2)])
+    for value in (np.nan, np.inf):
+        with pytest.raises(ValueError, match="finite"):
+            detect.detection_significance(good_s, good_sig,
+                                          nuisance=[np.full(3, value)])
 
 
 def _mr(n_pix=10):

@@ -412,6 +412,28 @@ def test_chem_key_separates_chemistry_from_rt_only_edits():
         assert forward.chem_key(_p(**kw)) != k0, kw
 
 
+def test_data_revision_keys_the_cache_without_moving_the_unset_keys(monkeypatch):
+    """A corrected opacity table changes no model parameter, so the deployment's
+    dataset revision is what tells the cache the science data moved. It keys
+    BOTH caches (the mount is synced wholesale, so a chemistry miss is the safe
+    direction), and an unset value keys nothing -- a local tree that only
+    changes by hand keeps every key it already has, including the pinned
+    WASP-39 b reference below."""
+    monkeypatch.delenv("JWST_TOOL_DATA_REVISION", raising=False)
+    k0, c0 = forward.params_key(_p()), forward.chem_key(_p())
+    assert "data_revision" not in forward.canonical_params(_p())
+    for blank in ("", "   "):                       # whitespace is not a revision
+        monkeypatch.setenv("JWST_TOOL_DATA_REVISION", blank)
+        assert (forward.params_key(_p()), forward.chem_key(_p())) == (k0, c0)
+    monkeypatch.setenv("JWST_TOOL_DATA_REVISION", "a" * 40)
+    k1, c1 = forward.params_key(_p()), forward.chem_key(_p())
+    assert k1 != k0 and c1 != c0
+    monkeypatch.setenv("JWST_TOOL_DATA_REVISION", "b" * 40)
+    assert forward.params_key(_p()) != k1 and forward.chem_key(_p()) != c1
+    monkeypatch.setenv("JWST_TOOL_DATA_REVISION", "a" * 40)
+    assert (forward.params_key(_p()), forward.chem_key(_p())) == (k1, c1)
+
+
 # --- WASP-39 b reference state: DO NOT let this drift ------------------------
 # The REFERENCE configuration (tp_mode="file", the shipped evening-terminator
 # table) is the one measured against the published JWST detection, and also

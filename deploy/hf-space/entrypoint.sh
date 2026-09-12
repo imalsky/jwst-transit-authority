@@ -88,6 +88,28 @@ else
     export VULCAN_FORWARD_DATA=/data/retrieval-data
 fi
 
+# Science-data identity for the model cache. The caches on $STATE outlive every
+# restart while the dataset repo can gain a corrected k-table under the same
+# filename -- and no model parameter changes with it, so a cached spectrum would
+# outlive the data it was computed from. The dataset repo's own commit keys the
+# cache instead. It is only ever allowed to be AHEAD of the mount (a partial
+# sync then costs a miss, never a stale hit). Unreachable Hub or no token: leave
+# it unset, which is the local-tree behaviour and keys nothing.
+export JWST_TOOL_DATA_REVISION="$(python - <<'PY' 2>/dev/null || true
+import os
+from huggingface_hub import HfApi
+repo = os.environ.get("DATASET_REPO", "imalsky/vulcan-jwst-tool-data")
+print(HfApi().dataset_info(repo).sha or "")
+PY
+)"
+if [ -n "$JWST_TOOL_DATA_REVISION" ]; then
+    echo "[entrypoint] model cache keyed to dataset revision ${JWST_TOOL_DATA_REVISION:0:12}"
+else
+    echo "[entrypoint] WARNING: dataset revision unavailable; the model cache is" \
+         "NOT keyed to the science data (a corrected table would be served from" \
+         "cache). Set JWST_TOOL_DATA_REVISION by hand after updating the data."
+fi
+
 # VULCAN-JAX's legacy IO writes a RELATIVE output/ dir in the process CWD
 # (harmless junk, but the CWD must be writable -- the container default is
 # root-owned and the forward subprocess inherits CWD from here).

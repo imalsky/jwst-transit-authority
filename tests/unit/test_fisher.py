@@ -8,6 +8,20 @@ import pytest
 from jwst_tool import fisher, posteriors
 
 
+@pytest.mark.parametrize("bad_row", [0, 1])
+def test_nonfinite_derivative_cannot_disappear_as_a_null_direction(bad_row):
+    # A failed science OR radius-nuisance row must invalidate the forecast,
+    # not be dropped by the positive-diagonal mask during rank detection.
+    result = dict(jac_bins=np.array([[1., -1., 2., -2.],
+                                     [2., 1., -1., -2.]]),
+                  sigma=np.ones(4), seg=np.zeros(4, dtype=int))
+    result["jac_bins"][bad_row] = np.nan
+    for forecast in (lambda: fisher.mode_forecast(result, ["lnZ"]),
+                     lambda: fisher.combined_forecast([result], ["lnZ"])):
+        with pytest.raises(ValueError, match="non-finite"):
+            forecast()
+
+
 def test_marg_sigmas_matches_independent_oracles():
     """Marginalized sigmas against three independent references: the analytic
     inverse of a well-conditioned Fisher matrix, an SVD of the noise-whitened

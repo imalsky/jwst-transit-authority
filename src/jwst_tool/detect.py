@@ -89,6 +89,9 @@ def detection_significance(signal: np.ndarray, sigma: np.ndarray,
         raise ValueError("detection_significance: signal must be a non-empty "
                          "1-D finite array")
     for i, r in enumerate(nuisance or []):
+        if not np.all(np.isfinite(r)):
+            raise ValueError(f"detection_significance: nuisance row {i} "
+                             "must contain only finite values")
         if np.asarray(r).shape != signal.shape:
             raise ValueError(f"detection_significance: nuisance row {i} has "
                              f"shape {np.asarray(r).shape}, expected "

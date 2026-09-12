@@ -171,8 +171,8 @@ def _w_int(n, s):
     return s / _LN10 if n == "dlnCO" else fisher_mod.display_sigma(n, s)
 
 
-def _csv_bytes(df: pd.DataFrame) -> bytes:
-    """CSV with a one-line identity header (`pd.read_csv(..., comment="#")`)."""
+def _csv_bytes(df: pd.DataFrame, caveats=()) -> bytes:
+    """CSV with identity and run caveats (`pd.read_csv(..., comment="#")`)."""
     p = provenance.snapshot()
     repos = " ".join(f"{k}={p['repositories'][k]['commit'][:12]}"
                      for k in ("jwst-transit-authority", "vulcan-forward", "vulcan-jax"))
@@ -181,6 +181,7 @@ def _csv_bytes(df: pd.DataFrame) -> bytes:
             f"pandeia engine {ps['engine']} refdata {ps['refdata']['version']} "
             f"psf {ps['psf']['version']} | cache model v{cs['model']} "
             f"worker v{cs['pandeia_worker']}\n")
+    head += "".join(f"# caveat: {c}\n" for c in caveats)
     return (head + df.to_csv(index=False)).encode()
 
 
@@ -2137,10 +2138,11 @@ if d_wo_s is not None:
 # the matching note in forward.py. Carbon-rich columns are where this bites
 # (C6H6 on sncho2025 at C/O 10). Read from the cache, so a cached run says it
 # too -- run_model logs it, but a cache hit never solves.
+_model_caveats = []
 _unmodeled = [str(u).split("|") for u in np.atleast_1d(
     model.get("unmodeled", np.array([], dtype="U32")))]
 if _unmodeled:
-    st.warning(
+    _model_caveats.append(
         "No opacity table for "
         + ", ".join(f"{sp} (VMR {float(v):.1e})" for sp, v in _unmodeled)
         + ": the modelled feature contrast carries an unquantified error, in "
@@ -2153,12 +2155,14 @@ if _unmodeled:
 _escalated = [str(e) for e in np.atleast_1d(
     model.get("photo_escalated", np.array([], dtype="U48")))]
 if _escalated:
-    st.warning(
+    _model_caveats.append(
         "Photolysis had to be refreshed every accepted step to converge "
         + ", ".join(_escalated)
-        + ". The derivative closure tests do not cover that cadence, so any "
-          "constraint forecast below carries an unquantified derivative "
+        + ". The derivative closure tests do not pass at that cadence, so any "
+          "constraint forecast from this run carries an unquantified derivative "
           "error; the spectrum itself is certified as usual.")
+for _caveat in _model_caveats:
+    st.warning(_caveat)
 
 with st.expander("Physical structure (T-P profile, mixing ratios)"):
     # ONE two-panel figure (plotting.build_structure_figure, pure and
@@ -2221,10 +2225,10 @@ with st.expander("Physical structure (T-P profile, mixing ratios)"):
         _s1.download_button("Figure (PNG)", _struct_png,
                             f"{_fname_base}_structure.png", "image/png",
                             key=K("dl_struct_png"), on_click="ignore")
-        _s2.download_button("T-P values (CSV)", _csv_bytes(_tp_df),
+        _s2.download_button("T-P values (CSV)", _csv_bytes(_tp_df, _model_caveats),
                             f"{_fname_base}_tp_profile.csv", "text/csv",
                             key=K("dl_tp_csv"), on_click="ignore")
-        _s3.download_button("Mixing ratios (CSV)", _csv_bytes(_vmr_df),
+        _s3.download_button("Mixing ratios (CSV)", _csv_bytes(_vmr_df, _model_caveats),
                             f"{_fname_base}_mixing_ratios.csv", "text/csv",
                             key=K("dl_vmr_csv"), on_click="ignore")
 
@@ -2415,7 +2419,7 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
         else:
             st.table(_disp_df)
         st.download_button("Constraint forecast (CSV)",
-                           _csv_bytes(pd.DataFrame(frows)),
+                           _csv_bytes(pd.DataFrame(frows), _model_caveats),
                            f"{_fname_base}_fisher_forecast.csv", "text/csv",
                            key=K("dl_fisher_csv"), on_click="ignore")
         st.divider()
@@ -2854,10 +2858,10 @@ _s1.download_button("Figure (PDF, vector)", _sum_pdf,
 _s2.download_button("Figure (PNG)", _sum_png,
                     f"{_fname_base}_proposal_summary.png", "image/png",
                     key=K("dl_summary_png"), on_click="ignore")
-_s3.download_button("Binned points (CSV)", _csv_bytes(_bin_df),
+_s3.download_button("Binned points (CSV)", _csv_bytes(_bin_df, _model_caveats),
                     f"{_fname_base}_binned_points.csv", "text/csv",
                     key=K("dl_spec_bins"), on_click="ignore")
-_s4.download_button("Native model (CSV)", _csv_bytes(pd.DataFrame(_native)),
+_s4.download_button("Native model (CSV)", _csv_bytes(pd.DataFrame(_native), _model_caveats),
                     f"{_fname_base}_model_spectrum.csv", "text/csv",
                     key=K("dl_spec_native"), on_click="ignore")
 if _mock is not None:
@@ -2878,7 +2882,7 @@ if _mock is not None:
             "numpy_version": _mock["numpy_version"]}))
     _mock_df = pd.concat(_mock_rows, ignore_index=True)
     _s5.download_button(
-        "Mock observation (CSV)", _csv_bytes(_mock_df),
+        "Mock observation (CSV)", _csv_bytes(_mock_df, _model_caveats),
         f"{_fname_base}_mock_realization_seed{int(seed)}.csv", "text/csv",
         key=K("dl_spec_mock"), on_click="ignore",
         help=posteriors.MOCK_SHORT_LABEL)
