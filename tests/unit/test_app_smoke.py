@@ -397,8 +397,13 @@ def test_results_render_and_below_target_is_warning_not_error():
     scientific outcome, not a software failure -- a warning, never an
     error."""
     out, out_meta = _synthetic_out()          # sigma_detect=0.0
+    # an escalated column must SAY so on the page: the flag is in the artifact
+    # precisely because a cache hit never solves and never logs (forward.py)
+    out["model"]["photo_escalated"] = np.array(["FD dlnCO row"], dtype="U48")
     at = _run_with_result(out, out_meta)
     assert not at.exception, at.exception
+    assert any("FD dlnCO row" in w.value for w in at.warning), \
+        "the photolysis-cadence escalation reached no user-facing surface"
     dl_labels = {b.label for b in at.get("download_button")}
     assert {"Figure (PDF, vector)", "Figure (PNG)", "Binned points (CSV)",
             "Native model (CSV)", "T-P values (CSV)",

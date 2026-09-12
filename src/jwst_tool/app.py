@@ -2146,6 +2146,20 @@ if _unmodeled:
         + ": the modelled feature contrast carries an unquantified error, in "
           "either direction.")
 
+# Derivative honesty: a stage that needed the photolysis-cadence escalation
+# (forward.certified_solve) is solved where the tool's own derivative closure
+# tests do NOT pass. Read from the cache for the same reason as unmodeled
+# above: run_model logs it, but a cache hit never solves.
+_escalated = [str(e) for e in np.atleast_1d(
+    model.get("photo_escalated", np.array([], dtype="U48")))]
+if _escalated:
+    st.warning(
+        "Photolysis had to be refreshed every accepted step to converge "
+        + ", ".join(_escalated)
+        + ". The derivative closure tests do not cover that cadence, so any "
+          "constraint forecast below carries an unquantified derivative "
+          "error; the spectrum itself is certified as usual.")
+
 with st.expander("Physical structure (T-P profile, mixing ratios)"):
     # ONE two-panel figure (plotting.build_structure_figure, pure and
     # importable without streamlit, so the threaded regression test

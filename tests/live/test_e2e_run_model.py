@@ -37,7 +37,7 @@ if importlib.util.find_spec("exojax") is None or \
         importlib.util.find_spec("vulcan_jax") is None:
     pytest.skip("RT stack not installed", allow_module_level=True)
 
-FIXTURE = Path(__file__).parent / "data" / "w39b_v53_reference.npz"
+FIXTURE = Path(__file__).parent / "data" / "w39b_v54_reference.npz"
 
 WL_LO, WL_HI, R_BIN = 1.02, 5.26, 100.0
 
@@ -113,6 +113,9 @@ def test_full_chain_reproduces_the_verified_reference(mode):
     got_cp = json.loads(str(out["params_json"]))
     assert got_cp["science_mode"] == mode
     assert str(out["science_mode"]) == mode
+    # the reference spectra must come from the ordinary cadence: an escalated
+    # column would put these numbers outside the closure-validated regime
+    assert list(out["photo_escalated"]) == []
 
     wl_c, got = bin_r100(out["wl_um"], np.asarray(out["depth"]) * 1e6)
     want = np.asarray(z[f"{mode}_depth_ppm"])

@@ -69,7 +69,7 @@ _S_MOLECULES = frozenset({"SO2", "H2S", "OCS", "SO", "SH", "CS", "NS"})
 # (correlated-k over the published tables is the only opacity path).
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
 DT_MAX_S = 1.0e13   # chemistry step-size cap (s); prevents the adaptive-dt balloon
-_VERSION = 53  # model_cache buster (identity = canonical params + this
+_VERSION = 54  # model_cache buster (identity = canonical params + this
                # number, never a content hash); bump on any physics or
                # canonical-key-set change.
 
@@ -2035,7 +2035,15 @@ def run_model(params: dict, log=print) -> Path:
         check_elements(y_np, chem, "chem-cache column", log)
         y_sol = jnp.asarray(y_np)
         if "photo_escalated" in _chem_art and int(_chem_art["photo_escalated"][0]):
-            _escalated.append("baseline solve (cached column)")
+            # The cached column was solved at cadence 1, so the rest of the run
+            # must be too: a row solved at the config cadence against this
+            # baseline (or anchored on it) would mix cadences, which is the one
+            # thing the row rule exists to prevent. Same rebinding as the fresh
+            # path below; the rebuild costs a model build, not a solve.
+            _escalated.append("baseline solve (whole run at photolysis cadence 1)")
+            _run_frq = 1
+            chem = _build_chem(tag="baseline [photo cadence 1]", photo_frq=1)
+            depth_from_y = make_depth_fn(chem)
         log(f"[fwd] chemistry column from chem-cache ({_chem_out.name}, "
             f"{_ac} accepted steps at write); solve skipped")
     else:
@@ -2045,7 +2053,7 @@ def run_model(params: dict, log=print) -> Path:
             rebuild=lambda: _build_chem(tag="baseline [photo cadence 1]",
                                         photo_frq=1))
         if _esc:                  # the model was rebuilt: rebind what binds it
-            _escalated.append("baseline solve")
+            _escalated.append("baseline solve (whole run at photolysis cadence 1)")
             _run_frq = 1
             depth_from_y = make_depth_fn(chem)
         y_np = np.asarray(y_sol)
@@ -2267,6 +2275,21 @@ def run_model(params: dict, log=print) -> Path:
             _bz_warm = check_ad_co_margin(chem, cp["co_ratio"],
                                           y=np.asarray(y_sol),
                                           build_margin=_bz_build, log=log)
+        if _ad_chem_rows and _escalated:
+            # An AD row differentiates the warm re-converge of THIS column. On
+            # a column that needed the cadence-1 escalation that map is the one
+            # the emission AD/FD closure measures at corr 0.558 / scale 0.711
+            # against the certified FD row (notes S1.7) -- a measured wrong
+            # derivative, not merely an unvalidated one. FD rows on the same
+            # column sit at 0.981-0.987 against a 0.99 gate, so they are the
+            # honest fallback rather than a second broken path.
+            raise RuntimeError(
+                "this column needed the photolysis-cadence escalation ("
+                + "; ".join(_escalated) + "), and automatic differentiation "
+                "is not validated there: the tool's own AD-vs-FD closure "
+                "falls to correlation 0.56 at that cadence. Re-run with "
+                "jac_method='fd' (finite differences), which stays within "
+                "2% of its closure gate on such a column.")
         if _ad_chem_rows:
             # One plain jvp per chemistry-theta row, NEVER vmap over the
             # tangent directions: the batched tangent through the solver's
