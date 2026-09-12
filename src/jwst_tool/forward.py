@@ -69,7 +69,7 @@ _S_MOLECULES = frozenset({"SO2", "H2S", "OCS", "SO", "SH", "CS", "NS"})
 # (correlated-k over the published tables is the only opacity path).
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
 DT_MAX_S = 1.0e13   # chemistry step-size cap (s); prevents the adaptive-dt balloon
-_VERSION = 49  # model_cache buster (identity = canonical params + this
+_VERSION = 53  # model_cache buster (identity = canonical params + this
                # number, never a content hash); bump on any physics or
                # canonical-key-set change.
 
@@ -211,7 +211,7 @@ CONV_FIELDS = ("stage", "accept", "longdy", "longdydt", "branch", "flux", "cell"
 CONV_BRANCH = {1: "tight (yconv_cri)", 2: "loose (yconv_min)"}
 
 
-ELEMENT_TOL = 0.05   # max |element/H drift| of a certified column vs its build column
+ELEMENT_TOL = 0.01   # max |element/H drift| of a certified column vs its build column
 
 
 def check_elements(y, chem, stage, log=print) -> float:
@@ -277,6 +277,34 @@ def check_converged(diag, stage, species, chem, log=print) -> tuple:
     log(f"[fwd] {stage}: certified at {ac} accepted steps ({detail})")
     return (stage, ac, longdy, float(diag.longdydt), branch,
             float(diag.aflux_change), cell)
+
+
+def certified_solve(chem_b, th, stage, rebuild=None, log=print):
+    """Solve one column and certify it, with ONE escalation.
+
+    At the configured photolysis cadence dt can grow by 2^frq between refreshes;
+    a strongly shielded column then rejects every refresh step and never
+    certifies (notes S1.7). A column that does not certify is re-solved once
+    with photolysis refreshed every accepted step, which converges it. `rebuild`
+    returns the same model at that cadence; without it the solve raises as
+    before. Returns (y, chem_used, cert, escalated)."""
+    def _solve(c, st):
+        species = [sp for sp, _ in sorted(c.sidx.items(), key=lambda kv: kv[1])]
+        y, diag = c.converged_y(th, return_conv_diag=True)
+        return y, check_converged(diag, st, species, c, log)
+
+    try:
+        y, cert = _solve(chem_b, stage)
+        return y, chem_b, cert, False
+    except RuntimeError as exc:
+        if rebuild is None:
+            raise
+        log(f"[fwd] {stage}: {exc}")
+        log(f"[fwd] {stage}: re-solving with photolysis refreshed every "
+            "accepted step")
+    chem_b = rebuild()
+    y, cert = _solve(chem_b, f"{stage} [photo cadence 1]")
+    return y, chem_b, cert, True
 
 
 def check_ad_co_margin(chem, co_ratio, y=None, build_margin=None,
@@ -1701,9 +1729,14 @@ def _assemble_chem(cp: dict, log):
     log(f"[fwd] structural composition: {cp['met_x_solar']:g}x solar metals, "
         f"C/O = {cp['co_ratio']:.3f} (C_H {ovr['C_H']:.3e}, O_H {ovr['O_H']:.3e})")
 
-    def _build_chem(extra_abun: dict | None = None, tag: str = "baseline"):
+    def _build_chem(extra_abun: dict | None = None, tag: str = "baseline",
+                    photo_frq: int | None = None):
         prof = dict(profile)
         prof["cfg_overrides"] = ({**ovr, **extra_abun} if extra_abun else ovr)
+        if photo_frq is not None:   # escalation rebuild; see certified_solve
+            prof["cfg_overrides"] = {**prof["cfg_overrides"],
+                                     "ini_update_photo_frq": photo_frq,
+                                     "final_update_photo_frq": photo_frq}
         # skip the engine's build-time warm-up SOLVE: this tool certifies its
         # own solves and never reads baseline_conv_normal.
         prof["skip_warmup"] = True
@@ -1886,7 +1919,7 @@ def run_model(params: dict, log=print) -> Path:
     cloud_vec = (jnp.asarray([cp["log_kappa_cloud"], cp["alpha_cloud"]])
                  if cp["cloud_on"] else None)
 
-    def make_depth_fn(chem_b):
+    def make_depth_fn(chem_b, tp_eval_b=None):
         """Depth function bound to ONE chemistry build: the interpolation map
         follows that build's hydrostatic grid, so it is NEVER shared across
         builds (composition moves the mean molecular weight and hence the
@@ -1912,7 +1945,8 @@ def run_model(params: dict, log=print) -> Path:
         def _art_profiles(y, th):
             y_gas = y * gas_mask[None, :]
             ymix = y_gas / jnp.sum(y_gas, axis=1, keepdims=True)
-            T_art = art_T(th)
+            T_art = (art_T(th) if tp_eval_b is None
+                     else tp_eval_b(th[3:], p_art_j))
             mmw_art = to_art_b(ymix @ chem_b.species_masses)
             vmr = {k: to_art_b(ymix[:, c]) for k, c in mol_cols.items()}
             return (vmr, to_art_b(ymix[:, h2_b]), T_art, mmw_art,
@@ -1969,6 +2003,8 @@ def run_model(params: dict, log=print) -> Path:
     advance()
     _species_now = [s for s, _ in sorted(chem.sidx.items(),
                                          key=lambda kv: kv[1])]
+    _escalated: list[str] = []   # stages that needed the cadence escalation
+    _run_frq = None              # photolysis cadence: None = whatever the config says
     _chem_out = chem_cache_path(params)
     _chem_art = _load_cached_npz(_chem_out)
     if _chem_art is not None:
@@ -1998,12 +2034,20 @@ def run_model(params: dict, log=print) -> Path:
                 f"yconv_min={float(chem.yconv_min):g}")
         check_elements(y_np, chem, "chem-cache column", log)
         y_sol = jnp.asarray(y_np)
+        if "photo_escalated" in _chem_art and int(_chem_art["photo_escalated"][0]):
+            _escalated.append("baseline solve (cached column)")
         log(f"[fwd] chemistry column from chem-cache ({_chem_out.name}, "
             f"{_ac} accepted steps at write); solve skipped")
     else:
         log("[fwd] solving photochemistry (cold, certified) ...")
-        y_sol, _cdiag = chem.converged_y(th0, return_conv_diag=True)
-        _cert = _check_converged(_cdiag, "baseline solve")
+        y_sol, chem, _cert, _esc = certified_solve(
+            chem, th0, "baseline solve", log=log,
+            rebuild=lambda: _build_chem(tag="baseline [photo cadence 1]",
+                                        photo_frq=1))
+        if _esc:                  # the model was rebuilt: rebind what binds it
+            _escalated.append("baseline solve")
+            _run_frq = 1
+            depth_from_y = make_depth_fn(chem)
         y_np = np.asarray(y_sol)
         if not np.all(np.isfinite(y_np)):
             raise RuntimeError(
@@ -2025,6 +2069,7 @@ def run_model(params: dict, log=print) -> Path:
             conv_branch=np.array([_br], dtype=np.int64),
             conv_flux=np.array([_fl], dtype=np.float64),
             conv_cell=np.array([_cell], dtype="U48"),
+            photo_escalated=np.array([1 if _esc else 0], dtype=np.int64),
         )
         MODEL_CACHE.mkdir(parents=True, exist_ok=True)
         _ins.atomic_write(
@@ -2181,15 +2226,14 @@ def run_model(params: dict, log=print) -> Path:
                                 rt.nu_grid, stage)
             return dep
 
-        def _certified_depth(chem_b, th, stage):
+        def _certified_depth(chem_b, th, stage, tp_eval_b=None):
             """One stencil point: the chemistry certificate AND, in emission,
             the thin-bottom certificate. A Fisher row is never built from a
-            spectrum neither gate has passed."""
-            y_b, diag_b = chem_b.converged_y(jnp.asarray(th),
-                                             return_conv_diag=True)
-            _check_converged(diag_b, stage)
+            spectrum neither gate has passed. A point that does not certify
+            RAISES -- the escalation is a row-level retry, never per point."""
+            y_b, chem_b, _, _ = certified_solve(chem_b, th, stage, log=log)
             check_elements(np.asarray(y_b), chem_b, stage, log)
-            _dep_fn = make_depth_fn(chem_b)
+            _dep_fn = make_depth_fn(chem_b, tp_eval_b)
             if emis is None:
                 return np.asarray(_dep_fn(y_b, jnp.asarray(th)))
             dep, tau = _dep_fn(y_b, jnp.asarray(th), return_tau=True)
@@ -2201,6 +2245,10 @@ def run_model(params: dict, log=print) -> Path:
             # steady-state tangent (photo ON, gated in canonical_params). The
             # convergence certificate is a second output, so the batch
             # certifies the point it differentiates from that same solve.
+            # No cadence escalation here: an AD row differentiates THIS warm
+            # map, and the emission AD/FD closure is exactly what fails at
+            # cadence 1 (notes §1.7). A warm solve that will not certify is a
+            # refusal, not a retry.
             y_w, diag = chem.converged_y(th, warm_y=y_sol, lnZ_ref=0.0,
                                          c_o_ref=0.0, return_conv_diag=True)
             if emis is None:
@@ -2309,51 +2357,83 @@ def run_model(params: dict, log=print) -> Path:
                 log(f"[fwd] AD Jacobian d(depth)/d({name}) from its warm jvp")
                 continue
             offs, h = (1, -1, 2, -2), FD_STEPS[name]
-            dvals = {}
             if name in FD_COMP_PARAMS:
-                # composition direction: FastChem re-init + certified cold
-                # solve per stencil point (central, or one-sided away from the
-                # network's C/O bound -- see fd_stencil)
+                # composition direction: central, or one-sided away from the
+                # network's C/O bound -- see fd_stencil
                 offs, h = fd_stencil(name,
                                      cp["met_x_solar" if name == "lnZ"
                                         else "co_ratio"],
                                      CO_MAX[cp["network"]])
-                for s in offs:
-                    f = float(np.exp(s * h))
-                    if name == "lnZ":      # all metals together; C/O preserved
-                        ab = _abundance_overrides(cp["met_x_solar"] * f,
-                                                  cp["co_ratio"])
-                    else:                  # dlnCO: carbon at fixed oxygen
-                        ab = _abundance_overrides(cp["met_x_solar"],
-                                                  cp["co_ratio"] * f)
-                    chem_s = _build_chem(ab, tag=f"FD {name} {s:+d}h")
-                    dvals[s] = _certified_depth(chem_s, theta,
-                                                f"FD {name} {s:+d}h")
-            else:
-                # theta direction (lnKzz / T-P): baseline build, certified
-                # points at theta +- h, +- 2h
+            method = "fd-central" if len(offs) == 4 else "fd-onesided"
+
+            def _row_points(frq):
+                """Every stencil point of this row at ONE photolysis cadence.
+                Never mix: the cadence moves a converged spectrum by 0.01-2.4
+                ppm on the presets (engine notes S1.6), and in a row that
+                offset divides by h and lands in the derivative."""
+                pts = {}
+                if name in FD_COMP_PARAMS:
+                    # FastChem re-init + certified cold solve per point
+                    for s in offs:
+                        f = float(np.exp(s * h))
+                        if name == "lnZ":  # all metals together; C/O preserved
+                            ab = _abundance_overrides(cp["met_x_solar"] * f,
+                                                      cp["co_ratio"])
+                        else:              # dlnCO: carbon at fixed oxygen
+                            ab = _abundance_overrides(cp["met_x_solar"],
+                                                      cp["co_ratio"] * f)
+                        pts[s] = _certified_depth(
+                            _build_chem(ab, tag=f"FD {name} {s:+d}h",
+                                        photo_frq=frq),
+                            theta, f"FD {name} {s:+d}h")
+                    return pts
+                # Kzz changes only the live transport coefficient. T-P also
+                # changes the radius/gravity anchor and hence the Guillot
+                # mapping, so rebuild it just as a full perturbed run does.
                 i_par = theta_names.index(name)
-                for s in (1, -1, 2, -2):
+                chem_r = (chem if frq == _run_frq or i_par >= 3
+                          else _build_chem(tag=f"{name} row [photo cadence "
+                                               f"{frq}]", photo_frq=frq))
+                for s in offs:
+                    if i_par >= 3:
+                        cp_s = dict(cp, **{name: cp[name] + s * h})
+                        A_s = _assemble_chem(cp_s, log)
+                        chem_s = A_s.build_chem(tag=f"FD {name} {s:+d}h",
+                                                photo_frq=frq)
+                        _check_t_window(A_s.tp_eval, A_s.theta, chem_s.p_bar, log)
+                        pts[s] = _certified_depth(
+                            chem_s, A_s.theta, f"FD {name} {s:+d}h", A_s.tp_eval)
+                        continue
                     th_s = theta.copy()
                     th_s[i_par] += s * h
-                    # T-P step must stay in the window (tp_eval is None only
-                    # in file mode, which has no theta T-P rows)
-                    if i_par >= 3 and tp_eval is not None:
-                        T_s = np.asarray(tp_eval(jnp.asarray(th_s[3:]),
-                                                 jnp.asarray(chem.p_bar)))
-                        if T_s.min() < T_WINDOW[0] or T_s.max() > T_WINDOW[1]:
-                            raise RuntimeError(
-                                f"FD step for {name} ({s:+d}h = {s * h:+g}) "
-                                f"leaves the modelable T window {T_WINDOW}: "
-                                "move the profile away from the window edge "
-                                "or reduce forward.FD_STEPS for it.")
-                    dvals[s] = _certified_depth(chem, th_s,
-                                                f"FD {name} {s:+d}h")
-            method = "fd-central" if len(offs) == 4 else "fd-onesided"
-            # the one-sided anchor is the BASELINE point (y_sol, th0, baseline
-            # deck, lnR0 = 0), already gated above -- no second certificate
-            f0 = (None if method == "fd-central"
-                  else np.asarray(depth_from_y(y_sol, th0)))
+                    pts[s] = _certified_depth(chem_r, th_s,
+                                              f"FD {name} {s:+d}h")
+                return pts
+
+            def _row_anchor(frq):
+                """The one-sided anchor is the BASELINE point. At the run's own
+                cadence it is the already-gated baseline spectrum; an escalated
+                row needs the anchor at ITS cadence, which costs one solve."""
+                if method == "fd-central":
+                    return None
+                if frq == _run_frq:
+                    return np.asarray(depth_from_y(y_sol, th0))
+                return _certified_depth(
+                    _build_chem(tag=f"baseline [photo cadence {frq}]",
+                                photo_frq=frq),
+                    theta, f"FD {name} anchor [photo cadence {frq}]")
+
+            try:
+                dvals, f0 = _row_points(_run_frq), _row_anchor(_run_frq)
+            except RuntimeError as exc:
+                if _run_frq == 1:         # already at the finest cadence
+                    raise
+                log(f"[fwd] FD {name} row: {exc}")
+                log(f"[fwd] FD {name} row: re-solving EVERY point of this row "
+                    "with photolysis refreshed every accepted step (a row may "
+                    "not mix cadences)")
+                dvals, f0 = _row_points(1), _row_anchor(1)
+                _escalated.append(f"FD {name} row")
             jac[j], err = fd_row(name, *fd_estimates(offs, dvals, f0, h), h)
             fd_h.append(h)
             fd_err.append(err)
@@ -2424,6 +2504,9 @@ def run_model(params: dict, log=print) -> Path:
         co_bz_margin=np.array([_bz_build, _bz_warm], dtype=np.float64),
         science_mode=np.array(cp["science_mode"], dtype="U16"),
         chem_provider=np.array(cp["chem_provider"], dtype="U16"),
+        # Stages that needed the photolysis-cadence escalation to certify;
+        # empty on the normal path. See certified_solve.
+        photo_escalated=np.array(_escalated, dtype="U48"),
     )
     if emis is not None:
         arrays["fs_flux"] = np.asarray(fs_j, dtype=np.float64)

@@ -1,9 +1,8 @@
-"""Closure tests: the noise model against synthetic Poisson counts, the
-covariance metric against Monte Carlo, and (opt-in, slow) the autodiff
-Jacobian against finite differences of the full forward model.
+"""Closure tests: noise against synthetic Poisson counts, transmission FD
+against a smaller-step FD, and emission AD against FD of the full model.
 
-Default runs stay numpy-only; the FD test needs JWST_TOOL_RUN_SLOW=1 and
-runs the real forward model three times (~5-10 min)."""
+Default runs stay numpy-only; derivative closures need JWST_TOOL_RUN_SLOW=1.
+"""
 import os
 
 import numpy as np
@@ -56,8 +55,8 @@ def test_jacobian_row_matches_finite_difference():
     """The cached FD Jacobian row must agree with an independent smaller-step
     (h = 2 K) central difference: different step, different cache entries.
 
-    Loose gate on purpose: chemistry certifies at yconv 1e-2, so shape
-    correlation plus ~15% scale is what steady-state uniqueness guarantees."""
+    Require correlation > 0.99 and scale within 15%. The solver can certify
+    through its loose branch; certification alone does not guarantee closure."""
     from jwst_tool import forward
 
     def quiet(_s):

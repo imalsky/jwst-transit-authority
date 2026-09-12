@@ -281,3 +281,36 @@ def test_an_abundant_species_with_no_k_table_is_named_not_swallowed():
     y2 = np.array([[1.0, 1.0e-2, 3.6e-3, 1.0e-2, 0.77, 1.2e-2]] * 3)
     assert [n for n, _ in forward.unmodeled_absorbers(sp, y2, p, {"H2O", "CO"})] \
         == ["C2H2", "C6H6"]
+
+
+def test_a_stalled_column_escalates_once_and_a_certified_one_never_does():
+    """certified_solve retries a non-certifying column at photolysis cadence 1
+    and returns the model that produced the column it hands back; with no
+    rebuild it still raises, and a column that certifies is never re-solved."""
+    def _model(diag):
+        m = _chem()
+        m.sidx = {s: i for i, s in enumerate(SPECIES)}
+        m.converged_y = lambda th, return_conv_diag: (np.full((3, 3), 7.0), diag)
+        return m
+
+    stalled = _model(_diag(conv_normal=False, longdy=2.7))
+    fixed = _model(_diag())
+    builds = []
+
+    y, chem, cert, escalated = forward.certified_solve(
+        stalled, np.zeros(3), "FD dlnCO +1h",
+        rebuild=lambda: (builds.append(1), fixed)[1], log=lambda _m: None)
+    assert escalated and builds == [1]
+    assert chem is fixed and np.all(np.asarray(y) == 7.0)
+    assert cert[0] == "FD dlnCO +1h [photo cadence 1]"
+
+    # no rebuild offered -> the refusal stands
+    with pytest.raises(RuntimeError, match="did NOT converge"):
+        forward.certified_solve(stalled, np.zeros(3), "baseline solve")
+
+    # a column that certifies is never rebuilt
+    builds.clear()
+    _y, chem2, _c, esc2 = forward.certified_solve(
+        fixed, np.zeros(3), "baseline solve",
+        rebuild=lambda: (builds.append(1), fixed)[1], log=lambda _m: None)
+    assert not esc2 and builds == [] and chem2 is fixed

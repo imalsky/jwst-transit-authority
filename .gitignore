@@ -28,9 +28,11 @@ data/cdbs/calspec/
 data/pandeia_data-*/
 data/pandeia_psfs-*/
 # Internal working documents. Reference content and dev logs live in the
-# gitignored root notes.md; README.md carries current usage only.
+# gitignored root notes.md, open work in the gitignored root todo.md;
+# README.md carries current usage only.
 CLAUDE.md
 /notes.md
+/todo.md
 
 # Machine-local absolute-path symlink into a sibling PICASO checkout. Consumers
 # obtain the PHOENIX grid via `jwst-tool fetch`; `jwst-tool data` reports status.
@@ -39,3 +41,4 @@ data/cdbs/grid/phoenix
 
 # C/O survey archive (personal paths in the report; notes.md decision 2026-09-07)
 validation/co_limits/
+validation/co_stall/

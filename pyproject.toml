@@ -44,11 +44,11 @@ dependencies = [
     # application). The floor is load-bearing: an older engine ignores unknown
     # profile keys silently. tests/unit/test_engine_api_contract.py pins every
     # engine symbol and profile key the tool uses.
-    "vulcan-forward>=0.15.1",
+    "vulcan-forward>=0.16.0",
     # Direct imports: load_config (CO_BASELINE check) and steady_state_grad
     # (adjoint_diag). The floor carries the Ros2 stage element repair and the
     # dt_max cap (0.4.0) and the OH+CH3+M Troe log10 correction (0.5.0, C20).
-    "vulcan-jax>=0.5.1",
+    "vulcan-jax>=0.6.0",
 ]
 
 [project.urls]

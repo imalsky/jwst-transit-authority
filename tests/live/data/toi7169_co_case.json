@@ -1,0 +1,130 @@
+{
+ "note": "TOI-7169 b CO detection case (Josh, 2026-09-10): the +h dlnCO stencil point stalled on photolysis cadence 5/5 (tests/live/test_toi7169_dlnco.py). canonical_params verbatim from the share file; software = the stack it failed on.",
+ "canonical_params": {
+  "planet": "custom",
+  "science_mode": "transmission",
+  "star_teff": 0.0,
+  "star_logg": 0.0,
+  "star_feh": 0.0,
+  "nz": 100,
+  "yconv_cri": 0.01,
+  "yconv_min": 0.1,
+  "rp_rjup": 1.475,
+  "gs_cgs": 267.0,
+  "rstar_rsun": 1.5,
+  "orbit_au": 0.0428,
+  "sflux": "Gueymard_solar.txt",
+  "met_x_solar": 10.0,
+  "co_ratio": 0.55,
+  "kzz_mode": "file",
+  "kzz_x": 1.0,
+  "kzz_const": 0.0,
+  "kzz_kmax": 0.0,
+  "kzz_plev": 0.0,
+  "kzz_kdeep": 0.0,
+  "tp_mode": "file",
+  "tp_file": "shipped",
+  "tp_file_sha1": "1a4ce744e65205d8",
+  "Tirr": 0.0,
+  "Tint": 0.0,
+  "log_kappa": 0.0,
+  "log_gamma": 0.0,
+  "use_photo": true,
+  "sl_angle_deg": 83.0,
+  "f_diurnal": 1.0,
+  "use_moldiff": true,
+  "use_vm_mol": false,
+  "use_rayleigh": true,
+  "rt_ptop_bar": 1e-07,
+  "rt_integration": "simpson",
+  "p_ref_bar": 0.001,
+  "p_btm_bar": 7.6,
+  "cloud_on": false,
+  "log_kappa_cloud": 0.0,
+  "alpha_cloud": 0.0,
+  "use_condense": false,
+  "use_settling": false,
+  "diff_esc": [],
+  "top_flux": [],
+  "bot_flux": [],
+  "extra_mols": [
+   "C2H2",
+   "C2H4",
+   "H2S",
+   "HCN",
+   "NH3",
+   "OCS",
+   "SH",
+   "SO"
+  ],
+  "wo_mols": [
+   "CO"
+  ],
+  "fisher_params": [
+   "dlnCO",
+   "lnZ"
+  ],
+  "jac_method": "fd",
+  "chem_provider": "vulcan",
+  "network": "sncho",
+  "version": 49
+ },
+ "goal": {
+  "goal": "detect",
+  "target_mol": "CO",
+  "target_sig": 3.0,
+  "goal_param": null,
+  "target_prec": null,
+  "marginalize": true,
+  "do_fisher": true,
+  "fisher_params": [
+   "lnZ",
+   "dlnCO"
+  ],
+  "jac_method": "fd"
+ },
+ "observation": {
+  "ks_mag": 10.81,
+  "t14": 4.05,
+  "t_base": 4.05,
+  "star_teff": 5714.0,
+  "star_logg": 3.91,
+  "star_feh": -0.72,
+  "sat_limit": 0.8,
+  "modes": [
+   "nirspec_prism",
+   "nirspec_g395h",
+   "niriss_soss"
+  ],
+  "n_transits": 1,
+  "r_bin": 100,
+  "floor_mode": "constant",
+  "floors": {
+   "nirspec_prism": 20.0,
+   "nirspec_g395h": 15.0,
+   "niriss_soss": 20.0
+  },
+  "noise_infl": {
+   "nirspec_prism": 1.0,
+   "nirspec_g395h": 1.0,
+   "niriss_soss": 1.0
+  },
+  "noise_scale": 1.0,
+  "show_noise": true,
+  "seed": 0,
+  "combos": []
+ },
+ "software": {
+  "jwst-transit-authority": "0.60.0",
+  "vulcan-forward": "0.15.1",
+  "vulcan-jax": "0.5.1",
+  "exojax": "2.2.3",
+  "jax": "0.7.1",
+  "numpy": "1.26.4"
+ },
+ "repositories": {
+  "vulcan-jax": "9e0f4bd78d16f1cba18ddc59fb4ee63c4b49b86e",
+  "vulcan-forward": "55613bc30d4c4846548bebd00c6d677cf6109742",
+  "jwst-transit-authority": "957e802751836df18ac6df8a76bd492d426884ee"
+ }
+}
