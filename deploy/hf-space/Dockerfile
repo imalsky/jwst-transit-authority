@@ -39,7 +39,7 @@ RUN conda create -y -n app python=3.12 \
 # BUILD_INFO records the enforced pins.
 # (History of these decisions: notes.md, Decision records.)
 ARG VULCAN_JAX_SHA=68fff1ebbfcbcb6062a54f191a409b56912f721e
-ARG VULCAN_FORWARD_SHA=879a99c776eda165d67511e40eff78fa2b55abdc
+ARG VULCAN_FORWARD_SHA=5ed1a8ac1d29163debf8cd31d37fa9722d550f7b
 ARG JWST_TOOL_SHA=a1f3c4492daa29ff91f21a7fd842413f8d4433cd
 RUN set -e; \
     for spec in \
