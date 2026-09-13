@@ -706,10 +706,10 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # this configuration have NOT been re-measured since v27-v31 and must be
     # before the key is quoted as a science result (notes.md).
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b", tp_mode="file"))) == "9a11eb8b5147144c"
+        dict(planet="wasp39b", tp_mode="file"))) == "e85c4f2e874864e5"
     # ... and the bare DEFAULT run is that same atmosphere
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "9a11eb8b5147144c"
+        dict(planet="wasp39b"))) == "e85c4f2e874864e5"
     # the sha1 pin is only meaningful re-derived from the file the run
     # actually reads -- this catches the table itself being swapped
     path = forward._shipped_tp_file("wasp39b")

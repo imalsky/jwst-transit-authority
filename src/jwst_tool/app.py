@@ -474,11 +474,11 @@ class _TimedBar:
                 prior_left = max(self._prior * (1.0 - self._frac), 0.0)
                 # Hand over to the measured pace by a THIRD of the way in, not
                 # halfway. The prior is a generic pre-run guess and it cannot
-                # see the two things that dominate a slow run -- a column that
-                # rides the step cap before its escalation fires, and an AD row
-                # whose warm re-converge never certifies -- so it underestimates
-                # badly there. Weighting it by (1 - frac) kept a wrong prior in
-                # charge of the countdown for most of the run.
+                # see the two things that dominate a slow run -- an FD stencil
+                # point that rides the step cap before its escalation fires,
+                # and an AD row that falls to the cadence-1 retry -- so it
+                # underestimates badly there. Weighting it by (1 - frac) kept
+                # a wrong prior in charge of the countdown for most of the run.
                 w = min(1.0, 3.0 * self._frac)
                 remaining = w * measured_left + (1.0 - w) * prior_left
             else:
@@ -1576,14 +1576,15 @@ if t_char < 900.0:
     base_min += 2.5
 
 # Jacobian-row cost model: fd = 4 solves per row; cloud rows are RT-only
-# (~seconds); ad = ONE shared warm primal plus a batched tangent per row
+# (~seconds); ad = one warm re-converge + tangent per row on the capped build,
+# measured at 1.5 solve-equivalents per row (0.74 WASP-39 b eclipse, 1.6
+# WASP-39 b transmission, 1.85 TOI-7169 b; notes S1.8)
 _solve_min = max(1.0, base_min * 0.5)
 _rt_only = set(forward.CLOUD_FISHER_PARAMS)
 n_cloud_rows = sum(1 for n in fisher_params if n in _rt_only)
 _solve_rows = [n for n in fisher_params if n not in _rt_only]
 if jac_method == "ad":
-    fd_min = (((0.9 + 0.35 * len(_solve_rows)) * _solve_min
-               if _solve_rows else 0.0) + 0.2 * n_cloud_rows)
+    fd_min = 1.5 * len(_solve_rows) * _solve_min + 0.2 * n_cloud_rows
 else:
     n_fd_comp = sum(1 for n in _solve_rows if n in forward.FD_COMP_PARAMS)
     n_fd_theta = len(_solve_rows) - n_fd_comp
@@ -2154,18 +2155,20 @@ if _unmodeled:
           "either direction.")
 
 # Derivative honesty: a stage that needed the photolysis-cadence escalation
-# (forward.certified_solve) is solved where the tool's own derivative closure
-# tests do NOT pass. Read from the cache for the same reason as unmodeled
-# above: run_model logs it, but a cache hit never solves.
+# (forward.certified_solve) solved on a different photolysis cadence than the
+# configuration asked for, so the run says which stages did. Read from the
+# cache for the same reason as unmodeled above: run_model logs it, but a cache
+# hit never solves.
 _escalated = [str(e) for e in np.atleast_1d(
     model.get("photo_escalated", np.array([], dtype="U48")))]
 if _escalated:
     _model_caveats.append(
         "Photolysis had to be refreshed every accepted step to converge "
         + ", ".join(_escalated)
-        + ". The derivative closure tests do not pass at that cadence, so any "
-          "constraint forecast from this run carries an unquantified derivative "
-          "error; the spectrum itself is certified as usual.")
+        + ". Those stages were re-solved and certified at that cadence, where "
+          "the tool's derivative closures have been checked (transmission FD "
+          "and eclipse AD against independent finite differences); the "
+          "spectrum itself is certified as usual.")
 for _caveat in _model_caveats:
     st.warning(_caveat)
 

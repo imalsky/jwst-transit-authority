@@ -69,7 +69,7 @@ _S_MOLECULES = frozenset({"SO2", "H2S", "OCS", "SO", "SH", "CS", "NS"})
 # (correlated-k over the published tables is the only opacity path).
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
 DT_MAX_S = 1.0e13   # chemistry step-size cap (s); prevents the adaptive-dt balloon
-_VERSION = 56  # model_cache buster (identity = canonical params + this
+_VERSION = 57  # model_cache buster (identity = canonical params + this
                # number, never a content hash); bump on any physics or
                # canonical-key-set change.
 
@@ -121,15 +121,19 @@ JAC_METHODS = ("fd", "ad")            # certified-FD default / warm-jvp opt-in
 # move the AD gate silently. FD has no equivalent limit: it re-initializes
 # FastChem per stencil point and never uses the b_z map.
 CO_BZ_MIN_AD = 0.1
-# The build an AD row's warm re-converge runs on. count_max is a cost bound,
-# not a floor: the TOI-7169 b stall stops improving by step ~900 and would
-# otherwise spend the full 30000-step cold budget (66 min) before the
-# cadence-1 retry. When the tangent settles is the solver's call: the AD row
-# runs through `converged_y_jvp`, whose certificate holds the tangent to the
-# same change-over-lookback tolerance as the column (vulcan-jax
+# The build an AD row's warm re-converge runs on. count_max bounds the cost
+# (the TOI-7169 b stall stops improving by step ~900 and would otherwise spend
+# the full 30000-step cold budget, 66 min, before the cadence-1 retry); dt_max
+# (s) stops the adaptive step running away on a photolysis-driven column (the
+# WASP-39 b eclipse warm map never certifies uncapped; capped 1e4-3e6 s all
+# certify with the same tangent, notes S1.7 / VULCAN-JAX todo 15). DERIVATIVE
+# builds only: the cold solve and the FD stencil points keep DT_MAX_S, so no
+# shipped spectrum moves. When the tangent settles is the solver's call: the AD
+# row runs through `converged_y_jvp`, whose certificate holds the tangent to
+# the same change-over-lookback tolerance as the column (vulcan-jax
 # OuterLoop.run_jvp), so no step floor and no geometry-veto override remain
 # here (notes S1.7 has the closures each of those used to stand in for).
-AD_BUILD_OVERRIDES = {"count_max": 6000}
+AD_BUILD_OVERRIDES = {"count_max": 6000, "dt_max": 1.0e5}
 # Accepted co_ratio range, INCLUSIVE at both ends. TWO gate axes, network and
 # photolysis; do NOT add temperature (non-monotonic: +400 K and -200 K both fix
 # C/O 1.087) or Kzz (a tabulated column is not a scalar to gate on).
@@ -2321,12 +2325,13 @@ def run_model(params: dict, log=print) -> Path:
             # That warm re-converge is where a shielded column stalls at the
             # config's photolysis cadence (TOI-7169 b: the FD stencil stall's
             # own cell and flux change, notes S1.7), so it runs on a build
-            # with AD_BUILD_OVERRIDES (step cap). A row that does not certify
-            # there is re-solved on a cadence-1 build and flagged in
-            # `photo_escalated`, or refused (emission: on the default eclipse
-            # column the warm map is a photolysis sawtooth at cadence 5 and
-            # its tangent grows without bound at cadence 1, notes S1.7). Only
-            # the certificate is inside the try: a backend failure propagates.
+            # with AD_BUILD_OVERRIDES (step cap + dt cap). A row that does not
+            # certify there is re-solved on a cadence-1 build and flagged in
+            # `photo_escalated`, in either science mode. That fallback build is
+            # SHARED: once one row fails to certify at the config cadence, the
+            # remaining rows run on the cadence-1 build directly and are all
+            # flagged. Only the certificate is inside the try: a backend
+            # failure propagates.
             chem_ad = _build_chem(extra_abun=AD_BUILD_OVERRIDES, tag="AD rows",
                                   photo_frq=_run_frq)
             chem_ad1 = None
@@ -2345,13 +2350,6 @@ def run_model(params: dict, log=print) -> Path:
                 except RuntimeError as exc:
                     if _run_frq == 1:
                         raise
-                    if emis is not None:
-                        raise RuntimeError(
-                            f"{exc} The eclipse AD row is not re-solved with "
-                            "photolysis refreshed every accepted step: on the "
-                            "default eclipse column the tangent grows without "
-                            "bound at that cadence too (notes S1.7). Re-run "
-                            "with jac_method='fd'.") from exc
                     log(f"[fwd] {stage}: {exc}")
                     log(f"[fwd] {stage}: re-solving with photolysis refreshed "
                         "every accepted step")

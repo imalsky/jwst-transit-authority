@@ -426,7 +426,7 @@ def test_results_render_and_below_target_is_warning_not_error(monkeypatch):
     assert "Constraint forecast (CSV)" in downloads
     for label, payload in downloads.items():
         assert "FD dlnCO row" in payload, label
-        assert "unquantified derivative error" in payload, label
+        assert "refreshed every accepted step" in payload, label
         assert "No opacity table for C6H6" in payload, label
 
 

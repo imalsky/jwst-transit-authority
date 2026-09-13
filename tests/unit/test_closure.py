@@ -48,16 +48,43 @@ def test_poisson_count_closure():
     assert np.allclose(est.var(axis=0), nz["var_phot"], rtol=0.15)
 
 
+def _force_cadence_1(monkeypatch, tmp_path, forward):
+    """Every chemistry build at photolysis cadence 1 -- the regime an escalated
+    row is re-solved in. The cadence is NOT part of the cache key, so the run
+    also gets its own model cache: a forced cadence-1 result must never be
+    served to a config-cadence run under the same key."""
+    orig = forward._assemble_chem
+
+    def assemble(cp, log):
+        a = orig(cp, log)
+        build = a.build_chem
+        a.build_chem = (lambda extra_abun=None, tag="baseline", photo_frq=None:
+                        build(extra_abun, tag, 1))
+        return a
+
+    monkeypatch.setattr(forward, "_assemble_chem", assemble)
+    cache = tmp_path / "model_cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(forward, "MODEL_CACHE", cache)
+
+
 @pytest.mark.skipif(os.environ.get("JWST_TOOL_RUN_SLOW") != "1",
-                    reason="slow: 3 full VULCAN-JAX+ExoJAX forward runs "
-                           "(~5-10 min, JAX required); set JWST_TOOL_RUN_SLOW=1")
-def test_jacobian_row_matches_finite_difference():
+                    reason="slow: 3 full VULCAN-JAX+ExoJAX forward runs per "
+                           "cadence variant, the cadence-1 one cold "
+                           "(~5-20 min, JAX required); set JWST_TOOL_RUN_SLOW=1")
+@pytest.mark.parametrize("cadence", [None, 1])
+def test_jacobian_row_matches_finite_difference(monkeypatch, tmp_path, cadence):
     """The cached FD Jacobian row must agree with an independent smaller-step
-    (h = 2 K) central difference: different step, different cache entries.
+    (h = 2 K) central difference: different step, different cache entries. Run
+    at the configuration's photolysis cadence and at cadence 1, the cadence an
+    escalated row is re-solved on.
 
     Require correlation > 0.99 and scale within 15%. The solver can certify
     through its loose branch; certification alone does not guarantee closure."""
     from jwst_tool import forward
+
+    if cadence == 1:
+        _force_cadence_1(monkeypatch, tmp_path, forward)
 
     def quiet(_s):
         return None
@@ -87,26 +114,38 @@ def test_jacobian_row_matches_finite_difference():
 
 
 @pytest.mark.skipif(os.environ.get("JWST_TOOL_RUN_SLOW") != "1",
-                    reason="slow: FD (4 solves) + a capped AD emission attempt "
-                           "(~30 min, JAX required); set JWST_TOOL_RUN_SLOW=1")
-def test_emission_ad_row_is_refused_where_its_tangent_never_settles():
-    """Default WASP-39 b eclipse case, lnZ row. The certified FD row exists;
-    the AD row does not: under the solver's tangent certificate the warm
-    re-converge of this column never settles (a photolysis sawtooth at the
-    config cadence, an unbounded tangent at cadence 1; notes S1.7), so the
-    tool refuses it with the certificate's message instead of reporting the
-    lucky-stop row 0.63.0 reported. An emission AD row that certifies on
-    another column is still returned; this pins the refusal, not a ban."""
+                    reason="slow: ~8 FD stencil solves + 2 AD rows per cadence "
+                           "variant (~30-60 min, JAX required); set "
+                           "JWST_TOOL_RUN_SLOW=1")
+@pytest.mark.parametrize("cadence", [None, 1])
+def test_emission_ad_rows_match_the_certified_fd_rows(monkeypatch, tmp_path, cadence):
+    """Default WASP-39 b eclipse case, lnZ and dlnCO rows: each warm-jvp AD row
+    must agree with its certified central-difference row to the transmission
+    gate. The AD rows run on the dt-capped build (AD_BUILD_OVERRIDES); a row
+    that does not certify at the configuration's photolysis cadence is
+    re-solved on a cadence-1 build and flagged in photo_escalated, never
+    refused. Two rows, because the cadence-1 build is shared: the first
+    escalation carries the later rows with it."""
     from jwst_tool import forward
 
-    p = dict(planet="wasp39b", science_mode="emission",
-             fisher_params=["lnZ"], jac_method="fd")
-    if forward.load_result(p) is None:
-        forward.run_model(p, log=lambda _s: None)
-    m = forward.load_result(p)
-    assert "lnZ" in [str(x) for x in m["jac_names"]]
-    # the AD stage itself, and the eclipse refusal (not a baseline failure)
-    with pytest.raises(RuntimeError,
-                       match=r"did NOT (converge|settle) \(AD warm re-converge "
-                             r"\(lnZ\)[\s\S]*jac_method='fd'"):
-        forward.run_model(dict(p, jac_method="ad"), log=lambda _s: None)
+    if cadence == 1:
+        _force_cadence_1(monkeypatch, tmp_path, forward)
+
+    rows = {}
+    for method in ("fd", "ad"):
+        p = dict(planet="wasp39b", science_mode="emission",
+                 fisher_params=["lnZ", "dlnCO"], jac_method=method)
+        if forward.load_result(p) is None:
+            forward.run_model(p, log=lambda _s: None)
+        m = forward.load_result(p)
+        names = [str(x) for x in m["jac_names"]]
+        rows[method] = {n: np.asarray(m["jac"][names.index(n)])
+                        for n in ("lnZ", "dlnCO")}
+        if method == "ad":
+            print("AD photo_escalated:", list(m["photo_escalated"]))
+    for n in ("lnZ", "dlnCO"):
+        ad, fd = rows["ad"][n], rows["fd"][n]
+        corr = np.corrcoef(ad, fd)[0, 1]
+        scale = float(np.dot(ad, fd) / np.dot(fd, fd))
+        assert corr > 0.99, n
+        assert scale == pytest.approx(1.0, abs=0.15), n
