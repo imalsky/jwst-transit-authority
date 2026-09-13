@@ -87,25 +87,26 @@ def test_jacobian_row_matches_finite_difference():
 
 
 @pytest.mark.skipif(os.environ.get("JWST_TOOL_RUN_SLOW") != "1",
-                    reason="slow: FD (4 solves) + AD emission runs "
-                           "(~10 min, JAX required); set JWST_TOOL_RUN_SLOW=1")
-def test_emission_ad_row_matches_the_certified_fd_row():
-    """Default WASP-39 b eclipse case, lnZ row: the warm-jvp AD row must agree
-    with the certified central-difference row to the transmission gate. Every
-    stencil point and the AD primal pass the thin-bottom certificate, so this
-    is the emission Fisher path end to end."""
+                    reason="slow: FD (4 solves) + a capped AD emission attempt "
+                           "(~30 min, JAX required); set JWST_TOOL_RUN_SLOW=1")
+def test_emission_ad_row_is_refused_where_its_tangent_never_settles():
+    """Default WASP-39 b eclipse case, lnZ row. The certified FD row exists;
+    the AD row does not: under the solver's tangent certificate the warm
+    re-converge of this column never settles (a photolysis sawtooth at the
+    config cadence, an unbounded tangent at cadence 1; notes S1.7), so the
+    tool refuses it with the certificate's message instead of reporting the
+    lucky-stop row 0.63.0 reported. An emission AD row that certifies on
+    another column is still returned; this pins the refusal, not a ban."""
     from jwst_tool import forward
 
-    rows = {}
-    for method in ("fd", "ad"):
-        p = dict(planet="wasp39b", science_mode="emission",
-                 fisher_params=["lnZ"], jac_method=method)
-        if forward.load_result(p) is None:
-            forward.run_model(p, log=lambda _s: None)
-        m = forward.load_result(p)
-        names = [str(x) for x in m["jac_names"]]
-        rows[method] = np.asarray(m["jac"][names.index("lnZ")])
-    corr = np.corrcoef(rows["ad"], rows["fd"])[0, 1]
-    scale = float(np.dot(rows["ad"], rows["fd"]) / np.dot(rows["fd"], rows["fd"]))
-    assert corr > 0.99
-    assert scale == pytest.approx(1.0, abs=0.15)
+    p = dict(planet="wasp39b", science_mode="emission",
+             fisher_params=["lnZ"], jac_method="fd")
+    if forward.load_result(p) is None:
+        forward.run_model(p, log=lambda _s: None)
+    m = forward.load_result(p)
+    assert "lnZ" in [str(x) for x in m["jac_names"]]
+    # the AD stage itself, and the eclipse refusal (not a baseline failure)
+    with pytest.raises(RuntimeError,
+                       match=r"did NOT (converge|settle) \(AD warm re-converge "
+                             r"\(lnZ\)[\s\S]*jac_method='fd'"):
+        forward.run_model(dict(p, jac_method="ad"), log=lambda _s: None)

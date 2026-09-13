@@ -69,7 +69,7 @@ _S_MOLECULES = frozenset({"SO2", "H2S", "OCS", "SO", "SH", "CS", "NS"})
 # (correlated-k over the published tables is the only opacity path).
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
 DT_MAX_S = 1.0e13   # chemistry step-size cap (s); prevents the adaptive-dt balloon
-_VERSION = 55  # model_cache buster (identity = canonical params + this
+_VERSION = 56  # model_cache buster (identity = canonical params + this
                # number, never a content hash); bump on any physics or
                # canonical-key-set change.
 
@@ -121,19 +121,15 @@ JAC_METHODS = ("fd", "ad")            # certified-FD default / warm-jvp opt-in
 # move the AD gate silently. FD has no equivalent limit: it re-initializes
 # FastChem per stencil point and never uses the b_z map.
 CO_BZ_MIN_AD = 0.1
-# The build an AD row's warm re-converge runs on. count_max: certifying warm
-# re-converges take 1100-1700 steps (engine notes S1.6); the TOI-7169 b stall
-# stops improving by step ~900 and would otherwise spend the full 30000-step
-# cold budget (66 min) before the cadence-1 retry. geom_conv_tol 1.0: the
-# solver's geometry veto (vulcan-jax C21) is OFF inside the differentiated
-# map -- it starts from the veto-certified cold column, and a veto
-# continuation leaves the tangent in the transient of the last refresh
-# (emission lnZ AD/FD closure corr -0.09 with the veto, 0.9976 without;
-# notes S1.7). count_min 2000: from a veto-certified column the warm map has
-# no kick to integrate through, certifies at the chemistry certificate's
-# first opportunity and hands back a tangent that has not relaxed (closure
-# corr 0.33 at the config's count_min 120; 0.9975 at 2000 and at 4000).
-AD_BUILD_OVERRIDES = {"count_max": 6000, "count_min": 2000, "geom_conv_tol": 1.0}
+# The build an AD row's warm re-converge runs on. count_max is a cost bound,
+# not a floor: the TOI-7169 b stall stops improving by step ~900 and would
+# otherwise spend the full 30000-step cold budget (66 min) before the
+# cadence-1 retry. When the tangent settles is the solver's call: the AD row
+# runs through `converged_y_jvp`, whose certificate holds the tangent to the
+# same change-over-lookback tolerance as the column (vulcan-jax
+# OuterLoop.run_jvp), so no step floor and no geometry-veto override remain
+# here (notes S1.7 has the closures each of those used to stand in for).
+AD_BUILD_OVERRIDES = {"count_max": 6000}
 # Accepted co_ratio range, INCLUSIVE at both ends. TWO gate axes, network and
 # photolysis; do NOT add temperature (non-monotonic: +400 K and -200 K both fix
 # C/O 1.087) or Kzz (a tabulated column is not a scalar to gate on).
@@ -269,10 +265,12 @@ def check_converged(diag, stage, species, chem, log=print) -> tuple:
     branch = int(diag.conv_branch)
     z = int(diag.cell_layer)
     cell = f"{species[int(diag.cell_species)]}@z{z}"
+    tl = float(getattr(diag, "tangent_longdy", np.nan))   # NaN: no tangent path
     detail = (f"longdy={longdy:.3g}, longdydt={float(diag.longdydt):.3g}/s, "
               f"branch {CONV_BRANCH.get(branch, 'none')}, "
               f"aflux_change={float(diag.aflux_change):.3g}, "
-              f"t={float(diag.t):.3g} s, dt={float(diag.dt):.3g} s; "
+              + (f"tangent_longdy={tl:.3g}, " if not np.isnan(tl) else "")
+              + f"t={float(diag.t):.3g} s, dt={float(diag.dt):.3g} s; "
               f"controlling cell {cell} at {float(chem.p_bar[z]):.3g} bar, "
               f"VMR {float(diag.cell_vmr):.3g}")
     if not (bool(diag.conv_normal) and longdy < chem.yconv_min):
@@ -280,6 +278,15 @@ def check_converged(diag, stage, species, chem, log=print) -> tuple:
                else f"exited at {ac} accepted steps without the runner's "
                     "canonical certification (stall fallback / hybrid "
                     "vm_mol phase-flip / photolysis flux still changing)")
+        if branch and not np.isnan(tl) and longdy < chem.yconv_min:
+            # the column certified; the derivative through it did not settle
+            raise RuntimeError(
+                f"the sensitivity did NOT settle ({stage}: {detail}; the "
+                f"column certified on branch {CONV_BRANCH[branch]} but its "
+                f"tangent, tangent_longdy={tl:.3g} with its slope, did not "
+                f"pass the same two-branch test (yconv_cri / yconv_min="
+                f"{chem.yconv_min:g}); {how}). The derivative at this point "
+                "is not certified; the column is.")
         raise RuntimeError(
             f"chemistry did NOT converge ({stage}: {detail}; "
             f"gate yconv_min={chem.yconv_min:g}, "
@@ -2273,19 +2280,25 @@ def run_model(params: dict, log=print) -> Path:
             dep, tau = _dep_fn(y_b, jnp.asarray(th), return_tau=True)
             return np.asarray(_gate_emis(dep, tau, stage))
 
-        def _ad_theta_depth_diag(th, chem_x):
-            # warm continuation from the converged column: the primal is a
-            # warm re-converge plus the full spectrum, the jvp the validated
-            # steady-state tangent (photo ON, gated in canonical_params). The
-            # convergence certificate is a second output, so the batch
-            # certifies the point it differentiates from that same solve.
-            # Primal and tangent share the build `chem_x`.
-            y_w, diag = chem_x.converged_y(th, warm_y=y_sol, lnZ_ref=0.0,
-                                           c_o_ref=0.0, return_conv_diag=True)
+        def _ad_row(chem_x, e_h):
+            # Warm continuation from the converged column, differentiated
+            # along `e_h` (a unit direction times its FD step: the solver
+            # certifies the tangent per cell in those units, together with
+            # the column it belongs to; a plain jax.jvp stops when the column
+            # certifies, which from a converged start is at count_min with
+            # the tangent unrelaxed, notes S1.7). The spectrum tangent follows
+            # by the chain rule from (y_w, dy_w) and the direct theta
+            # dependence of the RT. Returns (depth, diag, tau, y_w, d depth).
+            y_w, dy_w, diag = chem_x.converged_y_jvp(th0, e_h, warm_y=y_sol,
+                                                     lnZ_ref=0.0, c_o_ref=0.0)
+            e_j = jnp.asarray(e_h)
             if emis is None:
-                return depth_from_y(y_w, th), diag, None, y_w
-            dep, tau = depth_from_y(y_w, th, return_tau=True)
-            return dep, diag, tau, y_w
+                dep, ddep = jax.jvp(depth_from_y, (y_w, th0), (dy_w, e_j))
+                return dep, diag, None, y_w, ddep
+            (dep, tau), (ddep, _) = jax.jvp(
+                lambda y, th: depth_from_y(y, th, return_tau=True),
+                (y_w, th0), (dy_w, e_j))
+            return dep, diag, tau, y_w, ddep
 
         _ad_chem_rows = ([n for n in jac_names
                           if n not in CLOUD_FISHER_PARAMS]
@@ -2299,21 +2312,21 @@ def run_model(params: dict, log=print) -> Path:
                                           y=np.asarray(y_sol),
                                           build_margin=_bz_build, log=log)
         if _ad_chem_rows:
-            # One plain jvp per chemistry-theta row, NEVER vmap over the
-            # tangent directions: the batched tangent through the solver's
-            # while_loop is NaN in every bin on a column with clamped-zero
-            # layers (TOI-7169 b, 10x solar, C/O 0.55; even a batch of one),
-            # while the unbatched jvp is finite. Each row certifies its own
-            # warm re-converge.
+            # One tangent-certified jvp per chemistry-theta row, NEVER vmap
+            # over the tangent directions: the batched tangent through the
+            # solver's while_loop is NaN in every bin on a column with
+            # clamped-zero layers (TOI-7169 b, 10x solar, C/O 0.55; even a
+            # batch of one), while the unbatched jvp is finite. Each row
+            # certifies its own warm re-converge and its own tangent.
             # That warm re-converge is where a shielded column stalls at the
             # config's photolysis cadence (TOI-7169 b: the FD stencil stall's
             # own cell and flux change, notes S1.7), so it runs on a build
-            # with AD_BUILD_OVERRIDES (step cap, geometry veto off). A row
-            # that does not certify there is re-solved on a cadence-1 build
-            # and flagged in `photo_escalated` (transmission: corr 0.996 /
-            # 0.998 against the escalated FD rows on that case), or refused
-            # (emission: the AD/FD closure measures corr 0.36 at cadence 1,
-            # notes S1.7).
+            # with AD_BUILD_OVERRIDES (step cap). A row that does not certify
+            # there is re-solved on a cadence-1 build and flagged in
+            # `photo_escalated`, or refused (emission: on the default eclipse
+            # column the warm map is a photolysis sawtooth at cadence 5 and
+            # its tangent grows without bound at cadence 1, notes S1.7). Only
+            # the certificate is inside the try: a backend failure propagates.
             chem_ad = _build_chem(extra_abun=AD_BUILD_OVERRIDES, tag="AD rows",
                                   photo_frq=_run_frq)
             chem_ad1 = None
@@ -2321,23 +2334,24 @@ def run_model(params: dict, log=print) -> Path:
             advance()
             for _n in _ad_chem_rows:
                 _e = np.zeros(theta.size)
-                _e[theta_names.index(_n)] = 1.0
+                _e[theta_names.index(_n)] = FD_STEPS[_n]   # the certificate's units
                 stage = f"AD warm re-converge ({_n})"
+                # the shared primal already stalled on an earlier row
+                out = None if chem_ad1 is not None else _ad_row(chem_ad, _e)
                 try:
-                    if chem_ad1 is not None:   # the shared primal already stalled
+                    if out is None:
                         raise RuntimeError("primal stalled on an earlier row")
-                    out = jax.jvp(lambda th: _ad_theta_depth_diag(th, chem_ad),
-                                  (th0,), (jnp.asarray(_e),))
-                    _check_converged(out[0][1], stage)
+                    _check_converged(out[1], stage)
                 except RuntimeError as exc:
                     if _run_frq == 1:
                         raise
                     if emis is not None:
                         raise RuntimeError(
                             f"{exc} The eclipse AD row is not re-solved with "
-                            "photolysis refreshed every accepted step: the "
-                            "AD-vs-FD closure falls to correlation 0.36 there. "
-                            "Re-run with jac_method='fd'.") from exc
+                            "photolysis refreshed every accepted step: on the "
+                            "default eclipse column the tangent grows without "
+                            "bound at that cadence too (notes S1.7). Re-run "
+                            "with jac_method='fd'.") from exc
                     log(f"[fwd] {stage}: {exc}")
                     log(f"[fwd] {stage}: re-solving with photolysis refreshed "
                         "every accepted step")
@@ -2346,17 +2360,16 @@ def run_model(params: dict, log=print) -> Path:
                                                tag="AD rows [photo cadence 1]",
                                                photo_frq=1)
                     stage += " [photo cadence 1]"
-                    out = jax.jvp(lambda th: _ad_theta_depth_diag(th, chem_ad1),
-                                  (th0,), (jnp.asarray(_e),))
-                    _check_converged(out[0][1], stage)
+                    out = _ad_row(chem_ad1, _e)
+                    _check_converged(out[1], stage)
                     _escalated.append(f"AD {_n} row")
-                (_pd, _pdiag, _ptau, _py), (_dd, _, _, _) = out
+                _pd, _pdiag, _ptau, _py, _dd = out
                 check_elements(np.asarray(_py), chem, stage, log)
                 # the jvp's own primal, not y_sol: certify the point the
                 # tangent is actually taken at
                 if emis is not None:
                     _gate_emis(_pd, _ptau, stage)
-                _ad_cols[_n] = np.asarray(_dd)
+                _ad_cols[_n] = np.asarray(_dd) / FD_STEPS[_n]
             log(f"[fwd] AD Jacobian: {len(_ad_chem_rows)} rows, one warm jvp "
                 f"each, in {time.time()-t1:.0f} s")
 
