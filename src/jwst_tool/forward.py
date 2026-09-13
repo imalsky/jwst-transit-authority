@@ -69,7 +69,7 @@ _S_MOLECULES = frozenset({"SO2", "H2S", "OCS", "SO", "SH", "CS", "NS"})
 # (correlated-k over the published tables is the only opacity path).
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
 DT_MAX_S = 1.0e13   # chemistry step-size cap (s); prevents the adaptive-dt balloon
-_VERSION = 54  # model_cache buster (identity = canonical params + this
+_VERSION = 55  # model_cache buster (identity = canonical params + this
                # number, never a content hash); bump on any physics or
                # canonical-key-set change.
 
@@ -121,6 +121,19 @@ JAC_METHODS = ("fd", "ad")            # certified-FD default / warm-jvp opt-in
 # move the AD gate silently. FD has no equivalent limit: it re-initializes
 # FastChem per stencil point and never uses the b_z map.
 CO_BZ_MIN_AD = 0.1
+# The build an AD row's warm re-converge runs on. count_max: certifying warm
+# re-converges take 1100-1700 steps (engine notes S1.6); the TOI-7169 b stall
+# stops improving by step ~900 and would otherwise spend the full 30000-step
+# cold budget (66 min) before the cadence-1 retry. geom_conv_tol 1.0: the
+# solver's geometry veto (vulcan-jax C21) is OFF inside the differentiated
+# map -- it starts from the veto-certified cold column, and a veto
+# continuation leaves the tangent in the transient of the last refresh
+# (emission lnZ AD/FD closure corr -0.09 with the veto, 0.9976 without;
+# notes S1.7). count_min 2000: from a veto-certified column the warm map has
+# no kick to integrate through, certifies at the chemistry certificate's
+# first opportunity and hands back a tangent that has not relaxed (closure
+# corr 0.33 at the config's count_min 120; 0.9975 at 2000 and at 4000).
+AD_BUILD_OVERRIDES = {"count_max": 6000, "count_min": 2000, "geom_conv_tol": 1.0}
 # Accepted co_ratio range, INCLUSIVE at both ends. TWO gate axes, network and
 # photolysis; do NOT add temperature (non-monotonic: +400 K and -200 K both fix
 # C/O 1.087) or Kzz (a tabulated column is not a scalar to gate on).
@@ -2260,18 +2273,15 @@ def run_model(params: dict, log=print) -> Path:
             dep, tau = _dep_fn(y_b, jnp.asarray(th), return_tau=True)
             return np.asarray(_gate_emis(dep, tau, stage))
 
-        def _ad_theta_depth_diag(th):
+        def _ad_theta_depth_diag(th, chem_x):
             # warm continuation from the converged column: the primal is a
             # warm re-converge plus the full spectrum, the jvp the validated
             # steady-state tangent (photo ON, gated in canonical_params). The
             # convergence certificate is a second output, so the batch
             # certifies the point it differentiates from that same solve.
-            # No cadence escalation here: an AD row differentiates THIS warm
-            # map, and the emission AD/FD closure is exactly what fails at
-            # cadence 1 (notes §1.7). A warm solve that will not certify is a
-            # refusal, not a retry.
-            y_w, diag = chem.converged_y(th, warm_y=y_sol, lnZ_ref=0.0,
-                                         c_o_ref=0.0, return_conv_diag=True)
+            # Primal and tangent share the build `chem_x`.
+            y_w, diag = chem_x.converged_y(th, warm_y=y_sol, lnZ_ref=0.0,
+                                           c_o_ref=0.0, return_conv_diag=True)
             if emis is None:
                 return depth_from_y(y_w, th), diag, None, y_w
             dep, tau = depth_from_y(y_w, th, return_tau=True)
@@ -2288,21 +2298,6 @@ def run_model(params: dict, log=print) -> Path:
             _bz_warm = check_ad_co_margin(chem, cp["co_ratio"],
                                           y=np.asarray(y_sol),
                                           build_margin=_bz_build, log=log)
-        if _ad_chem_rows and _escalated:
-            # An AD row differentiates the warm re-converge of THIS column. On
-            # a column that needed the cadence-1 escalation that map is the one
-            # the emission AD/FD closure measures at corr 0.558 / scale 0.711
-            # against the certified FD row (notes S1.7) -- a measured wrong
-            # derivative, not merely an unvalidated one. FD rows on the same
-            # column sit at 0.981-0.987 against a 0.99 gate, so they are the
-            # honest fallback rather than a second broken path.
-            raise RuntimeError(
-                "this column needed the photolysis-cadence escalation ("
-                + "; ".join(_escalated) + "), and automatic differentiation "
-                "is not validated there: the tool's own AD-vs-FD closure "
-                "falls to correlation 0.56 at that cadence. Re-run with "
-                "jac_method='fd' (finite differences), which stays within "
-                "2% of its closure gate on such a column.")
         if _ad_chem_rows:
             # One plain jvp per chemistry-theta row, NEVER vmap over the
             # tangent directions: the batched tangent through the solver's
@@ -2310,20 +2305,57 @@ def run_model(params: dict, log=print) -> Path:
             # layers (TOI-7169 b, 10x solar, C/O 0.55; even a batch of one),
             # while the unbatched jvp is finite. Each row certifies its own
             # warm re-converge.
+            # That warm re-converge is where a shielded column stalls at the
+            # config's photolysis cadence (TOI-7169 b: the FD stencil stall's
+            # own cell and flux change, notes S1.7), so it runs on a build
+            # with AD_BUILD_OVERRIDES (step cap, geometry veto off). A row
+            # that does not certify there is re-solved on a cadence-1 build
+            # and flagged in `photo_escalated` (transmission: corr 0.996 /
+            # 0.998 against the escalated FD rows on that case), or refused
+            # (emission: the AD/FD closure measures corr 0.36 at cadence 1,
+            # notes S1.7).
+            chem_ad = _build_chem(extra_abun=AD_BUILD_OVERRIDES, tag="AD rows",
+                                  photo_frq=_run_frq)
+            chem_ad1 = None
             t1 = time.time()
             advance()
             for _n in _ad_chem_rows:
                 _e = np.zeros(theta.size)
                 _e[theta_names.index(_n)] = 1.0
-                (_pd, _pdiag, _ptau, _py), (_dd, _, _, _) = jax.jvp(
-                    _ad_theta_depth_diag, (th0,), (jnp.asarray(_e),))
-                _check_converged(_pdiag, f"AD warm re-converge ({_n})")
-                check_elements(np.asarray(_py), chem,
-                               f"AD warm re-converge ({_n})", log)
+                stage = f"AD warm re-converge ({_n})"
+                try:
+                    if chem_ad1 is not None:   # the shared primal already stalled
+                        raise RuntimeError("primal stalled on an earlier row")
+                    out = jax.jvp(lambda th: _ad_theta_depth_diag(th, chem_ad),
+                                  (th0,), (jnp.asarray(_e),))
+                    _check_converged(out[0][1], stage)
+                except RuntimeError as exc:
+                    if _run_frq == 1:
+                        raise
+                    if emis is not None:
+                        raise RuntimeError(
+                            f"{exc} The eclipse AD row is not re-solved with "
+                            "photolysis refreshed every accepted step: the "
+                            "AD-vs-FD closure falls to correlation 0.36 there. "
+                            "Re-run with jac_method='fd'.") from exc
+                    log(f"[fwd] {stage}: {exc}")
+                    log(f"[fwd] {stage}: re-solving with photolysis refreshed "
+                        "every accepted step")
+                    if chem_ad1 is None:
+                        chem_ad1 = _build_chem(extra_abun=AD_BUILD_OVERRIDES,
+                                               tag="AD rows [photo cadence 1]",
+                                               photo_frq=1)
+                    stage += " [photo cadence 1]"
+                    out = jax.jvp(lambda th: _ad_theta_depth_diag(th, chem_ad1),
+                                  (th0,), (jnp.asarray(_e),))
+                    _check_converged(out[0][1], stage)
+                    _escalated.append(f"AD {_n} row")
+                (_pd, _pdiag, _ptau, _py), (_dd, _, _, _) = out
+                check_elements(np.asarray(_py), chem, stage, log)
                 # the jvp's own primal, not y_sol: certify the point the
                 # tangent is actually taken at
                 if emis is not None:
-                    _gate_emis(_pd, _ptau, f"AD warm re-converge ({_n})")
+                    _gate_emis(_pd, _ptau, stage)
                 _ad_cols[_n] = np.asarray(_dd)
             log(f"[fwd] AD Jacobian: {len(_ad_chem_rows)} rows, one warm jvp "
                 f"each, in {time.time()-t1:.0f} s")

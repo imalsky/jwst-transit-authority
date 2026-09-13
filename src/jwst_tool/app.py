@@ -204,7 +204,7 @@ st.markdown(
     "\n\n"
     "The tool computes a forward spectrum and a Pandeia noise forecast and "
     "reports how many transits/eclipses are needed for the science target. "
-    "The Detection values are template S/N estimates and the parameter "
+    "The detection values are template S/N estimates and the parameter "
     "constraints are local Fisher estimates.")
 
 # The Run row renders HERE (above the explainers). Its widgets depend on
@@ -472,8 +472,15 @@ class _TimedBar:
             measured_left = e * (1.0 - self._frac) / self._frac
             if self._prior:
                 prior_left = max(self._prior * (1.0 - self._frac), 0.0)
-                remaining = (self._frac * measured_left
-                             + (1.0 - self._frac) * prior_left)
+                # Hand over to the measured pace by a THIRD of the way in, not
+                # halfway. The prior is a generic pre-run guess and it cannot
+                # see the two things that dominate a slow run -- a column that
+                # rides the step cap before its escalation fires, and an AD row
+                # whose warm re-converge never certifies -- so it underestimates
+                # badly there. Weighting it by (1 - frac) kept a wrong prior in
+                # charge of the countdown for most of the run.
+                w = min(1.0, 3.0 * self._frac)
+                remaining = w * measured_left + (1.0 - w) * prior_left
             else:
                 remaining = measured_left
         elif self._prior:
@@ -749,8 +756,6 @@ with st.sidebar:
                  + st.session_state["_cfg_load_error"])
     elif st.session_state.get("_cfg_populated"):
         st.success("Populated")
-    elif _cfg_up is not None:
-        st.info("File selected. Press Populate to apply it.")
     st.divider()
 
     # Step 1: Target
