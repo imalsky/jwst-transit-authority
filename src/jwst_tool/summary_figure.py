@@ -641,7 +641,7 @@ def _plot_posterior_panel(axp, pan: dict,
 
 
 def compose_summary_figure(spectrum: dict, posterior_panels=None,
-                           panel_xlims=None):
+                           panel_xlims=None, caveats=()):
     """Compose the three-panel proposal summary figure; returns the Figure.
 
     ``spectrum``: dict(wl_um, depth_ppm, depth_label, model_label,
@@ -665,6 +665,10 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
 
     The spectrum's own axis windows are ``spectrum['wl_range']`` and
     ``spectrum['depth_range']``; both default to None, meaning auto-fit.
+
+    ``caveats``: the run caveats the page shows. They are footnoted along the
+    bottom MARGIN of the canvas (``plotting.draw_caveats``) so a downloaded
+    figure still carries them -- the panels themselves stay free of prose.
 
     All inputs are validated loudly (house style); the caller's arrays are
     never mutated. The caller owns the Figure (close it after saving).
@@ -740,4 +744,7 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
             _plot_posterior_panel(
                 axp, panels[i],
                 xlim=(xlims[i] if i < len(xlims) else None))
+
+        # Inside the style context so the footnote is set in the house font.
+        plotting.draw_caveats(fig, caveats)
     return fig

@@ -55,6 +55,22 @@ def binned(wl, values):
 
 # Validate every pair before constructing or saving the comparison.
 PAIRS = {(p, m): load_pair(p, m) for m, planets in CASES.items() for p in planets}
+
+# All six columns must come from ONE photolysis cadence: mixing a cadence-1 input
+# with a config-cadence one moves a spectrum by up to 3.8 ppm and is invisible in
+# the residuals. Files written before atmos_cases.py recorded this cannot be checked.
+CADENCE_KEYS = ("ini_update_photo_frq", "final_update_photo_frq", "photo_escalated")
+CADENCES = {}
+for (planet, mode), (atmos, _) in PAIRS.items():
+    if all(k in atmos for k in CADENCE_KEYS):
+        CADENCES[f"{planet} {mode}"] = tuple(atmos[k].item() for k in CADENCE_KEYS)
+    else:
+        print(f"{planet} {mode}: cadence provenance unrecorded (npz predates the "
+              "cadence keys); regenerate with inputs/atmos_cases.py")
+if len(set(CADENCES.values())) > 1:
+    raise ValueError(f"atmos_*.npz mix photolysis cadences {CADENCE_KEYS} = {CADENCES}; "
+                     "regenerate them on one tree with inputs/atmos_cases.py")
+
 fig, axes = panels(1, 2)
 for ax, (mode, plist) in zip(axes, CASES.items()):
     for planet, col in zip(plist, CYC if mode == "transmission" else (INK, RED)):

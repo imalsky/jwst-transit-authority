@@ -395,8 +395,15 @@ def test_results_render_and_below_target_is_warning_not_error(monkeypatch):
     """Full post-Run render path on a synthetic result: every figure and
     table offers a download, and a run that works but finds no signal is a
     scientific outcome, not a software failure -- a warning, never an
-    error."""
+    error.
+
+    A download leaves the page behind, so the run caveats must ride the
+    bytes: the CSVs carry the full text in their header and every result
+    FIGURE carries the short form as a footnote in its own bottom strip --
+    a pasted PNG has neither the st.warning nor the CSV header.
+    """
     from streamlit.delta_generator import DeltaGenerator
+    from jwst_tool import plotting, summary_figure as _sf
     downloads = {}
     original = DeltaGenerator.download_button
 
@@ -408,6 +415,29 @@ def test_results_render_and_below_target_is_warning_not_error(monkeypatch):
     monkeypatch.setattr(DeltaGenerator, "download_button", capture)
     monkeypatch.setattr(st, "download_button",
                         capture.__get__(st.download_button.__self__))
+
+    # The app closes every Figure it builds, so record what each builder
+    # DREW and whether it landed on a panel.
+    drawn = {}
+
+    def _spy(name, real):
+        def _f(*a, **kw):
+            fig = real(*a, **kw)
+            with plotting.render_lock:
+                fig.canvas.draw()
+                r = fig.canvas.get_renderer()
+                boxes = [ax.get_window_extent() for ax in fig.axes]
+                drawn[name] = [(t.get_text(),
+                                any(t.get_window_extent(r).overlaps(b)
+                                    for b in boxes))
+                               for t in fig.texts]
+            return fig
+        return _f
+
+    monkeypatch.setattr(_sf, "compose_summary_figure",
+                        _spy("summary", _sf.compose_summary_figure))
+    monkeypatch.setattr(plotting, "build_structure_figure",
+                        _spy("structure", plotting.build_structure_figure))
     out, out_meta = _synthetic_out(with_jac=True)  # sigma_detect=0.0
     # an escalated column must SAY so on the page: the flag is in the artifact
     # precisely because a cache hit never solves and never logs (forward.py)
@@ -428,6 +458,12 @@ def test_results_render_and_below_target_is_warning_not_error(monkeypatch):
         assert "FD dlnCO row" in payload, label
         assert "refreshed every accepted step" in payload, label
         assert "No opacity table for C6H6" in payload, label
+    for name in ("summary", "structure"):
+        assert len(drawn[name]) == 1, (name, drawn[name])
+        text, on_a_panel = drawn[name][0]
+        assert "No opacity table for C6H6" in text, (name, text)
+        assert "FD dlnCO row" in text, (name, text)
+        assert not on_a_panel, f"the {name} caveat footnote covers a panel"
 
 
 def test_emission_results_use_eclipse_terms():
@@ -692,12 +728,15 @@ def test_changing_any_run_input_marks_the_result_stale(widget, value, field,
 def test_a_run_that_produces_nothing_clears_the_previous_result(monkeypatch):
     """A refused or failed Run must not leave the previous run's verdict and
     figures on screen under a stale banner: the page shows only the error.
-    Exercised through the one refusal that keeps the Run button enabled (no
-    free concurrency slot); the forward-model failure branch pops the same
-    keys."""
-    from jwst_tool import runlimit as _rl
+    Exercised through the one refusal that keeps the Run button enabled (a
+    cache MISS with no free concurrency slot); the forward-model failure
+    branch pops the same keys."""
+    from jwst_tool import forward as _fwd, runlimit as _rl
 
     monkeypatch.setattr(_rl, "acquire", lambda *_a, **_k: None)
+    # the miss is pinned here: only a heavy launch is declined now, so the
+    # refusal must not depend on what this machine happens to have cached
+    monkeypatch.setattr(_fwd, "load_result", lambda *_a, **_k: None)
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
     at = _run_with_result(out, out_meta)
     assert not at.exception, at.exception
@@ -707,6 +746,61 @@ def test_a_run_that_produces_nothing_clears_the_previous_result(monkeypatch):
     assert "out" not in at.session_state
     assert any("already running" in e.value for e in at.error), [e.value for e in at.error]
     assert not [w.value for w in at.warning if "previous run" in w.value or "reach it" in w.value]
+
+
+def test_a_fully_cached_run_renders_while_every_slot_is_busy(monkeypatch):
+    """The refusal promises previously computed results stay instant, so a
+    Run whose model AND ETC entries are all cached -- it starts no
+    subprocess -- must render with every heavy slot held. The slot is taken
+    at the launch, not at the click, and the second half pins the other side:
+    a cache MISS on the same busy instance is still refused, so the limiter
+    (never the cache) gates every heavy call."""
+    from jwst_tool import detect as _detect, forward as _fwd
+    from jwst_tool import noise as _noise, runlimit as _rl
+
+    out, _ = _synthetic_out(sigma_detect=8.0, with_jac=True)
+    by_mode = {r["mode_key"]: r for r in out["results"]}
+    monkeypatch.setattr(_rl, "acquire", lambda *_a, **_k: None)   # slots held
+    monkeypatch.setattr(_fwd, "load_result", lambda *_a, **_k: out["model"])
+    monkeypatch.setattr(_noise, "missing_modes",
+                        lambda _star, keys, **_k: [k for k in keys
+                                                   if k not in by_mode])
+    monkeypatch.setattr(_noise, "run_modes", lambda _star, keys, **_k: {
+        **{k: {"wl": [1.0]} for k in keys}, "__provenance__": None})
+    monkeypatch.setattr(_detect, "evaluate_mode",
+                        lambda k, *_a, **_kw: by_mode[k])
+
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.run()
+    at.multiselect(key="n0_modes").set_value(list(by_mode)).run()
+    assert not at.exception, at.exception
+    next(b for b in at.button if b.label == "Run").click()
+    at.run()
+    assert not at.exception, at.exception
+    assert not [e.value for e in at.error if "already running" in e.value]
+    assert {r["mode_key"] for r in at.session_state["out"]["results"]} \
+        == set(by_mode)
+
+    monkeypatch.setattr(_fwd, "load_result", lambda *_a, **_k: None)
+    next(b for b in at.button if b.label == "Run").click()
+    at.run()
+    assert not at.exception, at.exception
+    assert any("already running" in e.value for e in at.error), \
+        [e.value for e in at.error]
+    assert "out" not in at.session_state
+
+    # an ETC entry that vanished between the cache probe and the read: the
+    # model is cached, missing_modes says nothing is missing, run_modes finds
+    # a miss -- still refused, never launched without a slot
+    monkeypatch.setattr(_fwd, "load_result", lambda *_a, **_k: out["model"])
+    monkeypatch.setattr(_noise, "run_modes",
+                        lambda _s, _keys, launch=True, **_k: None if not launch
+                        else {})
+    next(b for b in at.button if b.label == "Run").click()
+    at.run()
+    assert not at.exception, at.exception
+    assert any("already running" in e.value for e in at.error)
+    assert "out" not in at.session_state
 
 
 def test_a_nonpositive_bound_on_a_log_axis_warns_instead_of_killing_the_page():

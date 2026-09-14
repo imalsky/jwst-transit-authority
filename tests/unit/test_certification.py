@@ -286,7 +286,9 @@ def test_an_abundant_species_with_no_k_table_is_named_not_swallowed():
 def test_a_stalled_column_escalates_once_and_a_certified_one_never_does():
     """certified_solve retries a non-certifying column at photolysis cadence 1
     and returns the model that produced the column it hands back; with no
-    rebuild it still raises, and a column that certifies is never re-solved."""
+    rebuild it still raises, and a column that certifies is never re-solved.
+    A failure of the SOLVE itself is not a stall: only the certificate's
+    RuntimeError may escalate."""
     def _model(diag):
         m = _chem()
         m.sidx = {s: i for i, s in enumerate(SPECIES)}
@@ -314,3 +316,15 @@ def test_a_stalled_column_escalates_once_and_a_certified_one_never_does():
         fixed, np.zeros(3), "baseline solve",
         rebuild=lambda: (builds.append(1), fixed)[1], log=lambda _m: None)
     assert not esc2 and builds == [] and chem2 is fixed
+
+    # a BACKEND failure is a RuntimeError too (XLA raises RESOURCE_EXHAUSTED as
+    # one): it must propagate, never be re-solved and flagged as an escalation
+    broken = _model(_diag())
+    def _boom(th, return_conv_diag):
+        raise RuntimeError("backend: RESOURCE_EXHAUSTED")
+    broken.converged_y = _boom
+    with pytest.raises(RuntimeError, match="RESOURCE_EXHAUSTED"):
+        forward.certified_solve(
+            broken, np.zeros(3), "baseline solve",
+            rebuild=lambda: (builds.append(1), fixed)[1], log=lambda _m: None)
+    assert builds == []

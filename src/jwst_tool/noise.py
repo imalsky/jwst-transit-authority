@@ -201,7 +201,7 @@ def missing_modes(star: dict, mode_keys: list[str],
 
 
 def run_modes(star: dict, mode_keys: list[str], sat_limit: float = 0.80,
-              progress=None, force: bool = False) -> dict:
+              progress=None, force: bool = False, launch: bool = True) -> dict:
     """The production ETC path: per-mode cache, one worker batch.
 
     Each mode is cached under its own single-mode job key, so a run computes
@@ -212,6 +212,10 @@ def run_modes(star: dict, mode_keys: list[str], sat_limit: float = 0.80,
     All cache misses go to the worker in ONE batch job (one subprocess, one
     pandeia import), and the result is split back into per-mode files.
     Returns {mode_key: payload, "__provenance__": {...}} like the worker.
+    ``launch=False`` returns None instead of starting the worker when any
+    mode is not cached: the caller that holds no run-limiter slot uses it,
+    so a cache entry that vanished since ``missing_modes`` never launches
+    Pandeia outside the limiter.
     """
     ins.NOISE_CACHE.mkdir(parents=True, exist_ok=True)
     out: dict = {}
@@ -224,6 +228,8 @@ def run_modes(star: dict, mode_keys: list[str], sat_limit: float = 0.80,
             continue
         out[k] = cached[k]
         out.setdefault("__provenance__", cached.get("__provenance__"))
+    if todo and not launch:
+        return None
     if todo:
         result = _run_worker(noise_job(star, todo, sat_limit=sat_limit),
                              progress)

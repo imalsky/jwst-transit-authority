@@ -88,6 +88,67 @@ def _thin_log_axis(ax, which: str) -> None:
     axis.set_minor_formatter(NullFormatter())
 
 
+# Run caveats on the canvas: an exported figure leaves its page behind, so the
+# st.warning above it and the CSV `# caveat:` header do not travel with a
+# pasted PNG. One small footnote line at the foot of the canvas carries the
+# SHORT form of each caveat with the image; the full text stays on the page
+# and in the CSV headers.
+CAVEAT_FONTSIZE = 6.5
+# Character budget for the footnote, SHARED equally by the caveats: a long
+# unmodeled-species list must not push a second caveat off the line, and the
+# whole line has to stay inside the narrowest canvas (11 in: ~0.047 in per
+# character at CAVEAT_FONTSIZE).
+CAVEAT_MAX_CHARS = 180
+# The footnote gets its OWN strip below the axes: the bottom margin of a
+# builder's canvas is already full of tick labels and an axis label (the
+# summary figure's x label sits 0.004 in above where a footnote at the canvas
+# edge would end), so the strip is ADDED to the figure height and every axes
+# is put back at the inch it occupied. The panels are therefore identical
+# with and without caveats -- only the canvas grows.
+CAVEAT_STRIP_IN = 0.20
+
+
+def caveat_line(caveats) -> str:
+    """The footnote text: each caveat cut at its first sentence or first
+    colon, whichever comes first, then to its share of CAVEAT_MAX_CHARS, and
+    the pieces joined into one line."""
+    caveats = list(caveats)
+    budget = CAVEAT_MAX_CHARS // max(1, len(caveats))
+    parts = []
+    for c in caveats:
+        s = " ".join(str(c).split())
+        ends = [i for i in (s.find(". "), s.find(": ")) if i > 0]
+        s = s[:min(ends)] if ends else s.rstrip(".")
+        parts.append(s if len(s) <= budget
+                     else s[:budget - 3].rstrip() + "...")
+    return "Model caveats: " + "; ".join(parts) + "."
+
+
+def draw_caveats(fig, caveats) -> None:
+    """Footnote ``fig`` with the run's caveats; no-op when there are none.
+
+    Grows the canvas by ``CAVEAT_STRIP_IN`` and re-seats every axes at the
+    inch it already occupied, so the panels are unchanged and the footnote
+    has clear space of its own.
+    """
+    caveats = [c for c in (caveats or []) if str(c).strip()]
+    if not caveats:
+        return
+    with render_lock:
+        w, h = fig.get_size_inches()
+        h2 = h + CAVEAT_STRIP_IN
+        fig.set_size_inches(w, h2, forward=False)
+        for ax in fig.axes:
+            # original=True: with set_box_aspect the ACTIVE position is the
+            # box matplotlib squeezed into the cell, and writing that back
+            # would make the next draw squeeze it a second time.
+            p = ax.get_position(original=True)
+            ax.set_position([p.x0, (p.y0 * h + CAVEAT_STRIP_IN) / h2,
+                             p.width, p.height * h / h2])
+        fig.text(0.5, 0.5 * CAVEAT_STRIP_IN / h2, caveat_line(caveats),
+                 ha="center", va="center", fontsize=CAVEAT_FONTSIZE)
+
+
 TP_XLIM_DEFAULT = (1.0, 3000.0)
 VMR_XLIM_DEFAULT = (1e-12, 1.0)
 
@@ -120,7 +181,7 @@ VMR_EXTRA_COLORS = ("#332288", "#117733", "#882255", "#AA4499", "#999933",
                     "#44AA99", "#DDCC77", "#661100")
 
 
-def build_structure_figure(p_bar, T_K, columns):
+def build_structure_figure(p_bar, T_K, columns, caveats=()):
     """T-P profile and mixing-ratio profiles as ONE two-panel figure.
 
     Left: pressure (log, inverted) vs temperature. Right: VMR (log) vs the
@@ -131,6 +192,9 @@ def build_structure_figure(p_bar, T_K, columns):
 
     Axis windows are the module defaults; this figure carries no per-axis
     controls (the panel it belongs to has no figure-settings block).
+
+    ``caveats``: the run caveats the page shows, footnoted along the bottom
+    margin so a downloaded figure keeps them (``draw_caveats``).
     """
     p = np.asarray(p_bar, dtype=float)
     T = np.asarray(T_K, dtype=float)
@@ -192,4 +256,5 @@ def build_structure_figure(p_bar, T_K, columns):
         ax_v.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0),
                     frameon=False, fontsize=7, ncol=1,
                     handletextpad=0.5, borderaxespad=0.0, labelspacing=0.35)
+        draw_caveats(fig, caveats)
         return fig

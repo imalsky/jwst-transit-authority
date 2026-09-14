@@ -1698,27 +1698,41 @@ def compute():
     if not mode_keys:
         st.error("Select at least one instrument mode (step 4).")
         return None
-    # Heavy subprocesses (forward + ETC) hold ONE concurrency slot for their
-    # whole duration; when every slot is busy the launch is declined. Cached
-    # results never need a slot.
-    _slot = runlimit.acquire("forward+etc")
-    if _slot is None:
-        st.error(
-            f"This instance is already running {runlimit.MAX_CONCURRENT} "
-            "heavy calculations (it is shared, public hardware). Please try "
-            "again in a few minutes -- previously computed results stay "
-            "instant.")
-        return None
+    # Heavy subprocesses (forward + ETC) hold ONE concurrency slot from the
+    # first heavy launch to the end of the run; when every slot is busy that
+    # launch is declined. A fully cached run holds no slot -- it starts
+    # nothing -- and every heavy call site goes through _take_slot, so a cache
+    # MISS can still never start chemistry or Pandeia outside the limiter.
+    _slot = []
     try:
-        return _compute_locked()
+        return _compute_locked(_slot)
     finally:
-        _slot.release()
+        for s in _slot:
+            s.release()
 
 
-def _compute_locked():
+def _take_slot(slot: list) -> bool:
+    """True once this run holds a heavy-computation slot, acquiring one on the
+    first heavy launch; otherwise declines the launch and says so."""
+    if not slot:
+        s = runlimit.acquire("forward+etc")
+        if s is None:
+            st.error(
+                f"This instance is already running {runlimit.MAX_CONCURRENT} "
+                "heavy calculations (it is shared, public hardware). Please "
+                "try again in a few minutes -- previously computed results "
+                "stay instant.")
+            return False
+        slot.append(s)
+    return True
+
+
+def _compute_locked(slot):
 
     model = forward.load_result(params)
     if model is None:
+        if not _take_slot(slot):
+            return None
         with st.status("Running VULCAN-JAX + ExoJAX forward model …",
                        expanded=True) as status:
             # prior = the same rough pre-run estimate shown next to the Run
@@ -1779,9 +1793,15 @@ def _compute_locked():
     # change computes exactly the newly added modes.
     etc_missing = noise_mod.missing_modes(star, list(mode_keys),
                                           sat_limit=sat_limit)
-    if not etc_missing:
-        etc = noise_mod.run_modes(star, list(mode_keys), sat_limit=sat_limit)
-    else:
+    # launch=False: an entry that vanished between the two cache reads must
+    # not start Pandeia without a slot; it falls into the slot path below
+    etc = (None if etc_missing else
+           noise_mod.run_modes(star, list(mode_keys), sat_limit=sat_limit,
+                               launch=False))
+    if etc is None:
+        etc_missing = etc_missing or list(mode_keys)
+        if not _take_slot(slot):
+            return None
         with st.status(f"Running Pandeia ETC ({ins.BACKEND_STATUS.split(' /')[0]}) …",
                        expanded=True) as status:
             # no reliable prior for the ETC; the remaining-time readout is
@@ -2210,7 +2230,10 @@ with st.expander("Physical structure (T-P profile, mixing ratios)"):
         _cols = [(_want[s], _ymix[:, _i]) for _i, s in enumerate(_ysp)
                  if s in _want]
         _cols.sort(key=lambda kv: -float(np.nanmax(kv[1])))
-        fig3 = plotting.build_structure_figure(_p_arr, _T_arr, _cols)
+        # the page caveats ride the figure too: a downloaded PNG carries
+        # neither the st.warning above nor the CSV header (todo 7)
+        fig3 = plotting.build_structure_figure(_p_arr, _T_arr, _cols,
+                                               caveats=_model_caveats)
         _struct_png = _fig_bytes(fig3, "png", tight=False)
         _show_fig(fig3, tight=False, png=_struct_png)
 
@@ -2840,7 +2863,7 @@ def _compose(spec):
     # the exported PNG/PDF carry the planet name in their FILENAME.
     return summary_figure.compose_summary_figure(
         spec, posterior_panels=_post_panels or None,
-        panel_xlims=_post_xlims)
+        panel_xlims=_post_xlims, caveats=_model_caveats)
 
 
 try:

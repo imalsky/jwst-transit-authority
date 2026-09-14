@@ -2,8 +2,9 @@
 case at JWST Transit Authority's defaults (GUI molecule set) -- solve the chemistry, map
 the column onto the RT grid, and save what both RT codes need (P, T, mean
 molecular weight, VMRs, geometry) plus the tool's own wide-band observable and a
-lines-only 3.03-5.17 um spectrum for the petitRADTRANS comparison. Needs the
-engine data root and this repo's jax environment:
+lines-only 3.03-5.17 um spectrum for the petitRADTRANS comparison, and the
+photolysis cadence that solved the column, so a file's provenance is readable
+from the file. Needs the engine data root and this repo's jax environment:
 
     JAX_PLATFORM_NAME=cpu python validation/scripts/inputs/atmos_cases.py wasp39b transmission
 """
@@ -29,6 +30,7 @@ cp = forward.canonical_params({"planet": planet, "science_mode": mode,
                                "extra_mols": forward.EXTRA_MOLECULES_DEFAULT})
 A = forward._assemble_chem(cp, print)
 chem = A.build_chem()
+cfg = chem._integ._cfg          # the cfg the solver ran; only place the cadence lives
 theta = jnp.asarray(A.theta)
 y, diag = chem.converged_y(theta, return_conv_diag=True)
 assert bool(diag.conv_normal) and float(diag.longdy) < chem.yconv_min, \
@@ -64,7 +66,13 @@ z = J(np.zeros_like(h2))
 out = dict(p_art=p_art, T_art=T_art, mmw=mmw, h2=h2, he=he, mols=np.array(rt.molecules),
            rp_cm=profile["rp_cm"], gs_cgs=profile["gs_cgs"], rstar_cm=profile["rstar_cm"],
            p_ref_bar=float(rt.p_ref_bar), label=planets.PLANETS[planet]["label"],
-           params_json=json.dumps(cp), **{f"vmr_{m}": v for m, v in vmr.items()})
+           params_json=json.dumps(cp),
+           # Provenance: one solve at the config cadence, no cadence-1 retry here
+           # (the assert above is the whole escalation policy of this script).
+           photo_escalated=False,
+           ini_update_photo_frq=int(cfg.ini_update_photo_frq),
+           final_update_photo_frq=int(cfg.final_update_photo_frq),
+           **{f"vmr_{m}": v for m, v in vmr.items()})
 if mode == "transmission":
     d = np.asarray(rt.transmission_depth(vmr_j, J(h2), J(T_art), J(mmw), vmr_he=J(he)))
     out.update(wl_um=rt.wl_um, depth_ppm=d * 1e6)

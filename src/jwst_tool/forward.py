@@ -311,24 +311,31 @@ def certified_solve(chem_b, th, stage, rebuild=None, log=print):
     certifies (notes S1.7). A column that does not certify is re-solved once
     with photolysis refreshed every accepted step, which converges it. `rebuild`
     returns the same model at that cadence; without it the solve raises as
-    before. Returns (y, chem_used, cert, escalated)."""
-    def _solve(c, st):
+    before. Returns (y, chem_used, cert, escalated).
+
+    Only the CERTIFICATE is inside the try, like the AD rows: an XLA runtime
+    error is a RuntimeError too, and a backend failure must propagate instead
+    of being retried as a stall and reported with the escalation caveat."""
+    def _solve(c):
         species = [sp for sp, _ in sorted(c.sidx.items(), key=lambda kv: kv[1])]
         y, diag = c.converged_y(th, return_conv_diag=True)
-        return y, check_converged(diag, st, species, c, log)
+        return y, diag, species
 
+    y, diag, species = _solve(chem_b)
     try:
-        y, cert = _solve(chem_b, stage)
-        return y, chem_b, cert, False
+        cert = check_converged(diag, stage, species, chem_b, log)
     except RuntimeError as exc:
         if rebuild is None:
             raise
         log(f"[fwd] {stage}: {exc}")
         log(f"[fwd] {stage}: re-solving with photolysis refreshed every "
             "accepted step")
+    else:
+        return y, chem_b, cert, False
     chem_b = rebuild()
-    y, cert = _solve(chem_b, f"{stage} [photo cadence 1]")
-    return y, chem_b, cert, True
+    stage = f"{stage} [photo cadence 1]"
+    y, diag, species = _solve(chem_b)
+    return y, chem_b, check_converged(diag, stage, species, chem_b, log), True
 
 
 def check_ad_co_margin(chem, co_ratio, y=None, build_margin=None,
