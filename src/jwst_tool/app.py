@@ -171,11 +171,23 @@ def _w_int(n, s):
     return s / _LN10 if n == "dlnCO" else fisher_mod.display_sigma(n, s)
 
 
+# The producer stamp of the model being displayed ("repo=commit12" x3, from
+# the result npz), set once the cached result is read. None for a result
+# written before the stamp existed.
+_producer = None
+
+
 def _csv_bytes(df: pd.DataFrame, caveats=()) -> bytes:
     """CSV with identity and run caveats (`pd.read_csv(..., comment="#")`)."""
     p = provenance.snapshot()
-    repos = " ".join(f"{k}={p['repositories'][k]['commit'][:12]}"
-                     for k in ("jwst-transit-authority", "vulcan-forward", "vulcan-jax"))
+    # The commits that SOLVED the column, not the ones installed now: a cache
+    # hit can be many engine versions old. Unstamped results (written before
+    # the stamp) fall back to the installed ones, SAID so rather than implied.
+    repos = " ".join(_producer or
+                     [f"{k}={p['repositories'][k]['commit'][:12]}"
+                      for k in provenance.PRODUCER_REPOS])
+    if not _producer:
+        repos += " (installed now; result carries no producer stamp)"
     ps, cs = p["pandeia_stack"], p["cache_schema"]
     head = (f"# provenance: jwst-transit-authority {p['software']['jwst-transit-authority']} | {repos} | "
             f"pandeia engine {ps['engine']} refdata {ps['refdata']['version']} "
@@ -1886,6 +1898,10 @@ if "out" not in st.session_state:
 out = st.session_state["out"]
 meta = st.session_state["out_meta"]
 model, results = out["model"], out["results"]
+# what SOLVED this column (forward stamps it into the npz); every CSV export
+# below reads it instead of the installed commits
+_producer = ([str(x) for x in model["producer"]]
+             if "producer" in model else None)
 goal_r = meta.get("goal", "detect")
 # the atmosphere's absolute C/O, for the dlnCO -> absolute-C/O display
 # conversion (sigma_CO = C/O * sigma_lnCO)
@@ -2074,34 +2090,48 @@ else:
     # distinguish "all modes saturated" from "no spectral response"
     if with_jac and not usable_jac:
         st.stop()
-    if not per_mode:
-        st.stop()
-    bk = min(per_mode, key=per_mode.get)
-    bs = per_mode[bk]
     ntr = meta["n_transits"]
-    verdict = (f"**{ins.MODES[bk]['label']}**: ±{bs:.3g}{usp} at "
-               f"{tsig:g}σ in {ntr} {_ev}{'s' if ntr > 1 else ''} "
-               f"(target ±{target:g}{usp}).")
-    if bs <= target:
-        pass                      # target met: nothing to add
-    elif np.isfinite(comb) and comb <= target:
-        _verdict_slot.warning(verdict + f"  Combined modes: ±{comb:.3g}{usp}.")
+    if not per_mode:
+        # No mode constrains gp ALONE, but complementary degeneracies can
+        # still leave the joint Fisher full rank. That joint number is the
+        # answer, so report it and carry on: stopping here also discarded the
+        # structure panel, the constraint forecast and the summary figure.
+        if not np.isfinite(comb):
+            _verdict_slot.warning(
+                f"{glabel} is unconstrained in this run, by any mode and by "
+                "the modes combined.")
+            st.stop()
+        _verdict_slot.warning(
+            f"No single mode constrains {glabel}. Combined modes: "
+            f"±{comb:.3g}{usp} at {tsig:g}σ in {ntr} "
+            f"{_ev}{'s' if ntr > 1 else ''} (target ±{target:g}{usp}).")
     else:
-        best_r = next(r for r in usable_jac if r["mode_key"] == bk)
-        tt = fisher_mod.transits_to_target(best_r, fisher_names, gp,
-                                           target / tsig,
-                                           co_eval=co_eval)
-        if tt["reachable"]:
-            _verdict_slot.warning(verdict + f"  {tt['n']} {_ev}s reach it.")
-        elif np.isinf(tt["sig_inf"]):
-            _verdict_slot.warning(verdict + f"  {glabel} is unconstrained "
-                       f"at any {_ev} count.")
-        elif detect.has_floor(best_r) and not np.isnan(tt["sig_inf"]):
-            _verdict_slot.warning(verdict + "  Floor caps it at "
-                       f"±{tsig * tt['sig_inf']:.3g}{usp}.")
+        bk = min(per_mode, key=per_mode.get)
+        bs = per_mode[bk]
+        verdict = (f"**{ins.MODES[bk]['label']}**: ±{bs:.3g}{usp} at "
+                   f"{tsig:g}σ in {ntr} {_ev}{'s' if ntr > 1 else ''} "
+                   f"(target ±{target:g}{usp}).")
+        if bs <= target:
+            pass                  # target met: nothing to add
+        elif np.isfinite(comb) and comb <= target:
+            _verdict_slot.warning(verdict
+                                  + f"  Combined modes: ±{comb:.3g}{usp}.")
         else:
-            _verdict_slot.warning(verdict + f"  >{detect.N_TRANSITS_CAP} {_ev}s "
-                       "(scan limit).")
+            best_r = next(r for r in usable_jac if r["mode_key"] == bk)
+            tt = fisher_mod.transits_to_target(best_r, fisher_names, gp,
+                                               target / tsig,
+                                               co_eval=co_eval)
+            if tt["reachable"]:
+                _verdict_slot.warning(verdict + f"  {tt['n']} {_ev}s reach it.")
+            elif np.isinf(tt["sig_inf"]):
+                _verdict_slot.warning(verdict + f"  {glabel} is unconstrained "
+                           f"at any {_ev} count.")
+            elif detect.has_floor(best_r) and not np.isnan(tt["sig_inf"]):
+                _verdict_slot.warning(verdict + "  Floor caps it at "
+                           f"±{tsig * tt['sig_inf']:.3g}{usp}.")
+            else:
+                _verdict_slot.warning(verdict + f"  >{detect.N_TRANSITS_CAP} "
+                           f"{_ev}s (scan limit).")
 
 # --- spectrum data (rendered ONCE, on the summary figure below) -------------
 wl = model["wl_um"]

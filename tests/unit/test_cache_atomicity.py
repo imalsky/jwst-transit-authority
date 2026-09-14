@@ -9,6 +9,7 @@ import pytest
 from jwst_tool import forward
 from jwst_tool import instruments as ins
 from jwst_tool import noise
+from jwst_tool import provenance
 
 
 def test_atomic_write_never_leaves_a_partial_final_file(tmp_path):
@@ -26,6 +27,16 @@ def test_atomic_write_never_leaves_a_partial_final_file(tmp_path):
     with np.load(target) as z:
         assert list(z["x"]) == [0, 1, 2]
     assert [p.name for p in tmp_path.iterdir()] == ["entry.npz"]  # no tmp left
+
+    # A result carries the commits that SOLVED it, through the same write/read
+    # pair run_model uses: an export must name the producing engine, not the
+    # one installed when the cache hit was exported.
+    stamp = provenance.producer_commits()
+    assert [s.split("=")[0] for s in stamp] == list(provenance.PRODUCER_REPOS)
+    ins.atomic_write(target, lambda fh: np.savez_compressed(
+        fh, producer=np.array(stamp, dtype="U64")))
+    assert [str(s) for s in forward._load_cached_npz(target)["producer"]] \
+        == stamp
 
 
 @pytest.mark.parametrize("garbage", [b"", b"not a zip archive"])

@@ -926,7 +926,9 @@ _PARAM_KEYS_READ = frozenset({
 })
 # Output-only keys of the canonical dict itself: share_config validates a SAVED
 # payload by feeding it back in, so echo fields must not read as unknown.
-_PARAM_KEYS_ECHOED = frozenset({"version"})
+# "data_revision" is appended from the environment below and re-derived on
+# every call (never inherited), so canonical_params must accept its own output.
+_PARAM_KEYS_ECHOED = frozenset({"version", "data_revision"})
 _KNOWN_PARAM_KEYS = _PARAM_KEYS_READ | _PARAM_KEYS_ECHOED
 
 # Misspellings worth a pointed hint; unknown keys are refused, never dropped
@@ -1491,6 +1493,8 @@ def load_result(params: dict):
     fs_flux, emis_depth_norm, emis_thin_flux_frac_wo (n_wo), and the
     per-wavelength emis_tau_bottom (n_nu) / emis_tau_bottom_wo (n_wo, n_nu)
     the band-restricted gate re-evaluates.
+    Also ``producer``: the three "repo=commit" strings that SOLVED the column
+    (provenance.producer_commits), absent in entries cached before it existed.
     """
     return _load_cached_npz(cache_path(params))
 
@@ -2560,6 +2564,8 @@ def run_model(params: dict, log=print) -> Path:
 
     MODEL_CACHE.mkdir(parents=True, exist_ok=True)
     out = cache_path(params)
+    # lazy: provenance imports this module
+    from jwst_tool import provenance as _prov
     # npz ymix must use the SAME gas normalization the RT applies (*_l_s
     # columns excluded), or the saved ymix disagrees with the spectra.
     _gas_np = np.ones(y_np.shape[1])
@@ -2598,6 +2604,8 @@ def run_model(params: dict, log=print) -> Path:
         # Stages that needed the photolysis-cadence escalation to certify;
         # empty on the normal path. See certified_solve.
         photo_escalated=np.array(_escalated, dtype="U48"),
+        # what SOLVED this column; exports read it, the cache key does not
+        producer=np.array(_prov.producer_commits(), dtype="U64"),
     )
     if emis is not None:
         arrays["fs_flux"] = np.asarray(fs_j, dtype=np.float64)

@@ -432,6 +432,18 @@ def test_data_revision_keys_the_cache_without_moving_the_unset_keys(monkeypatch)
     assert forward.params_key(_p()) != k1 and forward.chem_key(_p()) != c1
     monkeypatch.setenv("JWST_TOOL_DATA_REVISION", "a" * 40)
     assert (forward.params_key(_p()), forward.chem_key(_p())) == (k1, c1)
+    # ... and canonical_params must accept its OWN output: the key is appended
+    # from the environment, so every re-canonicalization (an uncached worker
+    # run, a share_config reload) feeds it straight back in and used to raise
+    # "unknown parameter key(s) ['data_revision']" on the deployment only.
+    cp = forward.canonical_params(_p())
+    assert cp["data_revision"] == "a" * 40
+    assert forward.canonical_params(cp) == cp
+    from jwst_tool import share_config
+    share = share_config.build_share(cp, goal={}, observation={})
+    assert share["canonical_params"]["data_revision"] == "a" * 40
+    assert share_config.widget_state(share, "n0_{}".format)["n0_planet"] \
+        == "wasp39b"
 
 
 # --- WASP-39 b reference state: DO NOT let this drift ------------------------

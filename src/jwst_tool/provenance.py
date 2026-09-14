@@ -175,14 +175,33 @@ def _ktables() -> dict:
                           "--molecules <species>"}
 
 
+# The three code repos a cached result was SOLVED by, in report order.
+PRODUCER_REPOS = ("jwst-transit-authority", "vulcan-forward", "vulcan-jax")
+
+
+@lru_cache(maxsize=1)
+def _repos() -> dict:
+    workspace = Path(__file__).resolve().parents[2].parent
+    return {name: _repo_identity(workspace, directories)
+            for name, directories in REPOSITORIES.items()}
+
+
+def producer_commits() -> list:
+    """``["repo=commit12", ...]`` for PRODUCER_REPOS.
+
+    Stamped into a model result at WRITE time: a cache hit can be many
+    engine versions old, so an export must name the code that produced the
+    column, not the code installed when it was exported. Deliberately
+    cheaper than snapshot() -- no pandeia subprocess, no dataset hashing --
+    because the forward worker calls it on every solve.
+    """
+    repos = _repos()
+    return [f"{name}={repos[name]['commit'][:12]}" for name in PRODUCER_REPOS]
+
+
 @lru_cache(maxsize=1)
 def _base_snapshot() -> dict:
-    repo_root = Path(__file__).resolve().parents[2]
-    workspace = repo_root.parent
-    repos = {
-        name: _repo_identity(workspace, directories)
-        for name, directories in REPOSITORIES.items()
-    }
+    repos = _repos()
     pandeia = _pandeia_python_identity()
     pandeia.update({
         "required_release": ins.BACKEND_RELEASE,

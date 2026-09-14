@@ -978,3 +978,30 @@ def test_exclusions_are_reported_once_even_without_usable_results(case):
     assert not any("duplicate risk note" in w.value for w in at.warning)
     if case == "mixed":
         assert any(b.label == "Binned points (CSV)" for b in at.get("download_button"))
+
+
+def test_combined_forecast_is_reported_when_no_single_mode_constrains():
+    """Complementary degeneracies: each mode alone puts the goal parameter on
+    a null direction (lnZ = +dlnCO in one, -dlnCO in the other), the two
+    jointly do not. The joint width IS the answer, so it is reported and the
+    page keeps rendering -- an empty per-mode set used to st.stop() and take
+    the structure panel, the constraint forecast and the figure with it."""
+    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
+    nb = out["results"][0]["jac_bins"].shape[1]
+    ramp = np.linspace(1.0, 2.0, nb)
+    quad = np.linspace(2.0, 1.0, nb) ** 2
+    r0 = np.cos(np.linspace(0.0, 2.0, nb))          # the shared lnR0 row
+    out["results"][0]["jac_bins"] = np.vstack([ramp, ramp, r0])
+    out["results"][1]["jac_bins"] = np.vstack([quad, -quad, r0])
+    out_meta.update(goal="constrain", target=None, goal_param="lnZ",
+                    target_prec=0.1)
+    at = _run_with_result(out, out_meta)
+    assert not at.exception, at.exception
+    warns = [w.value for w in at.warning]
+    hit = [w for w in warns if "No single mode constrains" in w]
+    assert len(hit) == 1, warns
+    assert "Metallicity" in hit[0] and "Combined modes: ±" in hit[0], hit[0]
+    assert "dex at 3σ in 1 transit (target ±0.1 dex)" in hit[0], hit[0]
+    exps = [e.label for e in at.get("expander")]
+    assert "Parameter constraint forecast (local Fisher)" in exps, exps
+    assert "Physical structure (T-P profile, mixing ratios)" in exps, exps
