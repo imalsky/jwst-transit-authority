@@ -44,7 +44,8 @@ def phoenix_surface_flux(nu_grid: np.ndarray, teff: float, logg: float,
 
     Parameters: nu_grid (cm^-1, any order), teff (K), logg (log10 cgs),
     feh ([Fe/H] dex). Raises with a remedy when the PHOENIX grid is absent
-    (``jwst-tool fetch`` / the data README) and on an energy-closure failure.
+    (``jwst-tool fetch``, which prints the manual STScI download) and on an
+    energy-closure failure.
     """
     from jwst_tool import instruments as ins
 
@@ -54,7 +55,7 @@ def phoenix_surface_flux(nu_grid: np.ndarray, teff: float, logg: float,
             f"PHOENIX grid not found at {phoenix_dir}: emission mode needs "
             "the stellar SED for the eclipse depth Fp/Fs. It is the same "
             "dataset the noise side uses -- run 'jwst-tool data' for status "
-            "and the data README for the download.")
+            "and 'jwst-tool fetch', which prints the manual STScI download.")
     # Pin the tool's OWN cdbs root unconditionally: an inherited shell
     # PYSYN_CDBS set elsewhere must never redirect the grid.
     os.environ["PYSYN_CDBS"] = ins.PYSYN_CDBS

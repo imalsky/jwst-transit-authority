@@ -14,10 +14,12 @@ the engine data. JWST_TOOL_E2E_ALLOW_CACHE=1 skips the cache delete for a
 quick re-check (then it validates the cache, not the chain -- so the flag is
 opt-in and says so).
 
-Tolerances: cross-run JAX nondeterminism on this chain measures well under a
-ppm; 50 ppm absolute / 2% relative catches any physics change while never
-flaking on solver noise. On a breach: if the change is INTENDED, regenerate
-the fixture (tools note inside its meta) and bump forward._VERSION.
+Tolerances: cross-run JAX nondeterminism on this chain measures under a ppm
+(the committed reference reproduces bit-identically), so the band is set per
+mode at 5% of the reference's own structure -- an absolute ppm would be far
+too loose on emission, where a quarter of the bins sit below 100 ppm while
+transmission runs near 20000. On a breach: if the change is INTENDED,
+regenerate the fixture (tools note inside its meta) and bump forward._VERSION.
 """
 from __future__ import annotations
 
@@ -98,6 +100,18 @@ def test_full_chain_reproduces_the_verified_reference(mode):
     assert meta["forward_version"] == forward._VERSION, (
         "fixture was generated under a different forward._VERSION -- "
         "regenerate it (meta['regenerate'])")
+    # _VERSION moves with the TOOL; an engine release under the same _VERSION
+    # would leave a reference solved by code that no longer runs here.
+    import vulcan_forward
+    from vulcan_forward import vulcan_chem  # noqa: F401  freezes the engine env before vulcan_jax loads
+    import vulcan_jax
+    assert (meta["software"]["vulcan-jax"],
+            meta["software"]["vulcan-forward"]) == (
+        vulcan_jax.__version__, vulcan_forward.__version__), (
+        f"fixture solved on vulcan-jax {meta['software']['vulcan-jax']} / "
+        f"vulcan-forward {meta['software']['vulcan-forward']}, installed is "
+        f"{vulcan_jax.__version__} / {vulcan_forward.__version__} -- "
+        "regenerate it (meta['regenerate'])")
     assert key == ref["params_key"], (
         "the canonical parameter set moved since the fixture was generated")
 
@@ -113,6 +127,9 @@ def test_full_chain_reproduces_the_verified_reference(mode):
     got_cp = json.loads(str(out["params_json"]))
     assert got_cp["science_mode"] == mode
     assert str(out["science_mode"]) == mode
+    # the cold solve stamps the commits that produced the column (a chem-cache
+    # hit deliberately does not, and this test cleared both caches above)
+    assert "producer" in out
     # the reference spectra must come from the ordinary cadence: an escalated
     # column would put these numbers outside the closure-validated regime
     assert list(out["photo_escalated"]) == []
@@ -120,13 +137,14 @@ def test_full_chain_reproduces_the_verified_reference(mode):
     wl_c, got = bin_r100(out["wl_um"], np.asarray(out["depth"]) * 1e6)
     want = np.asarray(z[f"{mode}_depth_ppm"])
     assert wl_c.shape == want.shape
+    tol = 0.05 * np.std(want)         # ~28 ppm transmission, ~27 emission
     dev = got - want
     label = (f"{mode}: max|d depth| {np.max(np.abs(dev)):.2f} ppm, "
              f"std ratio {np.std(got) / np.std(want):.5f}")
     print("\n  " + label)
-    assert np.max(np.abs(dev)) < 50.0, label
+    assert np.max(np.abs(dev)) < tol, label
     assert abs(np.std(got) / np.std(want) - 1.0) < 0.02, label
 
     m = (wl_c > 3.0) & (wl_c < 5.26)
-    assert abs(np.median(got[m]) - ref["median_ppm_3_5um"]) < 50.0
+    assert abs(np.median(got[m]) - ref["median_ppm_3_5um"]) < tol
     assert abs(np.ptp(got[m]) / ref["ptp_ppm_3_5um"] - 1.0) < 0.05

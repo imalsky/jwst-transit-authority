@@ -21,8 +21,8 @@ dist/
 # Large synphot reference data (fetch from ssb.stsci.edu/trds; worker preflight guides you)
 data/cdbs/calspec/
 
-# Large pandeia reference data (~4.3 GB per release; see README "Backend
-# configuration"). Globbed, not per-release: these were pinned to the 2026.2
+# Large pandeia reference data (~4.3 GB per release; `jwst-tool data` reports
+# status). Globbed, not per-release: these were pinned to the 2026.2
 # names, so adding the 2026.7 triple made 4.3 GB show up as untracked and one
 # `git add -A` away from the history.
 data/pandeia_data-*/
@@ -34,8 +34,8 @@ CLAUDE.md
 /notes.md
 /todo.md
 
-# Machine-local absolute-path symlink into a sibling PICASO checkout. Consumers
-# obtain the PHOENIX grid via `jwst-tool fetch`; `jwst-tool data` reports status.
+# Machine-local PHOENIX stellar grid (~1.9 GB). Consumers obtain it via
+# `jwst-tool fetch`; `jwst-tool data` reports status.
 data/cdbs/grid/phoenix
 
 

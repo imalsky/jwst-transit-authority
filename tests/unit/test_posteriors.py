@@ -174,8 +174,7 @@ def test_combo_forecast_identity_saturation_policy_and_additivity():
     real), and zero usable modes raise rather than reporting nothing.
     Fisher information is additive over independent modes, so a superset
     combination can only tighten a marginalized sigma -- pinned on
-    ``combo_forecast`` directly, and nowhere else. The with-centers path
-    attaches constrained posterior curves."""
+    ``combo_forecast`` directly, and nowhere else."""
     k1, k2 = _registry_keys(2)
 
     # single-mode identity
@@ -188,7 +187,6 @@ def test_combo_forecast_identity_saturation_policy_and_additivity():
         assert rec["sigma_marginalized_display"][name] == pytest.approx(
             want, rel=1e-12)
     assert rec["kind"] == posteriors.FORECAST_KIND
-    assert rec["posteriors"] is None and rec["posteriors_note"]
 
     # saturation policy: exclude, disclose, forecast = usable subset alone
     results = {k1: _result(seed=5), k2: _result(seed=6, saturated=True)}
@@ -207,19 +205,14 @@ def test_combo_forecast_identity_saturation_policy_and_additivity():
                                   {k1: _result(saturated=True)}, FREE,
                                   co_eval=CO)
 
-    # additivity + the with-centers path
+    # additivity
     results = {k1: _result(seed=7), k2: _result(seed=8)}
     one = posteriors.combo_forecast("A", [k1], results, FREE, co_eval=CO)
     both = posteriors.combo_forecast("A + B", [k1, k2], results, FREE,
-                                     centers=CENTERS, co_eval=CO)
+                                     co_eval=CO)
     assert one["name"] == "A" and both["name"] == "A + B"
     assert (both["sigma_marginalized_display"]["lnZ"]
             <= one["sigma_marginalized_display"]["lnZ"] * (1 + 1e-12))
-    post = both["posteriors"]
-    assert post is not None and post["n_modes"] == 2
-    assert post["params"]["lnZ"]["constrained"]
-    single = fisher.mode_forecast(results[k1], FREE)["lnZ"]
-    assert post["sigma_marginalized"]["lnZ"] <= single * (1 + 1e-12)
 
 
 def test_combo_input_validation_raises():
@@ -280,9 +273,9 @@ def test_mock_realization_contract():
 
 def test_mock_layer_validates_loudly():
     """Refusals: bad seed, empty selection, non-positive sigma, missing
-    mode_key, a recovery against a realization that does not cover the
-    results, and a crc32 stream collision between mode keys (which would
-    silently share noise draws; today's registry has none)."""
+    mode_key, and a recovery against a realization that does not cover the
+    results. Also pins that the registry's crc32 seed streams are distinct:
+    a collision would silently give two modes identical noise draws."""
     import zlib
     k1, k2 = _registry_keys(2)
     r = _mode_result(1, k1)
@@ -301,13 +294,8 @@ def test_mock_layer_validates_loudly():
     for results, record in (([r, r2], real_one), ([r], {"seed": 0})):
         with pytest.raises(ValueError):
             posteriors.mock_recovery(results, FREE, record)
-    # today's registry is collision-free; a genuine crc32 collision (classic
-    # colliding pair) is refused loudly
-    posteriors._assert_mode_streams_distinct(instruments.MODES.keys())
-    a, b = "plumless", "buckeroo"
-    assert zlib.crc32(a.encode()) == zlib.crc32(b.encode())
-    with pytest.raises(ValueError):
-        posteriors._assert_mode_streams_distinct([a, b])
+    assert len({zlib.crc32(k.encode()) for k in instruments.MODES}) \
+        == len(instruments.MODES)
 
 
 def test_mock_recovery_zero_mean_fisher_covariance_and_labels():

@@ -148,8 +148,9 @@ def test_no_backend_carries_a_personal_absolute_path():
     a developer's home in an editable checkout)."""
     import pathlib
 
-    src = pathlib.Path(ins.__file__).read_text()
-    offenders = [ln.strip() for ln in src.splitlines()
+    offenders = [f"{f.name}: {ln.strip()}"
+                 for f in sorted(pathlib.Path(ins.__file__).parent.glob("*.py"))
+                 for ln in f.read_text().splitlines()
                  if "/Users/" in ln and not ln.strip().startswith("#")]
     assert not offenders, offenders
 

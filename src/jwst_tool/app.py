@@ -192,9 +192,9 @@ def _w_int(n, s):
     return s / _LN10 if n == "dlnCO" else fisher_mod.display_sigma(n, s)
 
 
-# The producer stamp of the model being displayed ("repo=commit12" x3, from
-# the result npz), set once the cached result is read. None for a result
-# written before the stamp existed.
+# The producer stamp of the model being displayed ("repo=commit12[+dirty]"
+# per readable checkout, from the result npz), set once the cached result is
+# read. None or empty for a result without one.
 _producer = None
 
 
@@ -210,7 +210,8 @@ def _csv_bytes(df: pd.DataFrame, caveats=()) -> bytes:
     if not _producer:
         repos += " (installed now; result carries no producer stamp)"
     ps, cs = p["pandeia_stack"], p["cache_schema"]
-    head = (f"# provenance: jwst-transit-authority {p['software']['jwst-transit-authority']} | {repos} | "
+    head = (f"# provenance: exported by jwst-transit-authority "
+            f"{p['software']['jwst-transit-authority']} | solved by: {repos} | "
             f"pandeia engine {ps['engine']} refdata {ps['refdata']['version']} "
             f"psf {ps['psf']['version']} | cache model v{cs['model']} "
             f"worker v{cs['pandeia_worker']}\n")
@@ -233,7 +234,7 @@ st.markdown(
     r"- Pick a science goal (e.g. detect SO$_2$ at $3\sigma$)" "\n"
     "- Select the instrument modes, noise assumptions, analysis $R$, etc. "
     "You can combine multiple modes in \"Parameter constraint forecast\" "
-    "after the run, then pick that set under \"Modes\" below the figure"
+    "after the run, then pick that set under \"Modes\" above the figure"
     "\n\n"
     "The tool computes a forward spectrum and a Pandeia noise forecast and "
     "reports how many transits/eclipses are needed for the science target. "
@@ -258,9 +259,8 @@ with st.expander("Validation"):
         "This tool includes test suites, as well as other validation checks. "
         "The suites run in CI for each repository: "
         "[jax-vulcan](https://github.com/imalsky/jax-vulcan), "
-        "[vulcan-forward](https://github.com/imalsky/vulcan-forward), "
-        "[jwst-transit-authority](https://github.com/imalsky/jwst-transit-authority), and "
-        "[vulcan-retrieval](https://github.com/imalsky/vulcan-retrieval). "
+        "[vulcan-forward](https://github.com/imalsky/vulcan-forward), and "
+        "[jwst-transit-authority](https://github.com/imalsky/jwst-transit-authority). "
         "For end-to-end tests, see the set of validation figures that I've "
         "created [here](https://github.com/imalsky/jwst-transit-authority/tree/main/"
         "validation/figures). This includes trying to recreate the results "
@@ -585,7 +585,6 @@ def _managed_proc(cmd):
 # default target precision per parameter (DISPLAY units: dex / K / absolute C/O)
 _TARGET_DEFAULT = {"lnZ": 0.10, "dlnCO": 0.10, "lnKzz": 0.30,
                    "Tirr": 50.0, "Tint": 50.0,
-                   "Tint_cl": 50.0,
                    "log_kappa": 0.30, "log_gamma": 0.30,
                    "log_kappa_cloud": 0.30, "alpha_cloud": 0.50}
 # Every freeable Fisher parameter can be the constraint goal and looks up
@@ -682,7 +681,10 @@ def _populate_config() -> None:
     try:
         cfg = json.loads(up.getvalue().decode())
         state = share_config.widget_state(cfg, K)
-    except (ValueError, RuntimeError, TypeError, UnicodeDecodeError) as e:
+    except Exception as e:
+        # Anything the file can provoke is a bad file, not a tool defect: an
+        # out-of-float literal reaches the int() casts as OverflowError, and a
+        # raw traceback on a public page is never the right answer.
         st.session_state["_cfg_load_error"] = str(e)
         return
     st.session_state.pop("restored_tp_path", None)
@@ -700,11 +702,11 @@ def _populate_config() -> None:
 def _apply_pending_archive_fill() -> None:
     """Fill the custom planet's widgets from a queued archive lookup.
 
-    Same ordering contract as _apply_pending_config: widget keys can only be
-    written BEFORE the widgets instantiate, so the Fill button's callback
-    just stashes the planet name (un-namespaced on purpose -- a reset's
-    session_state.clear() must kill a queued fill) and this applies it at
-    the top of the next run. Out-of-range/missing fields are never written
+    Widget keys can only be written BEFORE the widgets instantiate, so the
+    Fill button's callback just stashes the planet name (un-namespaced on
+    purpose -- a reset's session_state.clear() must kill a queued fill) and
+    this applies it at the top of the next run, before any widget renders.
+    Out-of-range/missing fields are never written
     (Streamlit silently discards an out-of-range value, substituting the
     default); archive.custom_fill reports them by name instead."""
     name = st.session_state.pop("_archive_fill_pending", None)
@@ -1068,7 +1070,7 @@ with st.sidebar:
         # metallicity scales O/N/S, C/O sets C_H = co * O_H, FastChem
         # re-initializes at exactly that composition. No perturbative knob.
         met = st.number_input(
-            "Metallicity (× solar)", 0.1, 30.0, 10.0, 0.5,
+            "Metallicity (× solar)", *forward.MET_RANGE, 10.0, 0.5,
             format="%.2f", key=K("met"))
         # The widget spans the WHOLE admissible range over every (network,
         # photolysis) pair; which part of it is legal for the current pair is
@@ -1100,7 +1102,7 @@ with st.sidebar:
             "Vertical-mixing profile, Kzz", _kzz_opts,
             key=_k("kzzmode"),
             format_func={"const": "Constant",
-                         "Pfunc": "Power law in P (Pfunc)",
+                         "Pfunc": "Power law in P",
                          "JM16": "Moses-type P^-0.5 (JM16)",
                          "file": "Tabulated (Kzz column of the T-P table)"}.get)
         kzz_const = kzz_kmax = kzz_plev = kzz_kdeep = 0.0
@@ -1150,7 +1152,7 @@ with st.sidebar:
         use_moldiff = st.checkbox(
             "Molecular diffusion", value=True, key=K("moldiff"))
         use_vm_mol = st.checkbox(
-            "Upwind molecular-diffusion advection (vm_mol)", value=False,
+            "Upwind molecular-diffusion advection", value=False,
             key=K("vmmol"), disabled=not use_moldiff)
 
     # Opacity settings live in the Atmosphere step so extra_mols is a
@@ -1204,8 +1206,19 @@ with st.sidebar:
             "Cloud / haze opacity", value=False, key=K("cloud"))
         cloud_mode = "haze"
         if cloud_on:
+            # The gray deck is entered as a cloud-top PRESSURE and mapped to an
+            # opacity through the SLANT chord (planets.gray_cloud_log_kappa);
+            # the emission RT integrates vertically, so that pressure label is
+            # wrong by the chord/scale-height factor there. Emission is offered
+            # the haze parameterization only, and a session value carried in
+            # from the other geometry is moved back into range before the
+            # widget reads it (Streamlit raises on an off-menu value).
+            _cmode_opts = (["haze"] if science_mode == "emission"
+                           else ["haze", "gray"])
+            if st.session_state.get(K("cmode")) not in _cmode_opts:
+                st.session_state[K("cmode")] = "haze"
             cloud_mode = st.radio(
-                "Cloud model", ["haze", "gray"], horizontal=True,
+                "Cloud model", _cmode_opts, horizontal=True,
                 key=K("cmode"),
                 format_func={"haze": "Power-law haze",
                              "gray": "Gray cloud"}.get)
@@ -1248,6 +1261,15 @@ with st.sidebar:
 
     goal_param, target_prec, marginalize = None, None, True
     do_fisher = False
+    # Keys share_config writes on Populate: seeded once here, so neither
+    # widget below takes a value=/index= default as well (Streamlit logs a
+    # stack trace per rerun when a key is both pre-set and given one).
+    if K("tsig") not in st.session_state:
+        st.session_state[K("tsig")] = 3.0
+    if K("dofish") not in st.session_state:
+        st.session_state[K("dofish")] = True
+    if K("jacm") not in st.session_state:
+        st.session_state[K("jacm")] = "ad"
     with st.expander("Goal & target"):
         goal = st.radio(
             "Goal", ["detect", "constrain"], horizontal=True, key=K("goal"),
@@ -1263,10 +1285,10 @@ with st.sidebar:
                 key=K(f"mol_vulcan{_net_sfx}_"
                       + "_".join(sorted(extra_mols))))
             target_sig = st.number_input(
-                "Target significance (σ)", 1.0, 10.0, 3.0, 0.5, key=K("tsig"))
+                "Target significance (σ)", 1.0, 10.0, step=0.5,
+                key=K("tsig"))
             do_fisher = st.checkbox(
-                "Also calculate parameter constraints", value=True,
-                key=K("dofish"))
+                "Also calculate parameter constraints", key=K("dofish"))
         else:
             target_mol = None
             goal_param = st.selectbox(
@@ -1291,14 +1313,14 @@ with st.sidebar:
                                               _TARGET_DEFAULT[goal_param], 0.01,
                                               key=K(f"tgt_{goal_param}"))
             target_sig = st.number_input(
-                "Report Fisher half-width at Nσ", 1.0, 10.0, 3.0, 0.5,
+                "Report Fisher half-width at Nσ", 1.0, 10.0, step=0.5,
                 key=K("tsig"))
 
     # Free-parameter settings render only when the run computes derivatives.
     fisher_params: list = []
     jac_method = "fd"
     if goal == "constrain" or do_fisher:
-        with st.expander("Differentiation Method and Free Params",
+        with st.expander("Differentiation method & free parameters",
                          expanded=(goal == "constrain")):
             if goal == "constrain" and marginalize:
                 # Defaults FILTERED by the live menu, key carries the
@@ -1323,15 +1345,18 @@ with st.sidebar:
                     default=[p for p in ("lnZ", "dlnCO")
                              if p in avail_free],
                     format_func=lambda n: fisher_mod.PARAM_LABELS[n])
+            # key always seeded above, so no index= default
             jac_method = st.selectbox(
-                "Differentiation method", ["fd", "ad"], index=1,
+                "Differentiation method", ["fd", "ad"],
                 key=K("jacm"),
                 format_func={"fd": "Finite differences",
                              "ad": "Automatic differentiation "
                                    "(forward-mode, default)"}.get)
             # Loud slow-path flag: FD re-solves the chemistry per row.
             if fisher_params and jac_method == "fd":
-                st.warning("FD can be quite slow.")
+                st.warning("Finite differences re-solve the chemistry per "
+                           "free parameter and are much slower than "
+                           "automatic differentiation.")
 
     # Step 4: Observation
     st.divider()
@@ -1681,9 +1706,13 @@ _obs_meta = dict(
     sat_limit=float(sat_limit), modes=list(mode_keys),
     n_transits=int(n_transits), r_bin=int(r_bin),
     floor_mode=floor_mode,
+    # a 2-D table is recorded by CONTENT: the staleness guard reads this
+    # block, and a fixed label made two different uploaded tables one run
     floors={k: (None if floors[k] is None
                 else (float(floors[k]) if np.isscalar(floors[k])
-                      else "wavelength table"))
+                      else "table:" + hashlib.sha1(
+                          np.ascontiguousarray(floors[k]).tobytes()
+                      ).hexdigest()[:16]))
             for k in mode_keys},
     # the PER-MODE widget values, not the composed product: the global scale is
     # recorded separately below, and share_config restores noise_infl into the
@@ -1861,8 +1890,18 @@ def _compute_locked(slot):
                     box.code("\n".join(lines[-8:]), height=_LOG_BOX_PX)
                     bar.tick()
 
-            etc = noise_mod.run_modes(star, list(mode_keys),
-                                      sat_limit=sat_limit, progress=_cb)
+            try:
+                etc = noise_mod.run_modes(star, list(mode_keys),
+                                          sat_limit=sat_limit, progress=_cb)
+            except RuntimeError as _e:
+                status.update(label="Pandeia ETC failed", state="error")
+                # same handling as the forward model above: the first line is
+                # the tool's own sentence, the worker's stderr tail stays
+                # behind a collapsed expander
+                st.error(str(_e).strip().splitlines()[0])
+                with st.expander("Technical details"):
+                    st.code(str(_e)[-2500:])
+                return None
             bar.done()
             status.update(label="Pandeia ETC done", state="complete")
 
@@ -1904,14 +1943,10 @@ if run_clicked:
         st.session_state["out_meta"] = dict(
             goal=goal, target=target_mol, goal_param=goal_param,
             target_prec=target_prec, target_sig=target_sig,
-            n_transits=n_transits, show_noise=show_noise, seed=seed,
+            n_transits=n_transits,
             r_bin=r_bin, planet=planet_label,
-            floor_mode=floor_mode,
-            # the SELECTED floor, not the registry suggestion: a result must
-            # carry the number that produced it
-            floor_selected=_obs_meta["floors"],
-            # same reason: the limit the ramp search actually ran at, so the
-            # per-mode saturation advisory is measured against THIS run
+            # the limit the ramp search actually ran at, so the per-mode
+            # saturation advisory is measured against THIS run
             sat_limit=_obs_meta["sat_limit"],
             # the COMPLETE non-canonical input set, for the staleness guard
             run_sig=_run_sig)
@@ -2026,6 +2061,9 @@ for r in results:
     adv = ins.sat_limit_advisory(r["mode_key"], _sl) if _sl is not None else ""
     if adv:
         notes.append(adv)
+    if r.get("ramp_search_complete") is False:
+        notes.append("ngroup search hit its budget; the ramp shown is not "
+                     "the maximal safe one")
     if not notes:
         continue
     _mode_notes[r["mode_key"]] = "; ".join(notes)
@@ -2127,10 +2165,13 @@ else:
                 f"{glabel} is unconstrained in this run, by any mode and by "
                 "the modes combined.")
             st.stop()
-        _verdict_slot.warning(
-            f"No single mode constrains {glabel}. Combined modes: "
-            f"±{comb:.3g}{usp} at {tsig:g}σ in {ntr} "
-            f"{_ev}{'s' if ntr > 1 else ''} (target ±{target:g}{usp}).")
+        if comb > target:
+            # the joint Fisher is the answer here; warn only when it misses
+            # the target, like both sibling branches
+            _verdict_slot.warning(
+                f"No single mode constrains {glabel}. Combined modes: "
+                f"±{comb:.3g}{usp} at {tsig:g}σ in {ntr} "
+                f"{_ev}{'s' if ntr > 1 else ''} (target ±{target:g}{usp}).")
     else:
         bk = min(per_mode, key=per_mode.get)
         bs = per_mode[bk]
@@ -2242,9 +2283,10 @@ if _escalated:
         "Photolysis had to be refreshed every accepted step to converge "
         + ", ".join(_escalated)
         + ". Those stages were re-solved and certified at that cadence, where "
-          "the tool's derivative closures have been checked (transmission FD "
-          "and eclipse AD against independent finite differences); the "
-          "spectrum itself is certified as usual.")
+          "the tool's derivative closures have been checked (transmission "
+          "finite differences and eclipse automatic differentiation, both "
+          "against independent finite differences); the spectrum itself is "
+          "certified as usual.")
 for _caveat in _model_caveats:
     st.warning(_caveat)
 
@@ -2342,34 +2384,18 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
         _note = st.session_state.pop("_combo_note", None)
         if _note is not None:
             getattr(st, _note[0])(_note[1])
-        _usable_keys = [r["mode_key"] for r in results
-                        if r.get("jac_bins") is not None and not r["saturated"]]
-
-        def _combo_add_all_usable() -> None:
-            combos = st.session_state.setdefault(K("combos"), [])
-            if any(c["name"] == "All usable" for c in combos):
-                st.session_state["_combo_note"] = (
-                    "info", "The 'All usable' combination already exists.")
-                return
-            combos.append(dict(name="All usable", modes=list(_usable_keys)))
-            st.session_state["_combo_note"] = (
-                "success", "Added the 'All usable' combination.")
-
         _cbc1, _cbc2 = st.columns([1.6, 2.2])
         _cbc1.text_input("Combination name", key=K("cb_name"),
                          placeholder="e.g. SOSS + G395H")
         _cbc2.multiselect("Modes in the combination", _cb_opts,
                           key=K("cb_modes"),
                           format_func=lambda k: ins.MODES[k]["label"])
-        # Buttons on their OWN row, not in a third column beside the inputs:
+        # The button on its OWN row, not in a second column beside the inputs:
         # the inputs carry labels, so a column-mounted button floats to the
         # top of the row and lines up with nothing.
-        _cba1, _cba2, _ = st.columns([1.2, 1.6, 2.0])
+        _cba1, _ = st.columns([1.2, 3.6])
         _cba1.button("Add combination", key=K("cb_add"), on_click=_combo_add,
                      width="stretch")
-        if len(_usable_keys) >= 2:
-            _cba2.button("Add preset: all usable modes", key=K("cb_add_all"),
-                         on_click=_combo_add_all_usable, width="stretch")
         for _i, _c in enumerate(st.session_state.get(K("combos")) or []):
             _cc1, _cc2 = st.columns([4.0, 1.0])
             _cc1.markdown(
@@ -2401,7 +2427,7 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
                 else float(np.log10(c)) if n == "dlnCO" else float(c))
             for n in fisher_names}
 
-        def _cell(n, w, center=None):
+        def _cell(w, center=None):
             """One cell at the target significance. ``w`` is the 1-sigma width
             in the row's own coordinate. Both columns lead with the
             input-model value so each cell reads as an interval; they share
@@ -2420,14 +2446,14 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
         # long format, one row per mode x parameter, marginalized and conditional
         # side by side -- both read off the SAME nuisance-augmented Fisher matrix
         _marg_col = f"marginalized at {tsig_f:g}σ"
-        _cond_col = "conditional (others fixed)"
+        _cond_col = f"conditional at {tsig_f:g}σ (others fixed)"
 
         def _param_rows(mode_label, sig, cond, note=""):
             # the mode's risk notes ride on its first row only
             return [{"mode": mode_label,
                      "parameter": _row_label(n),
-                     _marg_col: _cell(n, _w_int(n, sig[n]), _row_center[n]),
-                     _cond_col: _cell(n, _w_int(n, cond[n]), _row_center[n]),
+                     _marg_col: _cell(_w_int(n, sig[n]), _row_center[n]),
+                     _cond_col: _cell(_w_int(n, cond[n]), _row_center[n]),
                      "notes": note if i == 0 else ""}
                     for i, n in enumerate(fisher_names)]
 
@@ -2461,10 +2487,10 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
                     "mode": str(_rec["name"]),
                     "parameter": _row_label(n),
                     _marg_col: _cell(
-                        n, _w_disp(n, float(_rec["sigma_marginalized_display"][n])),
+                        _w_disp(n, float(_rec["sigma_marginalized_display"][n])),
                         _row_center[n]),
                     _cond_col: _cell(
-                        n, _w_disp(n, float(_rec["sigma_conditional_display"][n])),
+                        _w_disp(n, float(_rec["sigma_conditional_display"][n])),
                         _row_center[n]),
                     "notes": ""})
         # Custom combinations FIRST: they are what the user built, so they
@@ -2513,6 +2539,11 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
         # Filled by the marginalized-forecast block below, which needs the
         # posterior records built after this panel renders.
         _post_slot = st.container()
+    else:
+        # Saved combinations outlive the run that could evaluate them; without
+        # this they vanished from the page with no word about why.
+        for _cname, _cerr in combo_errs:
+            st.info(f"Combination {_cname!r} could not be forecast: {_cerr}")
 
 
 
@@ -2720,12 +2751,10 @@ _leg_num: dict = {}
 if goal_r == "detect":
     # saturated modes carry no usable data anywhere else (rankings,
     # combinations, forecasts); they get no score in the legend either
-    _leg_projected = set()
     for r in results:
         _score, _ = detect.detection_metric(r)
         if not r["saturated"] and np.isfinite(_score):
             _leg_num[r["mode_key"]] = f"S/N {_score:.1f}σ"
-            _leg_projected.add(detect.metric_label(r))
 elif _have_fisher:
     _rk_key = K("sum_rank_param_" + "_".join(fisher_names))
     if st.session_state.get(_rk_key) not in fisher_names:
@@ -2862,19 +2891,6 @@ for r in results:
         # are distinguished by colour plus the legend entry.
         marker=ins.MODE_MARKER.get(r["mode_key"], "o"),
         wl_um=_pwl, depth_ppm=_pdep, sigma_ppm=_psig))
-_leg_note = None
-if _leg_num:
-    # ONE short line, rendered as the legend's TITLE (not folded into the
-    # model label, which made that entry multi-line and broke the legend's
-    # row spacing). Says what the per-mode numbers are, nothing more.
-    _leg_note = (
-        f"{meta['target']} template S/N per mode "
-        f"({'/'.join(sorted(_leg_projected))}), "
-        f"{meta['n_transits']} {_ev}"
-        f"{'s' if meta['n_transits'] > 1 else ''}"
-        if goal_r == "detect" else
-        f"Fisher ±{_row_axis(_rk_param)} per mode "
-        f"at {_target_sig:g}σ")
 _combo_order = [str(c["name"])
                 for c in (st.session_state.get(K("combos")) or [])]
 for _cname, _members in _combo_members.items():
@@ -2901,14 +2917,13 @@ for _cname, _members in _combo_members.items():
 _sum_spectrum = dict(wl_um=wl_s, depth_ppm=d_plot,
                      depth_label=_depth_lbl,
                      model_label="model",
-                     legend_title=_leg_note,
                      wl_range=_wl_range,
                      depth_range=_depth_range,
                      x_log=_x_log, y_log=_y_log,
                      points=_sum_points)
 if d_wo_s is not None:
-    # detect goal: the same without-target comparison curve the old
-    # standalone spectrum carried (smoothed identically for display)
+    # detect goal: the without-target comparison curve, smoothed identically
+    # to the model curve for display
     _sum_spectrum["depth2_ppm"] = _display_smooth(d_wo_s)
     _sum_spectrum["depth2_label"] = f"No {meta['target']}"
 
@@ -2931,6 +2946,8 @@ except ValueError as _e:
     # Any other ValueError is a real defect and must not be swallowed.
     if "y_log=True" not in str(_e):
         raise
+    _fig_box.warning("Log depth axis needs a positive visible range; "
+                     "showing a linear axis.")
     _sum_spectrum["y_log"] = False
     fig_sum = _compose(_sum_spectrum)
 _sum_png = _fig_bytes(fig_sum, "png")

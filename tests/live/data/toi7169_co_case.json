@@ -1,5 +1,5 @@
 {
- "note": "TOI-7169 b CO detection case (Josh, 2026-09-10): the +h dlnCO stencil point stalled on photolysis cadence 5/5 (tests/live/test_toi7169_dlnco.py). canonical_params verbatim from the share file; software = the stack it failed on.",
+ "note": "TOI-7169 b CO detection case (a collaborator, 2026-09-10): the +h dlnCO stencil point stalled on photolysis cadence 5/5 (tests/live/test_toi7169_dlnco.py). canonical_params verbatim from the share file; software = the stack it failed on.",
  "canonical_params": {
   "planet": "custom",
   "science_mode": "transmission",

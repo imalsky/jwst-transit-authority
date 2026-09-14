@@ -9,7 +9,10 @@ that the advertised version is the one the package ships."""
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 PINS = REPO / "deploy" / "pins.env"
@@ -50,6 +53,21 @@ def test_dockerfile_pins_the_deployed_tool_commit():
     assert "JWST_TOOL_SHA" in args, (
         "the Dockerfile must pin the deployed jwst-transit-authority commit by "
         "full SHA (no unqualified branch clones)")
+    # 40 hex is not enough: a SHA from a sibling repo, or one that was rebased
+    # away, passes that and deploys code this checkout does not contain.
+    sha = args["JWST_TOOL_SHA"]
+
+    def git(*a) -> int:
+        return subprocess.run(("git", "-C", str(REPO)) + a,
+                              capture_output=True).returncode
+
+    if git("rev-parse", "--git-dir") != 0:
+        pytest.skip("not a git checkout")
+    if git("cat-file", "-e", f"{sha}^{{commit}}") != 0:
+        # CI checks out at depth 1, so the pinned object is normally absent
+        pytest.skip(f"{sha[:12]} not present locally (shallow clone)")
+    assert git("merge-base", "--is-ancestor", sha, "HEAD") == 0, (
+        f"the Dockerfile pins {sha[:12]}, which is not an ancestor of HEAD")
 
 
 def test_citation_version_matches_the_package():

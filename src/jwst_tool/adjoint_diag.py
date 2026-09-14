@@ -126,9 +126,11 @@ def run_adjoint(params: dict, species: str, log=print) -> Path:
     """One reverse-mode adjoint analysis of the CURRENT forward model state.
 
     Builds the identical chemistry (forward._assemble_chem), re-converges it
-    cold, gates convergence on longdy exactly like run_model, runs the scope
-    audit (refusing on audit errors), then computes dL/dlnk (all reactions)
-    and dL/dT (all layers) with full certification info, and caches the lot.
+    cold with the stall exit disabled, and certifies the fixed point on the
+    runner's own conv_normal at the exit state plus longdy < yconv_min -- NOT
+    run_model's check_converged/check_elements gate. Then runs the scope audit
+    (refusing on audit errors), computes dL/dlnk (all reactions) and dL/dT
+    (all layers) with full certification info, and caches the lot.
     """
     cp = forward.canonical_params(params)
     if cp["use_condense"]:

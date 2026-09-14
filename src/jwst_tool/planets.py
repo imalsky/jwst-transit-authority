@@ -80,36 +80,6 @@ SFLUX_SOURCES = {
 }
 SFLUX_SOURCES["sflux-GJ1214.txt"] = SFLUX_SOURCES["sflux-GJ436.txt"]
 
-# Host Teff per shipped UV spectrum, powering a SUGGESTION caption on custom
-# planets only ("nearest-Teff shipped template: ..."). It is never applied:
-# neither the GUI nor the archive fill selects a UV spectrum for the user
-# (standing rule; registry planets keep their curated sflux).
-# Values:
-# WASP-39 / HD 189733 = this registry; Sun = IAU nominal; eps Eri ~5084 K
-# (interferometric, Baines & Armstrong 2012); GJ 436 ~3416 K (von Braun 2012);
-# GJ 1214 ~3026 K (Cloutier 2021). Only the ORDERING matters for
-# nearest-neighbor selection, so literature spread within ~100 K is harmless.
-SFLUX_TEFF_ANCHORS = {
-    "sflux-W39b_Tsai2023.txt": 5485.0,
-    "Gueymard_solar.txt": 5772.0,
-    "sflux-HD189_Moses11.txt": 5040.0,
-    "sflux-epseri.txt": 5084.0,
-    "sflux-GJ436.txt": 3416.0,
-    "sflux-GJ1214.txt": 3026.0,
-}
-if set(SFLUX_TEFF_ANCHORS) != set(SFLUX_CHOICES):
-    raise RuntimeError(
-        "SFLUX_TEFF_ANCHORS is out of sync with SFLUX_CHOICES: "
-        f"{sorted(set(SFLUX_TEFF_ANCHORS) ^ set(SFLUX_CHOICES))}; the "
-        "nearest-spectral-type default needs one Teff anchor per spectrum.")
-
-
-def nearest_sflux(teff_k: float) -> str:
-    """Filename of the shipped UV spectrum whose host Teff is closest to
-    ``teff_k`` (ties resolve by SFLUX_TEFF_ANCHORS insertion order)."""
-    t = float(teff_k)
-    return min(SFLUX_TEFF_ANCHORS, key=lambda f: abs(SFLUX_TEFF_ANCHORS[f] - t))
-
 # Per-planet MEASURED structure tables bundled with vulcan_jax (atm/).
 #
 # TWO SEPARATE FACTS, deliberately not conflated:
@@ -200,10 +170,11 @@ CUSTOM_DEFAULTS = PLANETS["wasp39b"]
 # Single source of truth for the custom-planet form bounds, in WIDGET units
 # (g in m s^-2 = gs_cgs / 100; everything else as displayed). app.py unpacks
 # these into its number_inputs and archive.custom_fill refuses values outside
-# them -- Streamlit hard-errors at widget instantiation on an out-of-range
-# session-state value, so the two consumers must never drift. Widening a range
-# is a physics decision (PHOENIX grid nodes, premodit opacity ceiling,
-# validated chemistry envelope), not a UI tweak.
+# them -- Streamlit does NOT reject an out-of-range session-state value, it
+# silently discards it and the widget falls back to its default, so the two
+# consumers must never drift. Widening a range is a physics decision (PHOENIX
+# grid nodes, premodit opacity ceiling, validated chemistry envelope), not a
+# UI tweak.
 CUSTOM_FIELD_RANGES = {
     "teff": (3000.0, 7000.0),   # K; PHOENIX + chemistry validity
     "logg": (3.5, 5.5),         # log10 cm s^-2

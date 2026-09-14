@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run on the Mac. Stages a symlink-dereferenced copy of the two data trees
-# (~7.5 GB; the phoenix grid symlink must be materialized) and uploads them
+# (~7.5 GB; the phoenix grid must be present, see `jwst-tool fetch`) and uploads them
 # to the private HF dataset repo the Space seeds /data from.
 #
 # Prereqs:
@@ -12,7 +12,8 @@
 #   env DATASET_REPO overrides the target (default imalsky/vulcan-jwst-tool-data)
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"   # this checkout, whatever it is named
+ROOT="$(dirname "$REPO_ROOT")"                    # the workspace holding the sibling repos
 STAGE="${1:-$HOME/Desktop/hf_data_stage}"
 REPO="${DATASET_REPO:-imalsky/vulcan-jwst-tool-data}"
 
@@ -24,8 +25,8 @@ else
     exit 1
 fi
 
-if [ ! -e "$ROOT/vulcan-jwst-tool/data/cdbs/grid/phoenix/catalog.fits" ]; then
-    echo "ERROR: phoenix grid not resolvable through the cdbs symlink" >&2
+if [ ! -e "$REPO_ROOT/data/cdbs/grid/phoenix/catalog.fits" ]; then
+    echo "ERROR: phoenix grid missing (no catalog.fits); run jwst-tool fetch" >&2
     exit 1
 fi
 
@@ -56,7 +57,7 @@ stage_tree() {                  # stage_tree <src-dir> <dst-dir> <label> [skip..
 }
 
 echo "Staging jwst-data (first run copies ~7 GB, needs the disk space) ..."
-stage_tree "$ROOT/vulcan-jwst-tool/data" "$STAGE/jwst-data" jwst-data
+stage_tree "$REPO_ROOT/data" "$STAGE/jwst-data" jwst-data
 # The engine's opacity cache (CIA) still lives in the retrieval checkout
 # on the maintainer's machine; the dataset folder keeps the name
 # "retrieval-data" deliberately, because renaming it would mean

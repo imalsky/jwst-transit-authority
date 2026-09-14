@@ -111,8 +111,8 @@ FD_COMP_PARAMS = ("lnZ", "dlnCO")     # need a chemistry re-init per FD point
 FD_CONSISTENCY_TOL = 0.25
 FD_LNR0_STEP = 0.01                   # lnR0 is RT-only (smooth, analytic)
 # Model top (chemistry grid AND RT top) when a request does not set it.
-# 1e-7 bar is the usual published choice; the converged 1e-9 bar top the
-# tool shipped before (v40) is still selectable in the same range.
+# 1e-7 bar is the usual published choice; 1e-9 bar is inside the allowed
+# range.
 RT_PTOP_DEFAULT = 1.0e-7
 JAC_METHODS = ("fd", "ad")            # certified-FD default / warm-jvp opt-in
 # Minimum positivity margin for the AD dlnCO row. The engine's co_bz_bound =
@@ -1131,12 +1131,12 @@ def canonical_params(params: dict) -> dict:
         "diff_esc": [],
         "top_flux": [],
         "bot_flux": [],
-        "extra_mols": sorted(str(m) for m in (params.get("extra_mols") or [])),
+        "extra_mols": sorted({str(m) for m in (params.get("extra_mols") or [])}),
         # Leave-one-out spectrum set: None = every RT molecule (the detect
         # default), [] skips the block. Canonicalized to fold order below.
         "wo_mols": (None if params.get("wo_mols") is None
                     else [str(m) for m in params.get("wo_mols")]),
-        "fisher_params": sorted(str(p) for p in (params.get("fisher_params") or [])),
+        "fisher_params": sorted({str(p) for p in (params.get("fisher_params") or [])}),
         # Jacobian method: "fd" (certified FD, default, valid everywhere) or
         # "ad" (one warm-started jvp per row, photo-on only; module docstring).
         "jac_method": str(params.get("jac_method", "fd")),
@@ -1494,8 +1494,9 @@ def load_result(params: dict):
     fs_flux, emis_depth_norm, emis_thin_flux_frac_wo (n_wo), and the
     per-wavelength emis_tau_bottom (n_nu) / emis_tau_bottom_wo (n_wo, n_nu)
     the band-restricted gate re-evaluates.
-    Also ``producer``: the three "repo=commit" strings that SOLVED the column
-    (provenance.producer_commits), absent in entries cached before it existed.
+    Also ``producer``: the "repo=commit" strings that SOLVED the column
+    (provenance.producer_commits; empty when no checkout could be read),
+    absent in entries cached before it existed.
     """
     return _load_cached_npz(cache_path(params))
 
@@ -2047,9 +2048,13 @@ def run_model(params: dict, log=print) -> Path:
     # --- chemistry: certified cold solves (no warm continuation) ------------
     t0 = time.time()
     th0 = jnp.asarray(theta)
-    def _check_converged(diag, stage):
-        """Raise unless the stage certifies; returns its CONV_FIELDS record."""
-        return check_converged(diag, stage, _species_now, chem, log)
+    def _check_converged(diag, stage, chem_used=None):
+        """Raise unless the stage certifies; returns its CONV_FIELDS record.
+        ``chem_used`` is the build the stage ran on (the AD rows run on their
+        own), so the refusal names that build's caps, not the baseline's."""
+        return check_converged(diag, stage, _species_now,
+                               chem_used if chem_used is not None else chem,
+                               log)
 
     # Single certified cold solve, unless an identical chemistry-relevant set
     # already solved: the chem-level cache stores the RAW column, so an RT-only
@@ -2144,9 +2149,10 @@ def run_model(params: dict, log=print) -> Path:
     # isothermal limit is H ln(1 + k_X/k_bkg), so an omitted background
     # absorber INFLATES the target's apparent contrast as readily as an
     # omitted overlapping band deflates it.
-    _unmodeled = unmodeled_absorbers(_species_now, np.asarray(y_sol),
-                                     np.asarray(chem.p_bar),
-                                     set(config.MOLECULES))
+    _unmodeled = unmodeled_absorbers(
+        _species_now, np.asarray(y_sol), np.asarray(chem.p_bar),
+        {v["vulcan"] for k, v in config.MOLECULES.items()
+         if k not in _NO_EXOMOLOP_TABLE})
     if _unmodeled:
         log("[fwd] WARNING: this column carries "
             + ", ".join(f"{sp} at {v:.2e}" for sp, v in _unmodeled)
@@ -2363,7 +2369,7 @@ def run_model(params: dict, log=print) -> Path:
                 try:
                     if out is None:
                         raise RuntimeError("primal stalled on an earlier row")
-                    _check_converged(out[1], stage)
+                    _check_converged(out[1], stage, chem_ad)
                 except RuntimeError as exc:
                     if _run_frq == 1:
                         raise
@@ -2376,7 +2382,7 @@ def run_model(params: dict, log=print) -> Path:
                                                photo_frq=1)
                     stage += " [photo cadence 1]"
                     out = _ad_row(chem_ad1, _e)
-                    _check_converged(out[1], stage)
+                    _check_converged(out[1], stage, chem_ad1)
                     _escalated.append(f"AD {_n} row")
                 _pd, _pdiag, _ptau, _py, _dd = out
                 check_elements(np.asarray(_py), chem, stage, log)
@@ -2604,13 +2610,14 @@ def run_model(params: dict, log=print) -> Path:
         chem_provider=np.array(cp["chem_provider"], dtype="U16"),
         # Stages that needed the photolysis-cadence escalation to certify;
         # empty on the normal path. See certified_solve.
-        photo_escalated=np.array(_escalated, dtype="U48"),
+        # auto-sized U dtype: a fixed width truncated the longest label
+        photo_escalated=np.array(_escalated),
     )
     if _chem_art is None:
         # what SOLVED this column; exports read it, the cache key does not.
         # A chem-cache hit was solved by an unrecorded stack: no stamp, and
         # the export says "installed now" instead of asserting one.
-        arrays["producer"] = np.array(_prov.producer_commits(), dtype="U64")
+        arrays["producer"] = np.array(_prov.producer_commits())
     if emis is not None:
         arrays["fs_flux"] = np.asarray(fs_j, dtype=np.float64)
         # Fp derived exactly from the stored eclipse depth (lnR0 = 0 baseline)

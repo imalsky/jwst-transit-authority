@@ -16,8 +16,7 @@ axis does not by itself fix the measure -- and therefore apply NO 1/(C/O)
 Jacobian to the ordinate, so the curve peaks on its own center rather than at
 center*exp(-sigma_ln**2). The builders return unit-area densities; the
 renderer divides by the peak, which is why the visible axis reads "relative
-forecast density". Widths are quoted in dex via fisher.format_co_width, which
-appends a physical C/O range only inside the network's supported band.
+forecast density". Widths are quoted in dex via fisher.format_co_width.
 
 HONESTY (baked into every returned record, keys ``kind``/``label``): these
 are linearized Fisher/Cramer-Rao forecasts around the input model under the
@@ -61,9 +60,7 @@ FORECAST_LABEL = (
     "the marginalized 1-sigma lower bound as width, under the quoted noise "
     "model. C/O is fitted in ln(C/O) and shown as a density per d ln(C/O) "
     "against a log C/O axis, with its width in dex; that width is a LOCAL "
-    "quadratic expansion at the input C/O, so a physical C/O range is quoted "
-    "only where it stays inside the selected network's supported band. "
-    "Not a sampled posterior; a "
+    "quadratic expansion at the input C/O. Not a sampled posterior; a "
     "retrieval freeing more parameters under the same assumptions usually "
     "reports lower significance.")
 
@@ -323,10 +320,8 @@ def marginalized_posteriors(results, free_names: list[str], centers: dict,
 # Named mode combinations
 
 def combo_forecast(name: str, mode_keys: list[str], results_by_mode: dict,
-                   free_names: list[str], centers: dict | None = None,
-                   params: list[str] | None = None,
-                   co_eval: float | None = None,
-                   grids: dict | None = None) -> dict:
+                   free_names: list[str],
+                   co_eval: float | None = None) -> dict:
     """Forecast one NAMED combination of instrument modes.
 
     ``name``: the user's label for the combination (e.g. "SOSS + G395H").
@@ -343,8 +338,7 @@ def combo_forecast(name: str, mode_keys: list[str], results_by_mode: dict,
     Goes through ``fisher.combined_forecast`` for any usable-mode count, so a
     single-mode combo equals ``fisher.mode_forecast`` (identity pinned
     upstream). Marginalized AND conditional display-unit sigmas are reported;
-    posterior curves (via ``marginalized_posteriors``) are attached when
-    ``centers`` is given, else ``posteriors`` is None and the record says so.
+    curves are the caller's job (``marginalized_posteriors``).
     """
     from jwst_tool import instruments as ins  # data-root resolution stays lazy
 
@@ -385,21 +379,10 @@ def combo_forecast(name: str, mode_keys: list[str], results_by_mode: dict,
 
     cond: dict = {}
     sig = fisher.combined_forecast(rlist, list(free_names), conditional=cond)
-    report = list(free_names) if params is None else list(params)
-    unknown = [p for p in report if p not in free_names]
-    if unknown:
-        raise ValueError(f"combo {name!r}: params {unknown} are not in "
-                         f"free_names {list(free_names)}")
     sig_disp = {n: float(fisher.display_sigma(n, float(sig[n]), co_eval=co_eval))
-                for n in report}
+                for n in free_names}
     cond_disp = {n: float(fisher.display_sigma(n, float(cond[n]), co_eval=co_eval))
-                 for n in report}
-
-    posteriors = None
-    if centers is not None:
-        posteriors = marginalized_posteriors(
-            rlist, list(free_names), centers, params=report, co_eval=co_eval,
-            grids=grids)
+                 for n in free_names}
 
     return dict(
         name=name, kind=FORECAST_KIND, label=FORECAST_LABEL,
@@ -407,10 +390,7 @@ def combo_forecast(name: str, mode_keys: list[str], results_by_mode: dict,
         n_modes_usable=len(usable), co_eval=co_eval,
         sigma_marginalized_display=sig_disp,
         sigma_conditional_display=cond_disp,
-        units={n: _param_unit(n) for n in report},
-        posteriors=posteriors,
-        posteriors_note=(None if centers is not None else
-                         "no centers supplied: sigmas only, no curves"),
+        units={n: _param_unit(n) for n in free_names},
     )
 
 
@@ -458,22 +438,6 @@ def _mode_stream_seed(seed: int, mode_key: str) -> list[int]:
     return [int(seed), zlib.crc32(mode_key.encode())]
 
 
-def _assert_mode_streams_distinct(mode_keys) -> None:
-    """crc32 is a 32-bit identifier; a collision between two registered mode
-    keys would silently give them identical noise draws. The registry is
-    small, so checking the stream ids on each mock draw is negligible and
-    prevents a silent collision."""
-    crcs = {}
-    for k in mode_keys:
-        c = zlib.crc32(str(k).encode())
-        if c in crcs:
-            raise ValueError(
-                f"mock-observation seed streams collide: mode keys "
-                f"{crcs[c]!r} and {k!r} share crc32 {c:#010x}; change one "
-                "key or move the stream id to a wider hash")
-        crcs[c] = k
-
-
 def mock_realization(results, seed: int) -> dict:
     """One seeded mock observation over the run's evaluated modes.
 
@@ -506,8 +470,6 @@ def mock_realization(results, seed: int) -> dict:
     rlist = list(results)
     if not rlist:
         raise ValueError("mock_realization: results is empty")
-    _assert_mode_streams_distinct(
-        r.get("mode_key") for r in rlist if r.get("mode_key"))
     modes = {}
     for i, r in enumerate(rlist):
         key = r.get("mode_key")
@@ -633,8 +595,7 @@ def param_center(name: str, cpj: dict):
             return float(np.log10(float(v)))
         return None
     direct = {"Tirr": "Tirr", "Tint": "Tint", "log_kappa": "log_kappa",
-              "log_gamma": "log_gamma", "Tint_cl": "tint_cl",
-              "log_kappa_cloud": "log_kappa_cloud",
+              "log_gamma": "log_gamma", "log_kappa_cloud": "log_kappa_cloud",
               "alpha_cloud": "alpha_cloud"}
     k = direct.get(name)
     if k is not None and cpj.get(k) is not None:

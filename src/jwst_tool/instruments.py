@@ -251,6 +251,10 @@ PANDEXO_UNBOUNDED_NGROUP = 65535
 # registry band, so moving an edge moves this number.
 # Display metadata only -- the LSF operator reads the full R(lambda) curve
 # from the worker, never this number.
+#
+# APPEND-ONLY: MODE_COLOR/MODE_MARKER key by enumeration order and a mode's
+# color is never re-assigned, so a new mode goes at the END of this literal,
+# never inserted mid-registry.
 MODES = {
     "nirspec_prism": dict(
         label="NIRSpec PRISM",
@@ -367,13 +371,10 @@ MODES = {
         floor_ppm_suggested=40.0, ngroup_min=2,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
-    # Appended LAST on purpose: MODE_COLOR/MODE_MARKER key by
-    # enumeration order, and per-mode colors are never re-assigned, so a new
-    # mode may only be appended, never inserted mid-registry. Same band as
-    # G395H at ~4x lower R; the medium-resolution grating trades resolving
-    # power for a brighter saturation limit than PRISM while keeping the full
-    # 3-5 um band on one detector pair (the G395M-vs-G395H duty-cycle /
-    # saturation trade). Tokens verified against
+    # Same band as G395H at ~4x lower R; the medium-resolution grating trades
+    # resolving power for a brighter saturation limit than PRISM while keeping
+    # the full 3-5 um band on one detector pair (the G395M-vs-G395H
+    # duty-cycle / saturation trade). Tokens verified against
     # pandeia_data-2026.7-jwst/jwst/nirspec/config.json (and the 2026.2
     # tree): bots dispersers include "g395m"; config_constraints allow
     # f290lp + sub2048 for it; readout_patterns include "nrsrapid";
@@ -394,8 +395,7 @@ MODES = {
         floor_ppm_suggested=15.0, ngroup_min=1,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
-    # Slots 9-11, appended in this order on purpose -- see the palette note
-    # above. Tokens verified against pandeia_data-2026.7-jwst config.json
+    # Tokens verified against pandeia_data-2026.7-jwst config.json
     # files and one live Pandeia 2026.7 calculation per mode; r_native_med is
     # the median R(lambda) of the refdata dispersion file over the registry
     # band.

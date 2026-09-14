@@ -96,7 +96,6 @@ def _validate_spectrum(spectrum: dict) -> dict:
             raise ValueError(f"spectrum: depth2_ppm {depth2.shape} and "
                              f"wl_um {wl.shape} shapes differ")
         depth2 = depth2[order]
-    _lt = spectrum.get("legend_title")
 
     def _pair(key, positive):
         """Optional (lo, hi) axis window -- validated, never silently ignored."""
@@ -132,10 +131,6 @@ def _validate_spectrum(spectrum: dict) -> dict:
                 depth_label=str(spectrum.get("depth_label",
                                              "transit depth (ppm)")),
                 model_label=str(spectrum.get("model_label", "model")),
-                # what the per-entry numbers mean -- ONE short line as the
-                # legend's title, never folded into an entry label (a
-                # multi-line label wrecks the legend's row spacing)
-                legend_title=(None if _lt is None else str(_lt)),
                 points=points)
 
 

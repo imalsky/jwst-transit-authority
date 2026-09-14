@@ -45,7 +45,6 @@ def _engine_cfg():
 
 @dataclass(frozen=True)
 class Fetch:
-    key: str                           # datacheck item key this satisfies
     label: str
     url: str
     dest: Callable[[], Path]           # resolved lazily (env-dependent roots)
@@ -54,21 +53,21 @@ class Fetch:
 
 
 FETCHES = (
-    Fetch("cia:H2-H2", "H2-H2 collision-induced absorption table",
+    Fetch("H2-H2 collision-induced absorption table",
           "https://hitran.org/data/CIA/main/H2-H2_2011.cia",
           lambda: Path(_engine_cfg().CIA_H2H2_FILE), "24 MB"),
-    Fetch("cia:H2-He", "H2-He collision-induced absorption table",
+    Fetch("H2-He collision-induced absorption table",
           "https://hitran.org/data/CIA/main/H2-He_2011.cia",
           lambda: Path(_engine_cfg().CIA_H2HE_FILE), "147 MB"),
-    Fetch("cdbs:2mass_ks_001_syn.fits", "2MASS Ks bandpass",
+    Fetch("2MASS Ks bandpass",
           "https://ssb.stsci.edu/trds/comp/nonhst/2mass_ks_001_syn.fits",
           lambda: Path(ins.PYSYN_CDBS) / "comp" / "nonhst"
           / "2mass_ks_001_syn.fits", "9 KB"),
-    Fetch("cdbs:alpha_lyr_stis_011.fits", "Vega spectrum (CALSPEC)",
+    Fetch("Vega spectrum (CALSPEC)",
           "https://ssb.stsci.edu/trds/calspec/alpha_lyr_stis_011.fits",
           lambda: Path(ins.PYSYN_CDBS) / "calspec"
           / "alpha_lyr_stis_011.fits", "288 KB"),
-    Fetch("cdbs:phoenix", "PHOENIX stellar grid (synphot)",
+    Fetch("PHOENIX stellar grid (synphot)",
           "https://archive.stsci.edu/hlsps/reference-atlases/"
           "hlsp_reference-atlases_hst_multi_pheonix-models_multi_v3_"
           "synphot5.tar",
@@ -122,8 +121,10 @@ def _present(f: Fetch) -> bool:
     except Exception:
         return False
     if f.tar_subtree:
-        real = Path(os.path.realpath(d))
-        return real.is_dir() and any(real.iterdir())
+        # the grid's catalog file, not the directory: an extraction killed
+        # part-way leaves a non-empty dir that would read as complete and be
+        # skipped forever. The deploy scripts use the same marker.
+        return (Path(os.path.realpath(d)) / "catalog.fits").is_file()
     return d.is_file()
 
 
@@ -150,6 +151,7 @@ def _download(url: str, out: Path, label: str) -> None:
 def _extract_subtree(tar_path: Path, subtree: str, dest: Path) -> int:
     """Extract members under ``subtree`` into ``dest`` (prefix stripped)."""
     prefix = subtree.rstrip("/") + "/"
+    root = os.path.realpath(dest)
     n = 0
     with tarfile.open(tar_path) as tf:
         for m in tf:
@@ -157,6 +159,12 @@ def _extract_subtree(tar_path: Path, subtree: str, dest: Path) -> int:
                 continue
             rel = m.name[len(prefix):]
             target = dest / rel
+            # a member carrying ".." resolves outside dest; startswith(prefix)
+            # does not stop it, and the archive is a remote file
+            if os.path.commonpath(
+                    [root, os.path.realpath(target)]) != root:
+                raise RuntimeError(
+                    f"{tar_path}: member {m.name!r} escapes {dest}")
             target.parent.mkdir(parents=True, exist_ok=True)
             src = tf.extractfile(m)
             with open(target, "wb") as w:

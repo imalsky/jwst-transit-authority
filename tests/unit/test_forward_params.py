@@ -332,8 +332,6 @@ def test_fisher_names_and_jac_method_matrix():
     assert cp["fisher_params"] == ["lnZ"] and cp["use_photo"] is False
     with pytest.raises(ValueError):
         forward.canonical_params(_p(fisher_params=["lnFoo"]))
-    with pytest.raises(ValueError):
-        forward.canonical_params(_p(fisher_params=["Tint_cl"]))  # climate-only
     # jac_method is canonical -- certified FD by default, unknown refused
     assert forward.canonical_params(
         _p(fisher_params=["lnKzz"]))["jac_method"] == "fd"

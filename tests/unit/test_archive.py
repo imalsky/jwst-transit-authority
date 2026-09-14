@@ -107,15 +107,6 @@ def test_custom_fill_refusals():
             archive.custom_fill(_row(st_teff=cell))
 
 
-def test_nearest_sflux_anchors():
-    assert set(planets.SFLUX_TEFF_ANCHORS) == set(planets.SFLUX_CHOICES)
-    for fname, teff in planets.SFLUX_TEFF_ANCHORS.items():
-        assert planets.nearest_sflux(teff) == fname
-    assert planets.nearest_sflux(5772.0) == "Gueymard_solar.txt"
-    assert planets.nearest_sflux(3100.0) == "sflux-GJ1214.txt"
-    assert planets.nearest_sflux(7000.0) == "Gueymard_solar.txt"
-
-
 def test_archive_fill_feeds_canonical_params():
     """End-to-end: a real snapshot row, mapped by custom_fill, builds a valid
     custom-planet canonical parameter set -- pinning the g (m s^-2) -> gs_cgs

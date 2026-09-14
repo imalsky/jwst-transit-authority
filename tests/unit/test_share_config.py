@@ -488,7 +488,7 @@ def test_restore_bounds_match_the_widgets():
             if lo is not None and hi is not None:
                 found.setdefault(suffix, set()).add((lo, hi))
 
-    shared = {"nz"} | set(planets.CUSTOM_FIELD_RANGES)
+    shared = {"nz", "met"} | set(planets.CUSTOM_FIELD_RANGES)
     for table in (share_config._GLOBAL_BOUNDS, share_config._PLANET_BOUNDS):
         for widget, (lo, hi) in table.items():
             if widget in shared:

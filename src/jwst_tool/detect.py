@@ -52,7 +52,7 @@ N_TRANSITS_CAP = 500
 # ARE the signal being scored. Must track forward.TP_PARAM_NAMES +
 # forward.CLOUD_FISHER_PARAMS.
 _NUISANCE_JAC = frozenset(
-    {"Tirr", "Tint", "Tint_cl", "log_kappa", "log_gamma", "lnR0",
+    {"Tirr", "Tint", "log_kappa", "log_gamma", "lnR0",
      "log_kappa_cloud", "alpha_cloud"})
 
 
@@ -205,7 +205,7 @@ def detection_score(result: dict, sigma: np.ndarray | None = None,
                     *, projected: bool = False) -> float:
     """Recompute a result's matched-template score with one explicit metric.
 
-    ``projected=False`` preserves the historical calibration-profiled score.
+    ``projected=False`` is the calibration-profiled score.
     ``projected=True`` additionally profiles the available local T-P,
     reference-radius, and cloud Jacobian directions. The latter is the
     collaborator-facing score whenever those Jacobians are available.
@@ -613,6 +613,7 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         ngroup=int(mode_result["ngroup"]),
         sat_frac=float(mode_result["sat_frac"]),
         sat_ngroups=mode_result.get("sat_ngroups"),
+        ramp_search_complete=bool(mode_result.get("ramp_search_complete", True)),
         saturated=bool(mode_result.get("saturated", False)),
         t_cycle_s=float(mode_result["t_cycle_s"]),
     )

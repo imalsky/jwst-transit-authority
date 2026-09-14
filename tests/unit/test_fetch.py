@@ -9,15 +9,15 @@ from jwst_tool import fetch
 
 
 def test_fetch_specs_are_well_formed():
-    keys = [f.key for f in fetch.FETCHES]
-    assert len(keys) == len(set(keys))
+    urls = [f.url for f in fetch.FETCHES]
+    assert len(urls) == len(set(urls))
     for f in fetch.FETCHES:
         assert f.url.startswith("https://")
         assert f.size
         assert callable(f.dest)
     # the one tarball spec is the PHOENIX subtree
-    tarred = [f for f in fetch.FETCHES if f.tar_subtree]
-    assert [f.key for f in tarred] == ["cdbs:phoenix"]
+    assert [f.tar_subtree for f in fetch.FETCHES if f.tar_subtree] == \
+        ["grp/redcat/trds/grid/phoenix"]
 
 
 def test_manual_block_names_pieces_and_renders():
@@ -92,3 +92,17 @@ def test_extract_subtree_strips_prefix_and_requires_a_match(tmp_path):
     # a prefix matching no member raises rather than "extracting" nothing
     with pytest.raises(RuntimeError):
         fetch._extract_subtree(tar_path, "grid/phoenix", tmp_path / "d2")
+
+
+def test_extract_subtree_refuses_a_member_escaping_the_destination(tmp_path):
+    """The tarball is a remote file: a member whose path climbs out of the
+    subtree must never be written outside ``dest``."""
+    tar_path = tmp_path / "evil.tar"
+    with tarfile.open(tar_path, "w") as tf:
+        for name, data in (("pre/good.fits", b"A"), ("pre/../escape", b"B")):
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+    with pytest.raises(RuntimeError, match="escapes"):
+        fetch._extract_subtree(tar_path, "pre", tmp_path / "dest")
+    assert not (tmp_path / "escape").exists()

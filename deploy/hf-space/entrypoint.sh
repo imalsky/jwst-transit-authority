@@ -74,9 +74,9 @@ if [ -d /srv/hub-data/jwst-data ]; then
     # renaming it would mean re-uploading gigabytes).
     export VULCAN_FORWARD_DATA="$STATE/retrieval-data"
 else
-    if [ ! -d /data ]; then
-        echo "ERROR: no dataset volume at /srv/hub-data and no storage at" >&2
-        echo "/data. Mount the dataset repo as a volume (Settings ->" >&2
+    if [ "$STATE" != /data ]; then
+        echo "ERROR: no dataset volume at /srv/hub-data and no writable" >&2
+        echo "storage at /data. Mount the dataset repo as a volume (Settings ->" >&2
         echo "Storage/Volumes, or HfApi.set_space_volumes) or add a" >&2
         echo "writable volume so bootstrap_data.py can seed it." >&2
         exit 1

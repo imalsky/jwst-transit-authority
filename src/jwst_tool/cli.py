@@ -61,8 +61,9 @@ def main() -> int:
     if importlib.util.find_spec("vulcan_jax") is None:
         print("jwst-tool: the vulcan_jax package is not installed in this "
               "environment.\n"
-              "Install it from a checkout:\n"
-              "  pip install -e <PROJECT_ROOT>/VULCAN-JAX --no-deps\n"
+              "Install it:\n"
+              '  python -m pip install "vulcan-jax @ '
+              'git+https://github.com/imalsky/jax-vulcan.git"\n'
               "Run `jwst-tool data` for the full data-availability report.",
               file=sys.stderr)
         return 2

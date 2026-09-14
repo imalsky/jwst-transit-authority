@@ -476,6 +476,16 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key) -> dict:
     # power-law haze -- what every configuration written before this was.
     cloud_top_bar = cfg.get("cloud_top_bar")
     cloud_mode = "haze" if cloud_top_bar is None else "gray"
+    if cloud_mode == "gray" and \
+            str(cp.get("science_mode", "transmission")) == "emission":
+        raise ValueError(
+            "this configuration pairs a gray cloud deck with an emission "
+            "run. The cloud-top pressure is mapped to an opacity through the "
+            "transmission chord, which the vertical emission integration does "
+            "not share, so the interface offers the gray deck in transmission "
+            "only. Restoring it as a power-law haze would run a different "
+            "cloud than the file describes; re-create the run with the haze "
+            "parameterization.")
 
     restored_tp, pending_tp = _resolve_embedded_tp(cp, cfg, tp_mode)
     try:

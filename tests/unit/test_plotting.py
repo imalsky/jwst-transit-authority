@@ -59,7 +59,7 @@ def _summary_fig(n_points: int = 3, with_sigma: bool = False):
     spec = dict(wl_um=wl, depth_ppm=20000.0 + 300.0 * np.sin(wl * 3),
                 depth_label="transit depth (ppm)",
                 model_label="model (smoothed for display)",
-                legend_title="SO2 S/N per mode, 1 transit", points=pts)
+                points=pts)
     return summary_figure.compose_summary_figure(spec, posterior_panels=pans)
 
 

@@ -1,6 +1,6 @@
 """The gravitational constant is duplicated across repos; pin it.
 
-`forward.py:1640` converts this tool's surface-gravity input into the planet
+`forward._assemble_chem` converts this tool's surface-gravity input into the planet
 mass VULCAN-JAX wants:
 
     Mp = gs_cgs * rp_cm**2 / planets.G_CGS

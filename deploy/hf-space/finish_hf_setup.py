@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """One-shot Hugging Face setup, run AFTER `hf auth login`.
 
-Does everything the browser/CLI sequence in notes.md's Deployment runbooks section
-(Hugging Face Space runbook) steps 2-6 does:
+Does everything the browser/CLI deployment sequence does:
 creates the private dataset + Space repos, uploads the Space shim files,
-sets the HF_TOKEN secret (+ DATASET_REPO variable if non-default), requests
+sets the HF_TOKEN secret from $HF_DATASET_READ_TOKEN (+ DATASET_REPO variable
+if non-default), requests
 persistent storage / CPU Upgrade hardware / 1 h sleep (these three need
 billing configured at hf.co/settings/billing), and finally uploads the
 staged ~7.5 GB data (resumable -- re-run this script if interrupted;
 completed steps are skipped or idempotent).
 
-Env overrides: DATASET_REPO, SPACE_REPO, STAGE_DIR.
+Env: HF_DATASET_READ_TOKEN (required). Overrides: DATASET_REPO, SPACE_REPO,
+STAGE_DIR.
 Loud on every failure, with the remedy.
 """
 import json
@@ -117,12 +118,15 @@ def main() -> int:
         print(f"pushed {HERE.name}/ contents to the Space repo")
 
         step("configuring Space secrets/variables")
-        api.add_space_secret(space, "HF_TOKEN", token)
-        print("HF_TOKEN secret set from your login token.")
-        print("NOTE: for least privilege, later create a fine-grained READ "
-              "token")
-        print("at hf.co/settings/tokens (access to the dataset repo only) and")
-        print("replace the secret in Space Settings.")
+        # NEVER the login token: it is write-scoped over every repo this
+        # account owns, and the Space only ever READS the dataset.
+        read_token = os.environ.get("HF_DATASET_READ_TOKEN", "").strip()
+        if not read_token:
+            die("HF_DATASET_READ_TOKEN is unset -- create a fine-grained READ "
+                "token at hf.co/settings/tokens scoped to the dataset repo "
+                "only, export it, and re-run")
+        api.add_space_secret(space, "HF_TOKEN", read_token)
+        print("HF_TOKEN secret set from HF_DATASET_READ_TOKEN.")
         if dataset != f"{user}/vulcan-jwst-tool-data":
             api.add_space_variable(space, "DATASET_REPO", dataset)
             print(f"DATASET_REPO variable set to {dataset}")

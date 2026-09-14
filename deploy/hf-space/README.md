@@ -35,5 +35,3 @@ Operational notes:
   the Dockerfile (and `deploy/pins.env` with them), then upload the Space
   files. Changing an ARG default busts the layers that clone the repos, so no
   factory rebuild is needed.
-- Setup runbook: the Deployment runbooks section (Hugging Face Space runbook)
-  of the main repo's local notes.md.

@@ -163,22 +163,24 @@ def test_the_engine_calls_in_forward_py_pass_arguments_it_accepts():
         "looking where it thinks it is")
 
 
-def test_pinned_engine_floor_is_recorded():
-    """pyproject must state a floor for the engine, and the installed engine
+@pytest.mark.parametrize("dist,mod_name", [("vulcan-forward", "vulcan_forward"),
+                                           ("vulcan-jax", "vulcan_jax")])
+def test_pinned_engine_floor_is_recorded(dist, mod_name):
+    """pyproject must state a floor for BOTH engines, and each installed engine
     must meet it. A pin without a floor is a string, not a contract."""
-    _skip_without_engine()
+    if importlib.util.find_spec(mod_name) is None:           # pragma: no cover
+        pytest.skip(f"{dist} not installed (light CI job)")
     root = Path(__file__).resolve().parents[2]
     text = (root / "pyproject.toml").read_text()
     line = next((ln for ln in text.splitlines()
-                 if "vulcan-forward" in ln and ">=" in ln), None)
-    assert line, "pyproject does not pin a vulcan-forward floor"
+                 if dist in ln and ">=" in ln), None)
+    assert line, f"pyproject does not pin a {dist} floor"
     floor = line.split(">=")[1].split("#")[0].strip().strip('",').strip()
-    import vulcan_forward
-    got = getattr(vulcan_forward, "__version__", None)
-    assert got, "vulcan_forward exposes no __version__"
+    got = getattr(importlib.import_module(mod_name), "__version__", None)
+    assert got, f"{mod_name} exposes no __version__"
     to_t = lambda v: tuple(int(x) for x in v.split(".")[:3])   # noqa: E731
     assert to_t(got) >= to_t(floor), (
-        f"installed vulcan-forward {got} is below this tool's floor {floor}")
+        f"installed {dist} {got} is below this tool's floor {floor}")
 
 
 def test_the_chemistry_radius_anchor_matches_the_engines_own_rule():

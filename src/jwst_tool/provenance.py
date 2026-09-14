@@ -187,16 +187,27 @@ def _repos() -> dict:
 
 
 def producer_commits() -> list:
-    """``["repo=commit12", ...]`` for PRODUCER_REPOS.
+    """``["repo=commit12", ...]`` for PRODUCER_REPOS, "+dirty" on a checkout
+    with uncommitted changes.
 
     Stamped into a model result at WRITE time: a cache hit can be many
     engine versions old, so an export must name the code that produced the
     column, not the code installed when it was exported. Deliberately
     cheaper than snapshot() -- no pandeia subprocess, no dataset hashing --
-    because the forward worker calls it on every solve.
+    because the forward worker calls it on every solve. A repo with no
+    readable revision (pip install, unversioned copy) is OMITTED rather than
+    stamped "absent": the empty list is what tells a reader the result
+    carries no producer stamp at all.
     """
     repos = _repos()
-    return [f"{name}={repos[name]['commit'][:12]}" for name in PRODUCER_REPOS]
+    out = []
+    for name in PRODUCER_REPOS:
+        repo = repos[name]
+        if repo["commit"] in ("absent", "unversioned", "unknown"):
+            continue
+        out.append(f"{name}={repo['commit'][:12]}"
+                   + ("+dirty" if repo["dirty"] else ""))
+    return out
 
 
 @lru_cache(maxsize=1)

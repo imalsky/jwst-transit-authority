@@ -62,6 +62,13 @@ _BACKEND_FINGERPRINT = None
 # right, while a bump discards them all and invalidates the parity artifact.
 WORKER_VERSION = 12
 
+# Hard wall-clock cap on ONE worker invocation. A worker that hangs silently
+# (no output, no exit) holds a run slot forever, because the stdout loop and
+# proc.wait() below are both unbounded. SOSS is ~600 s of CPU locally and the
+# Space is ~4.5x slower, so an hour is well clear of a legitimate run.
+# ponytail: wall cap, not a cancel path; select-with-tick if a user-cancel is wanted
+PANDEIA_WALL_CAP_S = 3600.0
+
 
 def backend_fingerprint() -> dict:
     """Pandeia backend identity baked into every cache key (queried once per
@@ -248,7 +255,7 @@ def run_modes(star: dict, mode_keys: list[str], sat_limit: float = 0.80,
     return out
 
 
-def run_pandeia(job: dict, progress=None, force: bool = False) -> dict:
+def run_pandeia(job: dict, progress=None) -> dict:
     """Run the worker on a whole job (or return the whole-job cached result).
 
     The parity harness's path: its artifact identity is the complete job.
@@ -259,10 +266,9 @@ def run_pandeia(job: dict, progress=None, force: bool = False) -> dict:
     """
     ins.NOISE_CACHE.mkdir(parents=True, exist_ok=True)
     cache = ins.NOISE_CACHE / f"{job_key(job)}.json"
-    if not force:
-        cached = _read_cached_json(cache)
-        if cached is not None:
-            return cached
+    cached = _read_cached_json(cache)
+    if cached is not None:
+        return cached
     result = _run_worker(job, progress)
     ins.atomic_write(cache,
                      lambda fh: fh.write(json.dumps(result).encode()))
@@ -302,10 +308,15 @@ def _run_worker(job: dict, progress=None) -> dict:
         # ``progress`` can raise Streamlit's cancel exception (a BaseException);
         # the worker must not outlive the run that started it
         with proc_mod.terminating(proc):
-            for line in proc.stdout:
-                if progress:
-                    progress(line.rstrip())
-            proc.wait()
+            killer = threading.Timer(PANDEIA_WALL_CAP_S, proc.kill)
+            killer.start()
+            try:
+                for line in proc.stdout:
+                    if progress:
+                        progress(line.rstrip())
+                proc.wait()
+            finally:
+                killer.cancel()
         t_err.join(timeout=30)
         if proc.returncode != 0 or not out_json.exists():
             err = err_buf.getvalue()

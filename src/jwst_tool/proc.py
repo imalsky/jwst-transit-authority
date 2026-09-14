@@ -22,7 +22,7 @@ TERM_GRACE_S = 10.0
 
 
 def worker_prologue(output_dir) -> None:
-    """Prologue for the GUI's subprocess entry points (forward, adjoint_diag).
+    """Prologue for the worker entry points (forward.main, adjoint_diag.main).
 
     Line-buffers stdout: the GUI pipes the child, which makes Python
     BLOCK-buffer library prints, so progress lines would sit invisible in the

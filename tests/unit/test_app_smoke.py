@@ -985,14 +985,18 @@ def test_combined_forecast_is_reported_when_no_single_mode_constrains():
     a null direction (lnZ = +dlnCO in one, -dlnCO in the other), the two
     jointly do not. The joint width IS the answer, so it is reported and the
     page keeps rendering -- an empty per-mode set used to st.stop() and take
-    the structure panel, the constraint forecast and the figure with it."""
+    the structure panel, the constraint forecast and the figure with it. The
+    verdict is a SHORTFALL warning: it speaks for a joint width that misses
+    the target and stays silent for one that meets it."""
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
     nb = out["results"][0]["jac_bins"].shape[1]
     ramp = np.linspace(1.0, 2.0, nb)
     quad = np.linspace(2.0, 1.0, nb) ** 2
     r0 = np.cos(np.linspace(0.0, 2.0, nb))          # the shared lnR0 row
-    out["results"][0]["jac_bins"] = np.vstack([ramp, ramp, r0])
-    out["results"][1]["jac_bins"] = np.vstack([quad, -quad, r0])
+    # amplitude scaled so the joint width lands at ~0.2 dex, i.e. WIDE of the
+    # 0.1 dex target below; the null directions are unchanged by a scale
+    out["results"][0]["jac_bins"] = np.vstack([ramp, ramp, r0]) * 1.0e-3
+    out["results"][1]["jac_bins"] = np.vstack([quad, -quad, r0]) * 1.0e-3
     out_meta.update(goal="constrain", target=None, goal_param="lnZ",
                     target_prec=0.1)
     at = _run_with_result(out, out_meta)
@@ -1005,3 +1009,8 @@ def test_combined_forecast_is_reported_when_no_single_mode_constrains():
     exps = [e.label for e in at.get("expander")]
     assert "Parameter constraint forecast (local Fisher)" in exps, exps
     assert "Physical structure (T-P profile, mixing ratios)" in exps, exps
+    # same run, a target the joint width meets: no shortfall, no warning
+    out_meta.update(target_prec=0.5)
+    at = _run_with_result(out, out_meta)
+    assert not at.exception, at.exception
+    assert not any("No single mode constrains" in w.value for w in at.warning)

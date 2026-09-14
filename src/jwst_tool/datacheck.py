@@ -50,10 +50,11 @@ def _found(path: Path) -> str:
 
 _STACK = (
     ("vulcan_jax", True,
-     "pip install -e <PROJECT_ROOT>/VULCAN-JAX --no-deps"),
+     'pip install "vulcan-jax @ git+https://github.com/imalsky/jax-vulcan.git"'),
     ("vulcan_forward", True,
-     "pip install -e <PROJECT_ROOT>/vulcan-forward --no-deps   (dist name "
-     "vulcan-forward; the shared chemistry + radiative-transfer engine)"),
+     'pip install "vulcan-forward @ '
+     'git+https://github.com/imalsky/vulcan-forward.git"   (the shared '
+     "chemistry + radiative-transfer engine)"),
     ("exojax", True, "pip install exojax"),
     ("jax", True, "pip install jax"),
     ("streamlit", False, "pip install streamlit pandas   (GUI only)"),

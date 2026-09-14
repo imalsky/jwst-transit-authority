@@ -11,9 +11,10 @@
 # (buckets replaced the retired per-Space persistent storage). Fallback, when
 # no dataset mount exists: the entrypoint seeds /data by download, which needs
 # the secret HF_TOKEN.
-# Base image pinned by DIGEST, not :latest -- an upstream rebuild must never
-# change the environment under fixed source SHAs. Update deliberately, with
-# a notes.md decision record.
+# Base image pinned by DIGEST, not :latest. What that fixes under fixed source
+# SHAs: the base image and the app env (installed from the lock with
+# --no-deps). The apt packages, `python=3.12` and the pandeia env re-resolve
+# on every build, so the image is reproducible, not bit-identical.
 FROM condaforge/miniforge3@sha256:8edc74dee5b29511a9c1a8941c77efbf438b47edffb6320ab8675dc06bd618c2
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -37,7 +38,6 @@ RUN conda create -y -n app python=3.12 \
 # Changing an ARG default busts the cache of the layers that use it, so the
 # pins are also the cache-bust. The build FAILS on a pin/rev-parse mismatch;
 # BUILD_INFO records the enforced pins.
-# (History of these decisions: notes.md, Decision records.)
 ARG VULCAN_JAX_SHA=09b9f6617cce66d8c43cc03d0514e908e5a7203b
 ARG VULCAN_FORWARD_SHA=b72b0d251db50b92cc5f35df23c77498a95c3df9
 ARG JWST_TOOL_SHA=0cf277a2330526f1b08a54e55fefe0fd11e8be2d
