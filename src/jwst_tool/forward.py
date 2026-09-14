@@ -126,7 +126,7 @@ CO_BZ_MIN_AD = 0.1
 # the full 30000-step cold budget, 66 min, before the cadence-1 retry); dt_max
 # (s) stops the adaptive step running away on a photolysis-driven column (the
 # WASP-39 b eclipse warm map never certifies uncapped; capped 1e4-3e6 s all
-# certify with the same tangent, notes S1.7 / VULCAN-JAX todo 15). DERIVATIVE
+# certify with the same tangent, notes S1.7 / VULCAN-JAX notes S1.15). DERIVATIVE
 # builds only: the cold solve and the FD stencil points keep DT_MAX_S, so no
 # shipped spectrum moves. When the tangent settles is the solver's call: the AD
 # row runs through `converged_y_jvp`, whose certificate holds the tangent to

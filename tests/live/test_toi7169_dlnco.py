@@ -51,4 +51,4 @@ def test_plus_h_dlnco_point_certifies_after_escalation():
     assert escalated, (
         "this column certified at the configured cadence: the stall this "
         "escalation exists for is gone, so re-measure before trusting the "
-        "retry path (vulcan-forward todo 4)")
+        "retry path (notes S1.7)")

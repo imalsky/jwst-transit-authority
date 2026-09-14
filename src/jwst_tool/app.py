@@ -2231,7 +2231,7 @@ with st.expander("Physical structure (T-P profile, mixing ratios)"):
                  if s in _want]
         _cols.sort(key=lambda kv: -float(np.nanmax(kv[1])))
         # the page caveats ride the figure too: a downloaded PNG carries
-        # neither the st.warning above nor the CSV header (todo 7)
+        # neither the st.warning above nor the CSV header
         fig3 = plotting.build_structure_figure(_p_arr, _T_arr, _cols,
                                                caveats=_model_caveats)
         _struct_png = _fig_bytes(fig3, "png", tight=False)
