@@ -15,8 +15,12 @@ from __future__ import annotations
 
 import fcntl
 import json
+import logging
 import os
+import smtplib
+import threading
 import time
+from email.message import EmailMessage
 from pathlib import Path
 
 from jwst_tool import instruments as _ins
@@ -73,3 +77,47 @@ def acquire(tag: str = "run"):
         fh.flush()
         return Slot(fh, i)
     return None
+
+
+def notify_refused(context: str) -> None:
+    """Mail the maintainer that a visitor was refused (every slot busy, or an
+    illegal parameter set), at most once an hour per instance.
+
+    Off unless ALERT_SMTP_USER, ALERT_SMTP_PASS and ALERT_TO are all set, so
+    it is inert locally and in the tests. The send runs in a daemon thread --
+    the page never waits on SMTP -- and nothing here raises: a failed alert
+    must never turn into a second refusal.
+    """
+    log = logging.getLogger(__name__)
+    user = os.environ.get("ALERT_SMTP_USER")
+    # Gmail shows an app password in four spaced groups; both forms work
+    password = (os.environ.get("ALERT_SMTP_PASS") or "").replace(" ", "")
+    to = os.environ.get("ALERT_TO")
+    if not (user and password and to):
+        return
+    stamp = Path(_ins.OUTPUT_DIR) / "alert_last_sent"
+    try:
+        # stamped BEFORE the thread starts: two refusals a millisecond apart
+        # must not both pass the window
+        if stamp.exists() and time.time() - stamp.stat().st_mtime < 3600.0:
+            return
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.touch()
+    except OSError as exc:
+        log.warning("refusal alert not sent: %r", exc)
+        return
+
+    def _send() -> None:
+        try:
+            msg = EmailMessage()
+            msg["Subject"] = "[jwst-transit-authority] user refused"
+            msg["From"], msg["To"] = user, to
+            msg.set_content("%s\n%s\n" % (
+                time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), context))
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as srv:
+                srv.login(user, password)
+                srv.send_message(msg)
+        except Exception as exc:       # broad: never break a page render
+            log.warning("refusal alert failed: %r", exc)
+
+    threading.Thread(target=_send, name="refusal-alert", daemon=True).start()

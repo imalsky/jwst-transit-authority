@@ -70,6 +70,24 @@ def _slug(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "_", str(s)).strip("_").lower()
 
 
+def _record_refusal(message: str) -> None:
+    """Record a settings refusal: one line in ``refusals.log`` and the same
+    alert mail a busy instance sends (one shared one-per-hour limit). Best
+    effort -- the refusal the user sees never depends on it. Once per
+    distinct message per session: the catch re-runs on every widget change
+    while the settings stay illegal."""
+    if st.session_state.get("_last_refusal") == message:
+        return
+    st.session_state["_last_refusal"] = message
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    try:
+        with open(Path(ins.OUTPUT_DIR) / "refusals.log", "a") as fh:
+            fh.write(f"{stamp} {message}\n")
+    except OSError:
+        pass
+    runlimit.notify_refused(f"parameter refused: {message}")
+
+
 # On-screen width of every rendered figure, in CSS pixels: FIXED, not
 # "stretch", so figures stop rescaling as the window changes (see _show_fig).
 # Streamlit clamps it to the container width on a narrower screen.
@@ -1553,6 +1571,7 @@ try:
     params_error = None
 except (ValueError, RuntimeError) as e:  # stale widget combo mid-rerun, or a
     cached, params_error = False, str(e)  # missing/invalid T-P table
+    _record_refusal(params_error)
 if tp_mode == "file" and not tp_file_ok and params_error is None:
     params_error = "file-mode T-P selected but no valid table is loaded"
 
@@ -1729,6 +1748,9 @@ def _take_slot(slot: list) -> bool:
     if not slot:
         s = runlimit.acquire("forward+etc")
         if s is None:
+            runlimit.notify_refused(
+                f"instance busy: {planet_label}, tp_mode={tp_mode}, "
+                f"modes={list(mode_keys)}")
             st.error(
                 f"This instance is already running {runlimit.MAX_CONCURRENT} "
                 "heavy calculations (it is shared, public hardware). Please "
