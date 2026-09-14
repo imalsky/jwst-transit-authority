@@ -7,12 +7,15 @@ reads the npz cache in ``instruments.MODEL_CACHE``: spectra under
 that entry, logging "[fwd] PROG <frac> <label>" for the GUI bar. With
 ``fisher_params`` it also builds the spectrum Jacobian row by row (per-row
 method in ``jac_row_method``): "fd" is certified central finite differences
-under the h-vs-2h gate, "ad" one warm-started jvp per row (photo-on required
-for CHEMISTRY rows -- photo-off they are unvalidated and AD cannot self-check;
-cloud-deck rows are RT-only and stay available;
-the lnZ jvp is the fixed-structural-grid
-derivative and the dlnCO jvp is refused near O-exhaustion, on the build
-column and again on the converged column). Where the central dlnCO stencil
+under the h-vs-2h gate, "ad" one warm-started jvp per row. AD covers the
+CHEMISTRY rows only (``CHEM_PARAM_NAMES``, photo-on required -- photo-off they
+are unvalidated and AD cannot self-check; the lnZ jvp is the
+fixed-structural-grid derivative and the dlnCO jvp is refused near
+O-exhaustion, on the build column and again on the converged column).
+T-P rows are FD under EITHER method: the warm jvp differentiates at the
+BASELINE radius/gravity anchor, which a T-P step moves, so it would miss the
+part of the Guillot mapping a perturbed run rebuilds. Cloud-deck rows are
+RT-only and stay available. Where the central dlnCO stencil
 would leave the network's photolysis-on ceiling, the FD row steps one-sided
 toward lower C/O instead (``fd_stencil``); ``co_ratio`` itself is bounded by
 ``co_bounds(network, use_photo)``. AD has no such escape.
@@ -70,7 +73,7 @@ _S_MOLECULES = frozenset({"SO2", "H2S", "OCS", "SO", "SH", "CS", "NS"})
 # (correlated-k over the published tables is the only opacity path).
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
 DT_MAX_S = 1.0e13   # chemistry step-size cap (s); prevents the adaptive-dt balloon
-_VERSION = 57  # model_cache buster (identity = canonical params + this
+_VERSION = 58  # model_cache buster (identity = canonical params + this
                # number, never a content hash); bump on any physics or
                # canonical-key-set change.
 
@@ -1570,15 +1573,14 @@ def _make_progress(cp: dict, log):
                 280.0 if n in FD_COMP_PARAMS else 260.0)
 
     if _ad:
-        # chemistry-theta rows run back to back in one stage; RT-only deck
-        # rows keep their own per-row stages
-        _chem_rows = [n for n in cp["fisher_params"]
-                      if n not in CLOUD_FISHER_PARAMS]
+        # chemistry rows run back to back in one stage; RT-only deck rows and
+        # the FD T-P rows keep their own per-row stages
+        _chem_rows = [n for n in cp["fisher_params"] if n in CHEM_PARAM_NAMES]
         if _chem_rows:
             stages += [(f"AD Jacobian ({len(_chem_rows)} rows)",
                         110.0 * len(_chem_rows))]
     stages += [_row_stage(n) for n in cp["fisher_params"]
-               if not _ad or n in CLOUD_FISHER_PARAMS]
+               if not _ad or n not in CHEM_PARAM_NAMES]
     if cp["fisher_params"]:
         stages += [(("AD" if _ad else "FD") + " Jacobian d/d(lnR0)", 8.0)]
     total = sum(w for _, w in stages)
@@ -2327,8 +2329,11 @@ def run_model(params: dict, log=print) -> Path:
                 (y_w, th0), (dy_w, e_j))
             return dep, diag, tau, y_w, ddep
 
-        _ad_chem_rows = ([n for n in jac_names
-                          if n not in CLOUD_FISHER_PARAMS]
+        # AD differentiates the CHEMISTRY rows only. A T-P row takes the FD
+        # branch under either method: the warm jvp runs at the baseline
+        # r_anchor/g_anchor, while a T-P step moves that anchor and with it
+        # the Guillot mapping, which only a rebuilt stencil point carries.
+        _ad_chem_rows = ([n for n in jac_names if n in CHEM_PARAM_NAMES]
                          if cp["jac_method"] == "ad" else [])
         _ad_cols = {}
         if "dlnCO" in _ad_chem_rows:
@@ -2445,10 +2450,11 @@ def run_model(params: dict, log=print) -> Path:
                     f"d(depth)/d({name}) [RT-only cloud row] in "
                     f"{time.time()-t1:.0f} s")
                 continue
-            if cp["jac_method"] == "ad":
+            if name in _ad_cols:
                 # AD row: warm-started jvp along this theta direction; lnZ is
                 # the fixed-structural-grid derivative and is not cross-checked
-                # against FD. Computed row by row above.
+                # against FD. Computed row by row above. Keyed on _ad_cols, not
+                # on jac_method: under "ad" the T-P rows still run FD below.
                 jac[j] = _ad_cols[name]
                 if not np.isfinite(jac[j]).all():
                     raise RuntimeError(

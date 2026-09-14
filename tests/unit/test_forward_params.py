@@ -338,8 +338,8 @@ def test_fisher_names_and_jac_method_matrix():
     with pytest.raises(ValueError):
         forward.canonical_params(_p(fisher_params=["lnKzz"],
                                     jac_method="magic"))
-    # the warm-jvp AD rows are validated only photo-on; they cover EVERY
-    # requested row, composition directions included (the C-rich b_z corner
+    # the warm-jvp AD rows are validated only photo-on; they cover the
+    # CHEMISTRY rows, composition directions included (the C-rich b_z corner
     # refuses at run time), so comp-only selections KEEP 'ad'
     cp = forward.canonical_params(_p(fisher_params=["lnZ", "dlnCO"],
                                      jac_method="ad"))
@@ -710,16 +710,17 @@ def test_wo_mols_end_to_end_semantics():
 def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # The key hashes every canonical parameter: if ANY default feeding the
     # reference run changes, this trips even when the pins above still pass.
-    # Re-pinning it is a _VERSION bump: say in notes.md what moved the
-    # spectrum, and whether the canonical parameter SET moved with it.
+    # Re-pinning it follows a _VERSION bump (the version is a canonical key):
+    # say in notes.md what moved the spectrum, and whether the canonical
+    # parameter SET moved with it.
     # The default-geometry median depth and the G395H SO2 significance behind
     # this configuration have NOT been re-measured since v27-v31 and must be
     # before the key is quoted as a science result (notes.md).
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b", tp_mode="file"))) == "e85c4f2e874864e5"
+        dict(planet="wasp39b", tp_mode="file"))) == "fec633bfcd1095f7"
     # ... and the bare DEFAULT run is that same atmosphere
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "e85c4f2e874864e5"
+        dict(planet="wasp39b"))) == "fec633bfcd1095f7"
     # the sha1 pin is only meaningful re-derived from the file the run
     # actually reads -- this catches the table itself being swapped
     path = forward._shipped_tp_file("wasp39b")

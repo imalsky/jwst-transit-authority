@@ -1636,18 +1636,20 @@ if t_char < 900.0:
     base_min += 2.5
 
 # Jacobian-row cost model: fd = 4 solves per row; cloud rows are RT-only
-# (~seconds); ad = one warm re-converge + tangent per row on the capped build,
-# measured at 1.5 solve-equivalents per row (0.74 WASP-39 b eclipse, 1.6
-# WASP-39 b transmission, 1.85 TOI-7169 b; notes S1.8)
+# (~seconds); ad = one warm re-converge + tangent per CHEMISTRY row on the
+# capped build, measured at 1.5 solve-equivalents per row (0.74 WASP-39 b
+# eclipse, 1.6 WASP-39 b transmission, 1.85 TOI-7169 b; notes S1.8). T-P rows
+# take the FD branch under either method.
 _solve_min = max(1.0, base_min * 0.5)
 _rt_only = set(forward.CLOUD_FISHER_PARAMS)
 n_cloud_rows = sum(1 for n in fisher_params if n in _rt_only)
 _solve_rows = [n for n in fisher_params if n not in _rt_only]
+n_fd_comp = sum(1 for n in _solve_rows if n in forward.FD_COMP_PARAMS)
+n_fd_theta = len(_solve_rows) - n_fd_comp
 if jac_method == "ad":
-    fd_min = 1.5 * len(_solve_rows) * _solve_min + 0.2 * n_cloud_rows
+    fd_min = (1.5 * n_fd_comp * _solve_min
+              + n_fd_theta * 4 * _solve_min + 0.2 * n_cloud_rows)
 else:
-    n_fd_comp = sum(1 for n in _solve_rows if n in forward.FD_COMP_PARAMS)
-    n_fd_theta = len(_solve_rows) - n_fd_comp
     fd_min = (n_fd_comp * 4 * (_solve_min + 0.8)
               + n_fd_theta * 4 * _solve_min + 0.2 * n_cloud_rows)
 

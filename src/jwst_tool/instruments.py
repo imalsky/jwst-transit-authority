@@ -460,11 +460,16 @@ MODES = {
 # lambda/R_refdata kernel, per mode as (wavelength_um, width) points: the
 # single-Gaussian FWHM scale fitted to a narrow line pushed through Pandeia
 # (validation/parity/scripts/run_parity.py --impulse, parity_summary.json
-# ["lsf_impulse"][mode][line]["width_fit"]). The refdata dispersion R is the
-# pixel dispersion; on the slitless modes the PSF along the dispersion axis
-# sets the response, which comes out this much broader. Interpolated in
-# wavelength, held flat outside the measured range. The NIRSpec modes fit
-# 0.94-1.02 and are left at 1. RE-MEASURE ON ANY REFDATA OR PSF CHANGE.
+# ["lsf_impulse"]["modes"][mode][line]["width_fit"]). The refdata dispersion
+# R is the pixel dispersion; on the slitless modes the PSF along the
+# dispersion axis sets the response, which comes out this much broader.
+# Interpolated in wavelength, held flat outside the measured range. F277W
+# keeps one point because only the 2.6 um impulse line clears 5 FWHM of its
+# 2.45-3.1 um band; it lands on F322W2's 2.6 um value (same grism). The
+# NIRSpec modes fit 0.94-1.02 and are left at 1, PRISM at 1.5 um excepted:
+# its 0.62 is fitted on a barely-resolved R = 34 line whose extracted peak
+# the unscaled kernel already reproduces to 0.6%.
+# RE-MEASURE ON ANY REFDATA OR PSF CHANGE.
 LSF_WIDTH = {
     "niriss_soss": ((1.1, 1.39), (1.5, 1.41), (2.0, 1.48), (2.6, 1.58)),
     "nircam_f277w": ((2.6, 1.37),),

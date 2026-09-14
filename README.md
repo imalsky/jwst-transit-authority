@@ -95,14 +95,13 @@ the current JWST ETC and APT.
   and noise assumptions. By this, I mean that it is local around the specific forward model that
   was run, and shouldn't be considered global behavior for different input parameters that can
   change the resulting atmosphere a lot.
-- The default covariance treats spectral bins as independent. It does not model
+- The covariance treats spectral bins as independent. It does not model
   time-correlated systematics, stellar heterogeneity, or visit-long trends.
 - A noise floor can be added, but one fixed floor cannot represent every
   target, mode, and reduction method. Where the floor dominates, the score
   also depends on the analysis resolving power: every final bin carries its
   own independent floor, so a resolved band scores as the square root of the
-  bin count. On identical data with a 15 ppm floor, the same feature reads
-  13 sigma at R = 30 and 49 sigma at R = 400. Compare modes at one R.
+  bin count. Compare modes at one R.
 - The comparison curve is the same model with the target species removed from
   the OPACITY. The chemistry is not re-solved, so the T-P profile, mean
   molecular weight, gravity, continuum, and every other species are unchanged.
