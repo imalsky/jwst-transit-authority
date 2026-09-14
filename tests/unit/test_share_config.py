@@ -183,6 +183,11 @@ def test_invalid_input_is_refused_before_anything_applies():
         tp_file_sha1="0000000000000000")}
     with pytest.raises(ValueError):
         share_config.widget_state(cfg, _key)
+    # the sha is an archive key, never a path: a traversal is refused
+    # without touching the filesystem (uploads/../x.txt would be opened)
+    cfg["canonical_params"]["tp_file_sha1"] = "../x"
+    with pytest.raises(ValueError, match="uploads archive"):
+        share_config.widget_state(cfg, _key)
     # unsupported format version; the marker written is the marker read
     share = share_config.build_share(_canon(), goal={}, observation={})
     share["jwst_tool_config"] = 999

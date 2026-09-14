@@ -29,6 +29,7 @@ from __future__ import annotations
 import hashlib
 import math
 import os
+import re
 
 from jwst_tool import fisher, forward, planets, provenance
 
@@ -209,7 +210,9 @@ def _resolve_embedded_tp(cp: dict, cfg: dict, tp_mode: str):
                 restored = str(temporary)
         else:
             sha = str(cp.get("tp_file_sha1", ""))
-            candidate = forward._uploads_dir() / f"{sha}.txt" if sha else None
+            # an archive KEY (sha1[:16]), never a path: the file is untrusted
+            candidate = (forward._uploads_dir() / f"{sha}.txt"
+                         if re.fullmatch(r"[0-9a-f]{16}", sha) else None)
             if candidate is not None and candidate.exists():
                 restored = str(candidate)
             else:

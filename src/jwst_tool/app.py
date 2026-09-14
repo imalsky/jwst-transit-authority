@@ -175,8 +175,11 @@ _LN10 = np.log(10.0)                    # ln-coordinate sigma -> dex
 # stays the PHYSICAL C/O the forecast panel's x axis draws -- that is a
 # different thing from the coordinate its width is quoted in, and printing one
 # under the other's name is how the table and the figure legend drifted apart.
+# The constraint table names its rows the same way (the C/O row is pinned
+# as "log10 C/O"): a bare "Metallicity" row read as the x-solar number the
+# input widget carries, and the row is in dex.
 def _row_label(n):
-    return "log10 C/O" if n == "dlnCO" else fisher_mod.PARAM_LABELS[n]
+    return "log10 C/O" if n == "dlnCO" else fisher_mod.param_axis(n)
 
 
 def _row_axis(n):
@@ -1011,15 +1014,16 @@ with st.sidebar:
                     _sha_tp = hashlib.sha1(_raw_tp).hexdigest()[:16]
                     _dst_tp = forward._uploads_dir() / f"{_sha_tp}.txt"
                     _dst_tp.parent.mkdir(parents=True, exist_ok=True)
-                    if not _dst_tp.exists():
-                        # atomic: the exists() guard makes a torn copy
-                        # permanent (the sha1 check would refuse it forever)
-                        ins.atomic_write(_dst_tp,
-                                         lambda fh: fh.write(_raw_tp))
+                    # staged like share_config: validated BEFORE it enters
+                    # the archive, so a rejected upload leaves nothing behind
+                    _tmp_tp = _dst_tp.with_name(f".{_sha_tp}.{os.getpid()}.tmp")
+                    _tmp_tp.write_bytes(_raw_tp)
                     try:                       # loud validation, immediate
-                        _tab_tp = forward._read_tp_table(_dst_tp)
+                        _tab_tp = forward._read_tp_table(_tmp_tp)
+                        os.replace(_tmp_tp, _dst_tp)       # atomic commit
                         tp_file_path = str(_dst_tp)
                     except ValueError as e:
+                        _tmp_tp.unlink(missing_ok=True)
                         st.error(
                             "The temperature-pressure table is not valid: "
                             f"{e} Edit the file and upload it again.")

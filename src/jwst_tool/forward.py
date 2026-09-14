@@ -27,6 +27,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import sys
 import time
 import zipfile
@@ -836,7 +837,7 @@ def _resolve_tp_file(params: dict) -> tuple[Path, str]:
             # No raw path: the content-addressed archive is what makes
             # canonical params ROUND-TRIP -- the sha re-resolves the bytes.
             sha = str(params.get("tp_file_sha1", ""))
-            if not sha:
+            if not re.fullmatch(r"[0-9a-f]{16}", sha):
                 raise ValueError(
                     "tp_file='upload' requires tp_file_path (the saved "
                     "table; the GUI sets it on upload) or tp_file_sha1 (a "
@@ -2604,9 +2605,12 @@ def run_model(params: dict, log=print) -> Path:
         # Stages that needed the photolysis-cadence escalation to certify;
         # empty on the normal path. See certified_solve.
         photo_escalated=np.array(_escalated, dtype="U48"),
-        # what SOLVED this column; exports read it, the cache key does not
-        producer=np.array(_prov.producer_commits(), dtype="U64"),
     )
+    if _chem_art is None:
+        # what SOLVED this column; exports read it, the cache key does not.
+        # A chem-cache hit was solved by an unrecorded stack: no stamp, and
+        # the export says "installed now" instead of asserting one.
+        arrays["producer"] = np.array(_prov.producer_commits(), dtype="U64")
     if emis is not None:
         arrays["fs_flux"] = np.asarray(fs_j, dtype=np.float64)
         # Fp derived exactly from the stored eclipse depth (lnR0 = 0 baseline)

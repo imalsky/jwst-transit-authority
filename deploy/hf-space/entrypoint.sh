@@ -135,11 +135,14 @@ PY
 echo "[entrypoint] warm-up (data report + one headless app pass) took $(( $(date +%s) - _t0 )) s"
 
 # CORS/XSRF off: required for uploads (T-P tables, noise-floor tables) to
-# work behind the Spaces proxy.
+# work behind the Spaces proxy. maxUploadSize caps every upload at 4 MB
+# (a real table is a few KB): the bytes land on the billed bucket and are
+# parsed in the shared process before any run slot is taken.
 exec jwst-tool \
     --server.address=0.0.0.0 \
     --server.port=7860 \
     --server.headless=true \
+    --server.maxUploadSize=4 \
     --browser.gatherUsageStats=false \
     --server.enableCORS=false \
     --server.enableXsrfProtection=false

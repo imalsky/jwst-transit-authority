@@ -8,7 +8,7 @@
 # (override with JWST_TOOL_DATA_DIR); generated caches at output/
 # (JWST_TOOL_OUTPUT_DIR).
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]

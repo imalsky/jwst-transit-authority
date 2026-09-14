@@ -50,8 +50,7 @@ def _found(path: Path) -> str:
 
 _STACK = (
     ("vulcan_jax", True,
-     "pip install -e <PROJECT_ROOT>/VULCAN-JAX --no-deps   (or from TestPyPI: "
-     "pip install -i https://test.pypi.org/simple/ vulcan-jax)"),
+     "pip install -e <PROJECT_ROOT>/VULCAN-JAX --no-deps"),
     ("vulcan_forward", True,
      "pip install -e <PROJECT_ROOT>/vulcan-forward --no-deps   (dist name "
      "vulcan-forward; the shared chemistry + radiative-transfer engine)"),

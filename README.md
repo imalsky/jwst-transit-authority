@@ -40,10 +40,9 @@ environment so that its dependencies do not change the forward-model
 environment.
 
 ```bash
-python -m pip install \
-  -i https://test.pypi.org/simple/ \
-  --extra-index-url https://pypi.org/simple/ \
-  "jwst-transit-authority[gui]"
+python -m pip install "vulcan-jax @ git+https://github.com/imalsky/jax-vulcan.git"
+python -m pip install "vulcan-forward @ git+https://github.com/imalsky/vulcan-forward.git"
+python -m pip install "jwst-transit-authority[gui] @ git+https://github.com/imalsky/jwst-transit-authority.git"
 
 conda create -n pandeia_2026_7 python=3.12
 conda run -n pandeia_2026_7 pip install pandeia.engine==2026.7
@@ -63,7 +62,7 @@ Fetch the available reference data and check the installation:
 ```bash
 jwst-tool fetch
 python -m vulcan_forward.fetch_exomolop \
-  --molecules H2O,CO2,CO,CH4,SO2,C2H2,C2H4,H2S,HCN,NH3,OCS,SO,SH
+  --molecules H2O,CO2,CO,CH4,SO2,C2,C2H2,C2H4,CH,CH3,CN,CS,H2CO,H2O2,H2S,HCN,N2O,NH,NH3,NO,NS,OCS,OH,SH,SO
 jwst-tool data
 ```
 
