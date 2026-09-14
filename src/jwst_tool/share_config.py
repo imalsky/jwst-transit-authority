@@ -38,7 +38,7 @@ SHARE_FORMAT = 1
 # tests/unit/test_share_config.py so they cannot drift. Session-global keys;
 # forward.* constants are shared with the widgets themselves.
 _GLOBAL_BOUNDS = {
-    "met": (0.1, 100.0),
+    "met": forward.MET_RANGE,
     "sza": (0.0, 89.0), "fdiur": (0.1, 1.0),
     "yconv": (1.0e-4, 1.0e-2), "yconvmin": (1.0e-4, 0.1),
     "ck": (-7.0, 2.0), "ca": (0.0, 4.0), "cpt": (-6.0, 1.0),

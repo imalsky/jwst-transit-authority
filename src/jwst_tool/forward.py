@@ -150,6 +150,10 @@ AD_BUILD_OVERRIDES = {"count_max": 6000, "dt_max": 1.0e5}
 CO_MIN = 0.1
 CO_MAX = {"sncho": 0.99, "sncho2025": 10.0, "ncho": 10.0}   # photolysis ON
 CO_MAX_PHOTO_OFF = 10.0
+# Accepted met_x_solar range, inclusive. The top is a demonstrated certifying
+# column on the default case with the lnZ stencil margin under it (notes
+# §1.1); 50x hits count_max. A value outside is refused before any solve.
+MET_RANGE = (0.1, 30.0)
 
 
 def co_bounds(network: str, use_photo: bool) -> tuple[float, float]:
@@ -1213,9 +1217,10 @@ def canonical_params(params: dict) -> dict:
             f"(network {network!r}, photolysis "
             f"{'on' if cp['use_photo'] else 'off'}): the limit is "
             f"{_co_hi:g}.{_fix}")
-    if not 0.1 <= cp["met_x_solar"] <= 100.0:
+    if not MET_RANGE[0] <= cp["met_x_solar"] <= MET_RANGE[1]:
         raise ValueError(
-            f"met_x_solar={cp['met_x_solar']} outside [0.1, 100] x solar")
+            f"met_x_solar={cp['met_x_solar']} outside "
+            f"[{MET_RANGE[0]:g}, {MET_RANGE[1]:g}] x solar")
     # Fisher menu: chemistry + the tp_mode's T-P parameters (none in file mode)
     # + the cloud-deck parameters when the deck is in the model.
     allowed_fp = {"lnZ", "dlnCO", "lnKzz"} | set(TP_PARAM_NAMES[tp_mode])
@@ -1265,7 +1270,7 @@ def canonical_params(params: dict) -> dict:
     # range edge would otherwise silently solve outside it). T-P rows
     # window-check every stencil point for the same reason.
     if cp["jac_method"] == "fd":
-        for name, key, rng in (("lnZ", "met_x_solar", (0.1, 100.0)),
+        for name, key, rng in (("lnZ", "met_x_solar", MET_RANGE),
                                ("dlnCO", "co_ratio",
                                 co_bounds(network, cp["use_photo"]))):
             if name not in cp["fisher_params"]:

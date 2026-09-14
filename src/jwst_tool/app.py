@@ -1034,7 +1034,7 @@ with st.sidebar:
         # metallicity scales O/N/S, C/O sets C_H = co * O_H, FastChem
         # re-initializes at exactly that composition. No perturbative knob.
         met = st.number_input(
-            "Metallicity (× solar)", 0.1, 100.0, 10.0, 0.5,
+            "Metallicity (× solar)", 0.1, 30.0, 10.0, 0.5,
             format="%.2f", key=K("met"))
         # The widget spans the WHOLE admissible range over every (network,
         # photolysis) pair; which part of it is legal for the current pair is

@@ -316,9 +316,9 @@ def test_composition_structural_path_baseline_and_ranges():
     # High C/O inside the bound is the same path, with NO detection-only
     # restriction: FD Fisher rows are certified re-solves, valid at any
     # baseline inside the bound
-    cp = forward.canonical_params(_p(co_ratio=0.8, met_x_solar=30.0,
+    cp = forward.canonical_params(_p(co_ratio=0.8, met_x_solar=24.0,
                                      fisher_params=["lnZ", "dlnCO"]))
-    assert cp["co_ratio"] == 0.8 and cp["met_x_solar"] == 30.0
+    assert cp["co_ratio"] == 0.8 and cp["met_x_solar"] == 24.0
     for bad in (dict(co_ratio=0.05), dict(co_ratio=2.5),
                 dict(met_x_solar=0.05), dict(met_x_solar=150.0)):
         with pytest.raises(ValueError):
@@ -893,13 +893,13 @@ def test_emission_mode_gating_star_params_and_hygiene(tmp_path):
 
 def test_composition_fd_stencil_envelope():
     """FD Fisher rows solve the chemistry at every stencil point, so a
-    baseline whose stencil leaves the validated range refuses (met=100 ->
-    122x solar, co=0.12 -> C/O 0.098). The dlnCO stencil steps one-sided away
+    baseline whose stencil leaves the validated range refuses (met=30 ->
+    36.6x solar, co=0.12 -> C/O 0.098). The dlnCO stencil steps one-sided away
     from the network's C/O ceiling instead of across it. AD rows take no
     stencil and are exempt here (the dlnCO AD row has its own run-time margin
     gate)."""
-    forward.canonical_params(_p(met_x_solar=80.0, fisher_params=["lnZ"]))
-    for kw, fp in (({"met_x_solar": 100.0}, "lnZ"),
+    forward.canonical_params(_p(met_x_solar=24.0, fisher_params=["lnZ"]))
+    for kw, fp in (({"met_x_solar": 30.0}, "lnZ"),
                    ({"met_x_solar": 0.1}, "lnZ"),
                    ({"co_ratio": 0.12}, "dlnCO")):
         with pytest.raises(ValueError, match="stencil"):
@@ -936,9 +936,9 @@ def test_composition_fd_stencil_envelope():
     assert abs(err[(-1, -2, -4), h] / err[(-1, -2, -4), h / 2] - 8.0) < 1e-6
     assert err[(1, -1, 2, -2), h] < 1e-12
     # no stencil under AD; and without fisher_params the value is legal
-    forward.canonical_params(_p(met_x_solar=100.0, fisher_params=["lnZ"],
+    forward.canonical_params(_p(met_x_solar=30.0, fisher_params=["lnZ"],
                                 jac_method="ad"))
-    forward.canonical_params(_p(met_x_solar=100.0))
+    forward.canonical_params(_p(met_x_solar=30.0))
 
 
 def test_emission_defaults_to_the_dayside_temperature():
