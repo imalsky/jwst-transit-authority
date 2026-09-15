@@ -107,12 +107,6 @@ the current JWST ETC and APT.
   molecular weight, gravity, continuum, and every other species are unchanged.
 - Eclipse depths use the wavelength-dependent tau = 2/3 photospheric radius
   (Fortney et al. 2019). Emission is absorption-only: no scattering.
-- The emission validity check certifies the share of the emitted energy that
-  comes from wavelengths where the model column is transparent at its bottom,
-  for the full spectrum, each removed-molecule spectrum, and every spectrum a
-  Fisher row is built from, over the whole 1-15 um band and again over the
-  wavelengths each selected mode measures. A mode that fails is excluded and
-  named.
 - The depth uncertainty counts all of T14 as full depth (a box transit). For a
   typical hot Jupiter that is optimistic by roughly 5% in sigma, partly offset
   by the conservatism of the symmetric in/out variance term.
