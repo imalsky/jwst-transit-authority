@@ -147,6 +147,8 @@ AD_BUILD_OVERRIDES = {"count_max": 6000, "dt_max": 1.0e5}
 # 121-229 CLI steps, 1.03 included -- the notch is photochemical. Ten is the
 # highest value SAMPLED, never a ceiling; the bound is deliberately permissive
 # and the convergence certificate refuses the cases that do not converge.
+# "sncho" is held at 0.99, one step below the certified 1.02, as a margin
+# from the 1.03 failure (maintainer decision, notes S2.1).
 # COST, not correctness: the same photo-off corner takes 22710 steps HERE vs
 # 121 in the CLI. Cause is the engine's exact-elemental repair, which at C/O 10
 # displaces species 4.4% off the FastChem column; masks mode exits at 121.
@@ -266,6 +268,13 @@ def check_elements(y, chem, stage, log=print) -> float:
     return worst
 
 
+class NotCertified(RuntimeError):
+    """A solve (or its tangent) that did not certify. Distinct from every other
+    RuntimeError on the same path -- a backend fault, the element gate, the
+    emission gate, the T-window check -- so a cadence-1 retry fires on a stall
+    alone."""
+
+
 def check_converged(diag, stage, species, chem, log=print) -> tuple:
     """Certify one solve against the runner's CANONICAL gate and return its
     record. Certification is ``ConvDiag.conv_normal`` AND ``longdy <
@@ -292,14 +301,14 @@ def check_converged(diag, stage, species, chem, log=print) -> tuple:
                     "vm_mol phase-flip / photolysis flux still changing)")
         if branch and not np.isnan(tl) and longdy < chem.yconv_min:
             # the column certified; the derivative through it did not settle
-            raise RuntimeError(
+            raise NotCertified(
                 f"the sensitivity did NOT settle ({stage}: {detail}; the "
                 f"column certified on branch {CONV_BRANCH[branch]} but its "
                 f"tangent, tangent_longdy={tl:.3g} with its slope, did not "
                 f"pass the same two-branch test (yconv_cri / yconv_min="
                 f"{chem.yconv_min:g}); {how}). The derivative at this point "
                 "is not certified; the column is.")
-        raise RuntimeError(
+        raise NotCertified(
             f"chemistry did NOT converge ({stage}: {detail}; "
             f"gate yconv_min={chem.yconv_min:g}, "
             f"conv_normal={bool(diag.conv_normal)}; {how}). This "
@@ -2533,7 +2542,12 @@ def run_model(params: dict, log=print) -> Path:
 
             try:
                 dvals, f0 = _row_points(_run_frq), _row_anchor(_run_frq)
-            except RuntimeError as exc:
+            except NotCertified as exc:
+                # ONLY a stalled column escalates. Every other RuntimeError
+                # this try spans -- a backend fault, the element gate, the
+                # emission gate, the T-window check -- propagates: re-solving
+                # it at cadence 1 pays a second full stencil and reports a
+                # photolysis escalation for a failure that is not one.
                 if _run_frq == 1:         # already at the finest cadence
                     raise
                 log(f"[fwd] FD {name} row: {exc}")

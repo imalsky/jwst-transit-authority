@@ -328,3 +328,63 @@ def test_a_stalled_column_escalates_once_and_a_certified_one_never_does():
             broken, np.zeros(3), "baseline solve",
             rebuild=lambda: (builds.append(1), fixed)[1], log=lambda _m: None)
     assert builds == []
+
+
+def test_only_the_certificate_escalates_an_fd_row():
+    """A Fisher row is re-solved at photolysis cadence 1, and reported in
+    `photo_escalated`, when its column STALLED. Every other gate a stencil
+    point passes raises RuntimeError too -- a backend fault, the element
+    budget, the emission tau-bottom gate, the T-P window -- and retrying one of
+    those pays a second full stencil and blames photolysis for a failure that
+    is not one. So the certificate raises its own type and the row catches THAT
+    (the row sits inside run_model's closure, unreachable without a full solve,
+    so its handler is pinned by source like the vmap guard above)."""
+    import ast
+    import importlib.util
+    from pathlib import Path
+
+    def _raised(fn, *a, **kw):
+        with pytest.raises(RuntimeError) as e:
+            fn(*a, **kw)
+        return e.value
+
+    def _model(converged_y):
+        m = _chem()
+        m.sidx = {s: i for i, s in enumerate(SPECIES)}
+        m.converged_y = converged_y
+        return m
+
+    def _boom(th, return_conv_diag):
+        raise RuntimeError("backend: RESOURCE_EXHAUSTED")
+
+    stalled = _model(lambda th, return_conv_diag: (
+        np.full((3, 3), 7.0), _diag(conv_normal=False, longdy=2.7)))
+    assert isinstance(_raised(forward.certified_solve, stalled, np.zeros(3),
+                              "FD dlnCO +1h"), forward.NotCertified)
+
+    compo = np.array([[2, 0, 0], [2, 1, 0], [0, 1, 1], [0, 2, 1]], float)
+    y0 = np.array([[1.0, 4e-3, 5e-3, 1e-5]] * 3)
+    leaked = y0.copy()
+    leaked[:, 1] *= 0.8
+    nu = 1.0e4 / np.geomspace(15.0, 1.0, 400)
+    for exc in (
+        _raised(forward.certified_solve, _model(_boom), np.zeros(3), "FD lnZ -1h"),
+        _raised(forward.check_elements, leaked,
+                SimpleNamespace(compo_array=compo, y0=y0,
+                                atom_list=("H", "O", "C")),
+                "FD lnZ -1h", lambda _m: None),
+        _raised(forward.check_emission_thin,
+                np.where(1.0e4 / nu < 2.0, 0.5, 50.0), np.ones_like(nu), nu,
+                "FD lnZ -1h"),
+        _raised(forward._check_t_window, None, np.zeros(7),
+                np.logspace(-7, 0, 3), lambda _m: None,
+                T_base=np.full(3, 4.0e3)),
+    ):
+        assert not isinstance(exc, forward.NotCertified), exc
+
+    src = Path(importlib.util.find_spec("jwst_tool.forward").origin).read_text()
+    rows = [t for t in ast.walk(ast.parse(src)) if isinstance(t, ast.Try)
+            and any("_row_points(_run_frq)" in ast.unparse(n) for n in t.body)]
+    assert rows, "the FD row's stencil try moved: re-pin it"
+    assert [ast.unparse(h.type) for t in rows for h in t.handlers] \
+        == ["NotCertified"]
