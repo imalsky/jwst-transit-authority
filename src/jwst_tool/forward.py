@@ -147,8 +147,11 @@ AD_BUILD_OVERRIDES = {"count_max": 6000, "dt_max": 1.0e5}
 # 121-229 CLI steps, 1.03 included -- the notch is photochemical. Ten is the
 # highest value SAMPLED, never a ceiling; the bound is deliberately permissive
 # and the convergence certificate refuses the cases that do not converge.
-# "sncho" is held at 0.99, one step below the certified 1.02, as a margin
-# from the 1.03 failure (maintainer decision, notes S2.1).
+# "sncho" is held at 0.99 although the column certifies to 1.02 (and 1.03
+# after the cadence-1 escalation): across 0.99-1.02 the FD dlnCO row fails
+# its h-vs-2h gate (0.33-0.43 vs 0.25) and the AD row is refused at build, so
+# a raise unlocks spectra with no certifiable C/O sensitivity and puts the
+# default network above C/O 1 (maintainer decision, notes S2.1, S1.1).
 # COST, not correctness: the same photo-off corner takes 22710 steps HERE vs
 # 121 in the CLI. Cause is the engine's exact-elemental repair, which at C/O 10
 # displaces species 4.4% off the FastChem column; masks mode exits at 121.
