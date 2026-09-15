@@ -737,6 +737,7 @@ def test_a_run_that_produces_nothing_clears_the_previous_result(monkeypatch):
     # the miss is pinned here: only a heavy launch is declined now, so the
     # refusal must not depend on what this machine happens to have cached
     monkeypatch.setattr(_fwd, "load_result", lambda *_a, **_k: None)
+    monkeypatch.setenv("JWST_TOOL_OVERFLOW_URL", "https://overflow.invalid/")
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
     at = _run_with_result(out, out_meta)
     assert not at.exception, at.exception
@@ -745,6 +746,8 @@ def test_a_run_that_produces_nothing_clears_the_previous_result(monkeypatch):
     assert not at.exception, at.exception
     assert "out" not in at.session_state
     assert any("already running" in e.value for e in at.error), [e.value for e in at.error]
+    links = at.get("link_button")                  # the overflow hand-off
+    assert links and "overflow.invalid" in str(links[0].proto), links
     assert not [w.value for w in at.warning if "previous run" in w.value or "reach it" in w.value]
 
 
