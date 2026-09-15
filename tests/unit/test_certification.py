@@ -283,6 +283,32 @@ def test_an_abundant_species_with_no_k_table_is_named_not_swallowed():
         == ["C2H2", "C6H6"]
 
 
+def test_a_bulk_absorber_with_no_k_table_refuses_the_run():
+    """An absorber the RT has no table for is a caveat while it is a trace and
+    a wrong spectrum once it is a bulk carrier: at C/O 10 on sncho2025 C6H6
+    reaches 3.3e-3 in the photosphere and no benzene table exists anywhere.
+    Above UNMODELED_VMR_REFUSE the run stops and names the species; below it
+    the column is modelable and the run proceeds."""
+    sp = ["H2O", "CO", "C6H6", "H2"]
+    p = np.array([1.0e-3, 1.0e-4, 5.0])   # two layers in the photosphere band
+    tables = {"H2O", "CO"}
+    log = []
+    y = np.array([[1.0e-3, 1.0e-2, 2.0e-4, 1.0 - 1.12e-2]] * 3)   # rows sum to 1
+
+    with pytest.raises(RuntimeError, match="C6H6 at VMR 2.00e-04") as e:
+        forward.check_unmodeled(sp, y, p, tables, "baseline solve", log.append)
+    assert "1e-04" in str(e.value) and "Lower C/O" in str(e.value)
+    # the element gate's failure path, NOT a stall: nothing may retry this
+    assert not isinstance(e.value, forward.NotCertified)
+
+    # below the threshold the run proceeds. 5e-5 is under UNMODELED_VMR_WARN
+    # too -- the warning floor sits ABOVE the refusal threshold -- so this
+    # column is reported nowhere.
+    y[:, 2] = 5.0e-5
+    assert forward.check_unmodeled(sp, y, p, tables, "baseline", log.append) is None
+    assert forward.unmodeled_absorbers(sp, y, p, tables) == []
+
+
 def test_a_stalled_column_escalates_once_and_a_certified_one_never_does():
     """certified_solve retries a non-certifying column at photolysis cadence 1
     and returns the model that produced the column it hands back; with no

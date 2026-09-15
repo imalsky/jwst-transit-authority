@@ -2289,6 +2289,18 @@ if _escalated:
           "finite differences and eclipse automatic differentiation, both "
           "against independent finite differences); the spectrum itself is "
           "certified as usual.")
+# Rate-law honesty: the network's documented temperature ranges are advisory
+# in both VULCAN implementations, so a hot column extrapolates many fitted
+# rates. forward stores the counts; a run cached before 0.68.0 has neither key
+# and simply says nothing.
+_rate_out = np.atleast_1d(model.get("rate_rows_outside", np.array([], int)))
+_rate_tot = np.atleast_1d(model.get("rate_rows_total", np.array([], int)))
+if _rate_out.size and _rate_tot.size and int(_rate_out[0]) > 0:
+    _model_caveats.append(
+        f"{int(_rate_out[0])} of {int(_rate_tot[0])} reaction rates are "
+        "evaluated outside their measured temperature range in at least one "
+        "layer (advisory: no rate is altered).")
+
 for _caveat in _model_caveats:
     st.warning(_caveat)
 

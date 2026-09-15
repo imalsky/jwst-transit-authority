@@ -234,7 +234,11 @@ CONV_FIELDS = ("stage", "accept", "longdy", "longdydt", "branch", "flux", "cell"
 CONV_BRANCH = {1: "tight (yconv_cri)", 2: "loose (yconv_min)"}
 
 
-ELEMENT_TOL = 0.01   # max |element/H drift| of a certified column vs its build column
+# Max |element/H drift| of a certified column vs its build column. 1.5%:
+# the smallest round value above the drift the advertised C/O top costs.
+# The photolysis-off ladder on sncho2025 is 0.06% at C/O 2, 0.32% at 4,
+# 0.81% at 7 and 1.30% at 10 (1.21% sncho, 1.22% ncho; notes.md 1.1).
+ELEMENT_TOL = 0.015
 
 
 def check_elements(y, chem, stage, log=print) -> float:
@@ -263,7 +267,7 @@ def check_elements(y, chem, stage, log=print) -> float:
     if worst > ELEMENT_TOL:
         raise RuntimeError(
             f"{stage}: the converged column's {el}/H drifted {worst:.1%} from the "
-            f"requested composition (gate {ELEMENT_TOL:.0%}); the solve leaked "
+            f"requested composition (gate {ELEMENT_TOL:.1%}); the solve leaked "
             "material and is not a steady state of this atmosphere")
     return worst
 
@@ -395,9 +399,19 @@ def check_ad_co_margin(chem, co_ratio, y=None, build_margin=None,
 # The contrast there carries an unsigned, unquantified error, so SAY so.
 # 0.01 % is an order of magnitude below the bulk carriers and above every
 # trace species the RT already carries at solar C/O.
-# 0.1 %: a bulk-level carrier. Trace omissions (HSO at 1.2e-4 on the default
-# case) are a standing entry in notes.md, not a per-run warning.
+# 0.1 %: a bulk-level carrier. Trace omissions (HSO at 3.0e-5 on the default
+# case, cached column fec633bfcd1095f7) are a standing entry in notes.md, not
+# a per-run warning.
 UNMODELED_VMR_WARN = 1.0e-3
+# REFUSE, not warn, above this: the RT is blind to a bulk absorber and the
+# spectrum is not a model of the requested atmosphere. The photolysis-off C/O
+# ladder on sncho2025 puts C6H6 at 1.7e-5 in the photosphere at C/O 4, 7.7e-4
+# at 7 and 3.3e-3 at 10. Leave-one-out on that column: CO at 9.8e-3 is worth
+# 64 ppm, C2H2 at 1.6e-4 is worth 504 ppm -- below 1e-4 an omitted absorber
+# moves the depth by tens of ppm, above it by hundreds -- so the threshold is
+# coarse and deliberate (notes.md 1.1). It sits BELOW UNMODELED_VMR_WARN, so a
+# column the RT cannot model is refused before the warning above it can fire.
+UNMODELED_VMR_REFUSE = 1.0e-4
 # Transmission photosphere, the band the warning is measured over (bar).
 _PHOTOSPHERE_BAR = (1.0e-5, 1.0e-2)
 # Absent from the k-table set for a REASON, so not missing opacity. Two
@@ -410,13 +424,15 @@ _NOT_A_K_TABLE_ABSORBER = frozenset({
     "H2", "He", "N2", "O2", "S2"})
 
 
-def unmodeled_absorbers(species, y, p_bar, table_species) -> list[tuple]:
+def unmodeled_absorbers(species, y, p_bar, table_species,
+                        floor=UNMODELED_VMR_WARN) -> list[tuple]:
     """Network species with no opacity table that are abundant anyway.
 
     Returns [(name, mean VMR over the transmission photosphere), ...] above
-    UNMODELED_VMR_WARN, most abundant first. ``table_species`` is the set the
-    engine can build opacity for; the background gases and the homonuclear
-    diatomics are excluded because their absence is deliberate, not a gap.
+    ``floor`` (UNMODELED_VMR_WARN by default), most abundant first.
+    ``table_species`` is the set the engine can build opacity for; the
+    background gases and the homonuclear diatomics are excluded because their
+    absence is deliberate, not a gap.
     """
     y = np.asarray(y, dtype=np.float64)
     vmr = y / y.sum(axis=1, keepdims=True)
@@ -427,8 +443,29 @@ def unmodeled_absorbers(species, y, p_bar, table_species) -> list[tuple]:
     skip = set(table_species) | _NOT_A_K_TABLE_ABSORBER
     out = [(sp, float(vmr[band, i].mean()))
            for i, sp in enumerate(species) if sp not in skip]
-    return sorted([o for o in out if o[1] > UNMODELED_VMR_WARN],
-                  key=lambda o: -o[1])
+    return sorted([o for o in out if o[1] > floor], key=lambda o: -o[1])
+
+
+def check_unmodeled(species, y, p_bar, table_species, stage, log=print) -> None:
+    """Refuse a column whose observable layers carry an absorber the RT has no
+    opacity table for, above UNMODELED_VMR_REFUSE. Below it the run proceeds
+    and only says so (the warning at the call site). No table can be supplied
+    for these species -- ExoMolOP publishes none -- so the only remedy is a
+    composition that does not make them bulk carriers."""
+    over = unmodeled_absorbers(species, y, p_bar, table_species,
+                               floor=UNMODELED_VMR_REFUSE)
+    if not over:
+        return
+    log(f"[fwd] {stage}: unmodeled absorbers over the refusal threshold: "
+        + ", ".join(f"{sp} {v:.2e}" for sp, v in over))
+    raise RuntimeError(
+        f"{stage}: the transmission photosphere carries "
+        + ", ".join(f"{sp} at VMR {v:.2e}" for sp, v in over)
+        + f", over the {UNMODELED_VMR_REFUSE:.0e} gate, and the RT has no "
+        "opacity table for it: the spectrum would omit a bulk absorber and "
+        "carry an unsigned error of several hundred ppm. Lower C/O -- the "
+        "carbon-rich states are where this bites -- there is no table to "
+        "supply for these species.")
 
 
 # Cloud-deck Fisher rows: RT-only like lnR0 (one central difference or an RT
@@ -1649,15 +1686,17 @@ def _assemble_chem(cp: dict, log):
 
     from jwst_tool import engine_config as config
 
-    # Non-default kinetics network: the engine freezes network/atom_list at ITS
-    # first import, so the selection must land before vulcan_chem arrives; a
-    # conflicting in-process import raises.
+    # Kinetics network: the engine freezes network/atom_list at ITS first
+    # import, so the selection must land before vulcan_chem arrives; a
+    # conflicting in-process import raises. Set for EVERY network, the default
+    # included: skipping it for "sncho" let a sncho request that followed a
+    # sncho2025 run in the same process be served by sncho2025 and cached
+    # under the sncho key.
     _net_path, _net_atoms = NETWORKS[cp["network"]]
-    if cp["network"] != "sncho":
-        os.environ["VULCAN_JAX_NETWORK"] = _net_path
-        os.environ["VULCAN_JAX_ATOM_LIST"] = _net_atoms
-        log(f"[fwd] kinetics network: {cp['network']} ({_net_path}, "
-            f"atoms {_net_atoms})")
+    os.environ["VULCAN_JAX_NETWORK"] = _net_path
+    os.environ["VULCAN_JAX_ATOM_LIST"] = _net_atoms
+    log(f"[fwd] kinetics network: {cp['network']} ({_net_path}, "
+        f"atoms {_net_atoms})")
     from vulcan_forward import vulcan_chem
     import jax
     import jax.numpy as jnp
@@ -1691,11 +1730,11 @@ def _assemble_chem(cp: dict, log):
     ovr = {                              # chemistry side (applied pre-pre-loop)
         # VULCAN derives g = G*Mp/Rp^2, so convert gs_cgs to a planet mass
         "Mp": cp["gs_cgs"] * rp_cm**2 / planets.G_CGS,
-        # the cfg network must agree with the import-frozen one; S_H stays in
-        # the cfg under ncho, harmless with an S-free atom_list
-        **({"network": _net_path,
-            "atom_list": _net_atoms.split(",")} if cp["network"] != "sncho"
-           else {}),
+        # the cfg network must agree with the import-frozen one (the engine
+        # raises when it does not); S_H stays in the cfg under ncho, harmless
+        # with an S-free atom_list
+        "network": _net_path,
+        "atom_list": _net_atoms.split(","),
         "Rp": rp_cm, "r_star": cp["rstar_rsun"],
         "orbit_radius": cp["orbit_au"],
         "sflux_file": f"atm/stellar_flux/{cp['sflux']}",
@@ -2160,10 +2199,15 @@ def run_model(params: dict, log=print) -> Path:
     # isothermal limit is H ln(1 + k_X/k_bkg), so an omitted background
     # absorber INFLATES the target's apparent contrast as readily as an
     # omitted overlapping band deflates it.
+    # Above UNMODELED_VMR_REFUSE the run stops here, before any spectrum or
+    # Jacobian row is built: a missing bulk absorber is not a caveat.
+    _table_species = {v["vulcan"] for k, v in config.MOLECULES.items()
+                      if k not in _NO_EXOMOLOP_TABLE}
+    check_unmodeled(_species_now, np.asarray(y_sol), np.asarray(chem.p_bar),
+                    _table_species, "baseline solve", log)
     _unmodeled = unmodeled_absorbers(
         _species_now, np.asarray(y_sol), np.asarray(chem.p_bar),
-        {v["vulcan"] for k, v in config.MOLECULES.items()
-         if k not in _NO_EXOMOLOP_TABLE})
+        _table_species)
     if _unmodeled:
         log("[fwd] WARNING: this column carries "
             + ", ".join(f"{sp} at {v:.2e}" for sp, v in _unmodeled)
@@ -2173,6 +2217,22 @@ def run_model(params: dict, log=print) -> Path:
               "UNQUANTIFIED error that can run in EITHER direction -- omitted "
               "background opacity inflates it, an omitted overlapping band "
               "deflates it. Carbon-rich compositions are where this bites.")
+
+    # Rate-law temperature-range exposure of this run's network on this run's
+    # T grid: ADVISORY, never a gate -- VULCAN evaluates every rate everywhere
+    # and parity requires the same. The engine prints its own advisory to the
+    # worker log, which the GUI shows only when a run FAILS, so the counts are
+    # stored for the app to state on a successful run. `thermal_rows` is the
+    # denominator: every thermal row, including the ones with no documented
+    # range (those are never counted as outside).
+    from vulcan_jax import runtime_validation as _rv
+    from vulcan_jax.network import parse_network as _parse_network
+    _rate_ex = _rv.rate_temp_range_exposure(
+        _parse_network(NETWORKS[cp["network"]][0]), T_check)
+    log(f"[fwd] rate T-range exposure: {_rate_ex['any_outside']} of "
+        f"{_rate_ex['thermal_rows']} thermal rows are evaluated outside their "
+        f"documented range in >= 1 layer ({_rate_ex['no_range']} rows carry "
+        "no parseable range); advisory, no rate is altered")
 
     # Emission bottom-boundary certification. The interior source term is a
     # blackbody at the extrapolated bottom temperature, an assumption about
@@ -2623,6 +2683,9 @@ def run_model(params: dict, log=print) -> Path:
         # way to say the contrast carries an unsigned opacity error.
         unmodeled=np.array([f"{sp}|{v:.3e}" for sp, v in _unmodeled],
                            dtype="U32"),
+        # Rate-law T-range advisory, this network on this T grid (above).
+        rate_rows_outside=np.array([_rate_ex["any_outside"]], dtype=np.int64),
+        rate_rows_total=np.array([_rate_ex["thermal_rows"]], dtype=np.int64),
         # AD dlnCO oxygen-reservoir margin on the build column and on the
         # converged column the tangent starts from (NaN when no AD dlnCO row)
         co_bz_margin=np.array([_bz_build, _bz_warm], dtype=np.float64),
