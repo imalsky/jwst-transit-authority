@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import smtplib
+import tempfile
 import threading
 import time
 from email.message import EmailMessage
@@ -28,10 +29,13 @@ from jwst_tool import instruments as _ins
 #: concurrent heavy subprocesses per instance (one Run holds ONE slot,
 #: covering its forward model and its Pandeia ETC batch, from its first
 #: heavy launch to the end of the run; a fully cached Run takes none).
-#: Sized for an 8 vCPU / 32 GB instance: one solve takes ~1.7 cores and
-#: ~6.3 GB peak, so four fit with headroom and eight do not.
-MAX_CONCURRENT = 4
-SLOT_DIR = Path(_ins.OUTPUT_DIR) / "run_slots"
+#: Sized for an 8 vCPU / 32 GB instance: one solve measures 1.75 cores
+#: averaged over the run and 6.34 GiB peak, over a 4.6 GiB idle floor, so
+#: three fit with memory to spare and four sit at the ceiling.
+MAX_CONCURRENT = 3
+#: container-local on purpose: a Space replica must own its own slots; on
+#: the shared bucket every replica would contend for the same files.
+SLOT_DIR = Path(tempfile.gettempdir()) / "jwst_tool_run_slots"
 
 
 class Slot:
@@ -67,9 +71,8 @@ def acquire(tag: str = "run"):
                                  _errno.EWOULDBLOCK):
                 raise RuntimeError(
                     f"run-slot lock failed on {SLOT_DIR} with {exc!r}: "
-                    "this filesystem does not support flock. Point "
-                    "JWST_TOOL_OUTPUT_DIR at a filesystem with working "
-                    "advisory locks.") from exc
+                    "this filesystem does not support flock. Set TMPDIR "
+                    "to a filesystem with working advisory locks.") from exc
             continue
         fh.truncate(0)
         fh.write(json.dumps({"pid": os.getpid(), "tag": str(tag),
