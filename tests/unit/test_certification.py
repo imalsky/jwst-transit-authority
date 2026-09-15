@@ -287,24 +287,33 @@ def test_a_bulk_absorber_with_no_k_table_refuses_the_run():
     """An absorber the RT has no table for is a caveat while it is a trace and
     a wrong spectrum once it is a bulk carrier: at C/O 10 on sncho2025 C6H6
     reaches 3.3e-3 in the photosphere and no benzene table exists anywhere.
-    Above UNMODELED_VMR_REFUSE the run stops and names the species; below it
-    the column is modelable and the run proceeds."""
+    Above UNMODELED_VMR_REFUSE the run stops and names the species; between it
+    and UNMODELED_VMR_WARN the column is modelable and the run proceeds with a
+    caveat; below the warning floor it is reported nowhere."""
     sp = ["H2O", "CO", "C6H6", "H2"]
     p = np.array([1.0e-3, 1.0e-4, 5.0])   # two layers in the photosphere band
     tables = {"H2O", "CO"}
     log = []
-    y = np.array([[1.0e-3, 1.0e-2, 2.0e-4, 1.0 - 1.12e-2]] * 3)   # rows sum to 1
 
-    with pytest.raises(RuntimeError, match="C6H6 at VMR 2.00e-04") as e:
+    def _col(x_c6h6):                     # rows sum to 1
+        row = [1.0e-3, 1.0e-2, x_c6h6, 0.0]
+        row[3] = 1.0 - sum(row)
+        return np.array([row] * 3)
+
+    y = _col(2.0e-3)
+    with pytest.raises(RuntimeError, match="C6H6 at VMR 2.00e-03") as e:
         forward.check_unmodeled(sp, y, p, tables, "baseline solve", log.append)
-    assert "1e-04" in str(e.value) and "Lower C/O" in str(e.value)
+    assert "1e-03" in str(e.value) and "Lower C/O" in str(e.value)
     # the element gate's failure path, NOT a stall: nothing may retry this
     assert not isinstance(e.value, forward.NotCertified)
 
-    # below the threshold the run proceeds. 5e-5 is under UNMODELED_VMR_WARN
-    # too -- the warning floor sits ABOVE the refusal threshold -- so this
-    # column is reported nowhere.
-    y[:, 2] = 5.0e-5
+    # the warn band: modelable, so the run proceeds, but the caveat names it
+    y = _col(2.0e-4)
+    assert forward.check_unmodeled(sp, y, p, tables, "baseline", log.append) is None
+    assert [n for n, _ in forward.unmodeled_absorbers(sp, y, p, tables)] == ["C6H6"]
+
+    # below the warning floor this column is reported nowhere
+    y = _col(5.0e-5)
     assert forward.check_unmodeled(sp, y, p, tables, "baseline", log.append) is None
     assert forward.unmodeled_absorbers(sp, y, p, tables) == []
 

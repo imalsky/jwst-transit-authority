@@ -400,21 +400,23 @@ def check_ad_co_margin(chem, co_ratio, y=None, build_margin=None,
 # abundance the RT then ignores: at C/O 10 on sncho2025, C6H6 reaches 3.6e-3
 # over 10-0.01 mbar, comparable to CO, and no ExoMolOP table exists for it.
 # The contrast there carries an unsigned, unquantified error, so SAY so.
-# 0.01 % is an order of magnitude below the bulk carriers and above every
-# trace species the RT already carries at solar C/O.
-# 0.1 %: a bulk-level carrier. Trace omissions (HSO at 3.0e-5 on the default
-# case, cached column fec633bfcd1095f7) are a standing entry in notes.md, not
-# a per-run warning.
-UNMODELED_VMR_WARN = 1.0e-3
+# WARN at 1e-4, an order of magnitude below the bulk carriers and above every
+# trace species the RT already carries at solar C/O: photolysis on, C6H6 in the
+# sncho2025 photosphere crosses it between C/O 1.2 (6.8e-5) and 1.4 (1.4e-4),
+# so every carbon-rich run says so. The default case's only untabulated species
+# is HSO at 3.0e-5 (measured on the cached column fec633bfcd1095f7), below the
+# floor, so it still warns about nothing.
+UNMODELED_VMR_WARN = 1.0e-4
 # REFUSE, not warn, above this: the RT is blind to a bulk absorber and the
-# spectrum is not a model of the requested atmosphere. The photolysis-off C/O
-# ladder on sncho2025 puts C6H6 at 1.7e-5 in the photosphere at C/O 4, 7.7e-4
-# at 7 and 3.3e-3 at 10. Leave-one-out on that column: CO at 9.8e-3 is worth
-# 64 ppm, C2H2 at 1.6e-4 is worth 504 ppm -- below 1e-4 an omitted absorber
-# moves the depth by tens of ppm, above it by hundreds -- so the threshold is
-# coarse and deliberate (notes.md 1.1). It sits BELOW UNMODELED_VMR_WARN, so a
-# column the RT cannot model is refused before the warning above it can fire.
-UNMODELED_VMR_REFUSE = 1.0e-4
+# spectrum is not a model of the requested atmosphere. The photolysis-ON C/O
+# ladder on sncho2025 puts C6H6 at 4.6e-4 in the photosphere at C/O 4, 1.15e-3
+# at 7 and 3.6e-3 at 10, so 1e-3 allows the carbon-rich path to about C/O 5 and
+# refuses it from 7 up (photolysis off, from about 8). Leave-one-out on the C/O
+# 10 column: CO at 9.8e-3 is worth 64 ppm, C2H2 at 1.6e-4 is worth 504 ppm --
+# the gate is coarse and deliberate, and the maintainer chose it over 1e-4,
+# which cut the carbon-rich path off at C/O ~1.3 (notes.md 1.1, 2.1). Between
+# the two thresholds the run only warns, and that error is unquantified.
+UNMODELED_VMR_REFUSE = 1.0e-3
 # Transmission photosphere, the band the warning is measured over (bar).
 _PHOTOSPHERE_BAR = (1.0e-5, 1.0e-2)
 # Absent from the k-table set for a REASON, so not missing opacity. Two
