@@ -159,10 +159,12 @@ AD_BUILD_OVERRIDES = {"count_max": 6000, "dt_max": 1.0e5}
 CO_MIN = 0.1
 CO_MAX = {"sncho": 0.99, "sncho2025": 10.0, "ncho": 10.0}   # photolysis ON
 CO_MAX_PHOTO_OFF = 10.0
-# Accepted met_x_solar range, inclusive. The top is a demonstrated certifying
-# column on the default case with the lnZ stencil margin under it (notes
-# §1.1); 50x hits count_max. A value outside is refused before any solve.
-MET_RANGE = (0.1, 30.0)
+# Accepted met_x_solar range, inclusive. The top is a maintainer decision
+# under the demonstrated envelope: the default case certifies through 300x
+# and the lnZ stencil's 122x sits under the certified 150x (notes §1.1).
+# Convergence is certified per run; a value outside is refused before any
+# solve.
+MET_RANGE = (0.1, 100.0)
 
 
 def co_bounds(network: str, use_photo: bool) -> tuple[float, float]:

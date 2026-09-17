@@ -904,13 +904,13 @@ def test_emission_mode_gating_star_params_and_hygiene(tmp_path):
 
 def test_composition_fd_stencil_envelope():
     """FD Fisher rows solve the chemistry at every stencil point, so a
-    baseline whose stencil leaves the validated range refuses (met=30 ->
-    36.6x solar, co=0.12 -> C/O 0.098). The dlnCO stencil steps one-sided away
+    baseline whose stencil leaves the validated range refuses (met=100 ->
+    122x solar, co=0.12 -> C/O 0.098). The dlnCO stencil steps one-sided away
     from the network's C/O ceiling instead of across it. AD rows take no
     stencil and are exempt here (the dlnCO AD row has its own run-time margin
     gate)."""
-    forward.canonical_params(_p(met_x_solar=24.0, fisher_params=["lnZ"]))
-    for kw, fp in (({"met_x_solar": 30.0}, "lnZ"),
+    forward.canonical_params(_p(met_x_solar=80.0, fisher_params=["lnZ"]))
+    for kw, fp in (({"met_x_solar": 100.0}, "lnZ"),
                    ({"met_x_solar": 0.1}, "lnZ"),
                    ({"co_ratio": 0.12}, "dlnCO")):
         with pytest.raises(ValueError, match="stencil"):
@@ -947,9 +947,9 @@ def test_composition_fd_stencil_envelope():
     assert abs(err[(-1, -2, -4), h] / err[(-1, -2, -4), h / 2] - 8.0) < 1e-6
     assert err[(1, -1, 2, -2), h] < 1e-12
     # no stencil under AD; and without fisher_params the value is legal
-    forward.canonical_params(_p(met_x_solar=30.0, fisher_params=["lnZ"],
+    forward.canonical_params(_p(met_x_solar=100.0, fisher_params=["lnZ"],
                                 jac_method="ad"))
-    forward.canonical_params(_p(met_x_solar=30.0))
+    forward.canonical_params(_p(met_x_solar=100.0))
 
 
 def test_emission_defaults_to_the_dayside_temperature():
