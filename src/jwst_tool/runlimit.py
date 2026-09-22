@@ -82,6 +82,23 @@ def acquire(tag: str = "run"):
     return None
 
 
+def oldest_start():
+    """Start time (epoch s) of the longest-running held slot, or None.
+
+    Read without the locks, so best effort: a slot file mid-rewrite or
+    malformed is skipped, and one read during turnover can be stale. For the
+    refusal message only, never for a promised wait.
+    """
+    t0s = []
+    for i in range(MAX_CONCURRENT):
+        try:
+            meta = json.loads((SLOT_DIR / f"slot{i}.lock").read_text())
+            t0s.append(float(meta["t0"]))
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return min(t0s) if t0s else None
+
+
 def notify_refused(context: str) -> None:
     """Mail the maintainer that a visitor was refused (every slot busy, or an
     illegal parameter set), at most once an hour per instance.

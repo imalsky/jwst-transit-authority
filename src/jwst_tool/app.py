@@ -1782,11 +1782,14 @@ def _take_slot(slot: list) -> bool:
             runlimit.notify_refused(
                 f"instance busy: {planet_label}, tp_mode={tp_mode}, "
                 f"modes={list(mode_keys)}")
+            t0 = runlimit.oldest_start()
+            since = ("" if t0 is None else " The longest-running one started "
+                     f"about {max(0.0, time.time() - t0) / 60.0:.0f} min ago.")
             st.error(
                 f"This instance is already running {runlimit.MAX_CONCURRENT} "
-                "heavy calculations (it is shared, public hardware). Please "
-                "try again in a few minutes -- previously computed results "
-                "stay instant.")
+                f"heavy calculations (it is shared, public hardware).{since} "
+                "A default run takes 20-30 min here, so please try again "
+                "later -- previously computed results stay instant.")
             # a second copy of the tool that sleeps until sent traffic; unset
             # on the overflow itself, so a full overflow refuses like this
             overflow = os.environ.get("JWST_TOOL_OVERFLOW_URL")

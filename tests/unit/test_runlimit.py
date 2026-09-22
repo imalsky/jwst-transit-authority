@@ -38,6 +38,25 @@ def test_slot_files_persist_and_carry_metadata():
     s.release()                                    # idempotent
 
 
+def test_oldest_start_is_best_effort():
+    """The refusal message's elapsed time: the oldest readable t0 among the
+    slot files; an empty (mid-rewrite) or malformed file is skipped."""
+    import json
+    assert runlimit.oldest_start() is None         # no slot file yet
+    held = [runlimit.acquire(f"a{i}") for i in range(runlimit.MAX_CONCURRENT)]
+    paths = [runlimit.SLOT_DIR / f"slot{s.index}.lock" for s in held]
+    t0 = [json.loads(p.read_text())["t0"] for p in paths]
+    assert runlimit.oldest_start() == min(t0)
+    bad = ["", '{"t0": "soon"}', "[1]", "{}"]
+    for i, p in enumerate(paths[:-1]):
+        p.write_text(bad[i % len(bad)])
+    assert runlimit.oldest_start() == t0[-1]
+    paths[-1].write_text("")
+    assert runlimit.oldest_start() is None
+    for s in held:
+        s.release()
+
+
 def test_refusal_alert_is_opt_in_and_hourly(tmp_path, monkeypatch):
     """One mail per hour when the three secrets are set, none without."""
     bodies, logins = [], []
