@@ -446,7 +446,7 @@ def _restore_rt_state(state: dict, cp: dict, key,
         key("pref"): float(cp.get("p_ref_bar", 1.0e-3)),
         # same .get treatment; per-geometry widget key (app.py's key contract)
         key(f"pbtm_{cp.get('science_mode', 'transmission')}"):
-            float(cp.get("p_btm_bar", forward.P_BTM_FILE_BAR)),
+            float(cp.get("p_btm_bar", forward.default_p_btm_bar(cp))),
     })
 
 

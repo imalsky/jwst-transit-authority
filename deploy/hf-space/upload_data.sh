@@ -112,8 +112,9 @@ if missing:
 PYEOF
     echo "exomolop: staged $(echo "$KTABLE_MOLS" | wc -w | tr -d ' ') tables."
 else
-    echo "NOTE: no exomolop/ tree at $KTABLE_SRC -- skipping the k-tables."
-    echo "      Every model step on the Space will stop with an error."
+    echo "ERROR: no exomolop/ tree at $KTABLE_SRC -- every model step on the Space" >&2
+    echo "       would stop with an error. Refusing to stage a k-table-less dataset." >&2
+    exit 1
 fi
 
 # Resumable uploader (safe to re-run after an interrupted upload). Uploads the

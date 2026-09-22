@@ -182,10 +182,6 @@ def _row_label(n):
     return "log10 C/O" if n == "dlnCO" else fisher_mod.param_axis(n)
 
 
-def _row_axis(n):
-    return "log10 C/O [dex]" if n == "dlnCO" else fisher_mod.param_axis(n)
-
-
 def _w_int(n, s):
     """Internal sigma -> that row's coordinate: dex for log10 C/O (internal
     is ln), display units for everything else."""

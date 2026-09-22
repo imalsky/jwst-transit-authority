@@ -285,7 +285,7 @@ def check_pandeia_backend(python: str | Path = None,
                       "backend environment is machine-specific)")),
         remedy=("Create a conda env with the matching engine, e.g.  "
                 f"conda create -n pandeia_{ins.BACKEND_RELEASE.replace('.', '_')} "
-                "python=3.11  then  <env>/bin/pip install "
+                "python=3.12  then  <env>/bin/pip install "
                 f"pandeia.engine=={ins.BACKEND_RELEASE}  and point "
                 "JWST_TOOL_PANDEIA_PYTHON at its python."))]
 

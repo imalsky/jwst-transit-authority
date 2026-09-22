@@ -83,15 +83,24 @@ def backend_fingerprint() -> dict:
     # key); the failure belongs at RUN time, not while building a key
     py = Path(ins.PANDEIA_PYTHON) if ins.PANDEIA_PYTHON else None
     if py is not None and py.exists():
+        # A backend that EXISTS but cannot be probed must not be fingerprinted
+        # "unavailable": that key would serve cached noise against an unknown
+        # engine. Only a missing backend keeps the stable placeholder.
         try:
             r = subprocess.run(
                 [str(py), "-c",
                  "import pandeia.engine; print(pandeia.engine.__version__)"],
                 capture_output=True, text=True, timeout=120)
-            if r.returncode == 0 and r.stdout.strip():
-                engine = r.stdout.strip().splitlines()[-1]
-        except Exception:
-            pass
+        except (OSError, subprocess.TimeoutExpired) as e:
+            raise RuntimeError(
+                f"Pandeia backend probe failed at {py}: {type(e).__name__}: {e}. "
+                "Fix the backend before running; its identity is part of every "
+                "noise-cache key.") from e
+        if r.returncode != 0 or not r.stdout.strip():
+            raise RuntimeError(
+                f"Pandeia backend probe failed at {py} (rc {r.returncode}): "
+                f"{r.stderr.strip()[-400:]}")
+        engine = r.stdout.strip().splitlines()[-1]
     refver = []
     # refdata identifies itself via VERSION/VERSION_DATA; a VERSION_PSF file
     # inside a refdata tree is a misplaced PSF marker, never a data version:

@@ -195,7 +195,7 @@ def _sat_curve(rpt, key, n_pix):
     all-zeros fallback would stop excluding saturated pixels after an engine
     key rename (STScI does rename them)."""
     try:
-        wave, curve = rpt["1d"][key]
+        _wave, curve = rpt["1d"][key]
     except Exception as e:
         raise RuntimeError(
             f"pandeia report has no 1d {key!r} curve (available: "
