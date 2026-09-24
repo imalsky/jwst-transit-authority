@@ -66,3 +66,19 @@ def test_sigterm_refuser_is_killed_within_the_grace_period():
         with proc_mod.terminating(p, grace_s=1.0):
             raise _ScriptCancelled()
     assert _wait_gone(p), "SIGKILL fallback did not fire"
+
+
+@pytest.mark.parametrize("last", [
+    "RuntimeError: chemistry did NOT converge (stage: detail)",
+    "NotCertified: the sensitivity did NOT settle (stage: detail)",
+    "jwst_tool.archive.SnapshotError: snapshot missing: detail",
+])
+def test_exception_sentence_is_the_last_traceback_line_whatever_the_class(last):
+    """The GUI shows the worker's own sentence for every exception class the
+    traceback can end with; a log with no traceback (a killed worker) falls
+    back, although solver lines have the same "<word>: <text>" shape."""
+    log = ["integration:  simpson", "Traceback (most recent call last):",
+           '  File "forward.py", line 313, in check_converged',
+           "    raise NotCertified(", last]
+    assert proc_mod.exception_sentence(log, "fallback") == last.split(": ", 1)[1]
+    assert proc_mod.exception_sentence(log[:1], "fallback") == "fallback"

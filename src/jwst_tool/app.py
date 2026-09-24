@@ -1849,10 +1849,8 @@ def _compute_locked(slot):
                 # the exception line of the subprocess traceback is the
                 # tool's own user-facing sentence; the raw tail stays behind
                 # a collapsed expander
-                _exc = next((ln.split(": ", 1)[1] for ln in reversed(lines)
-                             if re.match(r"^\w+(Error|Exception): ", ln)),
-                            "the forward model stopped without a message.")
-                st.error(_exc)
+                st.error(proc_mod.exception_sentence(
+                    lines, "the forward model stopped without a message."))
                 with st.expander("Technical details"):
                     st.code("\n".join(lines[-25:]))
                 return None

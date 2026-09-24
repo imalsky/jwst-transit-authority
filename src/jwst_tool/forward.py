@@ -138,6 +138,11 @@ CO_BZ_MIN_AD = 0.1
 # OuterLoop.run_jvp), so no step floor and no geometry-veto override remain
 # here (notes S1.7 has the closures each of those used to stand in for).
 AD_BUILD_OVERRIDES = {"count_max": 6000, "dt_max": 1.0e5}
+# The cadence-1 retry gets the cold step budget: a slowly settling tangent
+# needs it (LP 714-47 b at 100x certifies lnZ at ~21000 steps, notes S1.1).
+# The first attempt keeps the 6000 cap above, so a genuine stall (TOI-7169 b)
+# still escalates after 6000 steps, not 30000.
+AD_RETRY_COUNT_MAX = 30000
 # Accepted co_ratio range, INCLUSIVE at both ends. TWO gate axes, network and
 # photolysis; do NOT add temperature (non-monotonic: +400 K and -200 K both fix
 # C/O 1.087) or Kzz (a tabulated column is not a scalar to gate on).
@@ -2430,7 +2435,8 @@ def run_model(params: dict, log=print) -> Path:
             # config's photolysis cadence (TOI-7169 b: the FD stencil stall's
             # own cell and flux change, notes S1.7), so it runs on a build
             # with AD_BUILD_OVERRIDES (step cap + dt cap). A row that does not
-            # certify there is re-solved on a cadence-1 build and flagged in
+            # certify there is re-solved on a cadence-1 build with the cold
+            # step budget (AD_RETRY_COUNT_MAX) and flagged in
             # `photo_escalated`, in either science mode. That fallback build is
             # SHARED: once one row fails to certify at the config cadence, the
             # remaining rows run on the cadence-1 build directly and are all
@@ -2456,11 +2462,12 @@ def run_model(params: dict, log=print) -> Path:
                         raise
                     log(f"[fwd] {stage}: {exc}")
                     log(f"[fwd] {stage}: re-solving with photolysis refreshed "
-                        "every accepted step")
+                        f"every accepted step (step cap {AD_RETRY_COUNT_MAX})")
                     if chem_ad1 is None:
-                        chem_ad1 = _build_chem(extra_abun=AD_BUILD_OVERRIDES,
-                                               tag="AD rows [photo cadence 1]",
-                                               photo_frq=1)
+                        chem_ad1 = _build_chem(
+                            extra_abun={**AD_BUILD_OVERRIDES,
+                                        "count_max": AD_RETRY_COUNT_MAX},
+                            tag="AD rows [photo cadence 1]", photo_frq=1)
                     stage += " [photo cadence 1]"
                     out = _ad_row(chem_ad1, _e)
                     _check_converged(out[1], stage, chem_ad1)

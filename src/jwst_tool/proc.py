@@ -14,11 +14,31 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 TERM_GRACE_S = 10.0
+# The line that closes a Python traceback: "<class>: <message>". The class may
+# be a builtin (RuntimeError), one of the tool's own printed bare because the
+# worker runs as __main__ (NotCertified), or module-qualified
+# (jwst_tool.archive.SnapshotError) -- never gate on an Error/Exception suffix.
+# Solver log lines match the same shape ("integration:  simpson"), so only the
+# lines after the last traceback header are searched.
+_EXC_LINE = re.compile(r"^[A-Za-z_][\w.]*: ")
+
+
+def exception_sentence(lines, default: str) -> str:
+    """The user-facing sentence of a failed worker: the message of the
+    exception that closes the last traceback in its merged stdout/stderr, else
+    ``default`` (a worker killed without a traceback)."""
+    starts = [i for i, ln in enumerate(lines)
+              if ln.startswith("Traceback (most recent call last):")]
+    for ln in lines[starts[-1] + 1:] if starts else ():
+        if _EXC_LINE.match(ln):
+            return ln.split(": ", 1)[1]
+    return default
 
 
 def worker_prologue(output_dir) -> None:
