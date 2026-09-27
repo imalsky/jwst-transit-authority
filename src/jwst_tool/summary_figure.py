@@ -19,9 +19,9 @@ questions in one graphic:
   renders as an EMPTY panel, never a fake finite curve and never a caption
   on the axes: no figure this module draws carries prose.
 
-House style: science.mplstyle (byte-identical to validation/science.mplstyle)
-plus the white-face overrides this module owns (_STYLE_OVERRIDES, which the
-GUI applies globally), so a standalone render matches the in-app figures.
+House style: science.mplstyle (also the validation figures' style) plus
+the white-face overrides this module owns (_STYLE_OVERRIDES, which the GUI
+applies globally), so a standalone render matches the in-app figures.
 """
 from __future__ import annotations
 

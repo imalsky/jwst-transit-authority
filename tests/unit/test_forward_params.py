@@ -148,15 +148,15 @@ def test_shipped_tables_gate_defaults_and_are_never_substituted():
 
 def test_gray_cloud_pressure_and_opacity_are_one_knob():
     """The gray cloud's two coordinates differ by a constant in log space, so
-    they invert exactly and a Fisher width in dex means the same in either.
+    a Fisher width in dex means the same in either.
 
     The anchor is vulcan-forward's own closed form, which its
     tests/test_cloud_deck.py gates the RT against (Heng & Kitzmann 2017):
     uniformly mixed kappa gives slant tau = kappa (P/g) sqrt(2 pi Rp/H), so
     WASP-39 b at kappa = 0.1 cm^2/g and 896.6 K blocks down to 1.53e-4 bar."""
     g, rp = 422.0, 1.279
-    assert planets.gray_cloud_p_top_bar(-1.0, g, rp, 896.6) == pytest.approx(
-        1.53e-4, rel=5e-3)
+    assert planets.gray_cloud_log_kappa(1.53e-4, g, rp, 896.6) == pytest.approx(
+        -1.0, abs=2.2e-3)
 
     teq = planets.system_teq(5485.0, 0.932, 0.04828)
     levels = (-6.0, -3.0, 0.0, 1.0)
@@ -165,8 +165,7 @@ def test_gray_cloud_pressure_and_opacity_are_one_knob():
     # one decade of pressure IS one decade of opacity, in both directions
     assert kappas[0] - kappas[1] == pytest.approx(3.0)
     for lp, lk in zip(levels, kappas):
-        assert planets.gray_cloud_p_top_bar(lk, g, rp, teq) == pytest.approx(
-            10.0 ** lp)
+        assert lk + lp == pytest.approx(kappas[0] + levels[0])
     # a deep deck needs an opacity the pre-gray widget floor (-4) could not
     # reach: that unreachable range is why the mode exists
     assert planets.gray_cloud_log_kappa(1.0, g, rp, teq) < -4.0

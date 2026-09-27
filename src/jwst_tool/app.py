@@ -56,8 +56,8 @@ from jwst_tool import instruments as ins
 from jwst_tool import planets
 from jwst_tool import runlimit
 
-# House figure style: science.mplstyle (byte-identical to the validation
-# copy) plus summary_figure's white-face overrides, so a downloaded figure
+# House figure style: science.mplstyle (the validation figures use the same
+# file) plus summary_figure's white-face overrides, so a downloaded figure
 # stays white on any Streamlit theme. ONE definition of the overrides, applied globally
 # here and per-figure there, so an in-app figure and a headless render match.
 # Data colors/markers stay the fixed per-mode palette in

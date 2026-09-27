@@ -267,11 +267,3 @@ def gray_cloud_log_kappa(p_top_bar: float, gs_cgs: float, rp_rjup: float,
             f"cloud top pressure must be > 0 bar (got {p_top_bar!r})")
     return (_gray_cloud_offset(gs_cgs, rp_rjup, t_eq_k)
             - math.log10(float(p_top_bar)))
-
-
-def gray_cloud_p_top_bar(log_kappa: float, gs_cgs: float, rp_rjup: float,
-                         t_eq_k: float) -> float:
-    """Inverse of ``gray_cloud_log_kappa``: the pressure a gray kappa blocks
-    down to."""
-    return 10.0 ** (_gray_cloud_offset(gs_cgs, rp_rjup, t_eq_k)
-                    - float(log_kappa))

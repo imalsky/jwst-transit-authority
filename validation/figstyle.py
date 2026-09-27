@@ -1,13 +1,14 @@
 """The figure style for every committed figure in this repo (validation/figures
-and validation/parity/figs). Not used by the app, which keeps its own GUI style.
+and validation/parity/figs). The app loads the same science.mplstyle and adds
+its own GUI overrides; the helpers here are validation-only.
 
     import sys; sys.path.insert(0, "<repo>/validation")
     import figstyle as fs; fs.use()
 
-Serif science.mplstyle, Okabe-Ito cycle, square panels, axis labels + legend
-only. save() embeds the generating script in the PNG (tEXt chunks) so
-tests/unit/test_validation_figures.py can prove each committed figure was made
-by the committed code.
+Serif science.mplstyle (src/jwst_tool/science.mplstyle), Okabe-Ito cycle,
+square panels, axis labels + legend only. save() embeds the generating script
+in the PNG (tEXt chunks) so tests/unit/test_validation_figures.py can prove
+each committed figure was made by the committed code.
 """
 from __future__ import annotations
 
@@ -33,7 +34,7 @@ DOT_KW = dict(ls=":")
 
 
 def use():
-    plt.style.use(str(HERE / "science.mplstyle"))
+    plt.style.use(str(HERE.parent / "src" / "jwst_tool" / "science.mplstyle"))
 
 
 def pastel(c, keep=0.6):

@@ -7,7 +7,6 @@ saves to both PNG and vector PDF.
 import io
 
 import matplotlib
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -346,9 +345,3 @@ def test_mock_center_outside_the_solvable_range_is_refused():
     assert posteriors.mock_center_co(0.55, 506.0, -3.0) is None  # -> 0.027
     inside = posteriors.mock_center_co(0.55, 506.0, 1.0)
     assert inside is not None and lo <= inside <= hi
-
-
-def test_gui_style_is_the_validation_style():
-    root = Path(__file__).resolve().parents[2]
-    assert (root / "src/jwst_tool/science.mplstyle").read_bytes() == \
-           (root / "validation/science.mplstyle").read_bytes()
