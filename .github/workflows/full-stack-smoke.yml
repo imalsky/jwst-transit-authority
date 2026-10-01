@@ -101,6 +101,8 @@ jobs:
           VULCAN_PROJECT_ROOT: ${{ github.workspace }}
           JAX_PLATFORM_NAME: cpu
         run: |
+          # without pipefail, tee's exit status hides a failing test
+          set -o pipefail
           python -m pytest tests/test_condensation_live_tp.py -q -rs -o addopts="" -p no:cacheprovider | tee smoke.log
           # pytest exits 0 when every test SKIPS (e.g. the stack failed to import),
           # which would be a false green. Require at least one real pass.
