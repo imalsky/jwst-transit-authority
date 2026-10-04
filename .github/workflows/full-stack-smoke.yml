@@ -16,18 +16,16 @@ name: full-stack-smoke
 #      Guillot) and assert finite output + nonzero S8 condensate
 #
 # HEAD-tracking here is deliberate and NOT covered by the pins.env manifest
-# rule: the pinned unit CI validates what deploys, this weekly job detects
-# cross-repo breaks before a release pin ever advances onto them.
+# rule: the pinned unit CI validates what deploys, this job detects
+# cross-repo breaks before a release pin advances onto them. Run it by hand
+# before moving the pins.
 #
 # It is deliberately OUT of the fast Python-version matrix: it is slow
-# (SNCHO-network compile + two condensing solves) and runs on a schedule or on
-# demand only. It needs no GPU, no HITRAN downloads, and no pandeia backend --
-# the condensation solve is chemistry-only (const_mix init, photo off, no RT).
+# (SNCHO-network compile + two condensing solves) and runs on demand only.
+# It needs no GPU, no HITRAN downloads, and no pandeia backend -- the
+# condensation solve is chemistry-only (const_mix init, photo off, no RT).
 on:
   workflow_dispatch:
-  schedule:
-    # Weekly, Monday 06:00 UTC. Catches drift in any of the four HEADs.
-    - cron: "0 6 * * 1"
 
 jobs:
   smoke:
