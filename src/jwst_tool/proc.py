@@ -13,11 +13,9 @@ It also owns the prologue the worker entry points share.
 from __future__ import annotations
 
 import contextlib
-import os
 import re
 import subprocess
 import sys
-from pathlib import Path
 
 TERM_GRACE_S = 10.0
 # The line that closes a Python traceback: "<class>: <message>". The class may
@@ -41,21 +39,14 @@ def exception_sentence(lines, default: str) -> str:
     return default
 
 
-def worker_prologue(output_dir) -> None:
+def worker_prologue() -> None:
     """Prologue for the worker entry points (forward.main, adjoint_diag.main).
 
     Line-buffers stdout: the GUI pipes the child, which makes Python
     BLOCK-buffer library prints, so progress lines would sit invisible in the
-    buffer while the GUI shows nothing. Then moves the process into
-    ``<output_dir>/cwd``: vulcan_jax's legacy IO creates RELATIVE output/ and
-    plot/ directories in the process CWD (legacy_io.py), junk wherever the app
-    was launched from. Library callers of run_model / run_adjoint are
-    unaffected -- only the subprocess entry points change directory.
+    buffer while the GUI shows nothing.
     """
     sys.stdout.reconfigure(line_buffering=True)
-    cwd = Path(output_dir) / "cwd"
-    cwd.mkdir(parents=True, exist_ok=True)
-    os.chdir(cwd)
 
 
 @contextlib.contextmanager

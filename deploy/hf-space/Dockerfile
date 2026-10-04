@@ -38,8 +38,8 @@ RUN conda create -y -n app python=3.12 \
 # Changing an ARG default busts the cache of the layers that use it, so the
 # pins are also the cache-bust. The build FAILS on a pin/rev-parse mismatch;
 # BUILD_INFO records the enforced pins.
-ARG VULCAN_JAX_SHA=8dbd93b079810fe135b93e054b6eb732b77f3d8a
-ARG VULCAN_FORWARD_SHA=aa79f252e0166cdb5f101d0d83bc71c2e13915b2
+ARG VULCAN_JAX_SHA=b372e6510e5c60180e5d9a80fd2339837ef1d19b
+ARG VULCAN_FORWARD_SHA=430732a8705afb738d180dfe4cd3d0e43e7a782b
 ARG JWST_TOOL_SHA=1016a647d0c4b9da5414fe3fff313de16b36d8c1
 RUN set -e; \
     for spec in \
@@ -71,11 +71,6 @@ RUN /opt/conda/envs/app/bin/pip install --no-cache-dir --no-deps \
         -e /srv/vulcan/vulcan-forward \
         -e /srv/vulcan/jwst-transit-authority
 
-# FastChem for THIS platform (any checked-in binary would be the wrong arch).
-RUN rm -f /srv/vulcan/VULCAN-JAX/src/vulcan_jax/fastchem_vulcan/fastchem \
-    && make -C /srv/vulcan/VULCAN-JAX/src/vulcan_jax/fastchem_vulcan \
-    && test -x /srv/vulcan/VULCAN-JAX/src/vulcan_jax/fastchem_vulcan/fastchem
-
 # Only /data persists on a Space. The forward engine's data root is
 # env-overridable ($VULCAN_FORWARD_DATA), so there are no repo-relative data
 # stubs to fix up: the entrypoint just exports the variable.
@@ -83,8 +78,8 @@ RUN rm -f /srv/vulcan/VULCAN-JAX/src/vulcan_jax/fastchem_vulcan/fastchem \
 COPY entrypoint.sh bootstrap_data.py /srv/app/
 # Spaces run the container as uid 1000; the base image may already ship a
 # UID-1000 user (miniforge does), so create one only if absent and chown
-# numerically. FastChem writes its input/output inside its package dir at
-# runtime, so the whole tree is chowned.
+# numerically. vulcan_jax writes its generated rate code under its package
+# __pycache__ at runtime, so the whole tree is chowned.
 RUN chmod +x /srv/app/entrypoint.sh \
     && (id -u 1000 >/dev/null 2>&1 || useradd -m -u 1000 user) \
     && chown -R 1000:1000 /srv/vulcan /srv/app

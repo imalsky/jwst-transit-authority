@@ -146,7 +146,7 @@ used in the analysis:
 - Pandeia: [Pontoppidan et al. (2016)](https://doi.org/10.1117/12.2231768)
 - PandExo comparison: [Batalha et al. (2017)](https://doi.org/10.1088/1538-3873/aa65b0)
 - ExoMolOP tables: [Chubb et al. (2021)](https://doi.org/10.1051/0004-6361/202038350)
-- FastChem initialization: [Stock et al. (2018)](https://doi.org/10.1093/mnras/sty1531)
+- ExoGibbs equilibrium initialization: [ExoGibbs](https://github.com/HajimeKawahara/exogibbs)
 
 Record the software commits, Pandeia release, reference-data release, opacity
 data, reaction network, and model settings with any published result.

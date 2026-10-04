@@ -3,7 +3,7 @@
 Pure data, importable by the light GUI path (no jax/vulcan/exojax imports).
 
 Every planet runs on the SAME W39b-validated machinery (the WASP-39b SNCHO
-photo network + 10x-solar FastChem baseline), with the planet identity
+photo network + 10x-solar equilibrium baseline), with the planet identity
 injected through the existing hooks:
 
     chemistry : cfg_overrides {Mp, Rp, r_star, orbit_radius, sflux_file, ...}

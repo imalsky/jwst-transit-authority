@@ -1,15 +1,13 @@
 """Writes validation/data/case_<name>.npz: the chemistry solves behind the
 Tsai-2023 and ERS-CO2 validation figures. One WASP-39 b case per invocation
-(fresh process; FastChem input is written from process-level config state).
+(fresh process).
 Needs the engine data root and this repo's jax environment:
 
     python validation/scripts/inputs/chem_cases.py tsai_e5   # no argument lists the cases
 
 Metallicity is set where the engine actually reads it: the config's explicit
-C_H/N_H/O_H/S_H elemental knobs (ini_abun writes the FastChem element file
-from those for network elements; fastchem_met_scale only scales the
-non-network trace metals, which is also scaled here for consistency). He
-stays at the config value. The ERS fiducial keeps 10x O/N/S and sets
+C_H/N_H/O_H/S_H elemental knobs (the equilibrium seed in ini_abun reads those
+for network elements). He stays at the config value. The ERS fiducial keeps 10x O/N/S and sets
 C_H = 0.35 * O_H (their C/O = 0.35).
 
 NOTE the theta route was tried first and rejected on evidence: audit_init
@@ -69,14 +67,12 @@ def main(name):
     factor, co_target, morning, photo = cases()[name]
     base_cfg = vulcan_jax.load_config("W39b")
     ovr = {f"{e}_H": float(getattr(base_cfg, f"{e}_H")) * factor for e in ELEMS}
-    ovr["fastchem_met_scale"] = float(base_cfg.fastchem_met_scale) * factor
     if co_target is not None:
         ovr["C_H"] = co_target * ovr["O_H"]
     if morning:
         ovr["atm_file"] = str(morning_tp_kzz())
     profile = dict(vulcan_cfg_name="W39b", use_photo=photo, yconv_cri=0.01,
-                   abundance_mode="elemental", skip_warmup=True,
-                   cfg_overrides=ovr)
+                   skip_warmup=True, cfg_overrides=ovr)
 
     t0 = time.time()
     model = vulcan_chem.build_chem_model(profile)

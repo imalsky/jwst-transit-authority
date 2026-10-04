@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -73,13 +74,13 @@ _S_MOLECULES = frozenset({"SO2", "H2S", "OCS", "SO", "SH", "CS", "NS"})
 # (correlated-k over the published tables is the only opacity path).
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
 DT_MAX_S = 1.0e13   # chemistry step-size cap (s); prevents the adaptive-dt balloon
-_VERSION = 58  # model_cache buster (identity = canonical params + this
+_VERSION = 59  # model_cache buster (identity = canonical params + this
                # number, never a content hash); bump on any physics or
                # canonical-key-set change.
 
 # The W39b cfg's elemental set (number ratios to H, 10x solar): Lodders 2020
 # Table 8 present-day solar (log eps C 8.47, N 7.85, O 8.73, S 7.15; He 10.924
-# stays in the FastChem file) times 10, the numbers upstream VULCAN's
+# stays in the abundance preset file) times 10, the numbers upstream VULCAN's
 # vulcan_cfg.py carries. _assemble_chem refuses on drift from the loaded cfg,
 # so they are usable without the engine (share files, display).
 CFG_ABUNDANCES = {"O_H": 0.00537, "C_H": 0.00295,
@@ -94,8 +95,9 @@ CO_DEFAULT = 0.55
 def elemental_abundances(met_x_solar: float, co_ratio: float) -> dict:
     """The run's O/H, C/H, N/H, S/H: the cfg metals scaled by met_x_solar/10
     (the cfg is 10x solar; He fixed), carbon from co_ratio at the scaled
-    oxygen. Structural: FastChem re-initializes at exactly this set, so at
-    C/O away from the baseline carbon is NOT at met_x_solar times solar."""
+    oxygen. Structural: the equilibrium seed re-initializes at exactly this
+    set, so at C/O away from the baseline carbon is NOT at met_x_solar times
+    solar."""
     m = float(met_x_solar) / 10.0
     o_h = CFG_ABUNDANCES["O_H"] * m
     return {"O_H": o_h, "C_H": float(co_ratio) * o_h,
@@ -123,7 +125,7 @@ JAC_METHODS = ("fd", "ad")            # certified-FD default / warm-jvp opt-in
 # fixed-O factor b_z turns nonpositive. Empirical, set by closure against the
 # certified one-sided FD row; a literal so an FD step change cannot
 # move the AD gate silently. FD has no equivalent limit: it re-initializes
-# FastChem per stencil point and never uses the b_z map.
+# the equilibrium seed per stencil point and never uses the b_z map.
 CO_BZ_MIN_AD = 0.1
 # The build an AD row's warm re-converge runs on. count_max bounds the cost
 # (the TOI-7169 b stall stops improving by step ~900 and would otherwise spend
@@ -157,10 +159,6 @@ AD_RETRY_COUNT_MAX = 30000
 # its h-vs-2h gate (0.33-0.43 vs 0.25) and the AD row is refused at build, so
 # a raise unlocks spectra with no certifiable C/O sensitivity and puts the
 # default network above C/O 1 (maintainer decision).
-# COST, not correctness: the same photo-off corner takes 22710 steps HERE vs
-# 121 in the CLI. Cause is the engine's exact-elemental repair, which at C/O 10
-# displaces species 4.4% off the FastChem column; masks mode exits at 121.
-# Negligible below C/O ~2 (repair factor 1.000000).
 CO_MIN = 0.1
 CO_MAX = {"sncho": 0.99, "sncho2025": 10.0, "ncho": 10.0}   # photolysis ON
 CO_MAX_PHOTO_OFF = 10.0
@@ -1733,10 +1731,7 @@ def _assemble_chem(cp: dict, log):
     profile = _rt_profile_common(cp, config)
     profile["yconv_cri"] = cp["yconv_cri"]
     profile["yconv_min"] = cp["yconv_min"]
-    # exact-elemental abundance map (see the vulcan_chem docstring)
-    profile["abundance_mode"] = "elemental"
     profile["co_mode"] = "fixed_O"
-    profile["reanchor_atom_ini"] = True   # finite-Z steps must re-anchor atom totals
     profile["dt_max"] = DT_MAX_S
     rp_cm = profile["rp_cm"]
     ovr = {                              # chemistry side (applied pre-pre-loop)
@@ -1837,10 +1832,8 @@ def _assemble_chem(cp: dict, log):
                 "over that range (the upstream file-mode convention).")
 
     def _abundance_overrides(met_x_solar: float, co_ratio: float) -> dict:
-        # Structural composition (elemental_abundances); fastchem_met_scale
-        # follows for the trace metals FastChem carries outside the network.
-        return {**elemental_abundances(met_x_solar, co_ratio),
-                "fastchem_met_scale": float(met_x_solar)}
+        # Structural composition (elemental_abundances)
+        return elemental_abundances(met_x_solar, co_ratio)
 
     ovr.update(_abundance_overrides(cp["met_x_solar"], cp["co_ratio"]))
     log(f"[fwd] structural composition: {cp['met_x_solar']:g}x solar metals, "
@@ -2418,7 +2411,7 @@ def run_model(params: dict, log=print) -> Path:
                          if cp["jac_method"] == "ad" else [])
         _ad_cols = {}
         if "dlnCO" in _ad_chem_rows:
-            # The build-time co_bz_bound is a proxy (FastChem equilibrium
+            # The build-time co_bz_bound is a proxy (the equilibrium seed
             # column); the seed map recomputes the O split from the converged
             # column the tangent starts from, so gate on that column too.
             _bz_warm = check_ad_co_margin(chem, cp["co_ratio"],
@@ -2564,7 +2557,7 @@ def run_model(params: dict, log=print) -> Path:
                 offset divides by h and lands in the derivative."""
                 pts = {}
                 if name in FD_COMP_PARAMS:
-                    # FastChem re-init + certified cold solve per point
+                    # equilibrium re-seed + certified cold solve per point
                     for s in offs:
                         f = float(np.exp(s * h))
                         if name == "lnZ":  # all metals together; C/O preserved
@@ -2751,7 +2744,9 @@ def run_model(params: dict, log=print) -> Path:
 def main():
     from jwst_tool import proc
     params = json.load(open(sys.argv[1]))
-    proc.worker_prologue(_ins.OUTPUT_DIR)
+    proc.worker_prologue()
+    logging.basicConfig(level=logging.INFO, format="%(message)s",
+                        stream=sys.stdout)
     run_model(params, log=lambda *a: print(*a, flush=True))
     print("[fwd] DONE", flush=True)
 

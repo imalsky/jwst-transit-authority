@@ -41,14 +41,15 @@ dependencies = [
     "synphot>=1.5",
     "stsynphot>=1.4",
     # Shared forward-model engine (this tool does not depend on the retrieval
-    # application). The floor is load-bearing: an older engine ignores unknown
-    # profile keys silently. tests/unit/test_engine_api_contract.py pins every
+    # application). The floor is load-bearing: it refuses unknown profile
+    # keys, starts every cold solve from the vulcan-jax equilibrium seed and
+    # runs exojax 2.6.0. tests/unit/test_engine_api_contract.py pins every
     # engine symbol and profile key the tool uses.
-    "vulcan-forward>=0.19.1",
+    "vulcan-forward>=0.27.1",
     # Direct imports: load_config (CO_BASELINE check) and steady_state_grad
-    # (adjoint_diag). The floor carries the Ros2 stage element repair, the
-    # dt_max cap and the OH+CH3+M Troe log10 correction.
-    "vulcan-jax>=0.11.0",
+    # (adjoint_diag). The floor refuses removed config keys and seeds with
+    # the ExoGibbs Gibbs-equilibrium solve.
+    "vulcan-jax>=0.17.0",
 ]
 
 [project.urls]

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import sys
 import time
 from pathlib import Path
@@ -45,7 +46,7 @@ from jwst_tool import forward
 from jwst_tool import instruments as _ins
 
 ADJOINT_CACHE = _ins.OUTPUT_DIR / "adjoint_cache"
-_ADJ_VERSION = 3          # bump to invalidate cached adjoint diagnostics
+_ADJ_VERSION = 4          # bump to invalidate cached adjoint diagnostics
 
 # Loss-layer window (bar): transmission probes ~mbar-0.1 bar; picking the
 # peak-VMR layer inside it keeps a deep quenched maximum from hijacking the loss.
@@ -126,7 +127,7 @@ def run_adjoint(params: dict, species: str, log=print) -> Path:
     """One reverse-mode adjoint analysis of the CURRENT forward model state.
 
     Builds the identical chemistry (forward._assemble_chem), re-converges it
-    cold with the stall exit disabled, and certifies the fixed point on the
+    cold on an extended step budget, and certifies the fixed point on the
     runner's own conv_normal at the exit state plus longdy < yconv_min -- NOT
     run_model's check_converged/check_elements gate. Then runs the scope audit
     (refusing on audit errors), computes dL/dlnk (all reactions) and dL/dT
@@ -144,14 +145,13 @@ def run_adjoint(params: dict, species: str, log=print) -> Path:
             "(not validated for this tool). Turn condensation off to run "
             "the adjoint diagnostics.")
     A = forward._assemble_chem(cp, log)   # also arms the XLA compile cache
-    # Solve to the TIGHTEST reachable state: extended step budget, stall exit
-    # disabled. longdy itself floors at ~0.09 from relative creep of near-zero
-    # trace cells (physically steady), so the gate stays the runner's canonical
-    # one and per-cell tightness is judged by the scope audit below.
+    # Solve to the TIGHTEST reachable state: extended step budget. longdy
+    # itself floors at ~0.09 from relative creep of near-zero trace cells
+    # (physically steady), so the gate stays the runner's canonical one and
+    # per-cell tightness is judged by the scope audit below.
     # (cfg_overrides is the same dict A.build_chem closes over -- update in
     # place.)
-    A.profile["cfg_overrides"].update(
-        {"count_max": 8000, "conv_stall_window": 10 ** 9})
+    A.profile["cfg_overrides"].update({"count_max": 8000})
     import jax.numpy as jnp
 
     mol_map = A.config.MOLECULES
@@ -420,7 +420,9 @@ def main():
     from jwst_tool import proc
     params = json.load(open(sys.argv[1]))
     species = sys.argv[2]
-    proc.worker_prologue(_ins.OUTPUT_DIR)
+    proc.worker_prologue()
+    logging.basicConfig(level=logging.INFO, format="%(message)s",
+                        stream=sys.stdout)
     run_adjoint(params, species, log=lambda *a: print(*a, flush=True))
     print("[adj] DONE", flush=True)
 

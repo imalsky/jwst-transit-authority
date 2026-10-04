@@ -301,7 +301,7 @@ def test_vm_mol_pinned_explicitly_and_zeroed_without_moldiff():
 
 def test_composition_structural_path_baseline_and_ranges():
     # CO_BASELINE must be the network cfg's C_H/O_H (~0.549), never the
-    # FastChem EQ-init ratio (0.458), which only seeds the initial guess;
+    # equilibrium seed's own ratio, which only seeds the initial guess;
     # run_model additionally cross-checks the live cfg
     assert abs(forward.CO_BASELINE - 0.549) < 1e-3
     # Composition is ONE structural path -- co_ratio (absolute N_C/N_O)
@@ -716,10 +716,10 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # this configuration have NOT been re-measured since v27-v31 and must be
     # before the key is quoted as a science result.
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b", tp_mode="file"))) == "fec633bfcd1095f7"
+        dict(planet="wasp39b", tp_mode="file"))) == "21996e68a45060c0"
     # ... and the bare DEFAULT run is that same atmosphere
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "fec633bfcd1095f7"
+        dict(planet="wasp39b"))) == "21996e68a45060c0"
     # the sha1 pin is only meaningful re-derived from the file the run
     # actually reads -- this catches the table itself being swapped
     path = forward._shipped_tp_file("wasp39b")

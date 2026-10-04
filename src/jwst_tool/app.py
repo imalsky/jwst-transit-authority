@@ -275,7 +275,6 @@ def _data_label(it) -> str:
         "cia:H2-H2": "H2-H2 absorption table",
         "cia:H2-He": "H2-He absorption table",
         "ktable:provenance": "ExoMolOP source record",
-        "fastchem:binary": "FastChem equilibrium solver",
         "uv:package": "Stellar UV data folder",
         "pandeia:python": "Pandeia engine",
         "pandeia:refdata": "Pandeia JWST reference data",
@@ -388,11 +387,6 @@ def _source_rows(base_set, extra_set, extra_on, rayleigh_on, cloud_on,
          "used in this setup": bool(cloud_on),
          "data set": "ExoJAX powerlaw_clouds (kappa_cloud, alpha)",
          "source DOI": _EXOJAX_SRC[1], "source page": _EXOJAX_SRC[2]},
-        {"component": "Chemical equilibrium initializer",
-         "used in this setup": True,
-         "data set": "FastChem 2.0 (VULCAN build)",
-         "source DOI": "10.1093/mnras/sty1531",
-         "source page": "https://github.com/exoclime/FastChem"},
     ]
     for fname, label in planets.SFLUX_CHOICES.items():
         ds, doi, url = planets.SFLUX_SOURCES[fname]
@@ -1063,8 +1057,9 @@ with st.sidebar:
 
     with st.expander("Composition"):
         # Composition is STRUCTURAL, one path for every value:
-        # metallicity scales O/N/S, C/O sets C_H = co * O_H, FastChem
-        # re-initializes at exactly that composition. No perturbative knob.
+        # metallicity scales O/N/S, C/O sets C_H = co * O_H, the equilibrium
+        # seed re-initializes at exactly that composition. No perturbative
+        # knob.
         met = st.number_input(
             "Metallicity (× solar)", *forward.MET_RANGE, 10.0, 0.5,
             format="%.2f", key=K("met"))

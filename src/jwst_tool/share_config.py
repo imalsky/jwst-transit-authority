@@ -110,11 +110,9 @@ def build_share(canon: dict, goal: dict, observation: dict,
         "canonical_params": dict(canon),
         "goal": dict(goal),
         "observation": dict(observation),
-        # The elemental set REQUESTED of FastChem (number ratios to H):
-        # informational, derived from met_x_solar + co_ratio, never read back.
-        # NOT what the column ends up carrying -- FastChem places some carbon in
-        # species the network has no slot for, so the solved column runs C/O
-        # short by -0.01% at 0.55 and -1.2% at 10.
+        # The elemental set REQUESTED of the equilibrium seed (number ratios
+        # to H): informational, derived from met_x_solar + co_ratio, never
+        # read back. Not necessarily what the solved column carries.
         "elemental_abundances": forward.elemental_abundances(
             canon["met_x_solar"], canon["co_ratio"]),
         # Which software wrote this file is recorded ONCE, inside the

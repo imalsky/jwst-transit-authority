@@ -5,9 +5,8 @@ is already present, and ends with exact instructions for the few pieces it
 does not fetch itself: two STScI Box downloads (Box shared links serve HTML,
 not the file, so they need either a browser or the markup-dependent recipe in
 MANUAL) and the Pandeia conda environment. Line lists and the
-ExoMol CO tables are left to their existing on-first-use fetchers, and the
-FastChem binary compiles itself on the first run. Stdlib only, like
-datacheck; every failure is loud and the command is idempotent.
+ExoMol CO tables are left to their existing on-first-use fetchers. Stdlib
+only, like datacheck; every failure is loud and the command is idempotent.
 """
 from __future__ import annotations
 
@@ -111,8 +110,7 @@ The Pandeia engine runs in its own conda environment (once):
 then point JWST_TOOL_PANDEIA_PYTHON at that environment's python.
 
 Fetched automatically on first use, nothing to do now: HITRAN molecular
-line lists, the ExoMol CO tables, and the FastChem binary (compiles itself;
-needs `make` and a C++ compiler on PATH)."""
+line lists and the ExoMol CO tables."""
 
 
 def _present(f: Fetch) -> bool:

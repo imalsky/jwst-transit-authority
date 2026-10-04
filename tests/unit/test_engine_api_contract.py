@@ -111,8 +111,7 @@ def test_the_profile_keys_the_tool_sets_are_ones_the_engine_reads():
     # import-time failure here, not a silent pass at run time)
     chem_src = (Path(importlib.import_module("vulcan_forward.vulcan_chem").__file__)
                 .read_text())
-    for key in ("yconv_cri", "yconv_min", "dt_max", "co_mode",
-                "abundance_mode"):
+    for key in ("yconv_cri", "yconv_min", "dt_max", "co_mode"):
         assert f'"{key}"' in chem_src, (
             f"the engine never reads profile[{key!r}]")
     for attr in ("co_bz_bound", "co_bz_margin"):

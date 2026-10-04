@@ -110,9 +110,8 @@ else
          "cache). Set JWST_TOOL_DATA_REVISION by hand after updating the data."
 fi
 
-# VULCAN-JAX's legacy IO writes a RELATIVE output/ dir in the process CWD
-# (harmless junk, but the CWD must be writable -- the container default is
-# root-owned and the forward subprocess inherits CWD from here).
+# A writable CWD: the container default is root-owned and the forward
+# subprocess inherits CWD from here.
 cd "$STATE/cwd"
 
 # Warm the data-status report and the app's imports BEFORE serving. The full

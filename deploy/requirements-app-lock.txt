@@ -27,7 +27,8 @@ cryptography==50.0.0
 cycler==0.12.1
 dill==0.4.1
 donfig==0.8.1.post1
-exojax==2.2.3
+exogibbs==0.6.0
+exojax==2.6.0
 filelock==3.32.3
 fonttools==4.63.0
 fsspec==2026.7.0

@@ -207,21 +207,6 @@ def vulcan_atm_dir() -> Path | None:
     return None if pkg is None else pkg / "atm"
 
 
-def check_fastchem() -> list[Item]:
-    """The FastChem equilibrium-init binary: compiled on demand (make + C++)."""
-    pkg = _vulcan_pkg_dir()
-    if pkg is None:
-        return []                    # covered by the python-stack section
-    binary = pkg / "fastchem_vulcan" / "fastchem"
-    return [Item(
-        key="fastchem:binary", label="FastChem binary (equilibrium initializer)",
-        status=OK if binary.is_file() else AUTO, required=True,
-        detail=_found(binary) if binary.is_file() else f"absent: {binary}",
-        remedy="Compiled automatically on the first equilibrium-init run "
-               "(every shipped planet config); needs `make` and a C++ "
-               "compiler on PATH. No download involved.")]
-
-
 def uv_spectra_status() -> dict[str, bool]:
     """{sflux filename: present} for every registry stellar UV spectrum."""
     atm = vulcan_atm_dir()
@@ -446,7 +431,6 @@ def full_report(base_mols: list[str] = None, extra_mols: list[str] = None,
     sections = {
         "Python stack (this environment)": check_python_stack(),
         "Chemistry / RT engine data": check_engine_data(base_mols, extra_mols),
-        "Chemistry equilibrium initializer": check_fastchem(),
         "Stellar UV spectra (photochemistry)": check_stellar_uv(),
         f"Pandeia noise backend ({ins.JWST_TOOL_BACKEND})":
             check_pandeia_backend(),

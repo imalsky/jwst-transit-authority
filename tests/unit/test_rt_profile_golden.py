@@ -43,6 +43,5 @@ def test_rt_profile_common_golden_default():
     # and none of the chemistry-only keys leak in here (they are added by
     # _assemble_chem on top): the vulcan profile stays bit-identical because
     # the union of this dict and the chemistry-only block IS the full profile
-    for k in ("yconv_cri", "abundance_mode", "co_mode", "reanchor_atom_ini",
-              "dt_max", "cfg_overrides"):
+    for k in ("yconv_cri", "co_mode", "dt_max", "cfg_overrides"):
         assert k not in prof
