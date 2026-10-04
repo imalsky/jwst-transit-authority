@@ -6,7 +6,7 @@ At the config's refresh every 5th accepted step this point does not certify:
 dt can grow up to 2^5 between refreshes, and at the recorded event current
 water shielding gave Ros2 error 0.43 against rtol 0.2 while the previous water
 profile for radiation alone gave 0.06, so the column rejected every refresh
-step (vulcan-forward notes S1.6). `forward.certified_solve` re-solves such a
+step. `forward.certified_solve` re-solves such a
 column once with photolysis refreshed every accepted step.
 
 Cost: two cold solves, ~10 min. Gated like the e2e: JWST_TOOL_RUN_SLOW=1.
@@ -51,4 +51,4 @@ def test_plus_h_dlnco_point_certifies_after_escalation():
     assert escalated, (
         "this column certified at the configured cadence: the stall this "
         "escalation exists for is gone, so re-measure before trusting the "
-        "retry path (notes S1.7)")
+        "retry path")

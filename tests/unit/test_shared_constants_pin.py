@@ -14,8 +14,8 @@ carry the same digits. A one-digit edit
 on either side would silently rescale every atmosphere this tool submits, with
 no error anywhere: the value stays physical, just wrong.
 
-The 2026-08-14 audit's other option was to move the constants into
-`vulcan_forward.constants` and re-export. That was declined: VULCAN-JAX sits
+Moving the constants into `vulcan_forward.constants` and re-exporting them
+was declined: VULCAN-JAX sits
 BELOW vulcan-forward in the dependency DAG and must keep its own `phy_const`
 regardless, so a move would leave the same two-copy coupling plus an extra
 import edge. Pinning is the honest fix, in the style of vulcan-forward's

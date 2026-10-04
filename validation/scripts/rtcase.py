@@ -21,7 +21,7 @@ DATA = HERE.parent / "data"
 RSTAR = 0.932 * 6.957e10
 RT_MOLS = ["H2O", "CH4", "CO", "CO2", "H2S", "SH", "SO", "SO2"]
 # Tsai et al. 2023's own radius convention (their z = 0 sits at 0.8995 bar and
-# equals the catalogue radius; see vulcan-forward notes 2026-08-17).
+# equals the catalogue radius).
 ANCHOR = dict(p_ref_bar=0.8995, rp_cm=9.1438268e9, gs_cgs=426.0, rstar_cm=RSTAR)
 
 
@@ -88,7 +88,7 @@ def published_column(term):
                       / f"wasp39b_10Xsolar_{term}_vulcan.txt", skip_header=2)
     c = {k: a[:, j] for j, k in enumerate(cols)}
     p = c["P"] / 1e6
-    he = np.full_like(p, 0.168) * c["H2"]   # He/H2 from our own run (notes 2026-08-17)
+    he = np.full_like(p, 0.168) * c["H2"]   # He/H2 from our own run
     return dict(p=p, T=c["T"], mmw=c["mu"],
                 vmr={m: c[m] for m in RT_MOLS}, h2=c["H2"], he=he, so2=c["SO2"])
 

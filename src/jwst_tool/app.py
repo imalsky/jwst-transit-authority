@@ -1634,7 +1634,7 @@ if t_char < 900.0:
 # Jacobian-row cost model: fd = 4 solves per row; cloud rows are RT-only
 # (~seconds); ad = one warm re-converge + tangent per CHEMISTRY row on the
 # capped build, measured at 1.5 solve-equivalents per row (0.74 WASP-39 b
-# eclipse, 1.6 WASP-39 b transmission, 1.85 TOI-7169 b; notes S1.8). T-P rows
+# eclipse, 1.6 WASP-39 b transmission, 1.85 TOI-7169 b). T-P rows
 # take the FD branch under either method.
 _solve_min = max(1.0, base_min * 0.5)
 _rt_only = set(forward.CLOUD_FISHER_PARAMS)
@@ -2295,8 +2295,7 @@ if _escalated:
           "certified as usual.")
 # Rate-law honesty: the network's documented temperature ranges are advisory
 # in both VULCAN implementations, so a hot column extrapolates many fitted
-# rates. forward stores the counts; a run cached before 0.68.0 has neither key
-# and simply says nothing.
+# rates. forward stores the counts; a cached run without them shows nothing.
 _rate_out = np.atleast_1d(model.get("rate_rows_outside", np.array([], int)))
 _rate_tot = np.atleast_1d(model.get("rate_rows_total", np.array([], int)))
 if _rate_out.size and _rate_tot.size and int(_rate_out[0]) > 0:

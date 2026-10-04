@@ -29,4 +29,4 @@ Configuration: constant transit depth 0.01, transit duration 2.8036 h, equal out
 | sigma ratio, NIR matched | -0.3% to +31% (up to +34% policy) | median inside [0.8, 2.0] |
 | sigma ratio, MIRI LRS | +35% to +53% | same band |
 
-This tool is conservative relative to PandExo on every row but 1, which sits marginally below unity. The residual sigma difference is the noise model itself, not the configuration (mechanism: notes.md, Parity testing). Saturation masks are wavelength-aligned and gated for complete coverage and exact agreement; rows above the saturation limit are diagnostic rows, not validation rows.
+This tool is conservative relative to PandExo on every row but 1, which sits marginally below unity. The residual sigma difference is the noise model itself, not the configuration. Saturation masks are wavelength-aligned and gated for complete coverage and exact agreement; rows above the saturation limit are diagnostic rows, not validation rows.

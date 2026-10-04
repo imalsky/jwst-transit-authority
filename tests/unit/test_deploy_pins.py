@@ -73,8 +73,7 @@ def test_dockerfile_pins_the_deployed_tool_commit():
 def test_citation_version_matches_the_package():
     """CITATION.cff advertises the version a citer will quote.
 
-    It drifted six releases (0.48.2 while the package was 0.48.8) because CI
-    validates only the CFF schema. Pin the value, not just the syntax.
+    CI validates only the CFF schema, so pin the value, not just the syntax.
     """
     import sys
     sys.path.insert(0, str(REPO / "src"))

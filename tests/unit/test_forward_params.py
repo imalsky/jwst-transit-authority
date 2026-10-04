@@ -533,13 +533,13 @@ def test_co_bound_is_per_network_and_shared_by_every_surface(network, use_photo)
 
     Photolysis is the second gate axis: the pinned network's wall above
     C/O 1.02 is photochemical, and photolysis OFF all three networks converge
-    at C/O 10 (121-229 CLI steps, measured 2026-09-03). The permissive bounds
+    at C/O 10 (121-229 CLI steps). The permissive bounds
     are the highest value SAMPLED, not a measured ceiling: the convergence
     certificate is what refuses an individual case.
 
     The GUI widget deliberately does NOT track the two axes -- it spans the
     whole range and lets canonical_params refuse -- because a ceiling that
-    moved with them had to clamp a stored C/O silently.
+    moved with them would clamp a stored C/O silently.
     """
     import ast
     import importlib.util
@@ -710,11 +710,11 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # The key hashes every canonical parameter: if ANY default feeding the
     # reference run changes, this trips even when the pins above still pass.
     # Re-pinning it follows a _VERSION bump (the version is a canonical key):
-    # say in notes.md what moved the spectrum, and whether the canonical
+    # record what moved the spectrum, and whether the canonical
     # parameter SET moved with it.
     # The default-geometry median depth and the G395H SO2 significance behind
     # this configuration have NOT been re-measured since v27-v31 and must be
-    # before the key is quoted as a science result (notes.md).
+    # before the key is quoted as a science result.
     assert forward.params_key(forward.canonical_params(
         dict(planet="wasp39b", tp_mode="file"))) == "fec633bfcd1095f7"
     # ... and the bare DEFAULT run is that same atmosphere

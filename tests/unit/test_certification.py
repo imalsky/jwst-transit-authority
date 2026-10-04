@@ -1,9 +1,8 @@
 """Certification gates on the heavy path: the convergence certificate, the
 FD h-vs-2h consistency gate, and the AD dlnCO oxygen-reservoir refusal.
 
-All three used to live inside ``run_model``'s closure, so nothing could reach
-them without a full solve and none of them was covered. They are module-level
-now; the stubs here stand in for the engine's ConvDiag and chem model.
+All three are module-level so they can be reached without a full solve; the
+stubs here stand in for the engine's ConvDiag and chem model.
 """
 import re
 from types import SimpleNamespace
@@ -145,10 +144,8 @@ def test_ad_dlnco_margin_refuses_on_both_columns_and_on_a_missing_engine():
 
 
 def test_ad_chemistry_rows_are_never_vmapped_over_tangent_directions():
-    """VULCAN-JAX < 0.3.5 returned NaN batched tangents on columns with
-    sub-atol densities, and the fixed batched rows still differ from the
-    per-row ones by up to 3% per bin. Structural guard, like the ones in
-    test_posteriors / test_plotting."""
+    """Batched tangent rows differ from the per-row ones by up to 3% per bin.
+    Structural guard, like the ones in test_posteriors / test_plotting."""
     import ast
     import importlib.util
     from pathlib import Path

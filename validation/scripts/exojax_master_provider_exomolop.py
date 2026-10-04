@@ -1,5 +1,5 @@
 # Vendored from https://raw.githubusercontent.com/HajimeKawahara/exojax/master/src/exojax/provider/exomolop.py
-# fetched 2026-08-31 (post-PR#730 bugfix batch); the reader only, the downloader
+# at a revision after PR #730 (bugfix batch); the reader only, the downloader
 # is dropped. The independent ExoMolOP reader of fig_ckd_verification_vs_exojax_exok.py.
 from __future__ import annotations
 

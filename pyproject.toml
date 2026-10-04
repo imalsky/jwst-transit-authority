@@ -46,8 +46,8 @@ dependencies = [
     # engine symbol and profile key the tool uses.
     "vulcan-forward>=0.19.1",
     # Direct imports: load_config (CO_BASELINE check) and steady_state_grad
-    # (adjoint_diag). The floor carries the Ros2 stage element repair and the
-    # dt_max cap (0.4.0) and the OH+CH3+M Troe log10 correction (0.5.0, C20).
+    # (adjoint_diag). The floor carries the Ros2 stage element repair, the
+    # dt_max cap and the OH+CH3+M Troe log10 correction.
     "vulcan-jax>=0.11.0",
 ]
 
@@ -57,11 +57,10 @@ Repository = "https://github.com/imalsky/jwst-transit-authority"
 
 [project.optional-dependencies]
 # streamlit floor: app.py uses the width="stretch" API on st.button/st.pyplot/
-# st.dataframe, introduced for those widgets by 1.49.0 (2025-08-26).
+# st.dataframe, introduced for those widgets by 1.49.0.
 gui = ["streamlit>=1.49", "pandas"]
-# PICASO is not an install extra: PICASO 4.0.1 requires NumPy >=2 while
-# ExoJAX 2.2.3 requires NumPy <2. The PICASO code path itself was removed
-# in 0.43.0; canonical_params and share_config refuse its keys.
+# No PICASO extra: the PICASO path is removed and canonical_params and
+# share_config refuse its keys.
 dev = ["ruff>=0.11", "build>=1.2", "twine>=5"]
 
 [project.scripts]

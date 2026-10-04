@@ -1,4 +1,4 @@
-"""PandExo numerical parity harness (2026-07-12 external audit, release gate).
+"""PandExo numerical parity harness (release gate).
 
 Runs MATCHED star/instrument configurations through BOTH noise paths on the
 SAME Pandeia backend and compares them mode by mode:
@@ -9,7 +9,7 @@ SAME Pandeia backend and compares them mode by mode:
 
 Running both sides on one engine/refdata generation isolates ESTIMATOR
 differences (timing policy, in/out propagation, saturation handling) from
-engine-calibration differences -- the point of the audit's parity gate.
+engine-calibration differences -- the point of the parity gate.
 This is a FIXED-CONFIGURATION estimator gate: the submitted instrument
 configuration is pinned identically on both sides (PANDEXO_MODES below
 overrides PandExo's templates to this tool's registry), so it deliberately
@@ -337,8 +337,8 @@ def compare_mode(key: str, ours: dict, px: dict) -> dict:
     # Saturation is classified from the MEASURED saturation fraction (of
     # Pandeia's per-mode saturation level, NOT of the physical full well) as
     # well as the worker's `unusable` flag. A configuration can return usable
-    # pixels while sitting above the saturation limit -- the committed 2026-07
-    # artifact carried two such rows labeled OK, one at 7.31x that level.
+    # pixels while sitting above the saturation limit -- two such rows have
+    # been labeled OK, one at 7.31x that level.
     # Those numbers are still reported; they just cannot count as a
     # validation row.
     _sat_frac = float(ours["sat_frac"])

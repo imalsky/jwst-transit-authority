@@ -87,8 +87,8 @@ MIN_SAT_MASK_EQUAL_FRAC = 1.0
 # Group-count agreement. The faint rule passes on EITHER the absolute or the
 # relative tolerance (whichever is looser), on purpose: at ngroup ~500-1000 a
 # 5-group difference is ~1% and rounding to an integer is the only freedom
-# left, so a pure 1% test fails on rounding alone (the 2026-07 artifact has
-# 497-vs-492 = 1.006% and 195-vs-193 = 1.03%). REPORT.md states the same
+# left, so a pure 1% test fails on rounding alone (measured: 497-vs-492 =
+# 1.006% and 195-vs-193 = 1.03%). REPORT.md states the same
 # either/or rule.
 MAX_NGROUP_ABS_DIFF = 1
 MAX_NGROUP_REL_DIFF = 0.01
@@ -121,12 +121,12 @@ MAX_FLUX_RATIO_DEV = 0.03
 
 # Sigma ratios are deliberately NOT gated to unity: pandeia's full extracted
 # noise and PandExo's analytic `fml` estimator are different noise models on
-# purpose. Measured envelope on the 2026-08-14 eight-mode matrix: -0.3% to
+# purpose. Measured envelope on the committed artifact: -0.3% to
 # +31% (NIR) and +35% to +53% (MIRI LRS). REPORT.md derives these from the
 # artifact -- do not re-hard-code a range here, it goes stale on every re-run.
 # But "different by design" has a ceiling: a median ratio outside this band
-# is an ANOMALY (the 2026-08-09 regression measured 7.08x from an
-# unnecessary 1-group ramp and the ungated sigma let it pass silently).
+# is an ANOMALY (an unnecessary 1-group ramp measured 7.08x, which an
+# ungated sigma passes silently).
 # Widening the band requires a decision record, not a threshold edit.
 SIGMA_RATIO_MEDIAN_BAND = (0.8, 2.0)
 
@@ -346,8 +346,8 @@ def validate(summary: dict) -> list[str]:
                 continue
 
             # Saturation must be judged from the MEASURED fraction, not only
-            # the worker's `unusable` flag. The committed 2026-07 artifact had
-            # two OK rows above the limit, one at 7.31x the saturation
+            # the worker's `unusable` flag alone, which has let two rows
+            # above the limit through as OK, one at 7.31x the saturation
             # level (Pandeia's per-mode value, not the physical full well).
             sat = row.get("sat_frac_ours")
             if sat is None:

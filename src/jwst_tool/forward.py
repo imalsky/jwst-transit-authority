@@ -121,7 +121,7 @@ JAC_METHODS = ("fd", "ad")            # certified-FD default / warm-jvp opt-in
 # Minimum positivity margin for the AD dlnCO row. The engine's co_bz_bound =
 # ln(1 + min_z(OO_z/OC_z)) is the largest ln C/O increment before some layer's
 # fixed-O factor b_z turns nonpositive. Empirical, set by closure against the
-# certified one-sided FD row (notes.md); a literal so an FD step change cannot
+# certified one-sided FD row; a literal so an FD step change cannot
 # move the AD gate silently. FD has no equivalent limit: it re-initializes
 # FastChem per stencil point and never uses the b_z map.
 CO_BZ_MIN_AD = 0.1
@@ -130,16 +130,16 @@ CO_BZ_MIN_AD = 0.1
 # the full 30000-step cold budget, 66 min, before the cadence-1 retry); dt_max
 # (s) stops the adaptive step running away on a photolysis-driven column (the
 # WASP-39 b eclipse warm map never certifies uncapped; capped 1e4-3e6 s all
-# certify with the same tangent, notes S1.7 / VULCAN-JAX notes S1.15). DERIVATIVE
+# certify with the same tangent). DERIVATIVE
 # builds only: the cold solve and the FD stencil points keep DT_MAX_S, so no
 # shipped spectrum moves. When the tangent settles is the solver's call: the AD
 # row runs through `converged_y_jvp`, whose certificate holds the tangent to
 # the same change-over-lookback tolerance as the column (vulcan-jax
-# OuterLoop.run_jvp), so no step floor and no geometry-veto override remain
-# here (notes S1.7 has the closures each of those used to stand in for).
+# OuterLoop.run_jvp), so this build carries no step floor and no
+# geometry-veto override.
 AD_BUILD_OVERRIDES = {"count_max": 6000, "dt_max": 1.0e5}
 # The cadence-1 retry gets the cold step budget: a slowly settling tangent
-# needs it (LP 714-47 b at 100x certifies lnZ at ~21000 steps, notes S1.1).
+# needs it (LP 714-47 b at 100x certifies lnZ at ~21000 steps).
 # The first attempt keeps the 6000 cap above, so a genuine stall (TOI-7169 b)
 # still escalates after 6000 steps, not 30000.
 AD_RETRY_COUNT_MAX = 30000
@@ -156,7 +156,7 @@ AD_RETRY_COUNT_MAX = 30000
 # after the cadence-1 escalation): across 0.99-1.02 the FD dlnCO row fails
 # its h-vs-2h gate (0.33-0.43 vs 0.25) and the AD row is refused at build, so
 # a raise unlocks spectra with no certifiable C/O sensitivity and puts the
-# default network above C/O 1 (maintainer decision, notes S2.1, S1.1).
+# default network above C/O 1 (maintainer decision).
 # COST, not correctness: the same photo-off corner takes 22710 steps HERE vs
 # 121 in the CLI. Cause is the engine's exact-elemental repair, which at C/O 10
 # displaces species 4.4% off the FastChem column; masks mode exits at 121.
@@ -166,7 +166,7 @@ CO_MAX = {"sncho": 0.99, "sncho2025": 10.0, "ncho": 10.0}   # photolysis ON
 CO_MAX_PHOTO_OFF = 10.0
 # Accepted met_x_solar range, inclusive. The top is a maintainer decision
 # under the demonstrated envelope: the default case certifies through 300x
-# and the lnZ stencil's 122x sits under the certified 150x (notes §1.1).
+# and the lnZ stencil's 122x sits under the certified 150x.
 # Convergence is certified per run; a value outside is refused before any
 # solve.
 MET_RANGE = (0.1, 100.0)
@@ -247,7 +247,7 @@ CONV_BRANCH = {1: "tight (yconv_cri)", 2: "loose (yconv_min)"}
 # Max |element/H drift| of a certified column vs its build column. 1.5%:
 # the smallest round value above the drift the advertised C/O top costs.
 # The photolysis-off ladder on sncho2025 is 0.06% at C/O 2, 0.32% at 4,
-# 0.81% at 7 and 1.30% at 10 (1.21% sncho, 1.22% ncho; notes.md 1.1).
+# 0.81% at 7 and 1.30% at 10 (1.21% sncho, 1.22% ncho).
 ELEMENT_TOL = 0.015
 
 
@@ -339,7 +339,7 @@ def certified_solve(chem_b, th, stage, rebuild=None, log=print):
 
     At the configured photolysis cadence dt can grow by 2^frq between refreshes;
     a strongly shielded column then rejects every refresh step and never
-    certifies (notes S1.7). A column that does not certify is re-solved once
+    certifies. A column that does not certify is re-solved once
     with photolysis refreshed every accepted step, which converges it. `rebuild`
     returns the same model at that cadence; without it the solve raises as
     before. Returns (y, chem_used, cert, escalated).
@@ -421,7 +421,7 @@ UNMODELED_VMR_WARN = 1.0e-4
 # refuses it from 7 up (photolysis off, from about 8). Leave-one-out on the C/O
 # 10 column: CO at 9.8e-3 is worth 64 ppm, C2H2 at 1.6e-4 is worth 504 ppm --
 # the gate is coarse and deliberate, and the maintainer chose it over 1e-4,
-# which cut the carbon-rich path off at C/O ~1.3 (notes.md 1.1, 2.1). Between
+# which cut the carbon-rich path off at C/O ~1.3. Between
 # the two thresholds the run only warns, and that error is unquantified.
 UNMODELED_VMR_REFUSE = 1.0e-3
 # Transmission photosphere, the band the warning is measured over (bar).
@@ -430,7 +430,7 @@ _PHOTOSPHERE_BAR = (1.0e-5, 1.0e-2)
 # classes: the bare atoms (ExoMolOP is a MOLECULAR line-list database -- an
 # atom has no IR bands to tabulate), and the background gases, which are
 # either the CIA continuum and Rayleigh scatterers (H2, He) or homonuclear
-# and so dipole-free (N2, O2, S2 -- notes.md records the same for S2).
+# and so dipole-free (N2, O2, S2).
 _NOT_A_K_TABLE_ABSORBER = frozenset({
     "H", "O", "C", "N", "S", "O_1", "N_2D",
     "H2", "He", "N2", "O2", "S2"})
@@ -2396,7 +2396,7 @@ def run_model(params: dict, log=print) -> Path:
             # certifies the tangent per cell in those units, together with
             # the column it belongs to; a plain jax.jvp stops when the column
             # certifies, which from a converged start is at count_min with
-            # the tangent unrelaxed, notes S1.7). The spectrum tangent follows
+            # the tangent unrelaxed). The spectrum tangent follows
             # by the chain rule from (y_w, dy_w) and the direct theta
             # dependence of the RT. Returns (depth, diag, tau, y_w, d depth).
             y_w, dy_w, diag = chem_x.converged_y_jvp(th0, e_h, warm_y=y_sol,
@@ -2433,7 +2433,7 @@ def run_model(params: dict, log=print) -> Path:
             # certifies its own warm re-converge and its own tangent.
             # That warm re-converge is where a shielded column stalls at the
             # config's photolysis cadence (TOI-7169 b: the FD stencil stall's
-            # own cell and flux change, notes S1.7), so it runs on a build
+            # own cell and flux change), so it runs on a build
             # with AD_BUILD_OVERRIDES (step cap + dt cap). A row that does not
             # certify there is re-solved on a cadence-1 build with the cold
             # step budget (AD_RETRY_COUNT_MAX) and flagged in
@@ -2560,7 +2560,7 @@ def run_model(params: dict, log=print) -> Path:
             def _row_points(frq):
                 """Every stencil point of this row at ONE photolysis cadence.
                 Never mix: the cadence moves a converged spectrum by 0.01-2.4
-                ppm on the presets (engine notes S1.6), and in a row that
+                ppm on the presets, and in a row that
                 offset divides by h and lands in the derivative."""
                 pts = {}
                 if name in FD_COMP_PARAMS:

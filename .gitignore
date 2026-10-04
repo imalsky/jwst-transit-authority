@@ -22,14 +22,11 @@ dist/
 data/cdbs/calspec/
 
 # Large pandeia reference data (~4.3 GB per release; `jwst-tool data` reports
-# status). Globbed, not per-release: these were pinned to the 2026.2
-# names, so adding the 2026.7 triple made 4.3 GB show up as untracked and one
-# `git add -A` away from the history.
+# status). Globbed, not per-release, so a new release's triple is ignored
+# too and never one `git add -A` away from the history.
 data/pandeia_data-*/
 data/pandeia_psfs-*/
-# Internal working documents. Reference content and dev logs live in the
-# gitignored root notes.md, open work in the gitignored root todo.md;
-# README.md carries current usage only.
+# Local working documents, not part of the package.
 CLAUDE.md
 /notes.md
 /todo.md
@@ -39,6 +36,6 @@ CLAUDE.md
 data/cdbs/grid/phoenix
 
 
-# C/O survey archive (personal paths in the report; notes.md decision 2026-09-07)
+# C/O survey archive (its report carries personal paths)
 validation/co_limits/
 validation/co_stall/

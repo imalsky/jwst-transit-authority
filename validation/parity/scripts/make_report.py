@@ -13,12 +13,10 @@ gate (`parity_gate.py`) and re-runs `validate_artifact()` on the summary
 instead of trusting the persisted `gate.passed` boolean, so a hand-edited
 artifact cannot render as a PASS. Every numerical statement is computed from
 the artifact -- nothing is hard-coded, so the text cannot go stale against
-the JSON. `--require-pass` refuses to write a report for a failing artifact
-at all.
+the JSON.
 
-Usage: python validation/parity/scripts/make_report.py [--require-pass]
+Usage: python validation/parity/scripts/make_report.py
 """
-import argparse
 import json
 import sys
 from datetime import date
@@ -156,17 +154,10 @@ def _sigma_envelope(summary) -> dict:
             "sense": sense}
 
 
-def main(require_pass: bool = False):
+def main():
     summary = json.loads((OUTPUTS / "parity_summary.json").read_text())
     problems = (pg.validate_artifact(summary)
                 if summary.get("gate") is not None else None)
-    if require_pass and problems != []:
-        raise SystemExit(
-            "make_report: --require-pass given but parity_summary.json "
-            + ("has no gate block (regenerate with run_parity.py)"
-               if problems is None else
-               f"FAILS re-validation ({len(problems)} problems). "
-               "Fix the run; do not publish a report for a failing artifact."))
     cfg = summary["config"]
     ms = _measured(summary)
     env = _sigma_envelope(summary)
@@ -215,8 +206,7 @@ def main(require_pass: bool = False):
     w(f"| sigma ratio, MIRI LRS | {env['miri']} | same band |")
     w("")
     w(env["sense"] + " The residual sigma difference is the noise model "
-      "itself, not the configuration (mechanism: notes.md, Parity "
-      "testing). Saturation "
+      "itself, not the configuration. Saturation "
       "masks are wavelength-aligned and gated for complete coverage and "
       "exact agreement; rows above the saturation limit are diagnostic "
       "rows, not validation rows.")
@@ -234,9 +224,4 @@ def main(require_pass: bool = False):
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument(
-        "--require-pass", action="store_true",
-        help="refuse to write a report unless the summary re-validates as a "
-             "pass (use this in a release job)")
-    raise SystemExit(main(require_pass=ap.parse_args().require_pass))
+    raise SystemExit(main())

@@ -39,8 +39,7 @@ TAP_SYNC_URL = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
 # which no gravity or radius is ever derived. PSCompPars values can combine
 # different publications, so derived quantities are nominal composite
 # planning values, disclosed as such -- per-field references and
-# uncertainties are NOT snapshot columns yet (recorded in notes.md,
-# Open gaps).
+# uncertainties are NOT snapshot columns yet.
 SNAPSHOT_COLUMNS = (
     "pl_name", "st_spectype", "st_teff", "st_logg", "st_met", "st_metratio",
     "st_rad", "sy_kmag", "pl_radj", "pl_bmassj", "pl_bmassprov",

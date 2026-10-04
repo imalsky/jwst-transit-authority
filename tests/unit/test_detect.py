@@ -10,7 +10,7 @@ from jwst_tool import detect, forward, instruments as ins, noise as noise_mod
 def test_offset_profiled_out():
     """A pure constant depth signal carries no distinguishing information once
     the offset is profiled (it is the offset), and a SINGLE bin with a free
-    offset has no shape information: score 0, never |s|/sigma (recheck P2-D).
+    offset has no shape information: score 0, never |s|/sigma.
     Without profiling the score is the plain quadrature sum."""
     sig = np.full(20, 3e-5)
     err = np.full(20, 1e-5)

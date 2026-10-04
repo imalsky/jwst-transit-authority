@@ -114,7 +114,7 @@ def build_share(canon: dict, goal: dict, observation: dict,
         # informational, derived from met_x_solar + co_ratio, never read back.
         # NOT what the column ends up carrying -- FastChem places some carbon in
         # species the network has no slot for, so the solved column runs C/O
-        # short by -0.01% at 0.55 and -1.2% at 10 (notes.md 2026-09-03).
+        # short by -0.01% at 0.55 and -1.2% at 10.
         "elemental_abundances": forward.elemental_abundances(
             canon["met_x_solar"], canon["co_ratio"]),
         # Which software wrote this file is recorded ONCE, inside the

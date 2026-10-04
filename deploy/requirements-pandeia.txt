@@ -1,6 +1,6 @@
-# Pandeia noise-worker env. The companion pins were captured from the
-# validated Mac env `pandeia_2026` (python 3.12) on 2026-07-19; the ENGINE was
-# moved 2026.2 -> 2026.7 on 2026-08-04 to reach the STScI-supported release.
+# Pandeia noise-worker env (python 3.12). The companion pins were captured
+# from the validated env `pandeia_2026`; the engine is 2026.7, the
+# STScI-supported release.
 # 2026.7 declares only lower bounds on these packages (astropy>=5.3,
 # numpy>=1.21, scipy>=1.9.2, synphot, stsynphot, photutils), so every pin below
 # still satisfies it. This env is only entered by jwst_tool/pandeia_worker.py
