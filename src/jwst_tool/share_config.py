@@ -21,6 +21,9 @@ load-bearing: Streamlit does not reject an out-of-range session-state value,
 it silently discards it and the widget falls back to its default, so an
 unchecked restore would run a different model than the file describes.
 
+Both chemistry engines (VULCAN-JAX kinetics and PICASO climate + equilibrium
+chemistry) round-trip, each onto its own widget keys.
+
 This lives outside app.py so the mapping is importable and unit-testable
 without running Streamlit.
 """
@@ -31,7 +34,7 @@ import math
 import os
 import re
 
-from jwst_tool import fisher, forward, planets, provenance
+from jwst_tool import fisher, forward, picaso_engine, planets, provenance
 
 SHARE_FORMAT = 1
 
@@ -39,7 +42,6 @@ SHARE_FORMAT = 1
 # tests/unit/test_share_config.py so they cannot drift. Session-global keys;
 # forward.* constants are shared with the widgets themselves.
 _GLOBAL_BOUNDS = {
-    "met": forward.MET_RANGE,
     "sza": (0.0, 89.0), "fdiur": (0.1, 1.0),
     "yconv": (1.0e-4, 1.0e-2), "yconvmin": (1.0e-4, 0.1),
     "ck": (-7.0, 2.0), "ca": (0.0, 4.0), "cpt": (-6.0, 1.0),
@@ -79,11 +81,19 @@ def _check_widget_ranges(state: dict, key, pk, science_mode: str) -> None:
         checks[key(f"floor_{m}")] = (f"floor for {m}", _FLOOR_BOUNDS)
         checks[key(f"infl_{m}")] = (f"noise multiplier for {m}", _INFL_BOUNDS)
     checks[key(f"pbtm_{science_mode}")] = ("p_btm_bar", forward.P_BTM_RANGE)
+    checks[key(f"rfacv_picaso_{science_mode}")] = ("rfacv",
+                                                   forward.RFACV_RANGE)
     # C/O: the widget's ceiling follows the kinetics network AND the
     # photolysis switch, so the accepted range is theirs, not one literal pair.
-    checks[key("co")] = ("co_ratio", forward.co_bounds(
-        str(state.get(key("network"), "sncho")),
-        bool(state.get(key("photo"), True))))
+    # PICASO has neither and takes the whole range, as canonical_params does,
+    # but caps metallicity lower.
+    pic = state.get(key("provider")) == "picaso"
+    checks[key("co")] = ("co_ratio", (
+        (forward.CO_MIN, forward.CO_MAX_PHOTO_OFF) if pic else
+        forward.co_bounds(str(state.get(key("network"), "sncho")),
+                          bool(state.get(key("photo"), True)))))
+    checks[key("met")] = ("met", forward.PICASO_MET_RANGE if pic
+                          else forward.MET_RANGE)
     for p, unit in fisher.PARAM_UNITS.items():
         checks[key(f"tgt_{p}")] = (
             f"target uncertainty for {p}",
@@ -112,9 +122,13 @@ def build_share(canon: dict, goal: dict, observation: dict,
         "observation": dict(observation),
         # The elemental set REQUESTED of the equilibrium seed (number ratios
         # to H): informational, derived from met_x_solar + co_ratio, never
-        # read back. Not necessarily what the solved column carries.
-        "elemental_abundances": forward.elemental_abundances(
-            canon["met_x_solar"], canon["co_ratio"]),
+        # read back. Not necessarily what the solved column carries. PICASO's
+        # solver is given every atom it carries, He included.
+        "elemental_abundances": (
+            {f"{a}_H": v for a, v in picaso_engine.composition(
+                canon["met_x_solar"], canon["co_ratio"]).items()}
+            if _is_picaso(canon) else forward.elemental_abundances(
+                canon["met_x_solar"], canon["co_ratio"])),
         # Which software wrote this file is recorded ONCE, inside the
         # provenance block ("software"), never as a second top-level copy.
         # Informational only -- a configuration must load on any tool
@@ -232,8 +246,12 @@ def _restore_goal(state: dict, cp: dict, goal: dict, key,
                   tp_mode: str, cloud_mode: str = "haze") -> None:
     cloud_i = (0 if not cp["cloud_on"]
                else (2 if cloud_mode == "gray" else 1))
-    suffix = f"vulcan_{tp_mode}_{cloud_i}"
-    avail = list(forward.CHEM_PARAM_NAMES) + list(forward.TP_PARAM_NAMES[tp_mode])
+    pic = _is_picaso(cp)
+    suffix = f"{'picaso' if pic else 'vulcan'}_{tp_mode}_{cloud_i}"
+    # PICASO offers no lnKzz row (canonical_params refuses it)
+    avail = [p for p in forward.CHEM_PARAM_NAMES
+             if not (pic and p == "lnKzz")] \
+        + list(forward.TP_PARAM_NAMES[tp_mode])
     if cp["cloud_on"]:
         avail += [p for p in forward.CLOUD_FISHER_PARAMS
                   if cloud_mode != "gray" or p != "alpha_cloud"]
@@ -247,17 +265,19 @@ def _restore_goal(state: dict, cp: dict, goal: dict, key,
     if goal.get("target_sig") is not None:
         state[key("tsig")] = float(goal["target_sig"])
     method = str(goal.get("jac_method", cp.get("jac_method", "fd")))
-    if method in ("fd", "ad"):
+    # PICASO is FD-only on its own widget: writing "fd" here would overwrite
+    # the stored VULCAN choice
+    if method in ("fd", "ad") and not pic:
         state[key("jacm")] = method
     if selected_goal == "detect":
-        net_sfx = _network_suffix(cp)
-        extras = state[key(f"xmols_vulcan{net_sfx}")]
+        extras = state[key(_xmols_key(cp))]
         mol_opts = forward.active_molecules(
             {"network": str(cp.get("network", "sncho")),
              "extra_mols": extras})
         target = goal.get("target_mol")
         if target in mol_opts:
-            state[key(f"mol_vulcan{net_sfx}_"
+            state[key(("mol_picaso_" if pic
+                       else f"mol_vulcan{_network_suffix(cp)}_")
                       + "_".join(sorted(extras)))] = target
         state[key("dofish")] = bool(goal.get("do_fisher", bool(fisher)))
         if fisher:
@@ -345,7 +365,9 @@ def _restore_system_profile(cp: dict, key, pk, planet: str,
         pk("g"): float(cp["gs_cgs"]) / 100.0,
         pk("rstar"): float(cp["rstar_rsun"]),
         pk("a"): float(cp["orbit_au"]),
-        pk("tp"): tp_mode,
+        # always written: a VULCAN file loaded under PICASO switches back
+        key("provider"): "picaso" if _is_picaso(cp) else "vulcan",
+        pk("tp_picaso" if _is_picaso(cp) else "tp"): tp_mode,
     }
     # The Pandeia star. canonical_params zeroes star_teff/logg/feh in
     # transmission mode (the star lives only on the noise side there), so
@@ -357,9 +379,16 @@ def _restore_system_profile(cp: dict, key, pk, planet: str,
         state[pk("teff")] = float(cp["star_teff"])
         state[pk("logg")] = float(cp["star_logg"])
         state[pk("feh")] = float(cp["star_feh"])
-    if str(cp.get("sflux", "")) in planets.SFLUX_CHOICES:
+    # the UV spectrum feeds only VULCAN photolysis; a PICASO payload carries
+    # the registry default, which must not replace the VULCAN choice
+    if not _is_picaso(cp) and str(cp.get("sflux", "")) in planets.SFLUX_CHOICES:
         state[pk("sflux")] = str(cp["sflux"])
-    if tp_mode == "guillot":
+    if tp_mode == "picaso_climate":
+        state[pk("tint")] = float(cp["Tint"])
+        state[key("rfacv_picaso_"
+                  + str(cp.get("science_mode", "transmission")))] = \
+            float(cp["rfacv"])
+    elif tp_mode == "guillot":
         state.update({
             pk("tirr"): float(cp["Tirr"]), pk("tirr_auto"): None,
             pk("tint"): float(cp["Tint"]), pk("lk"): float(cp["log_kappa"]),
@@ -390,6 +419,23 @@ def _network_suffix(cp: dict) -> str:
     (same pattern as the provider-suffixed molecule keys)."""
     net = str(cp.get("network", "sncho"))
     return "" if net == "sncho" else f"_{net}"
+
+
+def _is_picaso(cp: dict) -> bool:
+    return str(cp.get("chem_provider", "vulcan")) == "picaso"
+
+
+def _xmols_key(cp: dict) -> str:
+    """The extra-molecule widget key: PICASO's own, else per network."""
+    return ("xmols_picaso" if _is_picaso(cp)
+            else f"xmols_vulcan{_network_suffix(cp)}")
+
+
+def _restore_picaso_physics(state: dict, cp: dict, key, pk) -> None:
+    quench = bool(cp.get("picaso_quench", False))
+    state[key("quench_picaso")] = quench
+    if quench:
+        state[pk("kzz")] = _log10(cp["kzz_const"], "kzz_const")
 
 
 def _restore_vulcan_physics(state: dict, cp: dict, key, pk) -> None:
@@ -430,7 +476,7 @@ def _restore_rt_state(state: dict, cp: dict, key,
             state[key("ck")] = float(cp["log_kappa_cloud"])
             state[key("ca")] = float(cp["alpha_cloud"])
     extras_all = list(forward.EXTRA_MOLECULES)
-    state[key(f"xmols_vulcan{_network_suffix(cp)}")] = [
+    state[key(_xmols_key(cp))] = [
         molecule for molecule in (cp.get("extra_mols") or [])
         if molecule in extras_all]
     state.update({
@@ -450,14 +496,7 @@ def _restore_rt_state(state: dict, cp: dict, key,
 
 def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key) -> dict:
     planet = str(cp["planet"])
-    provider = str(cp.get("chem_provider", "vulcan"))
     tp_mode = str(cp.get("tp_mode", "guillot"))
-    if provider == "picaso" or tp_mode == "picaso_climate":
-        raise ValueError(
-            "this configuration uses the removed PICASO engine "
-            "(chem_provider='picaso' or tp_mode='picaso_climate'); the "
-            "subsystem was removed in 0.43.0 because it was disabled and "
-            "uncertified. Re-create the run with the VULCAN engine.")
     if str(cp.get("mie_condensate", "") or "") or \
             str(cp.get("opacity_mode", "exomolop")) == "lbl":
         raise ValueError(
@@ -490,7 +529,10 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key) -> dict:
         state = _restore_system_profile(
             cp, key, pk, planet, tp_mode, restored_tp)
 
-        _restore_vulcan_physics(state, cp, key, pk)
+        if _is_picaso(cp):
+            _restore_picaso_physics(state, cp, key, pk)
+        else:
+            _restore_vulcan_physics(state, cp, key, pk)
 
         _restore_rt_state(state, cp, key, cloud_top_bar)
         _restore_goal(state, cp, goal, key, tp_mode, cloud_mode)

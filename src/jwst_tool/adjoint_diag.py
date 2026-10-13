@@ -134,6 +134,10 @@ def run_adjoint(params: dict, species: str, log=print) -> Path:
     (all layers) with full certification info, and caches the lot.
     """
     cp = forward.canonical_params(params)
+    if cp["chem_provider"] != "vulcan":
+        raise RuntimeError(
+            "adjoint diagnostics differentiate VULCAN-JAX's reaction network; "
+            "the PICASO engine has no reactions to differentiate.")
     if cp["use_condense"]:
         raise RuntimeError(
             "adjoint diagnostics are not available for a condensing state: "

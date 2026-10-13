@@ -329,6 +329,96 @@ def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
     assert at.number_input(key="n0_wasp39b_tbase").value == 5.0
 
 
+def test_engine_switch_keeps_each_engines_settings(monkeypatch):
+    """PICASO is the second engine beside VULCAN (the default). Switching
+    shows PICASO's own widgets (climate T-P with heat redistribution, a
+    quench box instead of the Kzz profile menu, FD only, no lnKzz row, H2O as
+    the detection target) and hides the VULCAN-only ones. Streamlit drops the
+    state of a widget it does not render, so a round trip must find every
+    setting of BOTH engines as it was, and the VULCAN differentiation method
+    is never written by PICASO's FD-only widget. That includes the goal
+    selections (each engine's own keys) and the Guillot boxes PICASO's climate
+    profile hides. A missing PICASO setup blocks a PICASO Run with one
+    sentence and leaves VULCAN alone."""
+    from jwst_tool import datacheck, fisher, forward
+    monkeypatch.setattr(datacheck, "picaso_missing", lambda r: [
+        datacheck.Item(key="picaso:python", label="PICASO python",
+                       status=datacheck.MISSING, required=False,
+                       detail="JWST_TOOL_PICASO_PYTHON not set")])
+
+    def _pic_error(app):
+        return [e.value for e in app.error if "PICASO engine" in e.value]
+
+    at = _run_app()
+    for widget, key, value in (("selectbox", "n0_network", "ncho"),
+                               ("number_input", "n0_sza", 60.0),
+                               ("selectbox", "n0_wasp39b_tp", "guillot"),
+                               ("selectbox", "n0_wasp39b_kzzmode", "const"),
+                               ("number_input", "n0_wasp39b_kzz", 10.0),
+                               ("number_input", "n0_wasp39b_tirr", 1500.0),
+                               ("number_input", "n0_wasp39b_lk", -1.5),
+                               ("multiselect", "n0_fp_vulcan_guillot_0",
+                                ["lnZ", "Tirr"])):
+        getattr(at, widget)(key=key).set_value(value).run()
+    mol_key = next(w.key for w in at.selectbox
+                   if w.key.startswith("n0_mol_vulcan_ncho_"))
+    at.selectbox(key=mol_key).set_value("CO2").run()
+    assert not at.exception, at.exception
+    vulcan = {k: at.session_state[k] for k in (
+        "n0_network", "n0_sza", "n0_wasp39b_tp", "n0_wasp39b_kzz", "n0_jacm",
+        "n0_wasp39b_tirr", "n0_wasp39b_lk", "n0_fp_vulcan_guillot_0",
+        mol_key)}
+    assert vulcan["n0_jacm"] == "ad" and not _pic_error(at)
+
+    at.selectbox(key="n0_provider").set_value("picaso").run()
+    assert not at.exception, at.exception
+    assert "Photochemistry & transport" not in [e.label for e in at.expander]
+    assert at.selectbox(key="n0_wasp39b_tp_picaso").value == \
+        forward.canonical_params(dict(planet="wasp39b",
+                                      chem_provider="picaso"))["tp_mode"]
+    assert at.number_input(key="n0_rfacv_picaso_transmission").value == 0.5
+    jm = at.selectbox(key="n0_jacm_picaso")
+    assert jm.disabled and jm.options == ["Finite differences"]
+    assert at.selectbox(key="n0_wasp39b_sflux").disabled
+    assert "N2O" not in at.multiselect(key="n0_xmols_picaso").options
+    assert at.selectbox(key="n0_mol_picaso_C2H2_C2H4_H2S_HCN_NH3_OCS_SH_SO"
+                        ).value == "H2O"
+    assert _pic_error(at) and "PICASO python" not in _pic_error(at)[0]
+    assert next(b for b in at.button if b.label == "Run").proto.disabled
+    assert not [w for w in at.number_input if w.key == "n0_wasp39b_kzz"]
+    for quench in (False, True):
+        at.checkbox(key="n0_quench_picaso").set_value(quench).run()
+        assert not at.exception, at.exception
+        assert fisher.PARAM_LABELS["lnKzz"] not in at.multiselect(
+            key="n0_fp_picaso_picaso_climate_0").options
+    assert at.number_input(key="n0_wasp39b_kzz").value == 10.0   # shared box
+    at.number_input(key="n0_rfacv_picaso_transmission").set_value(0.7).run()
+    at.multiselect(key="n0_fp_picaso_picaso_climate_0").set_value(
+        ["lnZ", "dlnCO"]).run()
+    at.radio(key="n0_scimode").set_value("emission").run()
+    assert at.number_input(key="n0_rfacv_picaso_emission").value == 1.0
+    at.radio(key="n0_scimode").set_value("transmission").run()
+    assert at.session_state["n0_jacm"] == "ad"
+
+    at.selectbox(key="n0_provider").set_value("vulcan").run()
+    assert not at.exception, at.exception
+    assert {k: at.session_state[k] for k in vulcan} == vulcan
+    assert not _pic_error(at)
+    at.selectbox(key="n0_provider").set_value("picaso").run()
+    assert at.number_input(key="n0_rfacv_picaso_transmission").value == 0.7
+    assert at.checkbox(key="n0_quench_picaso").value is True
+    assert at.multiselect(key="n0_fp_picaso_picaso_climate_0").value == \
+        ["lnZ", "dlnCO"]
+    # an uploaded-table choice survives a detour, never the shipped table instead
+    at.selectbox(key="n0_provider").set_value("vulcan").run()
+    at.selectbox(key="n0_wasp39b_tp").set_value("file").run()
+    at.radio(key="n0_wasp39b_tpsrc").set_value(forward.TP_FILE_UPLOAD).run()
+    for engine in ("picaso", "vulcan"):
+        at.selectbox(key="n0_provider").set_value(engine).run()
+    assert not at.exception, at.exception
+    assert at.session_state["n0_wasp39b_tpsrc"] == forward.TP_FILE_UPLOAD
+
+
 def test_source_pins_fig_width_fisher_table_and_noise_recording():
     """Source-level pins for three maintainer decisions: (1) the
     global noise multiplier COMPOSES with the per-mode multipliers and the
@@ -669,6 +759,7 @@ def test_emission_mode_archive_fill_skips_transit_duration():
     [("n0_mol_vulcan_C2H2_C2H4_H2S_HCN_NH3_OCS_SH_SO", "CO2",
       "target_mol"),                                # the reported bug
      ("n0_noisescale", 2.0, "noise_scale"),         # an observation-block field
+     ("n0_provider", "picaso", "chem_provider"),    # the chemistry engine
      # DISPLAY-ONLY: the seed redraws the mock from the cached run and
      # recomputes nothing, so it must never read as stale (field=None)
      ("n0_seed", 7, None)])

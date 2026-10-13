@@ -2,8 +2,14 @@
 
 Runs at every container boot (entrypoint), before the GUI starts. If the
 marker files are already present the download is skipped, so a wake from
-sleep costs nothing. The HF hub cache is pointed at ephemeral /tmp so the
-persistent volume only holds the final ~8 GB copy.
+sleep costs nothing (with the VULCAN data present and only PICASO's absent,
+the download is retried and a failure only warns). The HF hub cache is pointed at ephemeral /tmp so the
+persistent volume only holds the final ~10 GB copy (about 2.2 GB of it the
+PICASO correlated-k tables).
+
+A missing PICASO file triggers the download like any marker, but one still
+missing afterwards only warns: VULCAN boots without PICASO, and every PICASO
+run stops with an error.
 """
 import os
 import sys
@@ -14,7 +20,7 @@ os.environ.setdefault("HF_HOME", "/tmp/hf-cache")
 DATA = Path("/data")
 DATASET_REPO = os.environ.get("DATASET_REPO", "imalsky/vulcan-jwst-tool-data")
 
-# One marker per dataset the tool refuses to run without. The Pandeia markers
+# One marker per dataset VULCAN refuses to run without. The Pandeia markers
 # are the load-bearing VERSION FILES, not directories: an empty or truncated
 # tree must not count as seeded. Only the 2026.7 pair is listed, because
 # instruments.py defines exactly one backend ("current" = 2026.7) and raises
@@ -23,6 +29,7 @@ DATASET_REPO = os.environ.get("DATASET_REPO", "imalsky/vulcan-jwst-tool-data")
 # Never list a tree no backend can reach: boot then fails closed on data
 # nothing could use.
 # The per-molecule k-table markers are DERIVED, in ktable_markers() below.
+# The PICASO markers (picaso_markers()) are optional: see the docstring.
 MARKERS = [
     DATA / "jwst-data" / "cdbs" / "grid" / "phoenix" / "catalog.fits",
     DATA / "jwst-data" / "pandeia_data-2026.7-jwst" / "VERSION_DATA",
@@ -48,30 +55,48 @@ def ktable_markers() -> list[Path]:
             if m not in forward._NO_EXOMOLOP_TABLE]
 
 
-def missing() -> list[Path]:
-    return [m for m in MARKERS + ktable_markers() if not m.exists()]
+def picaso_markers() -> list[Path]:
+    """One marker per PICASO reference file and correlated-k table, read from
+    the installed tool's datacheck, so the list moves with the pinned code
+    like ktable_markers()."""
+    from jwst_tool import datacheck as dc
+    root = DATA / "jwst-data" / f"picaso_refdata-{dc.PICASO_RELEASE}"
+    return ([root / f for f in dc.PICASO_REFDATA_FILES]
+            + [root / dc.PICASO_CK_DIR / n for n in dc.PICASO_CK_MD5])
+
+
+def missing(markers: list[Path]) -> list[Path]:
+    return [m for m in markers if not m.exists()]
 
 
 def main() -> int:
-    gone = missing()
+    required = MARKERS + ktable_markers()
+    picaso = picaso_markers()
+    gone = missing(required + picaso)
     if not gone:
         print("[bootstrap] /data already seeded, skipping download")
         return 0
 
-    n_all = len(MARKERS) + len(ktable_markers())
     print(f"[bootstrap] seeding /data from {DATASET_REPO} "
-          f"({len(gone)}/{n_all} markers absent) ...")
+          f"({len(gone)}/{len(required) + len(picaso)} markers absent) ...")
     token = os.environ.get("HF_TOKEN")
     if not token:
         print("[bootstrap] WARNING: no HF_TOKEN secret set -- this only "
               "works if the dataset repo is public", file=sys.stderr)
 
     from huggingface_hub import snapshot_download
-    snapshot_download(
-        repo_id=DATASET_REPO, repo_type="dataset",
-        token=token, local_dir=str(DATA))
+    try:
+        snapshot_download(
+            repo_id=DATASET_REPO, repo_type="dataset",
+            token=token, local_dir=str(DATA))
+    except Exception as e:                                   # noqa: BLE001
+        if missing(required):
+            raise
+        # only PICASO files were absent: VULCAN still boots offline
+        print(f"[bootstrap] WARNING: dataset download failed ({e!r}); "
+              "booting without the PICASO data", file=sys.stderr)
 
-    gone = missing()
+    gone = missing(required)
     if gone:
         lines = "\n  ".join(str(m) for m in gone)
         raise RuntimeError(
@@ -79,6 +104,12 @@ def main() -> int:
             f"absent:\n  {lines}\nThe dataset repo layout must be "
             "jwst-data/... + retrieval-data/... at the repo root -- "
             "re-run deploy/hf-space/upload_data.sh from the Mac.")
+    gone = missing(picaso)
+    if gone:
+        print(f"[bootstrap] WARNING: {len(gone)}/{len(picaso)} PICASO files "
+              f"absent (first: {gone[0]}) -- VULCAN is unaffected, every "
+              "PICASO run will stop with an error (upload them: "
+              "deploy/hf-space/upload_data.sh)", file=sys.stderr)
     print("[bootstrap] /data seeded and verified")
     return 0
 

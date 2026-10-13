@@ -7,7 +7,9 @@ importable (they skip cleanly on the dependency-light CI).
 """
 from __future__ import annotations
 
+import json
 import os
+import subprocess
 
 import pytest
 
@@ -131,6 +133,79 @@ def test_cdbs_tree_states(tmp_path):
     assert "dangling" in by["cdbs:phoenix"].detail
 
 
+# PICASO engine checks (optional section; tmp trees, sparse CK files)
+
+def _picaso_tree(root, version="4.1"):
+    ref = root / "picaso_refdata"
+    for rel in datacheck.PICASO_REFDATA_FILES:
+        (ref / rel).parent.mkdir(parents=True, exist_ok=True)
+        (ref / rel).write_text("x")
+    (ref / "config.json").write_text(json.dumps({"version": version}))
+    ck = ref / datacheck.PICASO_CK_DIR
+    ck.mkdir(parents=True)
+    for name in datacheck.PICASO_CK_MD5:
+        with open(ck / name, "wb") as w:
+            w.truncate(datacheck.PICASO_CK_BYTES)
+    return ref
+
+
+@pytest.mark.parametrize("case, expect, fragment", [
+    ("complete", ("ok", "ok", "ok"), "version 4.1"),
+    ("absent", ("missing",) * 3, "absent: all"),
+    ("wrong_version", ("ok", "missing", "ok"), "version 4.0, need 4.1"),
+    ("missing_file", ("ok", "missing", "ok"), "ck_cx_cont_opacities_661.db"),
+    ("short_table", ("ok", "ok", "missing"), "not 61806680 bytes: H3+_1460"),
+    ("empty_config", ("ok", "missing", "ok"), "version unreadable, need 4.1"),
+    ("list_config", ("ok", "missing", "ok"), "version unreadable, need 4.1"),
+])
+def test_check_picaso_states(tmp_path, monkeypatch, case, expect, fragment):
+    from jwst_tool import instruments as ins
+    from jwst_tool import provenance
+    py = tmp_path / "python"
+    if case == "absent":
+        ref = tmp_path / "nowhere"
+    else:
+        py.touch()
+        ref = _picaso_tree(tmp_path, "4.0" if case == "wrong_version" else "4.1")
+    if case in ("empty_config", "list_config"):
+        (ref / "config.json").write_text("" if case == "empty_config" else "[]")
+    if case == "missing_file":
+        (ref / "climate_INPUTS" / "ck_cx_cont_opacities_661.db").unlink()
+    if case == "short_table":
+        with open(ref / datacheck.PICASO_CK_DIR / "H3+_1460.hdf5", "r+b") as w:
+            w.truncate(1000)
+    items = datacheck.check_picaso(python=py, refdata=ref)
+    assert [it.key for it in items] == ["picaso:python", "picaso:refdata",
+                                        "picaso:ck"]
+    assert tuple(it.status for it in items) == expect
+    assert any(fragment in it.detail for it in items)
+    assert not any(it.required for it in items)
+    assert "JWST_TOOL_PICASO_PYTHON" in items[0].remedy
+    assert all("jwst-tool fetch --picaso" in it.remedy for it in items[1:])
+    # optional: a machine without PICASO keeps the required-data banner
+    rep = {"sections": {datacheck.PICASO_SECTION: items}}
+    assert datacheck.missing_required(rep) == []
+    assert datacheck.picaso_missing(rep) == [
+        it for it in items if it.status == datacheck.MISSING]
+
+    # the export's PICASO record never raises on the same broken setups: the
+    # touched "python" is not executable, and empty_config's one hangs
+    monkeypatch.setattr(ins, "PICASO_PYTHON", str(py))
+    monkeypatch.setattr(ins, "PICASO_REFDATA", str(ref))
+    if case == "empty_config":
+        def hang(cmd, **kw):
+            raise subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+        monkeypatch.setattr(provenance.subprocess, "run", hang)
+    rec = provenance._picaso_identity()
+    assert rec["picaso"] == "unavailable"
+    assert rec["refdata"]["version"] == {
+        "absent": "missing", "wrong_version": "4.0", "empty_config":
+        "unreadable", "list_config": "unreadable"}.get(case, "4.1")
+    assert rec["climate_tables"] == {"zenodo_record": "18644980",
+                                     "count": 36, "status": expect[2]}
+    assert str(tmp_path) not in json.dumps(rec)
+
+
 # Report plumbing (no external deps at all)
 
 def test_full_report_structure_formatting_and_cache_stats():
@@ -149,6 +224,8 @@ def test_full_report_structure_formatting_and_cache_stats():
     for it in items:
         assert it.label in text
     assert "Generated caches" in text
+    assert datacheck.PICASO_SECTION in rep["sections"]
+    assert datacheck.picaso_missing({"sections": {}}) == []   # older cache
     stats = datacheck.cache_stats()
     for key in ("model_cache", "noise_cache"):
         assert set(stats[key]) == {"n", "mb"}

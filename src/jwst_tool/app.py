@@ -3,7 +3,8 @@
 Launch via the console script ``jwst-tool`` (installed with jwst-transit-authority), or
 directly:  streamlit run src/jwst_tool/app.py  (from the repo root).
 
-Pipeline per run: VULCAN-JAX photochemistry -> ExoJAX
+Pipeline per run: VULCAN-JAX photochemistry (or PICASO climate + equilibrium
+chemistry) -> ExoJAX
 transmission/emission spectrum (local subprocess, disk-cached) -> Pandeia ETC
 noise per instrument mode (subprocess in its own conda env, disk-cached) ->
 science-goal scoring per mode.
@@ -280,6 +281,9 @@ def _data_label(it) -> str:
         "pandeia:refdata": "Pandeia JWST reference data",
         "pandeia:psf": "Pandeia PSF data",
         "cdbs:phoenix": "PHOENIX stellar spectra",
+        "picaso:python": "PICASO engine",
+        "picaso:refdata": "PICASO reference data",
+        "picaso:ck": "PICASO climate opacity tables",
     }
     if it.key in labels:
         return labels[it.key]
@@ -352,7 +356,7 @@ _EXOJAX_SRC = ("ExoJAX", "10.3847/1538-4365/ac3b4d",
                "https://github.com/HajimeKawahara/exojax")
 
 def _source_rows(base_set, extra_set, extra_on, rayleigh_on, cloud_on,
-                 photo_on, sflux_sel):
+                 photo_on, sflux_sel, engine, tp_mode):
     """One row per data source the tool reads: the offered k-tables (base
     first), the continuum terms, and the non-opacity data files. Every row
     carries a resolvable DOI and page; `used in this setup` marks the ones
@@ -392,8 +396,33 @@ def _source_rows(base_set, extra_set, extra_on, rayleigh_on, cloud_on,
         ds, doi, url = planets.SFLUX_SOURCES[fname]
         rows.append({
             "component": f"Stellar UV — {label}",
-            "used in this setup": bool(photo_on) and fname == sflux_sel,
+            "used in this setup": (bool(photo_on) and engine == "vulcan"
+                                   and fname == sflux_sel),
             "data set": ds, "source DOI": doi, "source page": url})
+    _climate = engine == "picaso" and tp_mode == "picaso_climate"
+    rows += [
+        {"component": "Climate model (radiative-convective equilibrium)",
+         "used in this setup": _climate,
+         "data set": "PICASO 4.1 climate (Mukherjee et al. 2023)",
+         "source DOI": "10.3847/1538-4357/ac9f48",
+         "source page": "https://github.com/natashabatalha/picaso/tree/v4.1"},
+        {"component": "Equilibrium chemistry (PICASO engine)",
+         "used in this setup": engine == "picaso",
+         "data set": "photochem 0.9.2 (Wogan et al. 2025)",
+         "source DOI": "10.3847/PSJ/ae0e1c",
+         "source page": "https://github.com/Nicholaswogan/photochem"},
+        {"component": "Climate opacities (correlated-k)",
+         "used in this setup": _climate,
+         "data set": "PICASO resort-rebin tables, 661 bins",
+         "source DOI": "10.5281/zenodo.18644980",
+         "source page": "https://zenodo.org/records/18644980"},
+        {"component": "Solar abundances (PICASO engine)",
+         "used in this setup": engine == "picaso",
+         "data set": "Lodders (2020) Table 8, present-day solar system",
+         "source DOI": "10.1093/acrefore/9780190647926.013.145",
+         "source page":
+             "https://doi.org/10.1093/acrefore/9780190647926.013.145"},
+    ]
     rows += [
         {"component": "Stellar spectrum grid",
          "used in this setup": True,
@@ -436,6 +465,8 @@ with st.expander("Data" +
 # estimate and progress-bar prior is scaled by this factor. The forward.py
 # PROG weights are relative fractions and need no scaling.
 _RUNTIME_SCALE = 2.5 if os.environ.get("SPACE_ID") else 1.0
+# PICASO Guillot/file run, measured on daw: 94 s with three FD rows
+_PICASO_BASE_S, _PICASO_ROW_S = 40.0, 18.0
 
 _PROG_RE = re.compile(r"\[fwd\] PROG ([0-9.]+) (.*)")
 
@@ -762,6 +793,42 @@ def _combo_remove(i: int) -> None:
             "info", f"Removed the combination {removed['name']!r}.")
 
 
+# The chemistry engine. Its widget renders in step 2, but step 1's UV menu
+# already depends on it, so it is read from the session state here.
+_pic = st.session_state.get(K("provider"), "vulcan") == "picaso"
+# Streamlit deletes the state of a widget a run does not render, so the hidden
+# engine's settings are written back to THEMSELVES (Streamlit's idiom; never
+# a different value) and survive an engine switch. Only hidden keys (or
+# seeded ones without a value= default): a rendered widget with a value=
+# default logs a trace when its key is set.
+_pl = st.session_state.get(K("planet"))
+if _pic:
+    _hidden = ["network", "photo", "sza", "fdiur", "moldiff", "vmmol", "jacm",
+               "yconv", "yconvmin"]
+    _hidden += [f"{_pl}_{n}" for n in ("tp", "kzzmode", "kzkmax", "kzplev",
+                                       "kzkdeep", "kzzx")]
+    if not st.session_state.get(K("quench_picaso")):
+        _hidden.append(f"{_pl}_kzz")    # the constant-Kzz box both engines use
+    # the Guillot boxes both engines use, hidden unless PICASO's T-P is Guillot
+    _tp_pic = st.session_state.get(K(f"{_pl}_tp_picaso"))
+    if _tp_pic != "guillot":
+        _hidden += [f"{_pl}_tirr", f"{_pl}_lk", f"{_pl}_lg"]
+    if _tp_pic == "file":
+        _hidden.append(f"{_pl}_tint")
+else:
+    # the T-P and Kzz boxes both engines share, hidden under a VULCAN table
+    # profile or Kzz mode; all are seeded without a value= default
+    _hidden = [f"{_pl}_{n}" for n in ("tint", "tirr", "lk", "lg", "kzz")]
+# Engine-tagged keys of the hidden engine: its molecules and goal selections
+# (and PICASO's T-P, quench and FD boxes).
+_tag = "_vulcan" if _pic else "picaso"
+for _hk in ([K(h) for h in _hidden + [f"{_pl}_tpsrc", "rfacv_picaso_transmission",
+                                      "rfacv_picaso_emission"]]
+            + [k for k in list(st.session_state) if _tag in str(k)]):
+    if _hk in st.session_state:
+        st.session_state[_hk] = st.session_state[_hk]
+
+
 with st.sidebar:
     # Step 0: Load a configuration. Selecting the file does nothing by
     # itself; the Populate button's callback (_populate_config) writes it
@@ -867,7 +934,8 @@ with st.sidebar:
             # default, so gate the widget like every other photolysis knob --
             # otherwise the pick is silently replaced, and shared that way.
             # Session state, not use_photo: the checkbox renders further down.
-            disabled=not st.session_state.get(K("photo"), True))
+            # PICASO has no photolysis.
+            disabled=_pic or not st.session_state.get(K("photo"), True))
 
     # T_eq is derived from the star and orbit for every planet, registry or
     # custom: a stored literature value is a second source of truth that goes
@@ -878,36 +946,71 @@ with st.sidebar:
     st.divider()
     st.markdown("### 2 · Atmosphere")
 
+    with st.expander("Chemistry engine", expanded=True):
+        # no index=: VULCAN (the first option) is the default
+        _pic = st.selectbox(
+            "Chemistry engine", ["vulcan", "picaso"], key=K("provider"),
+            format_func={
+                "vulcan": "VULCAN-JAX (photochemical kinetics)",
+                "picaso": "PICASO (climate + equilibrium chemistry)"}.get
+        ) == "picaso"
+    chem_provider = "picaso" if _pic else "vulcan"
+
     with st.expander("Temperature-pressure profile"):
-        _tp_opts = ["guillot", "file"]
+        # each engine keeps its own T-P choice (PICASO adds its climate solver)
+        _tp_key = _k("tp_picaso") if _pic else _k("tp")
+        _tp_opts = (["picaso_climate", "guillot", "file"] if _pic
+                    else ["guillot", "file"])
         # Mirror canonical_params' default so GUI and API defaults agree --
         # INCLUDING the science mode (emission defaults to Guillot on every
         # planet; the bundled tables are terminator profiles). On a science-
         # mode switch, a widget still holding the other mode's default moves
-        # to this mode's default; an explicit user choice survives.
+        # to this mode's default; an explicit user choice survives. Under
+        # PICASO both defaults are its climate solver, so nothing moves.
         _tp_default = forward._default_tp_mode(
-            {"planet": planet_key, "science_mode": science_mode})
+            {"planet": planet_key, "science_mode": science_mode,
+             "chem_provider": chem_provider})
         _tp_other = forward._default_tp_mode(
             {"planet": planet_key,
              "science_mode": ("transmission" if science_mode == "emission"
                               else "emission")})
-        if st.session_state.get(K("tp_scimode_seen")) != science_mode:
+        if (not _pic and st.session_state.get(K("tp_scimode_seen"))
+                != science_mode):
             st.session_state[K("tp_scimode_seen")] = science_mode
             if st.session_state.get(_k("tp")) == _tp_other != _tp_default:
                 st.session_state[_k("tp")] = _tp_default
-        if st.session_state.get(_k("tp")) not in _tp_opts:
-            st.session_state[_k("tp")] = _tp_default
+        if st.session_state.get(_tp_key) not in _tp_opts:
+            st.session_state[_tp_key] = _tp_default
         # the key is always set above, so no index= default: passing one as
         # well makes Streamlit log a "created with a default value but also
         # set via the Session State API" stack trace on every rerun
         tp_mode = st.selectbox(
             "Temperature-pressure profile", _tp_opts,
-            key=_k("tp"),
-            format_func={"guillot": "Guillot (2010)",
-                         "file": "Tabulated table (T-P, optional Kzz)"}.get)
+            key=_tp_key,
+            format_func={"picaso_climate":
+                         "Radiative-convective (PICASO climate)",
+                         "guillot": "Guillot (2010)",
+                         "file": ("Tabulated table (T-P)" if _pic else
+                                  "Tabulated table (T-P, optional Kzz)")}.get)
         tp_kwargs = {}
         tp_file, tp_file_path, tp_file_ok = "", None, True
-        if tp_mode == "guillot":
+        # seeded once (no value= default), so the engine switch can write
+        # them back while hidden (the write-back block above)
+        for _sk, _sv in (("tint", planets.default_tint(pdef)), ("lk", -2.0),
+                         ("lg", -1.0), ("kzz", 9.0)):
+            if _k(_sk) not in st.session_state:
+                st.session_state[_k(_sk)] = _sv
+        if tp_mode == "picaso_climate":
+            # T_int shares its key with Guillot: the same physics and default
+            tp_kwargs["Tint"] = st.number_input(
+                "T_int (K)", 50.0, 500.0, step=25.0, key=_k("tint"))
+            _rf_key = K(f"rfacv_picaso_{science_mode}")
+            if _rf_key not in st.session_state:
+                st.session_state[_rf_key] = forward.RFACV_DEFAULT[science_mode]
+            tp_kwargs["rfacv"] = st.number_input(
+                "Heat redistribution", *forward.RFACV_RANGE, step=0.05,
+                key=_rf_key, help="0.5 = planet average, 1.0 = dayside.")
+        elif tp_mode == "guillot":
             # one definition shared with canonical_params, so the widget and
             # API defaults cannot drift apart
             tirr0 = planets.default_tirr(
@@ -930,15 +1033,13 @@ with st.sidebar:
                 st.session_state[_k("tirr")] = tirr0
             tp_kwargs["Tirr"] = st.number_input(
                 "T_irr (K)", 800.0, 2500.0, step=20.0, key=_k("tirr"))
-            if _k("tint") not in st.session_state:
-                st.session_state[_k("tint")] = planets.default_tint(pdef)
             tp_kwargs["Tint"] = st.number_input(
                 "T_int (K)", 50.0, 500.0, step=25.0, key=_k("tint"))
             # default 0.01 cm^2/g, Guillot (2010)'s canonical thermal opacity
             tp_kwargs["log_kappa"] = st.number_input(
-                "log10 kappa_IR (cm^2/g)", -4.0, 0.0, -2.0, 0.1, key=_k("lk"))
+                "log10 kappa_IR (cm^2/g)", -4.0, 0.0, step=0.1, key=_k("lk"))
             tp_kwargs["log_gamma"] = st.number_input(
-                "log10 gamma (kappa_vis/kappa_IR)", -2.0, 0.3, -1.0, 0.05,
+                "log10 gamma (kappa_vis/kappa_IR)", -2.0, 0.3, step=0.05,
                 key=_k("lg"))
         elif tp_mode == "file":
             # the shipped table is PER-PLANET; a planet without one may only
@@ -1059,7 +1160,9 @@ with st.sidebar:
         # Composition is STRUCTURAL, one path for every value:
         # metallicity scales O/N/S, C/O sets C_H = co * O_H, the equilibrium
         # seed re-initializes at exactly that composition. No perturbative
-        # knob.
+        # knob. The whole range under both engines, like C/O below: above
+        # PICASO's cap (forward.PICASO_MET_RANGE) canonical_params' sentence
+        # stops the Run.
         met = st.number_input(
             "Metallicity (× solar)", *forward.MET_RANGE, 10.0, 0.5,
             format="%.2f", key=K("met"))
@@ -1077,74 +1180,93 @@ with st.sidebar:
             format="%.3f", key=K("co"))
 
     with st.expander("Vertical mixing (Kzz)"):
-        _kzz_opts = ["const", "Pfunc", "JM16"]
-        # tabulated Kzz needs the tabulated T-P table (its Kzz column)
-        _kzz_file_ok = tp_mode == "file"
-        if _kzz_file_ok:
-            _kzz_opts.append("file")
-            # Same rule as canonical_params: a table that carries Kzz
-            # supplies the mixing profile, so "file" is the default.
-            if _k("kzzmode") not in st.session_state:
-                st.session_state[_k("kzzmode")] = "file"
-        elif st.session_state.get(_k("kzzmode")) in ("file", None):
-            st.session_state[_k("kzzmode")] = "const"
-        # key always seeded above, so no index= default
-        kzz_mode = st.selectbox(
-            "Vertical-mixing profile, Kzz", _kzz_opts,
-            key=_k("kzzmode"),
-            format_func={"const": "Constant",
-                         "Pfunc": "Power law in P",
-                         "JM16": "Moses-type P^-0.5 (JM16)",
-                         "file": "Tabulated (Kzz column of the T-P table)"}.get)
-        kzz_const = kzz_kmax = kzz_plev = kzz_kdeep = 0.0
-        kzz_x = 1.0
-        if kzz_mode == "const":
-            log_kzz = st.number_input(
-                "log10 Kzz (cm^2 s^-1)", 6.0, 12.0, 9.0, 0.25,
-                key=_k("kzz"))
-            kzz_const = 10.0 ** log_kzz
-        elif kzz_mode == "Pfunc":
-            kzz_kmax = 10.0 ** st.number_input(
-                "log10 deep Kzz (cm^2 s^-1)", 4.0, 11.0, 5.0, 0.25,
-                key=_k("kzkmax"))
-            kzz_plev = 10.0 ** st.number_input(
-                "log10 transition level (bar)", -5.0, 2.0, -1.0, 0.25,
-                key=_k("kzplev"))
-        elif kzz_mode == "JM16":
-            kzz_kdeep = 10.0 ** st.number_input(
-                "log10 deep-floor Kzz (cm^2 s^-1)", 4.0, 11.0, 5.0, 0.25,
-                key=_k("kzkdeep"))
-        if kzz_mode != "const":
-            kzz_x = 10.0 ** st.number_input(
-                "Kzz profile multiplier, log10(f)", -1.0, 1.0, 0.0, 0.05,
-                key=_k("kzzx"))
+        picaso_quench = False
+        if _pic:
+            # PICASO is equilibrium chemistry, optionally quenched at one
+            # constant Kzz: no profile menu and no multiplier
+            kzz_mode, kzz_x = "const", 1.0
+            kzz_const = kzz_kmax = kzz_plev = kzz_kdeep = 0.0
+            picaso_quench = st.checkbox(
+                "Quench (constant Kzz)", value=False, key=K("quench_picaso"))
+            if picaso_quench:
+                kzz_const = 10.0 ** st.number_input(
+                    "log10 Kzz (cm^2 s^-1)", 6.0, 12.0, step=0.25,
+                    key=_k("kzz"))
+        else:
+            _kzz_opts = ["const", "Pfunc", "JM16"]
+            # tabulated Kzz needs the tabulated T-P table (its Kzz column)
+            _kzz_file_ok = tp_mode == "file"
+            if _kzz_file_ok:
+                _kzz_opts.append("file")
+                # Same rule as canonical_params: a table that carries Kzz
+                # supplies the mixing profile, so "file" is the default.
+                if _k("kzzmode") not in st.session_state:
+                    st.session_state[_k("kzzmode")] = "file"
+            elif st.session_state.get(_k("kzzmode")) in ("file", None):
+                st.session_state[_k("kzzmode")] = "const"
+            # key always seeded above, so no index= default
+            kzz_mode = st.selectbox(
+                "Vertical-mixing profile, Kzz", _kzz_opts,
+                key=_k("kzzmode"),
+                format_func={"const": "Constant",
+                             "Pfunc": "Power law in P",
+                             "JM16": "Moses-type P^-0.5 (JM16)",
+                             "file": "Tabulated (Kzz column of the T-P "
+                                     "table)"}.get)
+            kzz_const = kzz_kmax = kzz_plev = kzz_kdeep = 0.0
+            kzz_x = 1.0
+            if kzz_mode == "const":
+                log_kzz = st.number_input(
+                    "log10 Kzz (cm^2 s^-1)", 6.0, 12.0, step=0.25,
+                    key=_k("kzz"))
+                kzz_const = 10.0 ** log_kzz
+            elif kzz_mode == "Pfunc":
+                kzz_kmax = 10.0 ** st.number_input(
+                    "log10 deep Kzz (cm^2 s^-1)", 4.0, 11.0, 5.0, 0.25,
+                    key=_k("kzkmax"))
+                kzz_plev = 10.0 ** st.number_input(
+                    "log10 transition level (bar)", -5.0, 2.0, -1.0, 0.25,
+                    key=_k("kzplev"))
+            elif kzz_mode == "JM16":
+                kzz_kdeep = 10.0 ** st.number_input(
+                    "log10 deep-floor Kzz (cm^2 s^-1)", 4.0, 11.0, 5.0, 0.25,
+                    key=_k("kzkdeep"))
+            if kzz_mode != "const":
+                kzz_x = 10.0 ** st.number_input(
+                    "Kzz profile multiplier, log10(f)", -1.0, 1.0, 0.0, 0.05,
+                    key=_k("kzzx"))
 
-    with st.expander("Photochemistry & transport"):
-        network = st.selectbox(
-            "Chemical network", list(forward.NETWORKS),
-            key=K("network"),
-            format_func={"sncho": "S-N-C-H-O (full, default)",
-                         "ncho": "N-C-H-O (no sulfur, faster)",
-                         "sncho2025": "S-N-C-H-O 2025 (experimental)"}.get)
-        if K("photo") not in st.session_state:
-            st.session_state[K("photo")] = True
-        # key always seeded above, so no value= default. AD needs photolysis
-        # on; canonical_params refuses that combination and the Run block
-        # shows its sentence, rather than the widget silently reverting.
-        use_photo = st.checkbox(
-            "Photochemistry (UV photolysis)", key=K("photo"))
-        # default 83 deg = upstream VULCAN's dayside-average zenith angle
-        sl_angle_deg = st.number_input(
-            "Photolysis zenith angle (degrees)", 0.0, 89.0, 83.0, 1.0,
-            key=K("sza"), disabled=not use_photo)
-        f_diurnal = st.number_input(
-            "Diurnal photolysis factor", 0.1, 1.0, 1.0, 0.05,
-            key=K("fdiur"), disabled=not use_photo)
-        use_moldiff = st.checkbox(
-            "Molecular diffusion", value=True, key=K("moldiff"))
-        use_vm_mol = st.checkbox(
-            "Upwind molecular-diffusion advection", value=False,
-            key=K("vmmol"), disabled=not use_moldiff)
+    if _pic:   # VULCAN-JAX settings; none of them is sent under PICASO
+        network, use_photo, use_moldiff, use_vm_mol = "", False, False, False
+        sl_angle_deg, f_diurnal = 0.0, 1.0
+    else:
+        with st.expander("Photochemistry & transport"):
+            network = st.selectbox(
+                "Chemical network", list(forward.NETWORKS),
+                key=K("network"),
+                format_func={"sncho": "S-N-C-H-O (full, default)",
+                             "ncho": "N-C-H-O (no sulfur, faster)",
+                             "sncho2025": "S-N-C-H-O 2025 (experimental)"}.get)
+            if K("photo") not in st.session_state:
+                st.session_state[K("photo")] = True
+            # key always seeded above, so no value= default. AD needs
+            # photolysis on; canonical_params refuses that combination and
+            # the Run block shows its sentence, rather than the widget
+            # silently reverting.
+            use_photo = st.checkbox(
+                "Photochemistry (UV photolysis)", key=K("photo"))
+            # default 83 deg = upstream VULCAN's dayside-average zenith angle
+            sl_angle_deg = st.number_input(
+                "Photolysis zenith angle (degrees)", 0.0, 89.0, 83.0, 1.0,
+                key=K("sza"), disabled=not use_photo)
+            f_diurnal = st.number_input(
+                "Diurnal photolysis factor", 0.1, 1.0, 1.0, 0.05,
+                key=K("fdiur"), disabled=not use_photo)
+            use_moldiff = st.checkbox(
+                "Molecular diffusion", value=True, key=K("moldiff"))
+            use_vm_mol = st.checkbox(
+                "Upwind molecular-diffusion advection", value=False,
+                key=K("vmmol"), disabled=not use_moldiff)
 
     # Opacity settings live in the Atmosphere step so extra_mols is a
     # live variable by step 3; all extras default ON.
@@ -1159,6 +1281,9 @@ with st.sidebar:
                          if m not in forward._S_MOLECULES]
             _extra_set = [m for m in _extra_set
                           if m not in forward._S_MOLECULES]
+        if _pic:    # PICASO's equilibrium species list lacks some extras
+            _extra_set = [m for m in _extra_set
+                          if m not in forward._PICASO_NO_SPECIES]
         st.caption("Correlated-k on ExoMolOP k-tables (R = 1000, "
                    "16 g-points, 1-15 µm), scored on the analysis bins "
                    "(default R = 100). Sources per species are in the Data "
@@ -1180,7 +1305,7 @@ with st.sidebar:
             "Extra opacity molecules", list(_extra_set),
             default=[m for m in _extra_set
                      if m in forward.EXTRA_MOLECULES_DEFAULT],
-            key=K(f"xmols_vulcan{_net_sfx}"))
+            key=K("xmols_picaso" if _pic else f"xmols_vulcan{_net_sfx}"))
 
     with st.expander("Clouds & scattering (ExoJAX)"):
         if K("rayl") not in st.session_state:
@@ -1242,7 +1367,13 @@ with st.sidebar:
     # Step 3: Science goal (only the controls the selected goal needs)
     st.divider()
     st.markdown("### 3 · Science goal")
-    avail_free = list(forward.CHEM_PARAM_NAMES) + forward.TP_PARAM_NAMES[tp_mode]
+    # PICASO has no lnKzz row: its quench levels make the abundances a
+    # staircase in Kzz, so canonical_params refuses the row
+    avail_free = ([p for p in forward.CHEM_PARAM_NAMES if p != "lnKzz"] if _pic
+                  else list(forward.CHEM_PARAM_NAMES)) \
+        + forward.TP_PARAM_NAMES[tp_mode]
+    # widget-key infix: each engine keeps its own goal selections
+    _eng = "picaso" if _pic else "vulcan"
     if cloud_on:
         avail_free = avail_free + [
             p for p in forward.CLOUD_FISHER_PARAMS
@@ -1259,21 +1390,20 @@ with st.sidebar:
         st.session_state[K("tsig")] = 3.0
     if K("dofish") not in st.session_state:
         st.session_state[K("dofish")] = True
-    if K("jacm") not in st.session_state:
-        st.session_state[K("jacm")] = "ad"
     with st.expander("Goal & target"):
         goal = st.radio(
             "Goal", ["detect", "constrain"], horizontal=True, key=K("goal"),
             format_func={"detect": "Detect a molecule",
                          "constrain": "Constrain a parameter"}.get)
         if goal == "detect":
-            # SO2 is the flagship W39b science under VULCAN; the equilibrium
-            # provider has no SO2, so its default detection target is H2O
-            _mol_default = "SO2" if "SO2" in mol_options else "H2O"
+            # SO2 is the flagship W39b science under VULCAN (photochemical);
+            # in equilibrium (PICASO) it is negligible, so H2O is the default
+            _mol_default = ("SO2" if "SO2" in mol_options and not _pic
+                            else "H2O")
             target_mol = st.selectbox(
                 "Molecule to detect", mol_options,
                 index=mol_options.index(_mol_default),
-                key=K(f"mol_vulcan{_net_sfx}_"
+                key=K(("mol_picaso_" if _pic else f"mol_vulcan{_net_sfx}_")
                       + "_".join(sorted(extra_mols))))
             target_sig = st.number_input(
                 "Target significance (σ)", 1.0, 10.0, step=0.5,
@@ -1284,7 +1414,7 @@ with st.sidebar:
             target_mol = None
             goal_param = st.selectbox(
                 "Parameter to constrain", avail_free,
-                key=K(f"gp_vulcan_{tp_mode}_{cloud_sfx}"),
+                key=K(f"gp_{_eng}_{tp_mode}_{cloud_sfx}"),
                 format_func=lambda n: fisher_mod.PARAM_LABELS[n])
             marginalize = st.checkbox(
                 "Marginalize over the other parameters", value=True,
@@ -1324,7 +1454,7 @@ with st.sidebar:
                     # sigmas toward the conditional bound.
                     default=[p for p in ("lnZ", "dlnCO")
                              if p in avail_free],
-                    key=K(f"fx_vulcan_{tp_mode}_{cloud_sfx}"),
+                    key=K(f"fx_{_eng}_{tp_mode}_{cloud_sfx}"),
                     format_func=lambda n: fisher_mod.PARAM_LABELS[n])
                 fisher_params = sorted(set(fisher_extra) | {goal_param})
             elif goal == "constrain":
@@ -1332,22 +1462,32 @@ with st.sidebar:
             else:
                 fisher_params = st.multiselect(
                     "Free parameters", avail_free,
-                    key=K(f"fp_vulcan_{tp_mode}_{cloud_sfx}"),
+                    key=K(f"fp_{_eng}_{tp_mode}_{cloud_sfx}"),
                     default=[p for p in ("lnZ", "dlnCO")
                              if p in avail_free],
                     format_func=lambda n: fisher_mod.PARAM_LABELS[n])
-            # key always seeded above, so no index= default
-            jac_method = st.selectbox(
-                "Differentiation method", ["fd", "ad"],
-                key=K("jacm"),
-                format_func={"fd": "Finite differences",
-                             "ad": "Automatic differentiation "
-                                   "(forward-mode, default)"}.get)
-            # Loud slow-path flag: FD re-solves the chemistry per row.
-            if fisher_params and jac_method == "fd":
-                st.warning("Finite differences re-solve the chemistry per "
-                           "free parameter and are much slower than "
-                           "automatic differentiation.")
+            if _pic:
+                # PICASO runs outside JAX: finite differences only. Its own
+                # key, so the VULCAN choice (K("jacm")) is never written here.
+                jac_method = st.selectbox(
+                    "Differentiation method", ["fd"], key=K("jacm_picaso"),
+                    disabled=True, format_func={"fd": "Finite differences"}.get)
+            else:
+                # Seeded once (share_config writes it on Populate), so no
+                # index= default.
+                if K("jacm") not in st.session_state:
+                    st.session_state[K("jacm")] = "ad"
+                jac_method = st.selectbox(
+                    "Differentiation method", ["fd", "ad"],
+                    key=K("jacm"),
+                    format_func={"fd": "Finite differences",
+                                 "ad": "Automatic differentiation "
+                                       "(forward-mode, default)"}.get)
+                # Loud slow-path flag: FD re-solves the chemistry per row.
+                if fisher_params and jac_method == "fd":
+                    st.warning("Finite differences re-solve the chemistry "
+                               "per free parameter and are much slower than "
+                               "automatic differentiation.")
 
     # Step 4: Observation
     st.divider()
@@ -1510,14 +1650,17 @@ with st.sidebar:
         nz = st.number_input(
             "Layers per grid (chemistry and RT)", *forward.NZ_RANGE,
             forward.NZ_DEFAULT, 10, key=K("nz"))
-        yconv_cri = st.number_input(
-            "Solver convergence tolerance", 1.0e-4, 1.0e-2,
-            forward.YCONV_DEFAULT, 1.0e-4,
-            format="%.1e", key=K("yconv"))
-        yconv_min = st.number_input(
-            "Loose-branch convergence gate", 1.0e-4, 0.1,
-            forward.YCONV_MIN_DEFAULT, 1.0e-4,
-            format="%.1e", key=K("yconvmin"))
+        # the VULCAN-JAX kinetics solver's gates; not sent under PICASO
+        yconv_cri, yconv_min = forward.YCONV_DEFAULT, forward.YCONV_MIN_DEFAULT
+        if not _pic:
+            yconv_cri = st.number_input(
+                "Solver convergence tolerance", 1.0e-4, 1.0e-2,
+                forward.YCONV_DEFAULT, 1.0e-4,
+                format="%.1e", key=K("yconv"))
+            yconv_min = st.number_input(
+                "Loose-branch convergence gate", 1.0e-4, 0.1,
+                forward.YCONV_MIN_DEFAULT, 1.0e-4,
+                format="%.1e", key=K("yconvmin"))
 
     # Condensation is API-only: the GUI never sends the key, and
     # canonical_params pins it (and the removed settling/escape/boundary-flux
@@ -1579,6 +1722,14 @@ params = dict(planet=planet_key, science_mode=science_mode,
               # of them and skips the block entirely.
               wo_mols=([target_mol] if goal == "detect" else []),
               extra_mols=extra_mols, **tp_kwargs)
+if _pic:
+    # VULCAN-JAX settings are omitted, never sent at a neutral value; rfacv
+    # rides tp_kwargs (climate only)
+    for _vk in ("network", "yconv_cri", "yconv_min", "sflux", "kzz_x",
+                "kzz_kmax", "kzz_plev", "kzz_kdeep", "use_photo",
+                "sl_angle_deg", "f_diurnal", "use_moldiff", "use_vm_mol"):
+        del params[_vk]
+    params.update(chem_provider="picaso", picaso_quench=picaso_quench)
 star = dict(teff=teff, log_g=logg, metallicity=feh, ks_mag=ks_mag)
 planet_label = (planets.PLANETS[planet_key]["label"]
                 if planet_key in planets.PLANETS else "custom planet")
@@ -1594,6 +1745,20 @@ except (ValueError, RuntimeError) as e:  # stale widget combo mid-rerun, or a
     _record_refusal(params_error)
 if tp_mode == "file" and not tp_file_ok and params_error is None:
     params_error = "file-mode T-P selected but no valid table is loaded"
+# A PICASO run needs its own environment and data (datacheck's optional
+# PICASO section).
+# fresh (about 40 stat calls), not the 1 h report cache: a PICASO install or
+# fetch must unblock the Run at once; VULCAN runs pay nothing
+_pic_missing = (datacheck.picaso_missing(
+    {"sections": {datacheck.PICASO_SECTION: datacheck.check_picaso()}})
+    if _pic else [])
+if _pic and _pic_missing and params_error is None:
+    _pic_labels = ", ".join(_data_label(it) for it in _pic_missing)
+    params_error = (
+        f"this hosted deployment is missing {_pic_labels}; please report it "
+        "to isaacmalsky@gmail.com." if os.environ.get("SPACE_ID") else
+        f"PICASO is not set up here (missing: {_pic_labels}); `jwst-tool "
+        "data` lists what to install.")
 
 with _opacity_slot:
     st.markdown("#### Data sources")
@@ -1603,7 +1768,7 @@ with _opacity_slot:
         st.dataframe(
             _source_rows(_base_set, _extra_set, extra_mols, use_rayleigh
                          and science_mode == "transmission", cloud_on,
-                         use_photo, sflux),
+                         use_photo, sflux, chem_provider, tp_mode),
             column_config={
                 "used in this setup": st.column_config.CheckboxColumn(
                     "used in this setup"),
@@ -1634,15 +1799,16 @@ if t_char < 900.0:
 _solve_min = max(1.0, base_min * 0.5)
 _rt_only = set(forward.CLOUD_FISHER_PARAMS)
 n_cloud_rows = sum(1 for n in fisher_params if n in _rt_only)
+_cloud_min = 0.2 * n_cloud_rows          # RT-only rows, either engine
 _solve_rows = [n for n in fisher_params if n not in _rt_only]
 n_fd_comp = sum(1 for n in _solve_rows if n in forward.FD_COMP_PARAMS)
 n_fd_theta = len(_solve_rows) - n_fd_comp
 if jac_method == "ad":
     fd_min = (1.5 * n_fd_comp * _solve_min
-              + n_fd_theta * 4 * _solve_min + 0.2 * n_cloud_rows)
+              + n_fd_theta * 4 * _solve_min + _cloud_min)
 else:
     fd_min = (n_fd_comp * 4 * (_solve_min + 0.8)
-              + n_fd_theta * 4 * _solve_min + 0.2 * n_cloud_rows)
+              + n_fd_theta * 4 * _solve_min + _cloud_min)
 
 # The removed-molecule spectrum (TARGET ONLY on detect; constrain computes
 # none). This term sits OUTSIDE base_min on purpose: a Jacobian row computes
@@ -1653,6 +1819,17 @@ _wo_min = ((0.05 * _n_mols_est * (nz / forward.NZ_DEFAULT))
 
 # One scaled total is the progress-bar prior (no runtime text is shown).
 _est_total_min = (base_min + _wo_min + fd_min) * _RUNTIME_SCALE
+if _pic:
+    # The climate baseline is two solves (its gravity fixed point) and a
+    # climate FD row four; the measured figures include the k-table loads.
+    _base_s, _row_s = ((2 * forward.PICASO_CLIMATE_SOLVE_S,
+                        4 * forward.PICASO_CLIMATE_SOLVE_S)
+                       if tp_mode == "picaso_climate"
+                       else (2 * forward.PICASO_QUENCH_COLUMN_S,
+                             4 * forward.PICASO_QUENCH_COLUMN_S)
+                       if picaso_quench else (_PICASO_BASE_S, _PICASO_ROW_S))
+    _est_total_min = ((_base_s + _row_s * len(_solve_rows)) / 60.0
+                      + _cloud_min + _wo_min) * _RUNTIME_SCALE
 
 # --- Run row: validation messages, run button, review summary --------------
 with _run_slot:
@@ -1775,7 +1952,8 @@ def _take_slot(slot: list) -> bool:
         s = runlimit.acquire("forward+etc")
         if s is None:
             runlimit.notify_refused(
-                f"instance busy: {planet_label}, tp_mode={tp_mode}, "
+                f"instance busy: {planet_label}, engine={chem_provider}, "
+                f"tp_mode={tp_mode}, "
                 f"modes={list(mode_keys)}")
             t0 = runlimit.oldest_start()
             since = ("" if t0 is None else " The longest-running one started "
@@ -1803,8 +1981,8 @@ def _compute_locked(slot):
     if model is None:
         if not _take_slot(slot):
             return None
-        with st.status("Running VULCAN-JAX + ExoJAX forward model …",
-                       expanded=True) as status:
+        with st.status(f"Running {'PICASO' if _pic else 'VULCAN-JAX'} + "
+                       "ExoJAX forward model …", expanded=True) as status:
             # prior = the same rough pre-run estimate shown next to the Run
             # button; the bar's remaining time converges to the measured pace
             bar = _TimedBar(prior_total_s=_est_total_min * 60.0,

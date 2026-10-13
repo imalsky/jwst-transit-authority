@@ -88,6 +88,53 @@ else
     export VULCAN_FORWARD_DATA=/data/retrieval-data
 fi
 
+# PICASO reference data (either data root above). picaso opens its continuum
+# database with sqlite, which takes POSIX locks that a dataset or bucket mount
+# need not support, so the small reference files (about 9 MB) are copied to
+# container-local disk on every boot. The correlated-k tables (2.2 GB of
+# pure-read HDF5) are not copied: each listed table is symlinked into a
+# container-local directory, because picaso globs that directory and loads
+# every table it finds, so a table the dataset carries beyond the list must
+# never be visible. Both lists are the installed tool's (jwst_tool.datacheck).
+# Every listed table must be there: a missing one would silently change the
+# climate opacity. Missing data fails closed for PICASO only: the tree is
+# removed, so every PICASO run stops with an error, and VULCAN boots and runs
+# unaffected. (A failed datacheck import stops the boot here; the app imports
+# the same module and could not start either.)
+PICASO_DIR="picaso_refdata-$(python -c 'from jwst_tool import datacheck as d; print(d.PICASO_RELEASE)')"
+PICASO_SRC="$JWST_TOOL_DATA_DIR/$PICASO_DIR"
+PICASO_DST="/tmp/$PICASO_DIR"
+PICASO_COPY="$(python -c 'from jwst_tool import datacheck as d
+print(*d.PICASO_REFDATA_FILES)')"
+PICASO_LINK="$(python -c 'from jwst_tool import datacheck as d
+print(*(f"{d.PICASO_CK_DIR}/{n}" for n in d.PICASO_CK_MD5))')"
+rm -rf "$PICASO_DST"
+picaso_missing=0
+for f in $PICASO_COPY; do
+    mkdir -p "$PICASO_DST/$(dirname "$f")"
+    # plain cp: the copy must not keep the mount's read-only modes
+    cp "$PICASO_SRC/$f" "$PICASO_DST/$f" || picaso_missing=$((picaso_missing + 1))
+done
+for f in $PICASO_LINK; do
+    mkdir -p "$PICASO_DST/$(dirname "$f")"
+    if [ -f "$PICASO_SRC/$f" ]; then
+        ln -s "$PICASO_SRC/$f" "$PICASO_DST/$f"
+    else
+        echo "[entrypoint] missing $PICASO_SRC/$f"
+        picaso_missing=$((picaso_missing + 1))
+    fi
+done
+export JWST_TOOL_PICASO_REFDATA="$PICASO_DST"
+if [ "$picaso_missing" -eq 0 ]; then
+    echo "[entrypoint] PICASO reference files copied to $PICASO_DST;" \
+         "$(echo $PICASO_LINK | wc -w) CK tables linked from $PICASO_SRC"
+else
+    rm -rf "$PICASO_DST"
+    echo "[entrypoint] WARNING: $picaso_missing PICASO file(s) missing under" \
+         "$PICASO_SRC -- every PICASO run will stop with an error (upload" \
+         "them: deploy/hf-space/upload_data.sh)"
+fi
+
 # Science-data identity for the model cache. The caches on $STATE outlive every
 # restart while the dataset repo can gain a corrected k-table under the same
 # filename -- and no model parameter changes with it, so a cached spectrum would

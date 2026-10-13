@@ -7,7 +7,7 @@ sets the HF_TOKEN secret from $HF_DATASET_READ_TOKEN (+ DATASET_REPO variable
 if non-default), requests
 persistent storage / CPU Upgrade hardware / 1 h sleep (these three need
 billing configured at hf.co/settings/billing), and finally uploads the
-staged ~7.5 GB data (resumable -- re-run this script if interrupted;
+staged ~10 GB data (resumable -- re-run this script if interrupted;
 completed steps are skipped or idempotent).
 
 Env: HF_DATASET_READ_TOKEN (required). Overrides: DATASET_REPO, SPACE_REPO,
@@ -33,6 +33,19 @@ STAGE_MARKERS = [
     STAGE / "retrieval-data" / "cm24_wasp39b",
     STAGE / "retrieval-data" / "opacity_cache",
 ]
+
+
+def picaso_markers() -> list[Path]:
+    """Every PICASO file, from the installed tool's datacheck (the list
+    upload_data.sh stages). PICASO is optional: a missing file only warns."""
+    try:
+        from jwst_tool import datacheck as dc
+    except ImportError:
+        die("jwst_tool not importable -- run this with the python that has "
+            "the tool installed (upload_data.sh needs it too)")
+    root = STAGE / "jwst-data" / f"picaso_refdata-{dc.PICASO_RELEASE}"
+    return ([root / f for f in dc.PICASO_REFDATA_FILES]
+            + [root / dc.PICASO_CK_DIR / n for n in dc.PICASO_CK_MD5])
 
 
 def die(msg: str) -> None:
@@ -67,6 +80,12 @@ def main() -> int:
         die(f"staged data incomplete -- missing:\n  {listing}\n"
             "Run deploy/hf-space/upload_data.sh once to (re)stage, or set "
             "STAGE_DIR.")
+    picaso = picaso_markers()
+    gone = [m for m in picaso if not m.exists()]
+    if gone:
+        print(f"WARNING: {len(gone)}/{len(picaso)} PICASO files not staged "
+              f"(first: {gone[0]}). VULCAN is unaffected; every PICASO run on "
+              "the Space will stop with an error.", file=sys.stderr)
 
     # Non-fatal preflight: the Space build clones the GitHub repos and reads
     # version pins from jwst-transit-authority/deploy/ -- if deploy/ is not pushed
@@ -160,7 +179,7 @@ def main() -> int:
                   "endpoint. Set it in the browser instead: Space Settings "
                   "-> Hardware -> CPU Upgrade, sleep 1 h.", file=sys.stderr)
 
-    step("uploading staged data (~7.5 GB, resumable; the long step)")
+    step("uploading staged data (~10 GB, resumable; the long step)")
     api.upload_large_folder(repo_id=dataset, repo_type="dataset",
                             folder_path=str(STAGE))
     print("data upload complete")

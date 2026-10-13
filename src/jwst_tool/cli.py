@@ -4,8 +4,10 @@
 ``jwst-tool fetch``        download every missing dataset with a public URL,
                            then print the short manual list (two STScI Box
                            downloads + the Pandeia conda environment)
+``jwst-tool fetch --picaso``  also the optional PICASO engine's reference
+                           data and climate tables (about 2.4 GB)
 ``jwst-tool data``         print the full data-availability report + remedies
-``jwst-tool data --deep``  also probe the Pandeia env for its engine version
+``jwst-tool data --deep``  also probe the Pandeia and PICASO envs for versions
 ``jwst-tool archive-refresh``  refresh the shipped NASA Exoplanet Archive
                            snapshot (maintainer/release step; network)
 
@@ -13,7 +15,8 @@ The GUI launch is equivalent to ``streamlit run src/jwst_tool/app.py``, but
 works from anywhere once the package is installed. Preflight checks catch the
 two external requirements with actionable messages instead of a mid-run stack
 trace: an importable ``vulcan_jax`` package and the Pandeia backend env
-(``$JWST_TOOL_PANDEIA_PYTHON``).
+(``$JWST_TOOL_PANDEIA_PYTHON``). A missing PICASO env
+(``$JWST_TOOL_PICASO_PYTHON``) only prints a note.
 """
 from __future__ import annotations
 
@@ -29,7 +32,7 @@ def _data_status(argv: list[str]) -> int:
     unknown = [a for a in argv if a not in ("--deep",)]
     if unknown:
         print(f"jwst-tool data: unknown argument(s) {unknown}; the only flag "
-              "is --deep (probe the Pandeia env's engine version).",
+              "is --deep (probe the Pandeia and PICASO envs for versions).",
               file=sys.stderr)
         return 2
     from jwst_tool import datacheck
@@ -43,7 +46,7 @@ def main() -> int:
         return _data_status(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == "fetch":
         from jwst_tool import fetch
-        return fetch.run_fetch()
+        return fetch.run_fetch(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == "archive-refresh":
         from jwst_tool import archive
         return archive.run_refresh(sys.argv[2:])
@@ -78,6 +81,10 @@ def main() -> int:
               "until this environment is available. "
               "Run `jwst-tool data` for the full data-availability report.",
               file=sys.stderr)
+    if not (ins.PICASO_PYTHON and Path(ins.PICASO_PYTHON).exists()):
+        print("jwst-tool: the PICASO engine stops with an error until "
+              "JWST_TOOL_PICASO_PYTHON points at its environment's python; "
+              "VULCAN runs are unaffected.", file=sys.stderr)
 
     app = Path(__file__).parent / "app.py"
     cmd = [sys.executable, "-m", "streamlit", "run", str(app)] + sys.argv[1:]

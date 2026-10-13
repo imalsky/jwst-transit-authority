@@ -354,6 +354,8 @@ def probe_pandeia_engine(python: str | Path = None,
             capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return f"unavailable (probe timed out after {timeout:g} s)"
+    except OSError as e:          # not executable / not a binary
+        return f"unavailable ({e.strerror or e})"
     if r.returncode != 0 or not r.stdout.strip():
         tail = (r.stderr or "").strip().splitlines()
         return ("unavailable (pandeia.engine not importable in that env"
@@ -402,6 +404,178 @@ def check_synphot_cdbs(cdbs: str | Path = None) -> list[Item]:
     return items
 
 
+# PICASO engine (optional second engine; every item is required=False)
+
+PICASO_SECTION = "PICASO engine (optional)"
+PICASO_RELEASE = "4.1"
+# md5 of each file under PICASO_REFDATA that picaso's climate path reads, from
+# picaso's v4.1 tag (reference/). With PICASO_CK_MD5 below this is the one
+# 40-file manifest; `jwst-tool fetch --picaso` verifies against it.
+PICASO_REFDATA_MD5 = {
+    "config.json": "98004fac6d7437853d44963941becaaf",
+    "climate_INPUTS/ck_cx_cont_opacities_661.db":
+        "d290d792048497deed67402541b15f27",
+    "climate_INPUTS/specific_heat_p_adiabat_grad.json":
+        "1db0ba98e1d664eca4b67046232a3a16",
+    "chemistry/thermo_data/thermo-sonora-component.yaml":
+        "107d369381ddb9813df308cdb6ed6988",
+}
+PICASO_REFDATA_FILES = tuple(PICASO_REFDATA_MD5)
+PICASO_CK_DIR = "opacities/resortrebin"
+PICASO_CK_BYTES = 61_806_680
+PICASO_CK_RECORD = "18644980"      # Zenodo, 10.5281/zenodo.18644980, CC-BY-4.0
+# md5 per resort-rebin table, from https://zenodo.org/api/records/18644980;
+# datacheck checks the byte count, `jwst-tool fetch --picaso` the digest
+PICASO_CK_MD5 = {
+    "AlH_1460.hdf5": "13f42ca48039edd0d5f19c2495825ff8",
+    "C2H2_1460.hdf5": "1a5fad713f2edeb4ae8d20cdecfd5a4a",
+    "C2H4_1460.hdf5": "04a850bea1c88f616f9444be768023b2",
+    "C2H6_1460.hdf5": "ea136a2f882cb69de03c2ddce463744b",
+    "CaH_1460.hdf5": "e807f6ba288049b668cee7f9a0adbe32",
+    "CH4_1460.hdf5": "5463b03978119b6e804fb62edd5d30d6",
+    "CO2_1460.hdf5": "751870e23261e67fd9f1f483c489465b",
+    "CO_1460.hdf5": "31967eab717af8a4bdb171e08710bc25",
+    "CrH_1460.hdf5": "1f2837ec6dd20339a32131f07bdc7e0b",
+    "Cs_1460.hdf5": "d9934d46985f7451a2b84a54a4606661",
+    "Fe_1460.hdf5": "ff52009850033e15c5886588720a3cea",
+    "FeH_1460.hdf5": "aa512abf62bb39725537ddd5e8d1d725",
+    "H2_1460.hdf5": "a86aa06bdbfb6a40a4538652f1b51875",
+    "H2O_1460.hdf5": "ebd7a417244da44cbfecac5464d2ea3f",
+    "H2S_1460.hdf5": "7ed039ca79f17cb059c2d0155ac7d51c",
+    "H3+_1460.hdf5": "ef884dd053c7041c9319900a77c89d75",
+    "HCN_1460.hdf5": "fefc9529a9cf24dcdb64d913ea0dcc89",
+    "K_1460.hdf5": "9e26ff33440e092d8140ceaea441b9ce",
+    "Li_1460.hdf5": "2711c81de87ef7a244839eb9ddda8ef0",
+    "LiCl_1460.hdf5": "4eb9924fa4fd1b75cc7f1075a3328517",
+    "LiF_1460.hdf5": "c95409638f88e37d3e00030fea6077ca",
+    "LiH_1460.hdf5": "f6cf85423910f6c95d7e326887d72bb9",
+    "MgH_1460.hdf5": "a896f803b72d42fd7d6c74792ee65c31",
+    "N2_1460.hdf5": "441cca2478c684a09c8accf915e4a972",
+    "Na_1460.hdf5": "61db98327bd93988731cece9276334e3",
+    "NH3_1460.hdf5": "3c178bbb1447c0a81d098cc3fb6702df",
+    "O2_1460.hdf5": "56d0e6141099651f280502a56e487ed1",
+    "O3_1460.hdf5": "f7312d26a1971fa77b89f0cd06484ab1",
+    "OCS_1460.hdf5": "89589ea60b9af08248b3a723af7cd5b6",
+    "PH3_1460.hdf5": "9ba0bc9bc994c20fa2c0cf2874d1ae3f",
+    "Rb_1460.hdf5": "b966d8d8a2df1611a867bf65a807bb3a",
+    "SiO_1460.hdf5": "b5e86a5d8cfbbc57d2eda3887ffa72b1",
+    "SO2_1460.hdf5": "ae65e858ca6c36eba8b0d5e18ca70de6",
+    "TiH_1460.hdf5": "15f8a63f9d36304b61bb6071502a5b72",
+    "TiO_1460.hdf5": "940518bf5b735fd49344dbfa3be765f8",
+    "VO_1460.hdf5": "aef34622d87ee2713495292134d9f36c",
+}
+# the two locks the Space image builds the env from; the conda lock is an
+# explicit linux-64 list
+PICASO_ENV_RECIPE = (
+    "on linux-64, in a checkout of this repository,  conda create -n picaso "
+    "--file deploy/picaso-conda-lock.txt  (micromamba create takes the same "
+    "arguments), then  conda run -n picaso python -m pip install --no-deps "
+    "-r deploy/requirements-picaso-lock.txt,  and point "
+    "JWST_TOOL_PICASO_PYTHON at that environment's python")
+
+
+def check_picaso(python: str | Path | None = None,
+                 refdata: str | Path | None = None) -> list[Item]:
+    """The PICASO engine's interpreter, reference tree and climate tables.
+
+    All three are optional: a machine without PICASO keeps a clean report
+    (and banner); a PICASO run stops with its own error.
+    """
+    _py = python if python is not None else ins.PICASO_PYTHON
+    python = Path(_py) if _py else None
+    refdata = Path(refdata if refdata is not None else ins.PICASO_REFDATA)
+    fetch_cmd = ("jwst-tool fetch --picaso  (or point JWST_TOOL_PICASO_REFDATA "
+                 f"at a complete picaso {PICASO_RELEASE} reference tree)")
+
+    py_ok = python is not None and python.exists()
+    items = [Item(
+        key="picaso:python", label="PICASO engine environment (python)",
+        status=OK if py_ok else MISSING, required=False,
+        detail=(_found(python) if py_ok else
+                (f"absent: {python}" if python is not None
+                 else "JWST_TOOL_PICASO_PYTHON not set (no default: the "
+                      "environment is machine-specific)")),
+        remedy=(f"picaso {PICASO_RELEASE} needs numpy >= 2, so it runs in "
+                f"its own environment:  {PICASO_ENV_RECIPE}."))]
+
+    try:
+        ver = str(json.loads((refdata / "config.json").read_text()).get("version"))
+    except (OSError, ValueError, AttributeError):
+        ver = None
+    missing = [f for f in PICASO_REFDATA_FILES if not (refdata / f).is_file()]
+    ref_ok = not missing and ver == PICASO_RELEASE
+    if ref_ok:
+        detail = f"{_found(refdata)} (version {ver})"
+    elif not refdata.is_dir():
+        detail = f"absent: {refdata}"
+    elif missing:
+        detail = f"{refdata}: missing {', '.join(missing)}"
+    else:
+        detail = (f"{refdata}: config.json version {ver or 'unreadable'}, "
+                  f"need {PICASO_RELEASE}")
+    items.append(Item(
+        key="picaso:refdata",
+        label=f"PICASO {PICASO_RELEASE} reference data",
+        status=OK if ref_ok else MISSING, required=False,
+        detail=detail, remedy=fetch_cmd))
+
+    # byte count only (cheap); the fetcher verifies each md5
+    ck = refdata / PICASO_CK_DIR
+    absent = [n for n in PICASO_CK_MD5 if not (ck / n).is_file()]
+    wrong = [n for n in PICASO_CK_MD5 if n not in absent
+             and (ck / n).stat().st_size != PICASO_CK_BYTES]
+    n_all = len(PICASO_CK_MD5)
+    if not absent and not wrong:
+        detail = f"found: {n_all} tables at {ck}"
+    else:
+        detail = f"{n_all - len(absent) - len(wrong)} of {n_all} tables at {ck}"
+        if absent:
+            detail += "; absent: " + ("all" if len(absent) == n_all
+                                      else ", ".join(absent))
+        if wrong:
+            detail += f"; not {PICASO_CK_BYTES} bytes: " + ", ".join(wrong)
+    items.append(Item(
+        key="picaso:ck",
+        label="PICASO climate correlated-k tables (resort-rebin)",
+        status=MISSING if absent or wrong else OK, required=False,
+        detail=detail, remedy=fetch_cmd))
+    return items
+
+
+def probe_picaso_env(python: str | Path | None = None, timeout: float = 60.0) -> str:
+    """Ask the PICASO env for its picaso / photochem / numpy versions (slow:
+    subprocess). It imports photochem (the compiled solver) but never picaso,
+    which needs its data paths at import. Never raises -- this is a report.
+    """
+    _py = python if python is not None else ins.PICASO_PYTHON
+    if not _py:
+        return "unavailable (JWST_TOOL_PICASO_PYTHON is not set)"
+    python = Path(_py)
+    if not python.exists():
+        return f"unavailable (no python at {python})"
+    code = ("import importlib.metadata as m, photochem; print(', '.join("
+            "f'{n} {m.version(n)}' for n in ('picaso', 'photochem', 'numpy')))")
+    try:
+        r = subprocess.run([str(python), "-c", code], capture_output=True,
+                           text=True, timeout=timeout, check=False)
+    except subprocess.TimeoutExpired:
+        return f"unavailable (probe timed out after {timeout:g} s)"
+    except OSError as e:          # not executable / not a binary
+        return f"unavailable ({e.strerror or e})"
+    if r.returncode != 0 or not r.stdout.strip():
+        tail = (r.stderr or "").strip().splitlines()
+        return "unavailable (" + (tail[-1] if tail else
+                                  f"exit {r.returncode}") + ")"
+    return r.stdout.strip().splitlines()[-1]
+
+
+def picaso_missing(report: dict) -> list[Item]:
+    """MISSING items of the PICASO section (none for a report cached before
+    the section existed; the PICASO run path still stops loudly)."""
+    return [it for it in report["sections"].get(PICASO_SECTION, [])
+            if it.status == MISSING]
+
+
 # Generated caches (informational)
 
 def cache_stats() -> dict:
@@ -421,7 +595,7 @@ def full_report(base_mols: list[str] = None, extra_mols: list[str] = None,
 
     ``base_mols``/``extra_mols`` default to the forward model's sets (passed
     in to keep this module import-independent of forward.py for tests).
-    ``deep`` adds a subprocess probe of the Pandeia env's engine version.
+    ``deep`` adds subprocess probes of the Pandeia and PICASO envs.
     """
     if base_mols is None or extra_mols is None:
         from jwst_tool import forward
@@ -435,12 +609,14 @@ def full_report(base_mols: list[str] = None, extra_mols: list[str] = None,
         f"Pandeia noise backend ({ins.JWST_TOOL_BACKEND})":
             check_pandeia_backend(),
         "Star normalization data (synphot CDBS)": check_synphot_cdbs(),
+        PICASO_SECTION: check_picaso(),
     }
     report = {"backend": ins.JWST_TOOL_BACKEND,
               "backend_status": ins.BACKEND_STATUS,
               "sections": sections, "caches": cache_stats()}
     if deep:
         report["engine_probe"] = probe_pandeia_engine()
+        report["picaso_probe"] = probe_picaso_env()
     return report
 
 
@@ -468,6 +644,8 @@ def format_report(report: dict) -> str:
     lines = [f"jwst-tool data status  (backend: {report['backend_status']})"]
     if "engine_probe" in report:
         lines.append(f"pandeia.engine version probe: {report['engine_probe']}")
+    if "picaso_probe" in report:
+        lines.append(f"PICASO environment probe: {report['picaso_probe']}")
     for name, items in report["sections"].items():
         lines += ["", name, "-" * len(name)]
         for it in items:

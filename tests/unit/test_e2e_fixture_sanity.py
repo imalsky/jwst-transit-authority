@@ -21,16 +21,18 @@ import pytest
 
 from jwst_tool import forward
 
-FIXTURE = (Path(__file__).parent.parent / "live" / "data"
-           / "w39b_v59_reference.npz")
+_DATA = Path(__file__).parent.parent / "live" / "data"
 
 
-@pytest.fixture(scope="module")
-def fixture():
-    assert FIXTURE.exists(), (
-        f"missing {FIXTURE}: the full-chain e2e reference must ship with the "
+# the VULCAN default and the PICASO engine's default (climate T-P)
+@pytest.fixture(scope="module", params=["w39b_v59_reference.npz",
+                                        "w39b_picaso_reference.npz"])
+def fixture(request):
+    path = _DATA / request.param
+    assert path.exists(), (
+        f"missing {path}: the full-chain e2e reference must ship with the "
         "repo (regenerate per its meta['regenerate'])")
-    z = np.load(FIXTURE)
+    z = np.load(path)
     return z, json.loads(bytes(np.asarray(z["meta"])))
 
 

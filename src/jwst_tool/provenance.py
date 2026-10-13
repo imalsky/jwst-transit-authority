@@ -8,6 +8,7 @@ import subprocess
 from functools import lru_cache
 from pathlib import Path
 
+from jwst_tool import datacheck as dc
 from jwst_tool import forward
 from jwst_tool import instruments as ins
 from jwst_tool import noise
@@ -100,11 +101,24 @@ def _file(path: Path) -> dict:
     }
 
 
+def _probe(python, code: str) -> dict | None:
+    """Run ``code`` in another interpreter; its last stdout line parsed as a
+    JSON object, or None when that fails in any way (no such file, not
+    executable, hung, bad output): an export records "unavailable" and never
+    fails because a side environment is broken."""
+    try:
+        if not python or not Path(python).is_file():
+            return None
+        result = subprocess.run(
+            [str(python), "-c", code], capture_output=True, text=True,
+            timeout=30, check=False)
+        out = json.loads(result.stdout.splitlines()[-1])
+    except (OSError, subprocess.TimeoutExpired, IndexError, ValueError):
+        return None
+    return out if result.returncode == 0 and isinstance(out, dict) else None
+
+
 def _pandeia_python_identity() -> dict:
-    python = ins.PANDEIA_PYTHON
-    if not python or not Path(python).is_file():
-        return {"engine": "unavailable", "pandexo": "unavailable",
-                "pandexo_commit": None}
     code = r'''import importlib.metadata as m, json
 out = {}
 for name in ("pandeia.engine", "pandexo.engine"):
@@ -118,17 +132,50 @@ except Exception: pass
 print(json.dumps({"engine": out["pandeia.engine"],
                   "pandexo": out["pandexo.engine"],
                   "pandexo_commit": commit}))'''
-    result = subprocess.run(
-        [python, "-c", code], capture_output=True, text=True, timeout=30,
-        check=False)
-    if result.returncode != 0:
-        return {"engine": "unavailable", "pandexo": "unavailable",
-                "pandexo_commit": None}
+    return _probe(ins.PANDEIA_PYTHON, code) or {
+        "engine": "unavailable", "pandexo": "unavailable",
+        "pandexo_commit": None}
+
+
+def _picaso_identity() -> dict:
+    """The PICASO env's stack (metadata only: importing picaso needs its data
+    paths), the reference tree's config.json release and the climate table
+    set. Never raises, like datacheck.check_picaso: PICASO is optional, so a
+    broken PICASO setup records "unavailable"/"unreadable" instead of
+    breaking a VULCAN export."""
+    code = r'''import importlib.metadata as m, json
+out = {}
+for name in ("picaso", "photochem", "numpy"):
+    try: out[name] = m.version(name)
+    except m.PackageNotFoundError: out[name] = "not installed"
+print(json.dumps(out))'''
+    out = _probe(ins.PICASO_PYTHON, code) or {
+        "picaso": "unavailable", "photochem": "unavailable",
+        "numpy": "unavailable"}
+    refdata = Path(ins.PICASO_REFDATA)
+    config = refdata / "config.json"
+    out["refdata"] = {"name": config.name, "version": "missing",
+                      "sha256": None}
     try:
-        return json.loads(result.stdout.splitlines()[-1])
-    except (IndexError, json.JSONDecodeError):
-        return {"engine": "unavailable", "pandexo": "unavailable",
-                "pandexo_commit": None}
+        if config.is_file():
+            out["refdata"]["version"] = "unreadable"
+            out["refdata"]["sha256"] = _sha256(config)
+            # an older picaso tree has no version field: say so, never guess
+            out["refdata"]["version"] = str(json.loads(
+                config.read_text()).get("version", "unversioned"))
+    except (OSError, ValueError, AttributeError):
+        pass
+    # the status is datacheck's (every pinned table present, right size)
+    out["climate_tables"] = {"zenodo_record": dc.PICASO_CK_RECORD,
+                             "count": len(dc.PICASO_CK_MD5),
+                             "status": "unreadable"}
+    try:
+        out["climate_tables"]["status"] = next(
+            it.status for it in dc.check_picaso(python="", refdata=refdata)
+            if it.key == "picaso:ck")
+    except OSError:
+        pass
+    return out
 
 
 def ktable_sources() -> dict:
@@ -226,6 +273,7 @@ def _base_snapshot() -> dict:
         "repositories": repos,
         "software": _versions(),
         "pandeia_stack": pandeia,
+        "picaso_env": _picaso_identity(),
         "datasets": {
             "phoenix_catalog": _file(
                 Path(ins.PYSYN_CDBS) / "grid" / "phoenix" / "catalog.fits"),

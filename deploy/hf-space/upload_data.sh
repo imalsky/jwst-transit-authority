@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run on the Mac. Stages a symlink-dereferenced copy of the two data trees
-# (~7.5 GB; the phoenix grid must be present, see `jwst-tool fetch`) and uploads them
+# (~7.5 GB plus 2.2 GB of optional PICASO tables; the phoenix grid must be
+# present, see `jwst-tool fetch`) and uploads them
 # to the private HF dataset repo the Space seeds /data from.
 #
 # Prereqs:
@@ -57,7 +58,8 @@ stage_tree() {                  # stage_tree <src-dir> <dst-dir> <label> [skip..
 }
 
 echo "Staging jwst-data (first run copies ~7 GB, needs the disk space) ..."
-stage_tree "$REPO_ROOT/data" "$STAGE/jwst-data" jwst-data
+PICASO_DIR="picaso_refdata-$(python3 -c 'from jwst_tool import datacheck as d; print(d.PICASO_RELEASE)')"
+stage_tree "$REPO_ROOT/data" "$STAGE/jwst-data" jwst-data "$PICASO_DIR"
 # The engine's opacity cache (CIA) still lives in the retrieval checkout
 # on the maintainer's machine; the dataset folder keeps the name
 # "retrieval-data" deliberately, because renaming it would mean
@@ -115,6 +117,64 @@ else
     echo "ERROR: no exomolop/ tree at $KTABLE_SRC -- every model step on the Space" >&2
     echo "       would stop with an error. Refusing to stage a k-table-less dataset." >&2
     exit 1
+fi
+
+# PICASO reference data, staged SELECTIVELY: only the files the INSTALLED
+# tool's datacheck lists (the four reference files picaso's climate path reads
+# and the 36 correlated-k tables, ~2.2 GB), not the whole local reference
+# tree. PICASO is optional: with no local tree this warns and stages nothing,
+# so a VULCAN-only upload goes ahead. A present tree must be complete. Missing
+# files are added; then EVERY staged file is checked against datacheck's
+# md5, so a stale or truncated stage from an earlier run cannot upload.
+PICASO_SRC="$REPO_ROOT/data/$PICASO_DIR"
+PICASO_STAGE="$STAGE/jwst-data/$PICASO_DIR"
+if [ -d "$PICASO_SRC" ]; then
+    PICASO_FILES="$(python3 - <<'PYEOF'
+from jwst_tool import datacheck as dc
+print(*dc.PICASO_REFDATA_FILES, *(f"{dc.PICASO_CK_DIR}/{n}" for n in dc.PICASO_CK_MD5))
+PYEOF
+)"
+    for rel in $PICASO_FILES; do
+        src="$PICASO_SRC/$rel"
+        dst="$PICASO_STAGE/$rel"
+        if [ ! -e "$src" ]; then
+            echo "ERROR: $src missing. Get picaso's reference/ files for $PICASO_DIR from GitHub" >&2
+            echo "       and the CK tables from doi:10.5281/zenodo.18644980." >&2
+            exit 1
+        fi
+        mkdir -p "$(dirname "$dst")"
+        [ -e "$dst" ] || ln "$src" "$dst" 2>/dev/null || cp -c "$src" "$dst"
+    done
+else
+    echo "WARNING: no PICASO tree at $PICASO_SRC -- staging no PICASO files." >&2
+    echo "         VULCAN is unaffected; with no PICASO data in the dataset," >&2
+    echo "         every PICASO run on the Space stops with an error." >&2
+fi
+if [ -d "$PICASO_STAGE" ]; then
+    python3 - "$PICASO_STAGE" <<'PYEOF'
+import hashlib, sys
+from pathlib import Path
+from jwst_tool import datacheck as dc
+stage = Path(sys.argv[1])
+want = {**dc.PICASO_REFDATA_MD5,
+        **{f"{dc.PICASO_CK_DIR}/{n}": md5 for n, md5 in dc.PICASO_CK_MD5.items()}}
+absent = [rel for rel in want if not (stage / rel).is_file()]
+bad = []
+for rel, md5 in want.items():
+    if rel in absent:
+        continue
+    h = hashlib.md5()
+    with open(stage / rel, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    if h.hexdigest() != md5:
+        bad.append(rel)
+if absent or bad:
+    sys.exit(f"ERROR: PICASO stage {stage} is wrong. Absent: {absent}; md5 "
+             f"mismatch: {bad}. Delete those files from the stage and re-fetch "
+             "the local copies.")
+print(f"picaso_refdata-{dc.PICASO_RELEASE}: {len(want)} files staged and md5-verified.")
+PYEOF
 fi
 
 # Resumable uploader (safe to re-run after an interrupted upload). Uploads the

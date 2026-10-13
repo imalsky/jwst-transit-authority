@@ -5,11 +5,14 @@ is already present, and ends with exact instructions for the few pieces it
 does not fetch itself: two STScI Box downloads (Box shared links serve HTML,
 not the file, so they need either a browser or the markup-dependent recipe in
 MANUAL) and the Pandeia conda environment. Line lists and the
-ExoMol CO tables are left to their existing on-first-use fetchers. Stdlib
-only, like datacheck; every failure is loud and the command is idempotent.
+ExoMol CO tables are left to their existing on-first-use fetchers.
+``--picaso`` (opt-in, about 2.4 GB) adds the optional PICASO engine's
+reference tree and climate tables. Stdlib only, like datacheck; every failure
+is loud and the command is idempotent.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import sys
@@ -19,7 +22,9 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+from urllib.parse import quote
 
+from jwst_tool import datacheck as dc
 from jwst_tool import instruments as ins
 
 _UA = {"User-Agent": "jwst-transit-authority data fetcher"}
@@ -49,6 +54,11 @@ class Fetch:
     dest: Callable[[], Path]           # resolved lazily (env-dependent roots)
     size: str                          # human download-size hint
     tar_subtree: str = ""              # extract only this prefix into dest
+    marker: str = ""                   # tar_subtree's file written LAST
+    md5: str = ""                      # pinned digest of a single file
+    # a tree's own completeness test in place of the marker: what is wrong
+    # with dest, "" when complete; also run after extraction
+    check: Callable[[Path], str] | None = None
 
 
 FETCHES = (
@@ -72,8 +82,40 @@ FETCHES = (
           "synphot5.tar",
           lambda: Path(ins.PYSYN_CDBS) / "grid" / "phoenix",
           "1.9 GB download (STScI's own 'pheonix' spelling in the URL)",
-          tar_subtree="grp/redcat/trds/grid/phoenix"),
+          tar_subtree="grp/redcat/trds/grid/phoenix", marker="catalog.fits"),
 )
+
+
+def _picaso_tree_problem(root: Path) -> str:
+    """datacheck's version-and-files check of the reference tree, then the
+    pinned md5 of each file picaso's climate path reads. "" when complete."""
+    item = next(it for it in dc.check_picaso(python="", refdata=root)
+                if it.key == "picaso:refdata")
+    if item.status != dc.OK:
+        return item.detail
+    bad = [rel for rel, md5 in dc.PICASO_REFDATA_MD5.items()
+           if _md5(root / rel) != md5]
+    return f"md5 mismatch: {', '.join(bad)}" if bad else ""
+
+
+# `jwst-tool fetch --picaso` only. A GitHub tag tarball is not byte-stable, so
+# the tree is checked file by file (_picaso_tree_problem); each table by its
+# Zenodo md5.
+PICASO_FETCHES = (
+    Fetch(f"PICASO {dc.PICASO_RELEASE} reference data",
+          "https://github.com/natashabatalha/picaso/archive/refs/tags/"
+          f"v{dc.PICASO_RELEASE}.tar.gz",
+          lambda: Path(ins.PICASO_REFDATA),
+          "67 MB source tarball; reference/ unpacks to about 180 MB",
+          tar_subtree=f"picaso-{dc.PICASO_RELEASE}/reference",
+          marker="config.json", check=_picaso_tree_problem),
+) + tuple(
+    Fetch(f"PICASO climate table {name}",
+          f"https://zenodo.org/records/{dc.PICASO_CK_RECORD}/files/"
+          f"{quote(name)}?download=1",
+          lambda name=name: Path(ins.PICASO_REFDATA) / dc.PICASO_CK_DIR / name,
+          "62 MB", md5=md5)
+    for name, md5 in dc.PICASO_CK_MD5.items())
 
 # What fetch does not download itself, printed verbatim after the downloads.
 # The two Pandeia pieces live on STScI Box, whose /v/ links serve HTML rather
@@ -118,15 +160,28 @@ def _present(f: Fetch) -> bool:
         d = f.dest()
     except Exception:
         return False
+    if f.check:
+        return not f.check(Path(os.path.realpath(d)))
     if f.tar_subtree:
-        # the grid's catalog file, not the directory: an extraction killed
-        # part-way leaves a non-empty dir that would read as complete and be
-        # skipped forever. The deploy scripts use the same marker.
-        return (Path(os.path.realpath(d)) / "catalog.fits").is_file()
+        # the marker file, not the directory: an extraction killed part-way
+        # leaves a non-empty dir that would read as complete and be skipped
+        # forever (_extract_subtree writes the marker last). The deploy
+        # scripts use the same PHOENIX marker.
+        return (Path(os.path.realpath(d)) / f.marker).is_file()
+    if f.md5:
+        return d.is_file() and _md5(d) == f.md5
     return d.is_file()
 
 
-def _download(url: str, out: Path, label: str) -> None:
+def _md5(path: Path) -> str:
+    h = hashlib.md5(usedforsecurity=False)
+    with open(path, "rb") as r:
+        for chunk in iter(lambda: r.read(_CHUNK), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _download(url: str, out: Path, label: str, md5: str = "") -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(out.suffix + ".part")
     req = urllib.request.Request(url, headers=_UA)
@@ -143,18 +198,27 @@ def _download(url: str, out: Path, label: str) -> None:
         tmp.unlink(missing_ok=True)
         raise RuntimeError(
             f"{label}: truncated download ({done} of {total} bytes)")
+    if md5 and (got := _md5(tmp)) != md5:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"{label}: md5 mismatch (got {got}, expected "
+                           f"{md5}); the download was deleted")
     os.replace(tmp, out)
 
 
-def _extract_subtree(tar_path: Path, subtree: str, dest: Path) -> int:
-    """Extract members under ``subtree`` into ``dest`` (prefix stripped)."""
+def _extract_subtree(tar_path: Path, subtree: str, dest: Path,
+                     marker: str = "") -> int:
+    """Extract members under ``subtree`` into ``dest`` (prefix stripped).
+
+    ``marker`` (relative to the subtree) is written last, so its presence
+    means every other member landed.
+    """
     prefix = subtree.rstrip("/") + "/"
     root = os.path.realpath(dest)
     n = 0
     with tarfile.open(tar_path) as tf:
-        for m in tf:
-            if not m.name.startswith(prefix) or not m.isfile():
-                continue
+        members = [m for m in tf if m.name.startswith(prefix) and m.isfile()]
+        members.sort(key=lambda m: m.name == prefix + marker)
+        for m in members:
             rel = m.name[len(prefix):]
             target = dest / rel
             # a member carrying ".." resolves outside dest; startswith(prefix)
@@ -164,9 +228,12 @@ def _extract_subtree(tar_path: Path, subtree: str, dest: Path) -> int:
                 raise RuntimeError(
                     f"{tar_path}: member {m.name!r} escapes {dest}")
             target.parent.mkdir(parents=True, exist_ok=True)
-            src = tf.extractfile(m)
-            with open(target, "wb") as w:
-                shutil.copyfileobj(src, w)
+            # temp file + rename: a killed extraction never leaves a
+            # truncated file, above all an empty marker, under its real name
+            part = target.with_name(target.name + ".part")
+            with open(part, "wb") as w:
+                shutil.copyfileobj(tf.extractfile(m), w)
+            os.replace(part, target)
             n += 1
     if n == 0:
         raise RuntimeError(f"no members under {subtree!r} in {tar_path}")
@@ -177,7 +244,7 @@ def _fetch_one(f: Fetch) -> None:
     dest = f.dest()
     if not f.tar_subtree:
         print(f"  downloading {f.label} ({f.size}) ...", flush=True)
-        _download(f.url, dest, f.label)
+        _download(f.url, dest, f.label, f.md5)
         print(f"  -> {dest}", flush=True)
         return
     # tarball with a subtree to extract (PHOENIX): download to a temp file
@@ -191,16 +258,26 @@ def _fetch_one(f: Fetch) -> None:
         print(f"  downloading {f.label} ({f.size}) ...", flush=True)
         _download(f.url, tar_path, f.label)
         print("  extracting ...", flush=True)
-        n = _extract_subtree(tar_path, f.tar_subtree, dest_real)
+        n = _extract_subtree(tar_path, f.tar_subtree, dest_real, f.marker)
+        if f.check and (bad := f.check(dest_real)):
+            raise RuntimeError(f"{f.label}: extracted tree refused: {bad}")
         print(f"  -> {n} files under {dest_real}", flush=True)
     finally:
         tar_path.unlink(missing_ok=True)
 
 
-def run_fetch() -> int:
-    """Fetch every missing direct-URL dataset. Returns a shell exit code."""
+def run_fetch(argv: list[str] = ()) -> int:
+    """Fetch every missing direct-URL dataset (``--picaso``: also the PICASO
+    engine's). Returns a shell exit code."""
+    unknown = [a for a in argv if a != "--picaso"]
+    if unknown:
+        print(f"jwst-tool fetch: unknown argument(s) {unknown}; the only flag "
+              "is --picaso (also fetch the PICASO engine's reference data and "
+              "climate tables, about 2.4 GB).", file=sys.stderr)
+        return 2
+    picaso = "--picaso" in argv
     failures = []
-    for f in FETCHES:
+    for f in FETCHES + (PICASO_FETCHES if picaso else ()):
         try:
             if _present(f):
                 print(f"  already present: {f.label}")
@@ -215,10 +292,14 @@ def run_fetch() -> int:
                         env_suffix=ins.BACKEND_RELEASE.replace(".", "_"),
                         psf=ins.PANDEIA_PSF_DIR or "(backend has no split "
                         "PSF dir; not needed)"))
+    if picaso:
+        print(f"\nThe PICASO engine runs in its own environment (picaso "
+              f"{dc.PICASO_RELEASE} needs numpy >= 2), created once:\n  "
+              f"{dc.PICASO_ENV_RECIPE}.\nReference data: {ins.PICASO_REFDATA}")
     if failures:
         print(f"\n{len(failures)} download(s) failed; re-run `jwst-tool "
-              "fetch` to retry, or follow the item's remedy in "
-              "`jwst-tool data`.", file=sys.stderr)
+              f"fetch{' --picaso' if picaso else ''}` to retry, or follow the "
+              "item's remedy in `jwst-tool data`.", file=sys.stderr)
         return 1
     print("\nDone. Run `jwst-tool data` to see the full status report.")
     return 0

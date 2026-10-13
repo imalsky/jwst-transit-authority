@@ -8,7 +8,7 @@ stronger tests).
 """
 import pytest
 
-from jwst_tool import forward, planets, share_config
+from jwst_tool import forward, picaso_engine, planets, share_config
 
 
 def _key(name: str) -> str:              # the app's K() with nonce 0
@@ -42,6 +42,8 @@ def test_round_trip_restores_the_full_run():
                          noise_infl={"nirspec_g395h": 1.05},
                          show_noise=False, seed=0))
     state = share_config.widget_state(share, _key)
+    # a VULCAN file selects its engine, so loading it under PICASO switches
+    assert state["n0_provider"] == "vulcan"
     # target + system (per-planet keys); the Pandeia star restores from the
     # observation block (the transmission canonical block zeroes it)
     assert state["n0_planet"] == "wasp39b"
@@ -152,6 +154,53 @@ def test_a_non_default_network_round_trips_on_its_own_widget_keys(network):
     assert state[f"n0_xmols_vulcan{sfx}"] == ["HCN", "NH3"]
     assert "n0_xmols_vulcan" not in state          # the sncho keys stay clean
     assert any(k.startswith(f"n0_mol_vulcan{sfx}_") for k in state)
+
+
+@pytest.mark.parametrize("kw,goal", [
+    (dict(science_mode="emission", picaso_quench=True, kzz_const=1.0e10,
+          rfacv=0.7, Tint=200.0, co_ratio=2.0, fisher_params=["lnZ", "dlnCO"]),
+     dict(goal="constrain", goal_param="dlnCO", target_prec=0.1,
+          target_sig=3.0, marginalize=True, fisher_params=["lnZ", "dlnCO"],
+          jac_method="fd")),
+    (dict(tp_mode="guillot", extra_mols=["HCN", "NH3"],
+          fisher_params=["lnZ", "Tirr"]),
+     dict(goal="detect", target_mol="H2O", target_sig=3.0, do_fisher=True,
+          fisher_params=["lnZ", "Tirr"], jac_method="fd")),
+])
+def test_a_picaso_config_round_trips_on_its_own_widget_keys(kw, goal):
+    """A PICASO file restores onto PICASO's own widget keys (engine, T-P,
+    quench, heat redistribution, molecules, goal), takes the whole C/O range,
+    and writes NO VULCAN-only key: its FD-only method must not overwrite the
+    stored VULCAN choice, nor its registry-default UV spectrum the VULCAN
+    one."""
+    canon = forward.canonical_params(
+        dict(planet="wasp39b", chem_provider="picaso", **kw))
+    share = share_config.build_share(canon, goal=goal, observation={})
+    # the full composition PICASO's solver is given, He included
+    assert share["elemental_abundances"] == {
+        f"{a}_H": v for a, v in picaso_engine.composition(
+            canon["met_x_solar"], canon["co_ratio"]).items()}
+    assert len(share["elemental_abundances"]) == 19
+    state = share_config.widget_state(share, _key)
+    tp = canon["tp_mode"]
+    assert state["n0_provider"] == "picaso"
+    assert state["n0_wasp39b_tp_picaso"] == tp
+    assert state["n0_quench_picaso"] is canon["picaso_quench"]
+    assert state["n0_co"] == canon["co_ratio"]
+    assert state["n0_xmols_picaso"] == canon["extra_mols"]
+    assert not {"n0_jacm", "n0_network", "n0_photo", "n0_sza", "n0_yconv",
+                "n0_wasp39b_tp", "n0_wasp39b_kzzmode", "n0_wasp39b_sflux",
+                "n0_xmols_vulcan"} & set(state)
+    if tp == "picaso_climate":
+        assert state["n0_rfacv_picaso_emission"] == 0.7
+        assert state["n0_wasp39b_tint"] == 200.0
+        assert state["n0_wasp39b_kzz"] == pytest.approx(10.0)
+        assert state["n0_gp_picaso_picaso_climate_0"] == "dlnCO"
+        assert state["n0_fx_picaso_picaso_climate_0"] == ["lnZ"]
+    else:
+        assert "n0_wasp39b_kzz" not in state     # equilibrium: no Kzz
+        assert state["n0_mol_picaso_HCN_NH3"] == "H2O"
+        assert state["n0_fp_picaso_guillot_0"] == ["lnZ", "Tirr"]
 
 
 def test_a_carbon_rich_config_is_refused_on_a_network_that_cannot_hold_it():
@@ -413,6 +462,17 @@ def test_out_of_range_values_refuse_loudly():
     with pytest.raises(ValueError, match="tirr"):
         share_config.widget_state(
             share_config.build_share(_canon(Tirr=5000.0), {}, {}), _key)
+    # PICASO heat redistribution: the widget's range is forward.RFACV_RANGE
+    with pytest.raises(ValueError, match="rfacv=1.5 outside"):
+        share_config._check_widget_ranges(
+            {"n0_rfacv_picaso_emission": 1.5}, _key, _key, "emission")
+    # metallicity follows the engine: 50x is VULCAN-legal, above PICASO's cap
+    share_config._check_widget_ranges({"n0_met": 50.0}, _key, _key,
+                                      "transmission")
+    with pytest.raises(ValueError, match="met=50 outside"):
+        share_config._check_widget_ranges(
+            {"n0_provider": "picaso", "n0_met": 50.0}, _key, _key,
+            "transmission")
 
 
 def test_noise_star_round_trips_and_legacy_files_get_a_note():
@@ -488,7 +548,7 @@ def test_restore_bounds_match_the_widgets():
             if lo is not None and hi is not None:
                 found.setdefault(suffix, set()).add((lo, hi))
 
-    shared = {"nz", "met"} | set(planets.CUSTOM_FIELD_RANGES)
+    shared = {"nz"} | set(planets.CUSTOM_FIELD_RANGES)
     for table in (share_config._GLOBAL_BOUNDS, share_config._PLANET_BOUNDS):
         for widget, (lo, hi) in table.items():
             if widget in shared:

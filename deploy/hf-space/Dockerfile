@@ -12,9 +12,10 @@
 # no dataset mount exists: the entrypoint seeds /data by download, which needs
 # the secret HF_TOKEN.
 # Base image pinned by DIGEST, not :latest. What that fixes under fixed source
-# SHAs: the base image and the app env (installed from the lock with
-# --no-deps). The apt packages, `python=3.12` and the pandeia env re-resolve
-# on every build, so the image is reproducible, not bit-identical.
+# SHAs: the base image, the app env (installed from the lock with --no-deps)
+# and the picaso env (an explicit conda lock with md5s plus a --no-deps pip
+# lock). The apt packages, `python=3.12` and the pandeia env re-resolve on
+# every build, so the image is reproducible, not bit-identical.
 FROM condaforge/miniforge3@sha256:8edc74dee5b29511a9c1a8941c77efbf438b47edffb6320ab8675dc06bd618c2
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -71,6 +72,24 @@ RUN /opt/conda/envs/app/bin/pip install --no-cache-dir --no-deps \
         -e /srv/vulcan/vulcan-forward \
         -e /srv/vulcan/jwst-transit-authority
 
+# The PICASO engine's own env (picaso 4.1 needs numpy >= 2; the app pins numpy
+# < 2), entered only by jwst_tool/picaso_worker.py via JWST_TOOL_PICASO_PYTHON.
+# Conda installs the compiled stack (photochem, numba, h5py, ...) from the
+# explicit lock; pip adds only the pip-only rest, --no-deps, so it can never
+# replace a conda build. The build fails unless the stack is the one the
+# worker requires. picaso.justdoit is not imported here: it needs the
+# reference data, which only exists at run time.
+RUN conda create -y -n picaso \
+        --file /srv/vulcan/jwst-transit-authority/deploy/picaso-conda-lock.txt \
+    && conda clean -afy \
+    && /opt/conda/envs/picaso/bin/pip install --no-cache-dir --no-deps \
+        -r /srv/vulcan/jwst-transit-authority/deploy/requirements-picaso-lock.txt \
+    && /opt/conda/envs/picaso/bin/python -m pip check \
+    && /opt/conda/envs/picaso/bin/python -c "import numba, numpy, photochem; \
+from importlib.metadata import version as v; \
+assert (v('picaso'), v('photochem')) == ('4.1', '0.9.2'), (v('picaso'), v('photochem')); \
+assert numpy.__version__.startswith('2.'), numpy.__version__"
+
 # Only /data persists on a Space. The forward engine's data root is
 # env-overridable ($VULCAN_FORWARD_DATA), so there are no repo-relative data
 # stubs to fix up: the entrypoint just exports the variable.
@@ -103,6 +122,7 @@ ENV VULCAN_PROJECT_ROOT=/srv/vulcan \
     JWST_TOOL_DATA_DIR=/data/jwst-data \
     JWST_TOOL_OUTPUT_DIR=/data/output \
     JWST_TOOL_PANDEIA_PYTHON=/opt/conda/envs/pandeia/bin/python \
+    JWST_TOOL_PICASO_PYTHON=/opt/conda/envs/picaso/bin/python \
     HOME=/data/home \
     PATH=/opt/conda/envs/app/bin:$PATH
 

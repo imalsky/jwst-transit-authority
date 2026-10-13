@@ -70,6 +70,70 @@ def test_dockerfile_pins_the_deployed_tool_commit():
         f"the Dockerfile pins {sha[:12]}, which is not an ancestor of HEAD")
 
 
+def test_space_build_and_boot_read_only_files_this_repo_ships():
+    """The Dockerfile reads the lock files out of the tool clone at
+    JWST_TOOL_SHA, so a misspelt or uncommitted one fails only on the Space,
+    at build. The PICASO file list and md5s have one home, jwst_tool.datacheck:
+    every deploy script that stages, seeds, checks or links PICASO data reads
+    them from there, never from a copy that can drift."""
+    shim = DOCKERFILE.read_text() + (DOCKERFILE.parent / "entrypoint.sh").read_text()
+    refs = set(re.findall(r"jwst-transit-authority/(deploy/[\w.+-]+)", shim))
+    assert {"deploy/picaso-conda-lock.txt", "deploy/requirements-picaso-lock.txt"} <= refs
+    for ref in sorted(refs):
+        assert (REPO / ref).is_file(), f"{ref} is read on the Space but not in the repo"
+    assert "JWST_TOOL_PICASO_PYTHON=/opt/conda/envs/picaso/bin/python" in shim
+
+    assert not (REPO / "deploy" / "picaso-refdata.md5").exists()
+    for name in ("upload_data.sh", "bootstrap_data.py", "finish_hf_setup.py",
+                 "entrypoint.sh"):
+        text = (DOCKERFILE.parent / name).read_text()
+        assert re.search(r"from jwst_tool import datacheck as d", text), name
+        assert {"PICASO_REFDATA_FILES", "PICASO_CK_MD5"} <= set(
+            re.findall(r"\bd\w*\.(PICASO_\w+)", text)), name
+        assert not re.search(r"_1460\.hdf5|\b[0-9a-f]{32}\b|refdata\.md5", text), name
+
+
+def test_space_boots_vulcan_when_picaso_data_is_missing(tmp_path, monkeypatch,
+                                                         capsys):
+    """PICASO is optional on the Space: its files may trigger the dataset
+    download, but one still missing afterwards only warns. A missing VULCAN
+    marker still stops the boot."""
+    import importlib.util
+    import sys
+    import types
+
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
+    spec = importlib.util.spec_from_file_location(
+        "bootstrap_data", DOCKERFILE.parent / "bootstrap_data.py")
+    boot = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(boot)
+    required = tmp_path / "VERSION_DATA"
+    required.touch()
+    calls = []
+    monkeypatch.setattr(boot, "DATA", tmp_path)
+    monkeypatch.setattr(boot, "MARKERS", [required])
+    monkeypatch.setattr(boot, "ktable_markers", lambda: [])
+    monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(
+        snapshot_download=lambda **kw: calls.append(kw)))
+
+    assert boot.main() == 0 and len(calls) == 1      # PICASO absent: download, warn
+    assert "PICASO files absent" in capsys.readouterr().err
+
+    def offline(**kw):
+        raise OSError("Hub unreachable")
+    monkeypatch.setitem(sys.modules, "huggingface_hub",
+                        types.SimpleNamespace(snapshot_download=offline))
+    assert boot.main() == 0                          # only PICASO absent: boots offline
+    assert "booting without the PICASO data" in capsys.readouterr().err
+    required.unlink()
+    with pytest.raises(OSError, match="unreachable"):
+        boot.main()                                   # VULCAN data absent: the error stands
+    monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(
+        snapshot_download=lambda **kw: calls.append(kw)))
+    with pytest.raises(RuntimeError, match="required paths"):
+        boot.main()
+
+
 def test_citation_version_matches_the_package():
     """CITATION.cff advertises the version a citer will quote.
 

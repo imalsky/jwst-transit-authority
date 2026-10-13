@@ -39,3 +39,6 @@ data/cdbs/grid/phoenix
 # C/O survey archive (its report carries personal paths)
 validation/co_limits/
 validation/co_stall/
+
+# PICASO reference tree + climate correlated-k tables (~2.3 GB); `jwst-tool fetch --picaso`
+data/picaso_refdata-*/

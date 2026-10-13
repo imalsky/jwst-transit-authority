@@ -158,28 +158,48 @@ def test_ad_chemistry_rows_are_never_vmapped_over_tangent_directions():
     assert "jax.jvp(" in src
 
 
-def test_picaso_is_removed_from_the_api_the_share_path_and_the_deploy_lock():
-    """PICASO was removed in 0.43.0. Both refusal sites say so by name, and
-    no deploy artifact may pin it (or virga / pysynphot) back in."""
+def test_picaso_lives_only_in_its_own_environment():
+    """picaso 4.1 needs numpy >= 2 and the tool's stack pins numpy < 2, so
+    PICASO runs only in picaso_worker.py inside its own environment: no other
+    module imports it, the worker imports nothing from the tool, and the app's
+    deploy lock carries no picaso, virga or photochem pin. The picaso env's
+    own locks split by installer: conda (md5-pinned) owns the compiled stack
+    and pip pins only the rest. make_app_lock.py's dist-info ownership test
+    keeps a conda build out of the pip lock; comparing the two locks by name
+    cannot (conda's astropy is astropy-base)."""
+    import ast
     from pathlib import Path
 
-    from jwst_tool import share_config
+    root = Path(__file__).resolve().parents[2]
+    heavy = {"picaso", "photochem", "virga"}
+    for f in sorted((root / "src" / "jwst_tool").glob("*.py")):
+        mods = set()
+        for n in ast.walk(ast.parse(f.read_text())):
+            if isinstance(n, ast.Import):
+                mods |= {a.name.split(".")[0] for a in n.names}
+            elif isinstance(n, ast.ImportFrom) and n.module:
+                mods.add(n.module.split(".")[0])
+        if f.name == "picaso_worker.py":
+            assert "jwst_tool" not in mods and {"picaso", "astropy"} <= mods, mods
+        else:
+            assert not mods & heavy, (f.name, mods & heavy)
+    banned = re.compile(r"^\s*(picaso|virga|virga-exo|photochem|pysynphot)\b",
+                        re.IGNORECASE | re.MULTILINE)
+    for name in ("requirements-app-lock.txt", "requirements-pandeia.txt"):
+        assert not banned.search((root / "deploy" / name).read_text()), name
 
-    base = dict(planet="wasp39b", tp_mode="guillot", kzz_mode="const",
-                kzz_const=1.0e9)
-    for kw in (dict(chem_provider="picaso"), dict(tp_mode="picaso_climate")):
-        with pytest.raises(ValueError, match="PICASO|picaso"):
-            forward.canonical_params({**base, **kw})
-    cp = forward.canonical_params(base)
-    with pytest.raises(ValueError, match="PICASO|picaso"):
-        share_config.widget_state({**cp, "chem_provider": "picaso"},
-                                  "n0_{}".format)
-
-    deploy = Path(__file__).resolve().parents[2] / "deploy"
-    banned = re.compile(r"^\s*(picaso|virga|pysynphot)\b", re.IGNORECASE | re.MULTILINE)
-    for f in sorted(deploy.rglob("*")):
-        if f.is_file() and f.suffix in (".txt", ".py", ".env", ""):
-            assert not banned.search(f.read_text(errors="ignore")), f
+    conda = (root / "deploy" / "picaso-conda-lock.txt").read_text()
+    urls = [u for u in conda.splitlines() if u.startswith("https://")]
+    assert "@EXPLICIT" in conda and all(re.search(r"#[0-9a-f]{32}$", u) for u in urls)
+    conda_names = {u.rsplit("/", 1)[1].rsplit("-", 2)[0].lower().replace("_", "-")
+                   for u in urls}
+    pip_pins = dict(line.split("==") for line in
+                    (root / "deploy" / "requirements-picaso-lock.txt").read_text().splitlines()
+                    if "==" in line)
+    assert pip_pins["picaso"] == "4.1"
+    assert {"photochem", "numpy", "numba", "pip"} <= conda_names
+    assert any("/photochem-0.9.2-" in u for u in urls)
+    assert any("/numpy-2." in u for u in urls)
 
 
 def test_emission_tau_bottom_gate_measures_the_flux_that_leaks_through():

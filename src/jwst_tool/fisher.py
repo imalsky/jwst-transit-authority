@@ -164,7 +164,7 @@ PARAM_UNITS = {"lnZ": "dex", "dlnCO": "", "lnKzz": "dex",
 PARAM_LABELS = {"lnZ": "Metallicity", "dlnCO": "C/O ratio",
                 "lnKzz": "Vertical mixing (Kzz)",
                 "Tirr": "Guillot T_irr",
-                "Tint": "Guillot T_int", "log_kappa": "Guillot log κ_IR",
+                "Tint": "T_int", "log_kappa": "Guillot log κ_IR",
                 "log_gamma": "Guillot log γ",
                 "log_kappa_cloud": "Cloud deck log κ (at 3.5 um)",
                 "alpha_cloud": "Cloud deck slope α"}

@@ -366,6 +366,60 @@ def test_fisher_names_and_jac_method_matrix():
         _p(jac_method="ad", use_photo=False))["jac_method"] == "fd"
 
 
+_PIC = dict(planet="wasp39b", chem_provider="picaso")
+
+
+@pytest.mark.parametrize("kw", [
+    dict(),
+    dict(science_mode="emission", fisher_params=["lnZ", "dlnCO"]),
+    dict(tp_mode="guillot", fisher_params=["Tirr"]),
+    dict(tp_mode="guillot", picaso_quench=True, kzz_const=1.0e10),
+    dict(tp_mode="file"),
+])
+def test_picaso_payloads_are_idempotent_and_carry_their_own_keys(kw):
+    cp = forward.canonical_params({**_PIC, **kw})
+    assert forward.canonical_params(cp) == cp
+    assert cp["picaso_stack"] == forward.PICASO_STACK and cp["network"] == ""
+    assert cp["use_photo"] is False and cp["kzz_mode"] == "const"
+    climate = cp["tp_mode"] == "picaso_climate"
+    assert (cp["rfacv"] > 0) == climate and (cp["star_teff"] > 0) == (
+        climate or cp["science_mode"] == "emission")
+    assert (cp["kzz_const"] > 0) == cp["picaso_quench"]
+    # the PICASO keys never reach a VULCAN payload
+    assert not {"rfacv", "picaso_quench", "picaso_stack"} & set(
+        forward.canonical_params(_p()))
+
+
+def test_picaso_lnz_stencil_turns_one_sided_at_the_metallicity_cap():
+    # the 10x default keeps its lnZ row; VULCAN's stencil is unchanged
+    assert forward.fd_stencil("lnZ", 10.0, 0.99, forward.PICASO_MET_RANGE[1])[0] == (-1, -2, -4)
+    assert forward.fd_stencil("lnZ", 10.0, 0.99)[0] == (1, -1, 2, -2)
+    forward.canonical_params({**_PIC, "fisher_params": ["lnZ"]})
+
+
+@pytest.mark.parametrize("kw,msg", [
+    (dict(use_photo=True), "VULCAN-JAX settings"),
+    (dict(network="sncho"), "VULCAN-JAX settings"),
+    (dict(kzz_mode="JM16"), "VULCAN-JAX settings"),
+    (dict(kzz_x=2.0), "VULCAN-JAX settings"),
+    (dict(jac_method="ad", fisher_params=["lnZ"]), "finite differences"),
+    (dict(picaso_quench=True, fisher_params=["lnKzz"]), "staircase"),
+    (dict(rfacv=0.0), "rfacv"),
+    (dict(Tint=40.0), "Tint"),
+    (dict(fisher_params=["Tint"]), "not a PICASO climate Fisher row"),
+    (dict(p_btm_bar=200.0), "100 bar"),
+    (dict(extra_mols=["N2O"]), "equilibrium species"),
+    (dict(chem_provider="vulcan", tp_mode="picaso_climate"), "chem_provider='picaso'"),
+    (dict(chem_provider="vulcan", rfacv=0.5), "PICASO settings"),
+    (dict(chem_provider="exo"), "unknown chem_provider"),
+    (dict(met_x_solar=20.0), "PICASO engine's range"),
+    (dict(tp_mode="file", picaso_quench=True), "quench search needs it"),
+])
+def test_picaso_refusals(kw, msg):
+    with pytest.raises(ValueError, match=msg):
+        forward.canonical_params({**_PIC, **kw})
+
+
 def test_rt_knobs_defaults_validation_and_cache_key():
     # two ExoJAX RT knobs are canonical (cache-keyed)
     cp = forward.canonical_params(_p())

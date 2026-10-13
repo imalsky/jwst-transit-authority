@@ -39,7 +39,9 @@ if importlib.util.find_spec("exojax") is None or \
         importlib.util.find_spec("vulcan_jax") is None:
     pytest.skip("RT stack not installed", allow_module_level=True)
 
-FIXTURE = Path(__file__).parent / "data" / "w39b_v59_reference.npz"
+FIXTURES = {"vulcan": Path(__file__).parent / "data" / "w39b_v59_reference.npz",
+            # the PICASO engine: climate T-P + equilibrium chemistry, same RT
+            "picaso": Path(__file__).parent / "data" / "w39b_picaso_reference.npz"}
 
 WL_LO, WL_HI, R_BIN = 1.02, 5.26, 100.0
 
@@ -69,10 +71,10 @@ def bin_r100(wl_model, y_model):
     return centers, means
 
 
-def _load_fixture():
-    if not FIXTURE.exists():
-        pytest.skip(f"reference fixture absent: {FIXTURE}")
-    z = np.load(FIXTURE)
+def _load_fixture(fixture):
+    if not fixture.exists():
+        pytest.skip(f"reference fixture absent: {fixture}")
+    z = np.load(fixture)
     return z, json.loads(bytes(np.asarray(z["meta"])))
 
 
@@ -87,12 +89,20 @@ def _engine_data_ready():
                     "python -m vulcan_forward.fetch_exomolop --molecules H2O,...")
 
 
+@pytest.mark.parametrize("engine", ["vulcan", "picaso"])
 @pytest.mark.parametrize("mode", ["transmission", "emission"])
-def test_full_chain_reproduces_the_verified_reference(mode):
+def test_full_chain_reproduces_the_verified_reference(mode, engine, tmp_path,
+                                                      monkeypatch):
     from jwst_tool import forward
 
     _engine_data_ready()
-    z, meta = _load_fixture()
+    z, meta = _load_fixture(FIXTURES[engine])
+    if engine == "picaso":
+        from jwst_tool import datacheck, picaso_engine
+        if any(i.status != datacheck.OK for i in datacheck.check_picaso()):
+            pytest.skip("PICASO environment or data not installed")
+        # a cold climate solve, not the PICASO request cache (~20 min per mode)
+        monkeypatch.setattr(picaso_engine, "PICASO_CACHE", tmp_path)
     ref = meta[mode]
     params = dict(ref["params"])
     cp = forward.canonical_params(params)

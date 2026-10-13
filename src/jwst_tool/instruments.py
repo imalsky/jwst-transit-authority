@@ -175,6 +175,14 @@ PANDEIA_PSF_DIR = os.environ.get("JWST_TOOL_PANDEIA_PSF_DIR",
 # Ks). `jwst-tool data` reports each piece.
 PYSYN_CDBS = str(DATA_DIR / "cdbs")
 
+# PICASO engine environment (picaso 4.1 + photochem 0.9.2, numpy >= 2): its
+# own interpreter, no portable default, like Pandeia. The reference tree holds
+# picaso's v4.1 `reference/` files the climate path reads plus the 36
+# resort-rebin correlated-k tables (Zenodo 10.5281/zenodo.18644980).
+PICASO_PYTHON = os.environ.get("JWST_TOOL_PICASO_PYTHON")
+PICASO_REFDATA = os.environ.get("JWST_TOOL_PICASO_REFDATA",
+                                str(DATA_DIR / "picaso_refdata-4.1"))
+
 # Star normalization is band-integrated 2MASS Ks vegamag inside the worker
 # (the web-ETC convention) -- never the monochromatic at_lambda shortcut,
 # which mis-scales flux by ~1-4% with spectral type and carries that error

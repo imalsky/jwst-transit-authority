@@ -169,6 +169,36 @@ CO_MAX_PHOTO_OFF = 10.0
 # solve.
 MET_RANGE = (0.1, 100.0)
 
+# Chemistry engines. "picaso": PICASO climate + equilibrium chemistry, run in
+# its own environment (picaso_engine.py); finite-difference Jacobians only.
+CHEM_PROVIDERS = ("vulcan", "picaso")
+# The PICASO stack a PICASO payload is computed with: echoed and re-derived on
+# every call like "version" (the worker refuses any other installed stack).
+from jwst_tool import picaso_engine as _pe   # noqa: E402  (numpy + stdlib only)
+PICASO_STACK = (f"picaso {_pe.PICASO_VERSIONS['picaso']}, photochem "
+                f"{_pe.PICASO_VERSIONS['photochem']}, correlated-k zenodo."
+                f"{_pe.datacheck.PICASO_CK_RECORD}, worker {_pe.WORKER_VERSION}")
+# picaso's climate heat redistribution (rfacv): 0.5 = planet average (a
+# terminator), 1.0 = dayside (an eclipse). 0 (no stellar heating) is not offered.
+RFACV_RANGE = (0.05, 1.0)
+RFACV_DEFAULT = {"transmission": 0.5, "emission": 1.0}
+# Climate T_int range: the GUI's T_int widget (picaso refuses T_int = 0).
+TINT_RANGE = (50.0, 500.0)
+# The climate grid and the quench search end at 100 bar (picaso_engine).
+PICASO_P_BTM_MAX = 100.0
+# PICASO metallicity: its thermochemical data are stated for +-1 dex and its
+# climate continuum lacks H2O/CO2 self-CIA, so the top is 10x (maintainer
+# decision); the lnZ stencil turns one-sided at the cap (fd_stencil).
+PICASO_MET_RANGE = (0.1, 10.0)
+# One WASP-39 b climate solve: 497-570 s on one daw core across nine variants
+# (numba warm; serial: four threads give bit-identical T in the same time)
+PICASO_CLIMATE_SOLVE_S = 550.0
+# One quenched chemistry-only PICASO column (~5 min: its atmosphere tuple
+# needs the 2.2 GB correlated-k set loaded)
+PICASO_QUENCH_COLUMN_S = 300.0
+# RT extras missing from picaso's equilibrium species list
+_PICASO_NO_SPECIES = frozenset({"N2O"})
+
 
 def co_bounds(network: str, use_photo: bool) -> tuple[float, float]:
     """(min, max) co_ratio for a network + photolysis state, both inclusive.
@@ -177,16 +207,19 @@ def co_bounds(network: str, use_photo: bool) -> tuple[float, float]:
     return CO_MIN, (CO_MAX[network] if use_photo else CO_MAX_PHOTO_OFF)
 
 
-def fd_stencil(name: str, value: float, co_max: float) -> tuple[tuple[int, ...], float]:
+def fd_stencil(name: str, value: float, co_max: float,
+               met_max: float | None = None) -> tuple[tuple[int, ...], float]:
     """(step multiples, step) a composition row solves at. Central (+-h, +-2h)
     at h = FD_STEPS[name], unless the dlnCO stencil would leave co_max (the
-    network's photolysis-ON ceiling, the conservative choice photo-off too):
+    network's photolysis-ON ceiling, the conservative choice photo-off too) or
+    the lnZ stencil would leave met_max (the PICASO cap; None = no cap):
     then the row uses the one-sided stencil (-1, -2, -4)
-    toward lower C/O -- third order after Richardson -- at h/2 so its reach
+    toward lower values -- third order after Richardson -- at h/2 so its reach
     equals the central stencil's 2h (at the full step the curvature toward the
     boundary fails the h-vs-2h gate on a 1600 K hot Jupiter)."""
     h = FD_STEPS[name]
-    if name == "dlnCO" and value * float(np.exp(2.0 * h)) > co_max:
+    top = {"dlnCO": co_max, "lnZ": met_max}.get(name)
+    if top is not None and value * float(np.exp(2.0 * h)) > top:
         return (-1, -2, -4), h / 2.0
     return (1, -1, 2, -2), h
 
@@ -431,7 +464,10 @@ _PHOTOSPHERE_BAR = (1.0e-5, 1.0e-2)
 # and so dipole-free (N2, O2, S2).
 _NOT_A_K_TABLE_ABSORBER = frozenset({
     "H", "O", "C", "N", "S", "O_1", "N_2D",
-    "H2", "He", "N2", "O2", "S2"})
+    "H2", "He", "N2", "O2", "S2",
+    # the metal atoms of PICASO's equilibrium chemistry
+    "Li", "F", "Na", "Mg", "Si", "P", "Cl", "K", "Ti", "V", "Cr", "Fe",
+    "Rb", "atCs"})
 
 
 def unmodeled_absorbers(species, y, p_bar, table_species,
@@ -692,7 +728,11 @@ def _default_tp_mode(params: dict) -> str:
     EMISSION always defaults to Guillot: the bundled tables are TERMINATOR
     profiles, the wrong structure for a dayside eclipse. Selecting one for
     emission stays possible as the user's explicit choice.
+
+    The PICASO engine defaults to its climate solver in both geometries.
     """
+    if str(params.get("chem_provider", "vulcan")) == "picaso":
+        return "picaso_climate"
     if str(params.get("science_mode", "transmission")) == "emission":
         return "guillot"
     planet = str(params.get("planet", "wasp39b"))
@@ -746,6 +786,9 @@ CHEM_PARAM_NAMES = ["lnZ", "dlnCO", "lnKzz"]
 TP_PARAM_NAMES = {
     "guillot": ["Tirr", "Tint", "log_kappa", "log_gamma"],
     "file": [],
+    # PICASO's radiative-convective climate solver (chem_provider='picaso'):
+    # no T-P row -- the T_int row does not certify (canonical_params)
+    "picaso_climate": [],
 }
 # tp_mode="file" helpers (light path: no vulcan_jax/jax imports)
 
@@ -976,8 +1019,8 @@ _PARAM_KEYS_READ = frozenset({
     "f_diurnal", "fisher_params", "gs_cgs", "jac_method", "kzz_const",
     "kzz_kdeep", "kzz_kmax", "kzz_mode", "kzz_plev", "kzz_x", "log_gamma",
     "log_kappa", "log_kappa_cloud", "met_x_solar", "network", "nz",
-    "orbit_au", "p_btm_bar", "p_ref_bar", "planet", "rp_rjup",
-    "rstar_rsun", "rt_integration", "rt_ptop_bar",
+    "orbit_au", "p_btm_bar", "p_ref_bar", "picaso_quench", "planet",
+    "rfacv", "rp_rjup", "rstar_rsun", "rt_integration", "rt_ptop_bar",
     "science_mode", "sflux", "sl_angle_deg", "star_feh", "star_logg",
     "star_teff", "top_flux", "tp_file", "tp_file_path",
     "tp_file_sha1", "tp_mode", "use_condense", "use_moldiff", "use_photo",
@@ -988,7 +1031,7 @@ _PARAM_KEYS_READ = frozenset({
 # payload by feeding it back in, so echo fields must not read as unknown.
 # "data_revision" is appended from the environment below and re-derived on
 # every call (never inherited), so canonical_params must accept its own output.
-_PARAM_KEYS_ECHOED = frozenset({"version", "data_revision"})
+_PARAM_KEYS_ECHOED = frozenset({"version", "data_revision", "picaso_stack"})
 _KNOWN_PARAM_KEYS = _PARAM_KEYS_READ | _PARAM_KEYS_ECHOED
 
 # Misspellings worth a pointed hint; unknown keys are refused, never dropped
@@ -1028,24 +1071,50 @@ def canonical_params(params: dict) -> dict:
             "tool: leave use_settling False and diff_esc/top_flux/bot_flux "
             "empty.")
     tp_mode = str(params.get("tp_mode", _default_tp_mode(params)))
-    if tp_mode == "picaso_climate":
-        raise ValueError(
-            "tp_mode='picaso_climate' was removed with the PICASO subsystem "
-            "in 0.43.0. Use a Guillot profile, or tp_mode='file' with an "
-            "explicit table.")
     if tp_mode not in TP_PARAM_NAMES:
         raise ValueError(
             f"unknown tp_mode {tp_mode!r}: choose from "
-            f"{list(TP_PARAM_NAMES)} -- a Guillot profile, or 'file' with an "
-            "explicit table.")
+            f"{list(TP_PARAM_NAMES)} -- a Guillot profile, 'file' with an "
+            "explicit table, or the PICASO climate solver.")
     provider = str(params.get("chem_provider", "vulcan"))
-    if provider != "vulcan":
+    if provider not in CHEM_PROVIDERS:
         raise ValueError(
-            f"chem_provider {provider!r} is not available: the PICASO "
-            "equilibrium provider was removed in 0.43.0. The only engine is "
-            "'vulcan' (VULCAN-JAX kinetics, the default -- drop the key).")
-    network = str(params.get("network", "sncho"))
-    if network not in NETWORKS:
+            f"unknown chem_provider {provider!r}: choose 'vulcan' (VULCAN-JAX "
+            "photochemical kinetics, the default) or 'picaso' (PICASO climate "
+            "+ equilibrium chemistry).")
+    pic = provider == "picaso"
+    if tp_mode == "picaso_climate" and not pic:
+        raise ValueError(
+            "tp_mode='picaso_climate' is PICASO's climate solver: it needs "
+            "chem_provider='picaso'.")
+    if pic:
+        # VULCAN-JAX physics has no PICASO counterpart: refused, never
+        # silently dropped
+        vulcan_only = [k for k in ("use_photo", "use_moldiff", "use_vm_mol",
+                                   "use_condense") if params.get(k)]
+        if params.get("network") not in (None, ""):
+            vulcan_only.append("network")
+        if str(params.get("kzz_mode", "const")) != "const":
+            vulcan_only.append(f"kzz_mode={params.get('kzz_mode')!r}")
+        if float(params.get("kzz_x", 1.0)) != 1.0:
+            vulcan_only.append("kzz_x")
+        if vulcan_only:
+            raise ValueError(
+                f"{vulcan_only} are VULCAN-JAX settings. The PICASO engine is "
+                "equilibrium chemistry, optionally quenched at one constant "
+                "Kzz (picaso_quench + kzz_const); drop them for "
+                "chem_provider='picaso'.")
+        if params.get("jac_method", "fd") == "ad" and params.get("fisher_params"):
+            raise ValueError(
+                "jac_method='ad' is not available with chem_provider='picaso': "
+                "PICASO runs outside JAX, so its Jacobian rows are certified "
+                "finite differences (jac_method='fd').")
+    elif "rfacv" in params or "picaso_quench" in params:
+        raise ValueError(
+            "rfacv and picaso_quench are PICASO settings; set "
+            "chem_provider='picaso' or drop them.")
+    network = "" if pic else str(params.get("network", "sncho"))
+    if not pic and network not in NETWORKS:
         raise ValueError(
             f"unknown network {network!r}: choose from {list(NETWORKS)} "
             "('sncho' = the shipped S-N-C-H-O kinetics network, the default "
@@ -1066,6 +1135,10 @@ def canonical_params(params: dict) -> dict:
             "chemistry and RT column bottom): below it the deep quench region "
             "is cut off, above it no shipped profile stays inside the "
             f"modelable window {T_WINDOW} K.")
+    if pic and p_btm_bar > PICASO_P_BTM_MAX:
+        raise ValueError(
+            f"p_btm_bar={p_btm_bar:g} bar is below the PICASO climate and "
+            f"quench column, which ends at {PICASO_P_BTM_MAX:g} bar.")
     _span = (float(params.get("rt_ptop_bar", RT_PTOP_DEFAULT)) * 1.0e6, p_btm_bar * 1.0e6)
     tp_file, tp_file_sha1, tp_table = "", "", None
     if tp_mode == "file":
@@ -1130,7 +1203,7 @@ def canonical_params(params: dict) -> dict:
         # supplies the mixing profile too, otherwise constant.
         "kzz_mode": str(params.get(
             "kzz_mode",
-            "file" if (tp_mode == "file" and tp_table is not None
+            "file" if (not pic and tp_mode == "file" and tp_table is not None
                        and tp_table["Kzz"] is not None) else "const")),
         "kzz_x": round(float(params.get("kzz_x", 1.0)), 4),
         "kzz_const": round(float(params.get("kzz_const", 1.0e9)), 1),
@@ -1159,10 +1232,10 @@ def canonical_params(params: dict) -> dict:
         "log_gamma": round(float(params.get("log_gamma", -1.0)), 3),
         # physical VULCAN knobs (all flow through cfg_overrides; the defaults
         # are the W39b cfg values)
-        "use_photo": bool(params.get("use_photo", True)),
+        "use_photo": bool(params.get("use_photo", not pic)),
         "sl_angle_deg": round(float(params.get("sl_angle_deg", 83.0)), 1),
         "f_diurnal": round(float(params.get("f_diurnal", 1.0)), 3),
-        "use_moldiff": bool(params.get("use_moldiff", True)),
+        "use_moldiff": bool(params.get("use_moldiff", not pic)),
         # Upwind molecular-diffusion advection: PINNED explicitly, never
         # inherited from the engine. False is the validated baseline here.
         "use_vm_mol": bool(params.get("use_vm_mol", False)),
@@ -1203,6 +1276,37 @@ def canonical_params(params: dict) -> dict:
         "network": network,
         "version": _VERSION,
     }
+    climate = tp_mode == "picaso_climate"
+    if pic:
+        # PICASO-only keys exist only in PICASO payloads, so no VULCAN cache
+        # key moves. rfacv is a climate input (inert, 0, for the other
+        # profiles); kzz_const keys only a quenched column.
+        cp["rfacv"] = (round(float(params.get("rfacv", RFACV_DEFAULT[science_mode])), 3)
+                       if climate else 0.0)
+        cp["picaso_quench"] = bool(params.get("picaso_quench", False))
+        cp["picaso_stack"] = PICASO_STACK
+        if climate and not RFACV_RANGE[0] <= cp["rfacv"] <= RFACV_RANGE[1]:
+            raise ValueError(
+                f"rfacv={cp['rfacv']:g} outside {list(RFACV_RANGE)} (climate "
+                "heat redistribution: 0.5 planet average, 1.0 dayside)")
+        if climate and not TINT_RANGE[0] <= cp["Tint"] <= TINT_RANGE[1]:
+            raise ValueError(
+                f"Tint={cp['Tint']:g} K outside {list(TINT_RANGE)} K (the "
+                "climate solve's interior temperature)")
+        # VULCAN solver and photolysis knobs are inert under PICASO
+        cp["yconv_cri"], cp["yconv_min"] = YCONV_DEFAULT, YCONV_MIN_DEFAULT
+        if tp_mode == "file" and cp["picaso_quench"]:
+            need = _pe.eval_grid(cp["p_btm_bar"], cp["rt_ptop_bar"], nz, True)[-1]
+            if tp_table["P_dyn"].max() / 1.0e6 < need * (1 - 1e-9):
+                raise ValueError(
+                    f"the T-P table ends at {tp_table['P_dyn'].max() / 1e6:.3g} "
+                    f"bar but the PICASO quench search needs it to {need:.3g} "
+                    "bar; extend the table or switch quench off.")
+        no_sp = sorted(set(cp["extra_mols"]) & _PICASO_NO_SPECIES)
+        if no_sp:
+            raise ValueError(
+                f"extra_mols {no_sp} are not in PICASO's equilibrium species "
+                "list; drop them for chem_provider='picaso'.")
     if not 0.0 <= cp["sl_angle_deg"] <= 89.0:
         raise ValueError(f"sl_angle_deg={cp['sl_angle_deg']} outside [0, 89] deg")
     if not 0.0 < cp["f_diurnal"] <= 1.0:
@@ -1264,14 +1368,15 @@ def canonical_params(params: dict) -> dict:
                 "molecule via extra_mols.")
         _req = set(cp["wo_mols"])
         cp["wo_mols"] = [m for m in _active if m in _req]
-    _co_lo, _co_hi = co_bounds(network, cp["use_photo"])
+    _co_lo, _co_hi = ((CO_MIN, CO_MAX_PHOTO_OFF) if pic
+                      else co_bounds(network, cp["use_photo"]))
     if cp["co_ratio"] < _co_lo:
         raise ValueError(
             f"C/O {cp['co_ratio']:g} is below the modelled minimum {_co_lo:g}.")
     if cp["co_ratio"] > _co_hi:
         # Only name an escape that would actually raise the ceiling: at
         # CO_MAX_PHOTO_OFF every one of them is already in force.
-        _fix = ("" if _co_hi >= CO_MAX_PHOTO_OFF else
+        _fix = ("" if pic or _co_hi >= CO_MAX_PHOTO_OFF else
                 " Try the sncho2025 network, the sulfur-free ncho network, or"
                 " photolysis off.")
         raise ValueError(
@@ -1279,12 +1384,26 @@ def canonical_params(params: dict) -> dict:
             f"(network {network!r}, photolysis "
             f"{'on' if cp['use_photo'] else 'off'}): the limit is "
             f"{_co_hi:g}.{_fix}")
-    if not MET_RANGE[0] <= cp["met_x_solar"] <= MET_RANGE[1]:
+    _met_rng = PICASO_MET_RANGE if pic else MET_RANGE
+    if not _met_rng[0] <= cp["met_x_solar"] <= _met_rng[1]:
         raise ValueError(
             f"met_x_solar={cp['met_x_solar']} outside "
-            f"[{MET_RANGE[0]:g}, {MET_RANGE[1]:g}] x solar")
+            f"[{_met_rng[0]:g}, {_met_rng[1]:g}] x solar"
+            + (" (the PICASO engine's range)" if pic else ""))
     # Fisher menu: chemistry + the tp_mode's T-P parameters (none in file mode)
     # + the cloud-deck parameters when the deck is in the model.
+    if climate and "Tint" in cp["fisher_params"]:
+        raise ValueError(
+            "Tint is not a PICASO climate Fisher row: at the default T_int the "
+            "photosphere moves < 0.02 K per K, under the climate solve's own "
+            "noise, and the row failed its step-size check at 7, 10 and 25 K. "
+            "T_int stays a climate setting; Guillot rows remain available.")
+    if pic and "lnKzz" in cp["fisher_params"]:
+        raise ValueError(
+            "lnKzz is not a PICASO Fisher row: PICASO quenches each family at "
+            "a whole model level, so the quenched abundances are a staircase "
+            "in Kzz (on WASP-39 b the CO-CH4-H2O level steps once per ~0.25 "
+            "dex of Kzz) and no step size gives a certified derivative.")
     allowed_fp = {"lnZ", "dlnCO", "lnKzz"} | set(TP_PARAM_NAMES[tp_mode])
     if cp["cloud_on"]:
         allowed_fp |= set(CLOUD_FISHER_PARAMS)
@@ -1332,16 +1451,16 @@ def canonical_params(params: dict) -> dict:
     # range edge would otherwise silently solve outside it). T-P rows
     # window-check every stencil point for the same reason.
     if cp["jac_method"] == "fd":
-        for name, key, rng in (("lnZ", "met_x_solar", MET_RANGE),
-                               ("dlnCO", "co_ratio",
-                                co_bounds(network, cp["use_photo"]))):
+        for name, key, rng in (("lnZ", "met_x_solar", _met_rng),
+                               ("dlnCO", "co_ratio", (_co_lo, _co_hi))):
             if name not in cp["fisher_params"]:
                 continue
             # Stencil SHAPE keys on the photolysis-on ceiling even photo-off:
             # a one-sided row where a central one would also solve is merely
             # conservative, and a photo-independent threshold keeps every
             # cached Jacobian identical across this widening (no _VERSION bump).
-            offs, h = fd_stencil(name, cp[key], CO_MAX[network])
+            offs, h = fd_stencil(name, cp[key], _co_hi if pic else CO_MAX[network],
+                                 PICASO_MET_RANGE[1] if pic else None)
             pts = [cp[key] * float(np.exp(s * h)) for s in offs]
             if not all(rng[0] <= p <= rng[1] for p in pts):
                 raise ValueError(
@@ -1392,7 +1511,8 @@ def canonical_params(params: dict) -> dict:
         # The UV spectrum feeds only photolysis: normalize it photo-off so
         # identical physics never caches under two keys.
         cp["sflux"] = str(sysd["sflux"])
-        cp["orbit_au"] = round(float(sysd["orbit_au"]), 5)
+        if not climate:                # the semi-major axis heats the climate
+            cp["orbit_au"] = round(float(sysd["orbit_au"]), 5)
     if not cp["use_moldiff"]:          # upwind vm_mol is inert without moldiff
         cp["use_vm_mol"] = False       # (engine gates use_vm on both); keep the
                                        # key from fragmenting the cache
@@ -1400,7 +1520,7 @@ def canonical_params(params: dict) -> dict:
         cp["log_kappa_cloud"] = 0.0
         cp["alpha_cloud"] = 0.0
     # --- science-mode hygiene + gating --------------------------------------
-    if science_mode == "emission":
+    if science_mode == "emission" or climate:   # the climate solve heats with the star
         if not 3000.0 <= cp["star_teff"] <= 7000.0:
             raise ValueError(
                 f"star_teff={cp['star_teff']:g} outside [3000, 7000] K (the "
@@ -1409,17 +1529,20 @@ def canonical_params(params: dict) -> dict:
             raise ValueError(f"star_logg={cp['star_logg']:g} outside [3.0, 5.5]")
         if not -2.5 <= cp["star_feh"] <= 0.5:
             raise ValueError(f"star_feh={cp['star_feh']:g} outside [-2.5, 0.5]")
+    if science_mode == "emission":
         # Rayleigh is transmission-only physics (the pure-absorption emission
         # solver must not read scattering as thermal absorption) and the chord
         # scheme exists only in transmission: normalize both for the cache.
         cp["use_rayleigh"] = False
         cp["rt_integration"] = "simpson"
-    else:
+    elif not climate:
         # transmission: the star lives only on the noise side.
         cp["star_teff"] = cp["star_logg"] = cp["star_feh"] = 0.0
     # drop fields inert for the chosen modes so they don't fragment the cache
     if tp_mode != "guillot":
-        cp["Tirr"] = cp["Tint"] = cp["log_kappa"] = cp["log_gamma"] = 0.0
+        cp["Tirr"] = cp["log_kappa"] = cp["log_gamma"] = 0.0
+        if not climate:
+            cp["Tint"] = 0.0
     # --- Kzz profile mode (const / Pfunc / JM16 / file) ---------------------
     if cp["kzz_mode"] not in KZZ_MODES:
         raise ValueError(
@@ -1430,7 +1553,9 @@ def canonical_params(params: dict) -> dict:
         raise ValueError(
             f"kzz_x={cp['kzz_x']} outside [0.01, 100] (multiplicative scale "
             "applied on-graph to the whole Kzz profile)")
-    if cp["kzz_mode"] == "const":
+    if pic and not cp["picaso_quench"]:  # equilibrium: no transport anywhere
+        cp["kzz_const"] = 0.0
+    elif cp["kzz_mode"] == "const":
         if not 1.0e3 <= cp["kzz_const"] <= 1.0e13:
             raise ValueError(
                 f"kzz_const={cp['kzz_const']:g} outside [1e3, 1e13] cm^2/s")
@@ -1599,12 +1724,20 @@ def _make_progress(cp: dict, log):
     at the START of each stage.
     """
     _emis = cp.get("science_mode") == "emission"
-    stages = [("building chemistry model", 5.0)]
+    _pic = cp["chem_provider"] == "picaso"
+    # a PICASO climate solve is ~550 s on one daw core (two for the baseline's
+    # gravity fixed point); its equilibrium chemistry alone is seconds
+    _clim_s = (PICASO_CLIMATE_SOLVE_S if cp["tp_mode"] == "picaso_climate"
+               else PICASO_QUENCH_COLUMN_S if cp.get("picaso_quench") else 3.0)
+    stages = [("PICASO climate + equilibrium chemistry"
+               if cp["tp_mode"] == "picaso_climate" else
+               "PICASO equilibrium chemistry", 2.0 * _clim_s) if _pic
+              else ("building chemistry model", 5.0)]
     stages += [("building radiative transfer (opacities + CIA)",
                 10.0 + 3.0 * len(cp["extra_mols"]))]
     if _emis:
         stages += [("emission model + stellar SED", 6.0)]
-    stages += [("solving photochemistry", 35.0)]
+    stages += [("PICASO column", 1.0) if _pic else ("solving photochemistry", 35.0)]
     # The leave-one-out block is one engine batch, not one stage per molecule;
     # each wo spectrum refolds from its position to the end of the set.
     _n_wo = len(cp["wo_mols"])
@@ -1625,6 +1758,8 @@ def _make_progress(cp: dict, log):
     def _row_stage(n):
         if n in CLOUD_FISHER_PARAMS:
             return (f"{'AD' if _ad else 'FD'} Jacobian d/d({n})", 8.0)
+        if _pic:
+            return (f"FD Jacobian d/d({n})", 4.0 * _clim_s + 8.0)
         return (f"FD Jacobian d/d({n})",
                 280.0 if n in FD_COMP_PARAMS else 260.0)
 
@@ -1939,7 +2074,13 @@ def run_model(params: dict, log=print) -> Path:
                               lambda fh: fh.write(src_path.read_bytes()))
             log(f"[fwd] uploaded T-P table archived -> {dst}")
     advance, finish = _make_progress(cp, log)
-    A = _assemble_chem(cp, log)
+    _pic = cp["chem_provider"] == "picaso"
+    if _pic:
+        from jwst_tool import picaso_engine
+        advance()          # stage 0 is the PICASO solve, which runs in assemble
+        A = picaso_engine.assemble(cp, log)
+    else:
+        A = _assemble_chem(cp, log)
     # heavy imports AFTER the assembler: vulcan_chem must init env/x64 first
     import jax
     import jax.numpy as jnp
@@ -1953,7 +2094,8 @@ def run_model(params: dict, log=print) -> Path:
     mols_active = list(profile["molecules"])
 
     t0 = time.time()
-    advance()
+    if not _pic:
+        advance()
     log("[fwd] building chemistry model ...")
     chem = _build_chem()
     _bz_build = _bz_warm = float("nan")   # AD dlnCO margins (build / converged column)
@@ -2040,6 +2182,10 @@ def run_model(params: dict, log=print) -> Path:
         eclipse depth (Fp/Fs) * (Rp/Rs)^2 * e^{2 lnR0}. Every downstream
         consumer is observable-agnostic through this function."""
         to_art_b = interp_map.make_to_art(chem_b.p_bar, rt.p_art_bar)
+        # a PICASO climate build carries its own T (a T_int stencil point
+        # solves its own profile); every VULCAN file-mode build shares one
+        _T_art_b = (_t_art_const_from(chem_b) if _pic and tp_eval is None
+                    else None)
         mol_cols = {k: chem_b.sidx[config.MOLECULES[k]["vulcan"]]
                     for k in rt.molecules}
         h2_b, he_b = chem_b.sidx["H2"], chem_b.sidx["He"]
@@ -2055,8 +2201,8 @@ def run_model(params: dict, log=print) -> Path:
         def _art_profiles(y, th):
             y_gas = y * gas_mask[None, :]
             ymix = y_gas / jnp.sum(y_gas, axis=1, keepdims=True)
-            T_art = (art_T(th) if tp_eval_b is None
-                     else tp_eval_b(th[3:], p_art_j))
+            T_art = (tp_eval_b(th[3:], p_art_j) if tp_eval_b is not None
+                     else _T_art_b if _T_art_b is not None else art_T(th))
             mmw_art = to_art_b(ymix @ chem_b.species_masses)
             vmr = {k: to_art_b(ymix[:, c]) for k, c in mol_cols.items()}
             return (vmr, to_art_b(ymix[:, h2_b]), T_art, mmw_art,
@@ -2119,8 +2265,8 @@ def run_model(params: dict, log=print) -> Path:
                                          key=lambda kv: kv[1])]
     _escalated: list[str] = []   # stages that needed the cadence escalation
     _run_frq = None              # photolysis cadence: None = whatever the config says
-    _chem_out = chem_cache_path(params)
-    _chem_art = _load_cached_npz(_chem_out)
+    _chem_out = None if _pic else chem_cache_path(params)
+    _chem_art = None if _pic else _load_cached_npz(_chem_out)
     if _chem_art is not None:
         # validate loudly: a mismatched entry raises, never silently re-solves
         if [str(s) for s in _chem_art["species"]] != _species_now:
@@ -2160,6 +2306,9 @@ def run_model(params: dict, log=print) -> Path:
             depth_from_y = make_depth_fn(chem)
         log(f"[fwd] chemistry column from chem-cache ({_chem_out.name}, "
             f"{_ac} accepted steps at write); solve skipped")
+    elif _pic:     # assemble/build already certified the PICASO column
+        y_np = np.asarray(chem.y, dtype=np.float64)
+        y_sol = jnp.asarray(y_np)
     else:
         log("[fwd] solving photochemistry (cold, certified) ...")
         y_sol, chem, _cert, _esc = certified_solve(
@@ -2230,14 +2379,17 @@ def run_model(params: dict, log=print) -> Path:
     # stored for the app to state on a successful run. `thermal_rows` is the
     # denominator: every thermal row, including the ones with no documented
     # range (those are never counted as outside).
-    from vulcan_jax import runtime_validation as _rv
-    from vulcan_jax.network import parse_network as _parse_network
-    _rate_ex = _rv.rate_temp_range_exposure(
-        _parse_network(NETWORKS[cp["network"]][0]), T_check)
-    log(f"[fwd] rate T-range exposure: {_rate_ex['any_outside']} of "
-        f"{_rate_ex['thermal_rows']} thermal rows are evaluated outside their "
-        f"documented range in >= 1 layer ({_rate_ex['no_range']} rows carry "
-        "no parseable range); advisory, no rate is altered")
+    if _pic:       # no kinetic rate is evaluated under PICASO
+        _rate_ex = {"any_outside": 0, "thermal_rows": 0}
+    else:
+        from vulcan_jax import runtime_validation as _rv
+        from vulcan_jax.network import parse_network as _parse_network
+        _rate_ex = _rv.rate_temp_range_exposure(
+            _parse_network(NETWORKS[cp["network"]][0]), T_check)
+        log(f"[fwd] rate T-range exposure: {_rate_ex['any_outside']} of "
+            f"{_rate_ex['thermal_rows']} thermal rows are evaluated outside "
+            f"their documented range in >= 1 layer ({_rate_ex['no_range']} rows "
+            "carry no parseable range); advisory, no rate is altered")
 
     # Emission bottom-boundary certification. The interior source term is a
     # blackbody at the extrapolated bottom temperature, an assumption about
@@ -2375,8 +2527,11 @@ def run_model(params: dict, log=print) -> Path:
             the thin-bottom certificate. A Fisher row is never built from a
             spectrum neither gate has passed. A point that does not certify
             RAISES -- the escalation is a row-level retry, never per point."""
-            y_b, chem_b, _, _ = certified_solve(chem_b, th, stage, log=log)
-            check_elements(np.asarray(y_b), chem_b, stage, log)
+            if _pic:   # a PICASO build is an already-certified column
+                y_b = jnp.asarray(chem_b.y)
+            else:
+                y_b, chem_b, _, _ = certified_solve(chem_b, th, stage, log=log)
+                check_elements(np.asarray(y_b), chem_b, stage, log)
             _dep_fn = make_depth_fn(chem_b, tp_eval_b)
             if emis is None:
                 return np.asarray(_dep_fn(y_b, jnp.asarray(th)))
@@ -2547,7 +2702,9 @@ def run_model(params: dict, log=print) -> Path:
                 offs, h = fd_stencil(name,
                                      cp["met_x_solar" if name == "lnZ"
                                         else "co_ratio"],
-                                     CO_MAX[cp["network"]])
+                                     CO_MAX_PHOTO_OFF if _pic
+                                     else CO_MAX[cp["network"]],
+                                     PICASO_MET_RANGE[1] if _pic else None)
             method = "fd-central" if len(offs) == 4 else "fd-onesided"
 
             def _row_points(frq):
@@ -2566,10 +2723,12 @@ def run_model(params: dict, log=print) -> Path:
                         else:              # dlnCO: carbon at fixed oxygen
                             ab = _abundance_overrides(cp["met_x_solar"],
                                                       cp["co_ratio"] * f)
-                        pts[s] = _certified_depth(
-                            _build_chem(ab, tag=f"FD {name} {s:+d}h",
-                                        photo_frq=frq),
-                            theta, f"FD {name} {s:+d}h")
+                        chem_s = _build_chem(ab, tag=f"FD {name} {s:+d}h",
+                                             photo_frq=frq)
+                        if _pic and tp_eval is None:   # a climate point has its own T
+                            _check_t_window(None, theta, chem_s.p_bar, log,
+                                            T_base=chem_s.T_base)
+                        pts[s] = _certified_depth(chem_s, theta, f"FD {name} {s:+d}h")
                     return pts
                 # Kzz changes only the live transport coefficient. T-P also
                 # changes the radius/gravity anchor and hence the Guillot
@@ -2581,10 +2740,12 @@ def run_model(params: dict, log=print) -> Path:
                 for s in offs:
                     if i_par >= 3:
                         cp_s = dict(cp, **{name: cp[name] + s * h})
-                        A_s = _assemble_chem(cp_s, log)
+                        A_s = (picaso_engine.assemble(cp_s, log) if _pic
+                               else _assemble_chem(cp_s, log))
                         chem_s = A_s.build_chem(tag=f"FD {name} {s:+d}h",
                                                 photo_frq=frq)
-                        _check_t_window(A_s.tp_eval, A_s.theta, chem_s.p_bar, log)
+                        _check_t_window(A_s.tp_eval, A_s.theta, chem_s.p_bar, log,
+                                        T_base=getattr(chem_s, "T_base", None))
                         pts[s] = _certified_depth(
                             chem_s, A_s.theta, f"FD {name} {s:+d}h", A_s.tp_eval)
                         continue
@@ -2707,7 +2868,13 @@ def run_model(params: dict, log=print) -> Path:
         # what SOLVED this column; exports read it, the cache key does not.
         # A chem-cache hit was solved by an unrecorded stack: no stamp, and
         # the export says "installed now" instead of asserting one.
-        arrays["producer"] = np.array(_prov.producer_commits())
+        arrays["producer"] = np.array(
+            _prov.producer_commits()
+            + ([f"{k}={v}" for k, v in sorted(chem.versions.items())] if _pic else []))
+    if _pic:
+        arrays["picaso_cert"] = np.array(json.dumps(
+            {"cert": chem.cert, "quench_bar": chem.quench,
+             "g_anchor_cgs": A.g_anchor}))
     if emis is not None:
         arrays["fs_flux"] = np.asarray(fs_j, dtype=np.float64)
         # Fp derived exactly from the stored eclipse depth (lnR0 = 0 baseline)
