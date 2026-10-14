@@ -1,9 +1,10 @@
-"""Always-on sanity for the full-chain e2e reference fixture (numpy-only).
+"""Always-on sanity for the two full-chain e2e reference fixtures (VULCAN and
+PICASO; numpy-only).
 
-Runs in the light CI (no JAX/exojax/pandeia), so the fixture behind
+Runs in the fast suite and CI, so the fixtures behind
 tests/live/test_e2e_run_model.py cannot rot silently:
 
-- it stays parseable, finite, and complete;
+- each stays parseable, finite, and complete;
 - its recorded forward._VERSION must equal the LIVE forward._VERSION -- a
   version bump without a fixture regeneration fails HERE, loudly, instead of
   leaving a stale reference that the gated live test would one day chase;

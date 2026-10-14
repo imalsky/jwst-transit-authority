@@ -1,10 +1,9 @@
 # jwst-transit-authority: JWST instrument selector on the shared vulcan-forward
-# engine. The Pandeia ETC noise backend runs in its OWN conda env, addressed via
-# JWST_TOOL_PANDEIA_PYTHON -- it is deliberately NOT a dependency here. The
-# ONLY backend is the STScI-supported matched triple pandeia.engine 2026.7 +
-# pandeia_data-2026.7-jwst + pandeia_psfs-2026.7-jwst. Older backends were
-# removed because this release does not ship or validate their complete
-# matched data triples. Inputs live at the repo-root data/
+# engine. The Pandeia ETC noise backend runs in its OWN Python environment,
+# addressed via JWST_TOOL_PANDEIA_PYTHON -- it is deliberately NOT a dependency
+# here. The ONLY backend is the STScI-supported matched triple pandeia.engine
+# 2026.7 + pandeia_data-2026.7-jwst + pandeia_psfs-2026.7-jwst: no other
+# complete triple is shipped or validated. Inputs live at the repo-root data/
 # (override with JWST_TOOL_DATA_DIR); generated caches at output/
 # (JWST_TOOL_OUTPUT_DIR).
 [build-system]
@@ -41,12 +40,14 @@ dependencies = [
     # Shared forward-model engine (this tool does not depend on the retrieval
     # application). The floor is load-bearing: it refuses unknown profile
     # keys, starts every cold solve from the vulcan-jax equilibrium seed and
-    # runs exojax 2.6.0. tests/unit/test_engine_api_contract.py pins every
-    # engine symbol and profile key the tool uses.
+    # runs exojax 2.6.0. tests/unit/test_engine_api_contract.py checks the
+    # tool's engine calls and profile keys against the installed engine.
     "vulcan-forward>=0.27.1",
-    # Direct imports: load_config (CO_BASELINE check) and steady_state_grad
-    # (adjoint_diag). The floor refuses removed config keys and seeds with
-    # the ExoGibbs Gibbs-equilibrium solve.
+    # Direct imports: load_config (the CFG_ABUNDANCES drift check),
+    # atm_setup, network and runtime_validation (forward), and chem_funs,
+    # steady_state_grad, rates_jax, gibbs and phy_const (adjoint_diag). The
+    # floor refuses removed config keys and seeds with the ExoGibbs
+    # Gibbs-equilibrium solve.
     "vulcan-jax>=0.17.0",
 ]
 

@@ -1,10 +1,10 @@
 name: full-stack-smoke
 
-# Cross-repository integration smoke test. The fast `tests` workflow is
-# numpy-only and installs the two sibling packages at the PINNED commits from
-# deploy/pins.env, so it cannot catch drift at the siblings' HEADs. This job
-# is the drift canary: it installs the WHOLE stack from the current HEADs of
-# all FOUR sibling repos and exercises the condensation path end-to-end:
+# Cross-repository integration smoke test. The fast `tests` workflow installs
+# the two sibling packages at the PINNED commits from deploy/pins.env, so it
+# cannot catch drift at the siblings' HEADs. This job is the drift canary: it
+# installs the WHOLE stack from the current HEADs of all four repositories and
+# exercises the condensation path end-to-end:
 #
 #   fresh env
 #   -> install jax-vulcan HEAD (VULCAN-JAX)
@@ -22,7 +22,7 @@ name: full-stack-smoke
 #
 # It is deliberately OUT of the fast Python-version matrix: it is slow
 # (SNCHO-network compile + two condensing solves) and runs on demand only.
-# It needs no GPU, no HITRAN downloads, and no pandeia backend -- the
+# It needs no GPU, no opacity data, and no pandeia backend -- the
 # condensation solve is chemistry-only (const_mix init, photo off, no RT).
 on:
   workflow_dispatch:
@@ -37,9 +37,9 @@ jobs:
         with:
           path: jwst-transit-authority
 
-      # The clone directory name "VULCAN-JAX" is load-bearing (the GitHub repo is
-      # named jax-vulcan); vulcan-retrieval's config/validate_env resolve it by
-      # that path under VULCAN_PROJECT_ROOT.
+      # Checked out under the workspace's directory name VULCAN-JAX (the
+      # GitHub repo is named jax-vulcan), the name vulcan-retrieval's
+      # validate_env expects.
       - name: Checkout jax-vulcan HEAD (as VULCAN-JAX)
         uses: actions/checkout@v4
         with:
@@ -94,9 +94,10 @@ jobs:
       - name: Build + solve a live-T(P) S8 condensation model (finite + nonzero condensate)
         working-directory: vulcan-retrieval
         env:
-          # PROJECT_ROOT is the directory CONTAINING the checkouts (they are
-          # siblings under the workspace); config.py resolves the tracked
-          # data/cm24_wasp39b marker under it and auto-selects the SNCHO network.
+          # The directory CONTAINING the checkouts: vulcan-retrieval's
+          # forward/config.py finds its data tree (the tracked
+          # data/cm24_wasp39b marker) under it. SNCHO is the engine's default
+          # network (vulcan_forward.constants.DEFAULT_NETWORK).
           VULCAN_PROJECT_ROOT: ${{ github.workspace }}
           JAX_PLATFORM_NAME: cpu
         run: |

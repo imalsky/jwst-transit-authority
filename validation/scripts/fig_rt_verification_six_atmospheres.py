@@ -58,7 +58,7 @@ PAIRS = {(p, m): load_pair(p, m) for m, planets in CASES.items() for p in planet
 
 # All six columns must come from ONE photolysis cadence: mixing a cadence-1 input
 # with a config-cadence one moves a spectrum by up to 3.8 ppm and is invisible in
-# the residuals. Files written before atmos_cases.py recorded this cannot be checked.
+# the residuals. A file without the cadence keys cannot be checked.
 CADENCE_KEYS = ("ini_update_photo_frq", "final_update_photo_frq", "photo_escalated")
 CADENCES = {}
 for (planet, mode), (atmos, _) in PAIRS.items():

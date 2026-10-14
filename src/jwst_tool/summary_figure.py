@@ -159,13 +159,13 @@ def _validate_panels(posterior_panels) -> list[dict]:
                 raise ValueError(f"{cw}: theta {theta.shape} and pdf "
                                  f"{pdf.shape} shapes differ")
             # mu/sigma are the curve's center and 1-sigma width in DISPLAY
-            # units. Optional, but when present the panel shades the 1-sigma
-            # interval and quotes the width -- which is how a marginalized
-            # posterior is conventionally reported (corner.py annotates the
-            # median and 68% interval above each histogram; papers mark the
-            # 1-sigma range with shading or vertical lines). Without them the
-            # curve's SHAPE carries no width information at all, because each
-            # parameter's axis is auto-scaled to its own +/-5 sigma.
+            # units. Optional, but when present the legend entry quotes the
+            # width (_width_text) and the automatic x window is sized from
+            # them -- quoting the width is how a marginalized posterior is
+            # conventionally reported (corner.py annotates the median and 68%
+            # interval above each histogram). Without them the curve's SHAPE
+            # carries no width information at all, because each parameter's
+            # axis is auto-scaled to its own +/-5 sigma grid.
             _mu, _sg = c.get("mu"), c.get("sigma")
             if _sg is not None:
                 _sg = float(_sg)
@@ -249,7 +249,7 @@ def _visible_ylim(spec: dict, lo: float, hi: float):
     The DEFAULT window fits the MODEL curves only, padded 10% of their span
     on each side. The simulated observation points
     are deliberately excluded: a low-S/N MIRI point's whisker can span
-    several times the spectrum's own range and compressed the curve to a
+    several times the spectrum's own range and would compress the curve to a
     near-flat line. Points still set the limits when no model sample is
     visible, and an explicit depth_range always wins upstream. The padding
     is MULTIPLICATIVE when the axis is logarithmic (additive padding over a
@@ -266,9 +266,9 @@ def _visible_ylim(spec: dict, lo: float, hi: float):
         y0, y1 = float(np.min(allv)), float(np.max(allv))
         if spec["y_log"]:
             # A log axis silently DROPS a non-positive point center (a
-            # whisker merely clips). Poison y0 so the caller's existing
-            # positive-range guard refuses the axis, exactly as before;
-            # positive centers stay excluded from the model-only fit.
+            # whisker merely clips). Poison y0 so the caller's
+            # positive-range guard refuses the axis; positive centers stay
+            # excluded from the model-only fit.
             for p in spec["points"]:
                 pm = (p["wl_um"] >= lo) & (p["wl_um"] <= hi)
                 if pm.any() and float(np.min(p["depth_ppm"][pm])) <= 0.0:

@@ -29,7 +29,8 @@ Two faces like forward.py: the light cache API (no JAX imports) and the
 heavy script mode (``python -m jwst_tool.adjoint_diag params.json SO2``).
 Condensation is refused up front: the pinned reservoir is a
 step-sequence-dependent transient (tangents through it are ~91% wrong, see
-forward.py).
+forward.canonical_params). The PICASO engine is refused too: it has no
+reaction network to differentiate.
 """
 from __future__ import annotations
 
@@ -52,8 +53,9 @@ _ADJ_VERSION = 4          # bump to invalidate cached adjoint diagnostics
 # peak-VMR layer inside it keeps a deep quenched maximum from hijacking the loss.
 PHOTOSPHERE_P_BAR = (1.0e-5, 1.0e-1)
 
-# Upstream certification thresholds (steady_state_grad module constants):
-# above these the gradient is reported as a RANKING, not trusted magnitudes.
+# Upstream certification thresholds (vulcan_jax.steady_state_grad
+# _ADJOINT_RESID_WARN and _SPREAD_WARN): above these the gradient is reported
+# as a RANKING, not trusted magnitudes.
 RESID_MEDIAN_TRUST = 0.2
 SPREAD_TRUST = 0.15
 
@@ -179,9 +181,9 @@ def run_adjoint(params: dict, species: str, log=print) -> Path:
     final, _init, atm_T = chem.run_diag(
         jnp.asarray(A.theta, dtype=jnp.float64), return_atm=True)
     longdy = float(final.longdy)
-    # Canonical certification: longdy alone accepted budget-exhausted exits
-    # with still-drifting photolysis flux; conv_normal is the runner's own
-    # gate recomputed at the exit state.
+    # Canonical certification: longdy alone would accept a budget-exhausted
+    # exit whose photolysis flux still drifts; conv_normal is the runner's
+    # own gate recomputed at the exit state.
     _cn = chem.conv_normal_at_exit
     if not (bool(_cn(final)) and longdy < chem.yconv_min):
         raise RuntimeError(

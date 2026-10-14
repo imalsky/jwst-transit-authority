@@ -154,8 +154,8 @@ def test_gray_cloud_pressure_and_opacity_are_one_knob():
     assert kappas[0] - kappas[1] == pytest.approx(3.0)
     for lp, lk in zip(levels, kappas):
         assert lk + lp == pytest.approx(kappas[0] + levels[0])
-    # a deep deck needs an opacity the pre-gray widget floor (-4) could not
-    # reach: that unreachable range is why the mode exists
+    # a 1-bar deck needs log10 kappa below -4, a range the pressure-entered
+    # gray mode reaches directly
     assert planets.gray_cloud_log_kappa(1.0, g, rp, teq) < -4.0
     for bad in (0.0, -1.0):
         with pytest.raises(ValueError, match="cloud top pressure"):
@@ -470,8 +470,9 @@ def test_data_revision_keys_the_cache_without_moving_the_unset_keys(monkeypatch)
     assert (forward.params_key(_p()), forward.chem_key(_p())) == (k1, c1)
     # ... and canonical_params must accept its OWN output: the key is appended
     # from the environment, so every re-canonicalization (an uncached worker
-    # run, a share_config reload) feeds it straight back in and used to raise
-    # "unknown parameter key(s) ['data_revision']" on the deployment only.
+    # run, a share_config reload) feeds it straight back in; refusing it
+    # raises "unknown parameter key(s) ['data_revision']" on the deployment
+    # only.
     cp = forward.canonical_params(_p())
     assert cp["data_revision"] == "a" * 40
     assert forward.canonical_params(cp) == cp
@@ -486,7 +487,7 @@ def test_data_revision_keys_the_cache_without_moving_the_unset_keys(monkeypatch)
 # The REFERENCE configuration (tp_mode="file", the shipped evening-terminator
 # table) is the one measured against the published JWST detection, and also
 # the DEFAULT. The guard anchors to the EXPLICIT file-mode
-# config so it protects the reference even if the default moves again.
+# config so it protects the reference even if the default moves.
 # Re-measure against the literature before updating expected values.
 W39B_REFERENCE = {
     "tp_mode": "file",                      # measured evening-terminator table
@@ -502,7 +503,7 @@ W39B_REFERENCE = {
                                             # the SO2 re-measure noted below
     "use_photo": True,                      # SO2 is photochemical; non-negotiable
     "sl_angle_deg": 83.0,                   # Tsai+2023 terminator slant
-    "use_vm_mol": False,                    # validated pre-flip baseline
+    "use_vm_mol": False,                    # the validated baseline chemistry
     "nz": 100,
 }
 
@@ -567,8 +568,8 @@ def test_network_semantics():
 @pytest.mark.parametrize("use_photo", [True, False])
 def test_co_bound_is_per_network_and_shared_by_every_surface(network, use_photo):
     """One inclusive C/O bound per (network, photolysis), and the API and
-    share_config both read it -- they used to disagree (API < 1.0, share file
-    <= 0.95), so an API run at C/O 0.97 could not be restored.
+    share_config both read it: two separate bounds can disagree (API < 1.0,
+    share file <= 0.95), and then an API run at C/O 0.97 cannot be restored.
 
     Photolysis is the second gate axis: the pinned network's wall above
     C/O 1.02 is photochemical, and photolysis OFF all three networks converge
@@ -618,14 +619,14 @@ def test_co_bound_is_per_network_and_shared_by_every_surface(network, use_photo)
 
 
 def test_photo_off_carbon_rich_fd_dlnco_row_is_accepted():
-    """The slice the photolysis axis opened: photolysis off, C/O above the
+    """The slice the photolysis axis opens: photolysis off, C/O above the
     network's photolysis-ON ceiling, with the dlnCO Jacobian row free.
 
     The stencil SHAPE keys on CO_MAX[network] (photolysis-ON) even photo-off,
     so the row is one-sided where a central one would also solve. That is
     conservative, not wrong -- the one-sided reach is never worse against
-    either bound -- and keeping it photolysis-independent is what makes every
-    previously cached Jacobian bit-identical across the widening.
+    either bound -- and keeping it photolysis-independent leaves every cached
+    Jacobian bit-identical.
     """
     cp = forward.canonical_params(_p(
         network="sncho", use_photo=False, co_ratio=5.0,
@@ -984,10 +985,10 @@ def test_emission_defaults_to_the_dayside_temperature():
     """An eclipse sees the DAYSIDE; a published equilibrium temperature assumes
     full redistribution, which is a planet-average profile.
 
-    This was the single largest error in the emission path. Measured on
-    HD 189733 b against the published MIRI/LRS eclipse spectrum (Inglis et al.
-    2024), switching only this default moved the eclipse depth from 1.35x LOW
-    to within 3% of the data, and chi2 per point from 934 to 31.
+    Measured on HD 189733 b against the published MIRI/LRS eclipse spectrum
+    (Inglis et al. 2024): the planet-average default puts the eclipse depth
+    1.35x LOW (chi2 per point 934); the dayside default lands within 3% of the
+    data (chi2 per point 31), the largest single effect in the emission path.
     """
     for key in planets.PLANETS:
         t = forward.canonical_params(
@@ -1007,9 +1008,9 @@ def test_emission_defaults_to_the_dayside_temperature():
 # --- unknown-key rejection -------------------------------------------------
 
 def test_unknown_keys_refuse_with_a_hint_and_output_round_trips():
-    # The bug this pins: a validation driver passed {"mode": "emission"}, the
-    # key was silently ignored, and a TRANSMISSION spectrum was scored against
-    # eclipse data (chi2/N ~ 5e5). Unknown keys must refuse, never drop.
+    # Unknown keys must refuse, never drop: a silently ignored
+    # {"mode": "emission"} scores a TRANSMISSION spectrum against eclipse
+    # data (chi2/N ~ 5e5).
     with pytest.raises(ValueError, match="science_mode"):
         forward.canonical_params(_p(mode="emission"))
     with pytest.raises(ValueError):
@@ -1154,7 +1155,7 @@ def test_the_chemistry_radius_anchor_is_the_hydrostatic_identity():
     with pytest.raises(ValueError, match="inside the column"):
         forward.radius_at_anchor(p, T, mu, rp, gs, 50.0, p_anchor)
 
-    # At the allowed 1-bar bottom the legacy anchor can be the exterior
+    # At the allowed 1-bar bottom the engine's anchor can be the exterior
     # interface. Integrate the remaining half layer at bottom-layer T/mu.
     p_edge = np.geomspace(1.0, 1e-7, 100)
     anchor = forward.chem_radius_anchor_bar(p_edge, 1e6, False)

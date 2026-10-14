@@ -1,7 +1,7 @@
-"""The gravitational constant is duplicated across repos; pin it.
+"""G, R_sun and AU are duplicated across repos; pin them.
 
-`forward._assemble_chem` converts this tool's surface-gravity input into the planet
-mass VULCAN-JAX wants:
+`forward._assemble_chem` converts this tool's surface-gravity input into the
+planet mass VULCAN-JAX wants:
 
     Mp = gs_cgs * rp_cm**2 / planets.G_CGS
 
@@ -9,20 +9,20 @@ and `vulcan_jax.atm_setup.surface_gravity` inverts it:
 
     gs = phy_const.G_grav * Mp / Rp**2
 
-so `gs` round-trips ONLY because two independently-declared literals happen to
-carry the same digits. A one-digit edit
-on either side would silently rescale every atmosphere this tool submits, with
-no error anywhere: the value stays physical, just wrong.
+so `gs` round-trips ONLY because two independently-declared literals carry
+the same digits. A one-digit edit on either side would silently rescale every
+atmosphere this tool submits, with no error anywhere: the value stays
+physical, just wrong.
 
-Moving the constants into `vulcan_forward.constants` and re-exporting them
-was declined: VULCAN-JAX sits
-BELOW vulcan-forward in the dependency DAG and must keep its own `phy_const`
-regardless, so a move would leave the same two-copy coupling plus an extra
-import edge. Pinning is the honest fix, in the style of vulcan-forward's
+The constants stay where they are: VULCAN-JAX sits BELOW vulcan-forward in the
+dependency DAG and must keep its own `phy_const`, so moving them into
+`vulcan_forward.constants` would leave the same two-copy coupling plus an
+extra import edge. A pin is the fix, in the style of vulcan-forward's
 `_assert_composition_tables`.
 
-VULCAN-JAX is read from SOURCE with `ast`, never imported: this suite is
-deliberately numpy-only and fast, and importing `vulcan_jax` pulls in JAX.
+VULCAN-JAX is read from SOURCE with `ast`, never imported: the pin needs
+only the literals, and importing `vulcan_jax` sets process-wide JAX config
+(x64) and loads its config module.
 """
 from __future__ import annotations
 

@@ -1,6 +1,7 @@
 """Pandeia ETC worker -- runs INSIDE the Pandeia environment
 (JWST_TOOL_PANDEIA_PYTHON). Standalone on purpose: no imports from the rest
-of the tool, stdlib + pandeia only.
+of the tool; stdlib, numpy and the pandeia stack (pandeia.engine, synphot,
+astropy) only.
 
     python pandeia_worker.py job.json result.json
 
@@ -8,9 +9,16 @@ job.json:
     {"refdata": <pandeia_refdata path>, "psf_dir": <pandeia_psfs path>,
      "cdbs": <PYSYN_CDBS path>,
      "star": {"teff":.., "log_g":.., "metallicity":.., "ks_mag":..},
+     "star_spectrum": {"wave_um": [...], "flux_mjy": [...]},  # optional; the
+                                    parity harness's input SED, used as-is
+                                    instead of the PHOENIX + Ks normalization
      "sat_limit": 0.80,
      "modes": [{"key":.., "instrument":.., "mode":.., "config": {...},
-                "strategy": {...}, "ngroup_min":.., "ngroup_max":..}, ...]}
+                "strategy": {...}, "background":.., "background_level":..,
+                "ngroup_min":.., "ngroup_max":..}, ...],
+     "backend": {...}, "worker_version": ..}   # host cache-key fields; the
+                                    worker echoes worker_version into the
+                                    provenance
 
 result.json: one entry per mode key, plus a reserved "__provenance__" entry
 (the exact backend identity, written before any mode runs). Per mode key:
@@ -46,6 +54,8 @@ result.json: one entry per mode key, plus a reserved "__provenance__" entry
                                     ramp length at which the brightest pixel
                                     reaches saturation_fullwell.
      "saturated": bool, "engine_version": "..",
+     "ramp_search_complete": bool,  False when the group search ran out of
+                                    budget before proving maximality,
      "n_pix_native": ..,             NATIVE-GRID channel counts, taken BEFORE
      "n_pix_unusable_dropped": ..,   the finite/positive `good` filter (fully
      "n_pix_part_sat_native": ..,    saturated channels have non-finite
@@ -54,10 +64,19 @@ result.json: one entry per mode key, plus a reserved "__provenance__" entry
                                      of CHANNELS holding at least one such
                                      pixel. Diagnostic only: no host code
                                      reads these four.
-     "warnings": {...}}      -- or {"error": "..."} if that mode failed.
+     "wl_native": [...], "usable_native": [...],
+     "n_part_sat_native_curve": [...], "n_full_sat_native_curve": [...],
+                                    the same native grid, unfiltered (the
+                                    parity harness reads the grid and the
+                                    two curves),
+     "warnings": {...}}
+A mode with no usable pixel returns {"unusable": True, "reason": "..",
+"ngroup", "sat_frac", "saturated", "ramp_search_complete", the native counts
+and curves, "warnings"} instead; a mode that raised returns
+{"error": <traceback>}.
 
 Star normalization: band-integrated synphot photsys normalization to the
-2MASS Ks magnitude in vegamag (web-ETC convention). Never revert to the
+2MASS Ks magnitude in vegamag (web-ETC convention). Never use the
 at_lambda monochromatic shortcut -- it mis-scales the flux by ~1-4% with
 spectral type. Vega reference: the engine uses its OWN refdata Vega; the
 local synphot vega_file pin is only an offline guard (the two agree to

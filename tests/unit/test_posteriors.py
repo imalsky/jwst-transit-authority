@@ -350,8 +350,8 @@ def test_mock_center_co_refuses_an_off_scale_draw():
     width and the pairing breaks. mock_center_co returns the shifted center
     inside the forecast window and None past it, so no curve is drawn at a
     center the input-point width does not describe. A center outside the
-    C/O range the forward model solves is refused too (it once reached
-    ln_gaussian_curve, whose unbounded grid overflowed)."""
+    C/O range the forward model solves is refused too (otherwise it reaches
+    ln_gaussian_curve, whose unbounded grid overflows)."""
     sig_ln = 0.2
     mu = posteriors.mock_center_co(CO, CO * sig_ln, 0.15)
     assert mu == pytest.approx(CO * np.exp(0.15), rel=1e-12)
@@ -407,8 +407,8 @@ def test_scoring_modules_never_reference_the_mock_layer():
 def test_mock_draw_uses_the_same_sigma_as_the_reported_error_bars():
     """The mock draw must be a realization of the SAME noise model whose
     error bars and forecasts are displayed beside it: no scale factor, and
-    the drawn scatter must match the reported sigma. A scale knob that moves
-    the dots without moving the forecast must never come back."""
+    the drawn scatter must match the reported sigma. A scale setting that
+    moves the dots without moving the forecast is refused."""
     import inspect
 
     # the API must not accept a scale/multiplier on the draw

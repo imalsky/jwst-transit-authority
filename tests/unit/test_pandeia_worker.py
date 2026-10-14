@@ -222,7 +222,7 @@ def test_full_saturation_is_counted_before_the_good_filter():
     """Saturation is counted on NATIVE curves, before the good-pixel filter.
 
     A fully saturated channel has non-finite extracted noise, so counting
-    from the filtered curves reported zero saturated pixels.
+    from the filtered curves reports zero saturated pixels.
     """
     out = _run_one_mode(
         wl=[1.0, 2.0],

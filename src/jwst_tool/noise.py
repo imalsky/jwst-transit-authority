@@ -10,7 +10,7 @@ uncertainty per spectral bin:
     sigma_bin        = max(sqrt(var_bin), floor)         (PandExo floor convention)
 
 The count-space combination is the variance of the SAME estimator detect.py
-uses to bin the model (binning.build_operator) -- never revert to the
+uses to bin the model (binning.build_operator) -- never use the
 inverse-variance combination, which quotes a different (optimal-weights)
 estimator than the one the model is binned with.
 
@@ -28,20 +28,24 @@ widget.
 Scope: a Pandeia-extracted-noise BOX-TRANSIT planning forecast under the
 selected extraction/detector configuration. NEVER label sigmas
 PandExo-identical; parity status lives in
-validation/parity/outputs/REPORT.md, kept honest by the fail-closed gate
-(validation/parity/scripts/run_parity.py). Pandeia's extracted noise is not a
-time-series systematics model (no 1/f residuals, visit-long trends,
-detrending covariance, or stellar heterogeneity).
+validation/parity/outputs/REPORT.md, enforced by the fail-closed gate
+(validation/parity/scripts/parity_gate.py, run by run_parity.py). Pandeia's
+extracted noise is not a time-series systematics model (no 1/f residuals,
+visit-long trends, detrending covariance, or stellar heterogeneity).
 
-Results are cached by a hash of (star, modes, sat_limit, engine + refdata
-versions) so the ETC runs once per star/instrument set and stale caches are
-invalidated when the Pandeia backend changes.
+Results are cached per mode (_mode_key) by a hash of the star, the mode's
+submitted configuration, sat_limit, the refdata, CDBS and PSF paths, the
+backend fingerprint (engine version, refdata and PSF identity, CDBS/PHOENIX
+identity) and WORKER_VERSION, so the ETC runs once per star and mode and a
+changed backend misses the cache. run_pandeia, the parity harness's path,
+caches the whole job under its job_key.
 """
 from __future__ import annotations
 
 import hashlib
 import io
 import json
+import logging
 import subprocess
 import threading
 import time
@@ -72,10 +76,12 @@ PANDEIA_WALL_CAP_S = 3600.0
 
 
 def backend_fingerprint() -> dict:
-    """Pandeia backend identity baked into every cache key (queried once per
-    process): engine version from the backend python + refdata version-file
-    contents. "unavailable" (still cache-key-stable) when the env is missing --
-    run_pandeia raises loudly on an actual run attempt."""
+    """Pandeia backend identity in every cache key (queried once per
+    process): the engine version from the backend python, the refdata and
+    PSF names and version files, the backend token and release, and the
+    CDBS/PHOENIX identity. ``engine_version`` is "unavailable" (still
+    cache-key-stable) when the env is missing -- _run_worker raises loudly on
+    an actual run attempt."""
     global _BACKEND_FINGERPRINT
     if _BACKEND_FINGERPRINT is not None:
         return _BACKEND_FINGERPRINT
@@ -191,8 +197,9 @@ def _read_cached_json(path: Path):
             path.rename(quarantine)
         except OSError:
             pass                # a concurrent reader already moved it
-        print(f"[cache] {path.name} unreadable ({e!r}); quarantined -> "
-              f"{quarantine.name}, treating as a cache miss", flush=True)
+        logging.getLogger(__name__).warning(
+            "[cache] %s unreadable (%r); quarantined -> %s, treating as a cache "
+            "miss", path.name, e, quarantine.name)
         return None
 
 

@@ -9,9 +9,9 @@ archive; a planet announced after the shipped snapshot is entered by hand.
 Fill policy (standing loud-errors rule): values outside the custom form's
 bounds (``planets.CUSTOM_FIELD_RANGES``), values missing from the archive row
 and one-sided limits are NEVER clamped or guessed -- the field is left
-unchanged. An out-of-range value written into Streamlit session state would
-crash the widget at instantiation, so the range check is a crash guard, not
-politeness. Stdlib only.
+unchanged. Streamlit silently discards an out-of-range session-state value
+and the widget falls back to its default, so a fill without the range check
+would appear to apply a value the form does not hold. Stdlib only.
 """
 from __future__ import annotations
 
@@ -34,13 +34,12 @@ TAP_SYNC_URL = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
 
 # Column order is the file format; the loader and the refresh both refuse any
 # drift (schema drift means the mapping below needs review, never a silent
-# reinterpretation). st_metratio / pl_bmassprov ride along for honest
-# disclosure ([M/H] vs [Fe/H]; Msini vs true mass behind the derived
-# gravity); the *lim flags mark one-sided limits (+1 upper / -1 lower), from
-# which no gravity or radius is ever derived. PSCompPars values can combine
-# different publications, so derived quantities are nominal composite
-# planning values, disclosed as such -- per-field references and
-# uncertainties are NOT snapshot columns yet.
+# reinterpretation). st_metratio gates the metallicity fill ([M/H] vs
+# [Fe/H]); st_spectype and pl_bmassprov are carried but not read. The *lim
+# flags mark one-sided limits (+1 upper / -1 lower), from which no gravity or
+# radius is ever derived. PSCompPars values can combine different
+# publications, so derived quantities are nominal composite planning values;
+# per-field references and uncertainties are NOT snapshot columns.
 SNAPSHOT_COLUMNS = (
     "pl_name", "st_spectype", "st_teff", "st_logg", "st_met", "st_metratio",
     "st_rad", "sy_kmag", "pl_radj", "pl_bmassj", "pl_bmassprov",
@@ -48,7 +47,8 @@ SNAPSHOT_COLUMNS = (
 )
 
 # Transiting planets with the four fields without which a fill is meaningless;
-# everything else stays nullable and is disclosed by name when missing.
+# everything else stays nullable, and a missing value leaves its field
+# unchanged (custom_fill).
 SNAPSHOT_ADQL = (
     "select " + ",".join(SNAPSHOT_COLUMNS) + " from pscomppars "
     "where tran_flag=1 and st_teff is not null and st_rad is not null "

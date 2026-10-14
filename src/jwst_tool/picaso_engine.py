@@ -210,7 +210,9 @@ def _load(path: Path, req: dict, stage: str):
             res = {k: z[k] for k in z.files}
     except (OSError, ValueError, KeyError, EOFError, zipfile.BadZipFile, zlib.error):
         return None      # unreadable: a miss; the solve rewrites it atomically
-    res.pop("error", None)       # older cache files carry an always-empty one
+    # a cache file under the same WORKER_VERSION may carry an always-empty
+    # "error" array; it is not a result field
+    res.pop("error", None)
     res["cert"] = certify(req, res, stage)
     return res
 

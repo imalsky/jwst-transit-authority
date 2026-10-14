@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Space entrypoint. Preferred layout (HF volumes API, 2026): the dataset repo
+# Space entrypoint. Preferred layout (HF volumes API): the dataset repo
 # is mounted READ-ONLY at /srv/hub-data and a writable bucket volume at /data
 # holds caches + anything the engines insist on writing. Fallback: seed /data
 # from the dataset repo via bootstrap_data.py (needs HF_TOKEN) when no
@@ -161,11 +161,12 @@ fi
 cd "$STATE/cwd"
 
 # Warm the data-status report and the app's imports BEFORE serving. The full
-# scan stats thousands of remote-volume files; when it ran in the background a
-# visitor arriving during the first minute paid it again behind the GUI (the
-# first page load sat on the how-to text for that long). One foreground pass
-# costs the boot about a minute and the first visitor nothing; the duration
-# is logged so a slow boot can be read off the container log.
+# scan stats thousands of remote-volume files; run in the background, it is
+# still unfinished when a visitor arrives in the first minute, and that page
+# (finding no cached report) runs the scan a second time behind the GUI. One
+# foreground pass costs the boot about a minute and the first visitor
+# nothing; the duration is logged so a slow boot can be read off the
+# container log.
 _t0=$(date +%s)
 python - <<'PY' || echo "[entrypoint] WARNING: warm-up failed; the first visitor pays the data scan"
 from jwst_tool import datacheck, forward

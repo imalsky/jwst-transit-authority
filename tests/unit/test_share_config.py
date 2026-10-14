@@ -3,8 +3,6 @@
 The mapping must restore exactly the widget state the download described, and
 an invalid file must raise before anything could be applied. No Streamlit, no
 pandeia, no JAX: the mapping is pure dict work over canonical params.
-Refusals are merged into consolidated fail-closed tests (maintainer: fewer,
-stronger tests).
 """
 import pytest
 
@@ -92,8 +90,7 @@ def test_a_gray_cloud_round_trips_on_the_pressure_it_was_entered_as():
     engine actually uses, and the restore inverts it back to the pressure that
     was entered. The slope is pinned at 0 and is NOT offered as a free
     parameter, so the goal widgets carry their own key suffix. A file with no
-    cloud_mode is the power-law haze -- which is what every configuration
-    written before this mode existed was."""
+    cloud_top_bar marker is the power-law haze."""
     # the app's own T_eq: derived from the star and orbit, not from the
     # canonical block, which zeroes star_teff in transmission
     w39 = planets.PLANETS["wasp39b"]
@@ -135,8 +132,7 @@ def test_a_gray_cloud_round_trips_on_the_pressure_it_was_entered_as():
 def test_a_non_default_network_round_trips_on_its_own_widget_keys(network):
     """The molecule widgets are re-keyed per network so a selection from one
     never strands in the other's options; only the default network's keys are
-    unsuffixed. That suffixed branch had no coverage, and it is a shipped
-    widget-KEY contract."""
+    unsuffixed. The suffixed branch is a shipped widget-KEY contract."""
     co = 2.0 if forward.CO_MAX[network] > 1.0 else 0.6
     canon = _canon(network=network, co_ratio=co, extra_mols=["HCN", "NH3"])
     share = share_config.build_share(
@@ -296,11 +292,11 @@ def test_embedded_tp_table_is_all_or_nothing(tmp_path):
 
 def test_provenance_block_is_complete_and_portable(tmp_path):
     """Release provenance carries no machine paths and reports EVERY declared
-    repository -- the first version keyed on the GitHub name (`jax-vulcan`),
-    missed the working copy (`VULCAN-JAX`), and silently dropped the solver
-    from every export. The identity helper must find the solver under either
-    directory name, report an unversioned copy as such, and make a missing
-    repository explicit."""
+    repository: keying on the GitHub name (`jax-vulcan`) alone misses the
+    working copy (`VULCAN-JAX`) and silently drops the solver from every
+    export. The identity helper must find the solver under either directory
+    name, report an unversioned copy as such, and make a missing repository
+    explicit."""
     from jwst_tool import provenance
     share = share_config.build_share(_canon(), {}, {"seed": 73})
     prov = share["provenance"]
@@ -375,8 +371,8 @@ def test_combos_round_trip_and_invalid_entries_are_refused():
 def test_noise_model_config_evolution_round_trips():
     """The global "Noise multiplier" and the per-mode multipliers round-trip
     as SEPARATE factors (the app composes them; recording the product would
-    re-multiply on restore); a file predating the global knob restores the
-    same behavior (no scale invented, no failure); an unknown floor type is
+    re-multiply on restore); a file without the global multiplier restores
+    the same behavior (no scale invented, no failure); an unknown floor type is
     refused by name; and the removed correlated-floor scenarios load (they
     never changed the model)."""
     goal = dict(goal="detect", goal_mol="H2O", target_sig=3.0)
@@ -397,7 +393,7 @@ def test_noise_model_config_evolution_round_trips():
     assert state[_key("infl_nirspec_g395h")] == 1.5, state
     assert state[_key("noisescale")] == 2.0, state
 
-    # a config written before the global knob existed
+    # a config without the global noise_scale setting
     share = share_config.build_share(_canon(), goal=goal, observation=_obs())
     share["observation"].pop("noise_scale", None)
     state = share_config.widget_state(share, _key)
@@ -465,7 +461,7 @@ def test_noise_star_round_trips_and_legacy_files_get_a_note():
     state = share_config.widget_state(share, _key)
     assert state["n0_wasp39b_teff"] == 5485.0
     assert state["n0_wasp39b_logg"] == 4.47
-    # legacy file: an observation block without the star record
+    # a file whose observation block has no star record
     share = share_config.build_share(canon, goal={},
                                      observation=dict(ks_mag=9.0))
     state = share_config.widget_state(share, _key)

@@ -1,13 +1,21 @@
-"""Forward model runner: VULCAN-JAX photochemistry -> ExoJAX spectrum.
+"""Forward model runner: chemistry -> ExoJAX spectrum.
 
-The GUI's light path (``params_key`` / ``cache_path`` / ``load_result``) only
-reads the npz cache in ``instruments.MODEL_CACHE``: spectra under
-``params_key``, converged chemistry columns under ``chem-<chem_key>``.
+The chemistry is VULCAN-JAX photochemical kinetics (the default) or, with
+``chem_provider='picaso'``, PICASO climate + equilibrium chemistry
+(``picaso_engine.py``). The npz cache in ``instruments.MODEL_CACHE`` holds
+spectra under ``params_key`` and converged VULCAN chemistry columns under
+``chem-<chem_key>``; the GUI's light path (``params_key`` / ``cache_path`` /
+``load_result``) reads only the ``params_key`` entries.
 ``python -m jwst_tool.forward params.json`` runs the heavy pipeline and writes
-that entry, logging "[fwd] PROG <frac> <label>" for the GUI bar. With
-``fisher_params`` it also builds the spectrum Jacobian row by row (per-row
-method in ``jac_row_method``): "fd" is certified central finite differences
-under the h-vs-2h gate, "ad" one warm-started jvp per row.
+the ``params_key`` entry, logging "[fwd] PROG <frac> <label>" for the GUI
+bar. With ``fisher_params`` it also builds the spectrum Jacobian row by row,
+recording each row's method in ``jac_row_method``. ``jac_method="fd"`` (the
+default) gives certified finite differences under the h-vs-2h gate, central
+or one-sided at a range edge ("fd-central", "fd-onesided"); ``"ad"`` gives
+one warm-started jvp per chemistry row ("ad-jvp", VULCAN only); T-P rows take
+the FD stencil under either method. The RT-only rows (cloud deck, lnR0) are
+one central difference with no h-vs-2h check ("fd-rt", fd_err NaN) or an RT
+jvp ("ad-jvp").
 ``fisher.py`` turns the Jacobian + Pandeia noise into forecasts.
 
 A "removed" spectrum zeroes that molecule's VMR in the RT only, keeping the
@@ -68,10 +76,11 @@ _VERSION = 59  # model_cache buster (identity = canonical params + this
                # canonical-key-set change.
 
 # The W39b cfg's elemental set (number ratios to H, 10x solar): Lodders 2020
-# Table 8 present-day solar (log eps C 8.47, N 7.85, O 8.73, S 7.15; He 10.924
-# stays in the abundance preset file) times 10, the numbers upstream VULCAN's
-# vulcan_cfg.py carries. _assemble_chem refuses on drift from the loaded cfg,
-# so they are usable without the engine (share files, display).
+# Table 8 present-day solar (log eps C 8.47, N 7.85, O 8.73, S 7.15; He is
+# not scaled and stays at the abundance preset file's 10.9232) times 10, the
+# numbers upstream VULCAN's vulcan_cfg.py carries. _assemble_chem refuses on
+# drift from the loaded cfg, so they are usable without the engine (share
+# files, display).
 CFG_ABUNDANCES = {"O_H": 0.00537, "C_H": 0.00295,
                   "N_H": 0.000708, "S_H": 0.000141}
 # Baseline C/O: the number ratio N_C/N_O (not [C/H]/[O/H], not a log) on that
@@ -343,8 +352,8 @@ def certified_solve(chem_b, th, stage, rebuild=None, log=print):
     a strongly shielded column then rejects every refresh step and never
     certifies. A column that does not certify is re-solved once
     with photolysis refreshed every accepted step, which converges it. `rebuild`
-    returns the same model at that cadence; without it the solve raises as
-    before. Returns (y, chem_used, cert, escalated).
+    returns the same model at that cadence; without it a column that does not
+    certify raises NotCertified. Returns (y, chem_used, cert, escalated).
 
     Only the CERTIFICATE is inside the try, like the AD rows: an XLA runtime
     error is a RuntimeError too, and a backend failure must propagate instead
@@ -993,6 +1002,16 @@ _REMOVED_PARAM_KEYS = frozenset({
 
 
 def canonical_params(params: dict) -> dict:
+    """Validate a run request and return its canonical parameter dict.
+
+    Every default is filled in, values are rounded, settings that are inert
+    for the chosen modes are zeroed so one physics maps to one key, and
+    ``version`` (plus ``picaso_stack`` under PICASO and ``data_revision`` when
+    set) is appended. params_key hashes this dict; chem_key hashes it without
+    CHEM_IRRELEVANT_PARAMS. Unknown or removed keys, out-of-range values and
+    conflicting settings raise; nothing is clipped and no unknown key is
+    dropped. The output maps to itself, so a saved payload can be validated
+    by feeding it back in (share_config)."""
     removed = sorted(set(params) & _REMOVED_PARAM_KEYS)
     if removed:
         raise ValueError(
@@ -1216,8 +1235,9 @@ def canonical_params(params: dict) -> dict:
         "wo_mols": (None if params.get("wo_mols") is None
                     else [str(m) for m in params.get("wo_mols")]),
         "fisher_params": sorted({str(p) for p in (params.get("fisher_params") or [])}),
-        # Jacobian method: "fd" (certified FD, default, valid everywhere) or
-        # "ad" (one warm-started jvp per row, photo-on only; module docstring).
+        # Jacobian method: "fd" (certified FD, the default) or "ad" (one
+        # warm-started jvp per chemistry row, photo-on and VULCAN only; module
+        # docstring).
         "jac_method": str(params.get("jac_method", "fd")),
         "chem_provider": provider,
         "network": network,
@@ -1605,17 +1625,23 @@ def load_result(params: dict):
     """Cached spectrum dict or None.
 
     Always present: wl_um, depth, depth_wo (n_wo, n_nu), wo_mols (the
-    leave-one-out set depth_wo rows align with), mols, ymix, p_bar, T, theta,
-    theta_names, params_json, chem_provider, and unmodeled (network species
-    with no k-table, "<species>|<vmr>"). With Fisher requested:
+    leave-one-out set depth_wo rows align with), mols, ymix, ymix_species
+    (the column names of ymix), p_bar, T, theta, theta_names, params_json,
+    science_mode, chem_provider, unmodeled (network species with no k-table,
+    "<species>|<vmr>"), rate_rows_outside / rate_rows_total (the rate-law
+    T-range advisory), co_bz_margin (the AD dlnCO margins, NaN when unused)
+    and photo_escalated (stages that needed photolysis cadence 1). Under
+    PICASO also picaso_cert (certificate, quench levels, gravity anchor). With
+    Fisher requested:
     jac (n_par, n_nu), jac_names, jac_row_method, fd_h, fd_err. In emission,
     the thin-bottom evidence detect REQUIRES and refuses without: fp_flux,
     fs_flux, emis_depth_norm, emis_thin_flux_frac_wo (n_wo), and the
     per-wavelength emis_tau_bottom (n_nu) / emis_tau_bottom_wo (n_wo, n_nu)
     the band-restricted gate re-evaluates.
     Also ``producer``: the "repo=commit" strings that SOLVED the column
-    (provenance.producer_commits; empty when no checkout could be read),
-    absent when the column came from the chem cache.
+    (provenance.producer_commits; empty when no checkout could be read; under
+    PICASO followed by the worker's stack versions), absent when the column
+    came from the chem cache.
     """
     return _load_cached_npz(cache_path(params))
 
@@ -1769,8 +1795,8 @@ def _assemble_chem(cp: dict, log):
     # Kinetics network: the engine freezes network/atom_list at ITS first
     # import, so the selection must land before vulcan_chem arrives; a
     # conflicting in-process import raises. Set for EVERY network, the default
-    # included: skipping it for "sncho" let a sncho request that followed a
-    # sncho2025 run in the same process be served by sncho2025 and cached
+    # included: skipping it for "sncho" would let a sncho request that follows
+    # a sncho2025 run in the same process be served by sncho2025 and cached
     # under the sncho key.
     _net_path, _net_atoms = NETWORKS[cp["network"]]
     os.environ["VULCAN_JAX_NETWORK"] = _net_path
@@ -1781,8 +1807,8 @@ def _assemble_chem(cp: dict, log):
     import jax
     import jax.numpy as jnp
 
-    # Persistent XLA compile cache: ESSENTIAL for adjoint_diag, whose step-VJP
-    # is a multi-hour cold compile on CPU.
+    # Persistent XLA compile cache, for adjoint_diag's step-VJP: a long cold
+    # compile on CPU.
     jax.config.update("jax_compilation_cache_dir",
                       str(Path.home() / ".cache" / "jax_vulcan"))
     jax.config.update("jax_persistent_cache_min_compile_time_secs", 1.0)
@@ -1986,6 +2012,10 @@ def _check_t_window(tp_eval, theta, p_bar, log, T_base=None):
 
 
 def run_model(params: dict, log=print) -> Path:
+    """Run the heavy pipeline for ``params`` and write its model_cache entry
+    (contents: load_result); returns the npz path. Every certificate and gate
+    raises before that entry is written: an uncertified spectrum or Jacobian
+    row is never cached."""
     cp = canonical_params(params)
     # Uploaded T-P tables become a CONTENT-ADDRESSED copy under
     # <output>/uploads/<sha1>.txt before anything heavy runs, so canonical
@@ -2269,7 +2299,7 @@ def run_model(params: dict, log=print) -> Path:
             _chem_out, lambda fh: np.savez_compressed(fh, **_chem_arrays))
         log(f"[fwd] chem column cached -> {_chem_out.name}")
 
-    # Opacity honesty: a species the network solves but the RT cannot see is
+    # Missing opacity: a species the network solves but the RT cannot see is
     # missing absorption, not a missing trace. Loud, never silent. The error it
     # leaves is UNSIGNED: the tool scores depth - depth_wo, which in the
     # isothermal limit is H ln(1 + k_X/k_bkg), so an omitted background
@@ -2614,7 +2644,7 @@ def run_model(params: dict, log=print) -> Path:
             offs, h = (1, -1, 2, -2), FD_STEPS[name]
             if name in FD_COMP_PARAMS:
                 # composition direction: central, or one-sided away from the
-                # network's C/O bound -- see fd_stencil
+                # C/O bound or the PICASO metallicity cap -- see fd_stencil
                 offs, h = fd_stencil(name,
                                      cp["met_x_solar" if name == "lnZ"
                                         else "co_ratio"],
@@ -2754,7 +2784,7 @@ def run_model(params: dict, log=print) -> Path:
         ymix_species=np.array(_species_now, dtype="U16"),
         T=np.asarray(T_check), theta=theta,
         theta_names=np.array(theta_names, dtype="U16"),
-        # auto-sized U dtype: a fixed width silently truncated long JSON
+        # auto-sized U dtype: a fixed width silently truncates long JSON
         params_json=np.array(json.dumps(cp)),
         # Network species with no k-table (unmodeled_absorbers). Stored, not
         # just logged: a model-cache hit never solves, so the GUI has no other
@@ -2771,7 +2801,7 @@ def run_model(params: dict, log=print) -> Path:
         chem_provider=np.array(cp["chem_provider"], dtype="U16"),
         # Stages that needed the photolysis-cadence escalation to certify;
         # empty on the normal path. See certified_solve.
-        # auto-sized U dtype: a fixed width truncated the longest label
+        # auto-sized U dtype: a fixed width truncates the longest label
         photo_escalated=np.array(_escalated),
     )
     if _chem_art is None:
@@ -2805,8 +2835,9 @@ def run_model(params: dict, log=print) -> Path:
     if jac is not None:
         arrays["jac"] = jac
         arrays["jac_names"] = np.array(jac_names, dtype="U16")
-        # Per-row provenance. fd_err NaN = unmeasured (AD rows, ungated
-        # single-difference RT rows), never 0; 0.0 means a zero-response row.
+        # Per-row provenance. fd_err NaN = unmeasured (AD rows, and the
+        # single-difference RT rows with no h-vs-2h check), never 0; 0.0
+        # means a zero-response row.
         arrays["jac_row_method"] = np.array(row_method, dtype="U16")
         arrays["fd_h"] = np.array(fd_h, dtype=np.float64)
         arrays["fd_err"] = np.array(fd_err, dtype=np.float64)

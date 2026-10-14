@@ -55,8 +55,8 @@ REQUIRED_UNSATURATED_MODES = set(MODE_KEYS)
 FAINT_STARS = {"faint_k"}
 
 # The closed status vocabulary. A status the gate does not know is a row the
-# gate cannot judge, so it is a FAILURE, not a skip (that hole once hid a
-# 65.9%-pixel-match saturated PRISM row from every check).
+# gate cannot judge, so it is a FAILURE, not a skip: a skip lets a saturated
+# PRISM row at a 65.9% pixel match through every check.
 VALID_STATUSES = {"OK", "ERROR", "SATURATED", "SATURATED_ABOVE_LIMIT"}
 
 # Identity: defined once in production code, re-exported for the gate.
@@ -97,9 +97,8 @@ MAX_NGROUP_ABS_DIFF_FAINT = 5
 # +-1 tolerance above is meaningless there: 1 vs 2 groups is a 100% group
 # difference and ~33% of the integration time, and pandeia's extracted noise
 # is pathologically worse at 1 group. Whenever EITHER side selects at or
-# below this count, the two optimizers must agree EXACTLY: a conservative
-# seed once picked 1 group where PandExo's 2 was measured safe, and the +-1
-# rule passed it.
+# below this count, the two optimizers must agree EXACTLY: the +-1 rule
+# passes a 1-group choice where 2 groups are measured safe.
 LOW_NGROUP_EXACT = 3
 # Per-integration time inherits the group choice; gate the relative gap so a
 # ramp-policy divergence cannot hide behind a passing group diff.
@@ -121,9 +120,9 @@ MAX_FLUX_RATIO_DEV = 0.03
 
 # Sigma ratios are deliberately NOT gated to unity: pandeia's full extracted
 # noise and PandExo's analytic `fml` estimator are different noise models on
-# purpose. Measured envelope on the committed artifact: -0.3% to
-# +31% (NIR) and +35% to +53% (MIRI LRS). REPORT.md derives these from the
-# artifact -- do not re-hard-code a range here, it goes stale on every re-run.
+# purpose. REPORT.md derives the measured envelope from the artifact (on the
+# committed one: -0.3% to +31% NIR, +35% to +53% MIRI LRS); it moves on every
+# re-run, so no code here depends on it.
 # But "different by design" has a ceiling: a median ratio outside this band
 # is an ANOMALY (an unnecessary 1-group ramp measured 7.08x, which an
 # ungated sigma passes silently).
@@ -345,10 +344,10 @@ def validate(summary: dict) -> list[str]:
                         "must agree exactly")
                 continue
 
-            # Saturation must be judged from the MEASURED fraction, not only
-            # the worker's `unusable` flag alone, which has let two rows
-            # above the limit through as OK, one at 7.31x the saturation
-            # level (Pandeia's per-mode value, not the physical full well).
+            # Saturation is judged from the MEASURED fraction, not the
+            # worker's `unusable` flag alone: the flag can pass a row above
+            # the limit as OK (one measured at 7.31x the saturation level,
+            # Pandeia's per-mode value, not the physical full well).
             sat = row.get("sat_frac_ours")
             if sat is None:
                 problems.append(f"{tag}: OK row with no measured sat_frac")

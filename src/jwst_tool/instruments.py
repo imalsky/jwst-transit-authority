@@ -1,10 +1,10 @@
 """JWST time-series instrument-mode registry + paths for the noise backend.
 
 Each ``MODES`` entry carries the Pandeia configuration used by
-``pandeia_worker.py`` (running in the selected backend's conda env), display
-metadata, and an illustrative systematic noise floor.
+``pandeia_worker.py`` (running in the Pandeia backend's own environment),
+display metadata, and an illustrative systematic noise floor.
 
-Mode tokens are the engine mode names of the supported (2026-era) release
+Mode tokens are the engine mode names of the supported Pandeia release
 and are submitted verbatim by ``noise.noise_job`` and the parity harness alike.
 
 Noise floors (``floor_ppm_suggested``) are ILLUSTRATIVE planning values, not
@@ -118,7 +118,7 @@ def atomic_write(path: Path, writer) -> None:
         raise
 
 # Pandeia backend environment (the real STScI ETC engine, PandExo's core).
-# The worker runs in its own conda env; noise.run_pandeia refuses loudly if
+# The worker runs in its own environment; noise.run_pandeia refuses loudly if
 # the python is missing. There is exactly ONE backend, "current" = the
 # supported STScI release as a MATCHED TRIPLE (pandeia.engine == 2026.7 +
 # pandeia_data-2026.7-jwst + pandeia_psfs-2026.7-jwst), enforced by
@@ -238,9 +238,9 @@ PANDEXO_UNBOUNDED_NGROUP = 65535
 # (pandeia_data-2026.7-jwst/jwst/<instrument>/config.json detector_config:
 # nirspec/niriss/nircam 1, miri 2). PandExo reads the same field
 # (timing_det_pars['mingroups'], no instrument branching), so both tools
-# search the same ramp space. Do not restore floors above pandeia's
-# mingroups: that reports bright targets "saturated at the shortest ramp"
-# where PandExo passes.
+# search the same ramp space. Never set a floor above pandeia's mingroups:
+# that reports bright targets "saturated at the shortest ramp" where PandExo
+# passes.
 
 # r_native_med: the mode's typical native resolving power, shown in the GUI
 # mode picker. Median of R(lambda) from the mode's 2026.7 refdata dispersion
@@ -374,14 +374,15 @@ MODES = {
         floor_ppm_suggested=40.0, ngroup_min=2,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
-    # Same band as G395H at ~4x lower R; the medium-resolution grating trades
-    # resolving power for a brighter saturation limit than PRISM while keeping
-    # the full 3-5 um band on one detector pair (the G395M-vs-G395H
-    # duty-cycle / saturation trade). Tokens verified against
+    # Same band as G395H at ~2.7x lower R (r_native_med 1000 against 2700);
+    # the medium-resolution grating trades resolving power for a brighter
+    # saturation limit than PRISM while keeping the full 3-5 um band on one
+    # detector pair (the G395M-vs-G395H duty-cycle / saturation trade).
+    # Tokens verified against
     # pandeia_data-2026.7-jwst/jwst/nirspec/config.json: bots dispersers
-    # include "g395m"; config_constraints allow
-    # f290lp + sub2048 for it; readout_patterns include "nrsrapid";
-    # range.s1600a1.f290lp spans 2.87-5.27 um.
+    # include "g395m"; config_constraints allow f290lp + sub2048 for it;
+    # readout_patterns include "nrsrapid"; range.s1600a1.f290lp spans
+    # 2.87-5.27 um.
     "nirspec_g395m": dict(
         label="NIRSpec G395M",
         instrument="nirspec", mode="bots",
@@ -492,7 +493,7 @@ LSF_WIDTH = {
 #
 # REPORTED, NEVER APPLIED (no silent substitution, and applying it would move
 # measured worker output without moving a parity gate key). The user lowers
-# the slider; the tool says so.
+# the saturation limit; the tool says so.
 SAT_LIMIT_ADVISED = {
     "niriss_soss": 56000.0 / 72000.0,
 }
@@ -501,7 +502,7 @@ SAT_LIMIT_ADVISED = {
 # tool never consumes -- `bad_waveref` is about 2D diagnostic planes (only
 # rpt["1d"] is read), `wavelength_truncated_blue_0` / `scene_range_truncated`
 # are a 0.51-vs-0.50 um SED blue-limit mismatch -- and forwarding it verbatim
-# put a permanent yellow box of internal tokens on nearly every NIRCam run.
+# puts a permanent yellow box of internal tokens on nearly every NIRCam run.
 REPORTED_WARNINGS = frozenset({"full_saturated", "partial_saturated"})
 
 

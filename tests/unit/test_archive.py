@@ -1,8 +1,6 @@
 """Archive snapshot / custom-fill unit tests (stdlib + planets only, no
 network, light-CI safe). The shipped snapshot is a test fixture here: its
 provenance, schema, and required-field guarantees are part of the contract.
-Fill-refusal assertions are merged into one test per behavior (maintainer:
-fewer, stronger tests).
 """
 from __future__ import annotations
 
@@ -61,8 +59,8 @@ def _row(**over):
 
 def test_custom_fill_maps_derives_gravity_and_never_selects_uv():
     """A complete row maps every field and derives gravity from mass +
-    radius. Standing maintainer rule: the fill NEVER writes the UV menu --
-    no substitute is ever selected, and nothing is said about it."""
+    radius. The fill NEVER writes the UV menu: no substitute is ever
+    selected, and nothing is said about it."""
     values = archive.custom_fill(_row())
     assert values["teff"] == 5485.0 and values["logg"] == 4.5
     assert values["feh"] == 0.10 and values["ks"] == 10.20

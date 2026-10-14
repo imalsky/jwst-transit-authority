@@ -95,8 +95,9 @@ def _assert_no_overlaps(boxes, what):
 
 # The render lock: matplotlib's mathtext parser is locked only during
 # Figure.draw, but tight_layout measures (mathtext) log-axis tick labels
-# outside it, so two Streamlit sessions rendering at once raised
-# 'ValueError: ParseException' (7/8 threads on matplotlib 3.10.0).
+# outside it, so two Streamlit sessions rendering at once without the lock
+# raise 'ValueError: ParseException' (measured: 7/8 threads on matplotlib
+# 3.10.0).
 
 def test_builders_block_while_the_render_lock_is_held():
     """BEHAVIORAL: each builder actually ACQUIRES the lock: with the lock
@@ -141,7 +142,7 @@ def test_builders_block_while_the_render_lock_is_held():
 def test_structure_panels_share_one_pressure_axis_drawn_on_both():
     """The two structure panels lock their pressure axis together (sharey),
     but the axis must be VISIBLE on both: plt.subplots hides the right
-    panel's tick labels, which left the mixing-ratio panel floating with no
+    panel's tick labels, which leaves the mixing-ratio panel floating with no
     pressure scale across the gap between the panels."""
     p, T = _tp()
     fig = plotting.build_structure_figure(p, T, _vmr_cols(p))
@@ -370,8 +371,8 @@ def test_log_depth_axis_refusals_whisker_clip_and_tick_spacing():
        50 +/- 340 ppm is ordinary at low S/N; the whisker is clipped at the
        spine and the limits follow the positive DEPTHS.
     3. Ticks come from a subdivided LogLocator, never a linear locator: a
-       MaxNLocator branch once placed LINEARLY spaced ticks below 1.5
-       decades (equal steps at unequal distances misread on a log axis).
+       MaxNLocator places LINEARLY spaced ticks below 1.5 decades (equal
+       steps at unequal distances misread on a log axis).
        subs=(1, 2, 5) covers both the narrow and the wide regime.
     """
     wl = np.linspace(0.6, 12.0, 200)      # must match _log_spec's grid

@@ -6,10 +6,11 @@ At the config's refresh every 5th accepted step this point does not certify:
 dt can grow up to 2^5 between refreshes, and at the recorded event current
 water shielding gave Ros2 error 0.43 against rtol 0.2 while the previous water
 profile for radiation alone gave 0.06, so the column rejected every refresh
-step. `forward.certified_solve` re-solves such a
-column once with photolysis refreshed every accepted step.
+step. `forward.certified_solve` re-solves such a column once with photolysis
+refreshed every accepted step.
 
-Cost: two cold solves, ~10 min. Gated like the e2e: JWST_TOOL_RUN_SLOW=1.
+Cost: two cold solves, about an hour on daw. Gated like the e2e:
+JWST_TOOL_RUN_SLOW=1.
 """
 from __future__ import annotations
 

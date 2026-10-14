@@ -1,8 +1,8 @@
 """PICASO worker -- runs INSIDE the PICASO environment (JWST_TOOL_PICASO_PYTHON).
 
 Standalone on purpose: stdlib + numpy at module level, picaso/photochem/astropy
-inside functions, nothing from the rest of the tool and no jax. picaso 4.1
-needs numpy >= 2; the tool's stack pins numpy < 2.
+and synphot/stsynphot inside functions, nothing from the rest of the tool and
+no jax. picaso 4.1 needs numpy >= 2; the tool's stack pins numpy < 2.
 
     python picaso_worker.py job.json out.npz
 
@@ -13,7 +13,7 @@ job.json:
      "request": {
         "xh": {atom: X/H for every atom except H},   # the tool's composition
         "metallicity": Z,             # linear; quench timescales + tripwire
-        "g_cgs": g,                   # one constant gravity (picaso #384)
+        "g_cgs": g,                   # one constant gravity (picaso issue #384)
         "p_bar": [...],               # ascending evaluation grid
         "T": [...] | null,            # null: the climate solve supplies T
         "quench_kzz": Kzz | null,     # cm^2/s; null = equilibrium

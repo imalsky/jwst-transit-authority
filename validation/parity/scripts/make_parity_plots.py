@@ -9,7 +9,7 @@ current PandExo on the same Pandeia 2026.7 engine -- the things that match
 1:1: the selected groups, integration time, integration counts, and the
 extracted stellar flux. The depth-uncertainty difference (a noise-model
 difference, not a configuration one) is quantified in REPORT.md and
-parity_summary.json, and explained in README.md, not plotted.
+parity_summary.json, not plotted.
 
 The summary is RE-VALIDATED through the shared gate (parity_gate.py) before
 any figure gets current-release labels; the persisted `gate.passed` boolean
@@ -155,11 +155,10 @@ def _require_raw_matches_summary(summary, star, o_all, p_all, of, pf):
     older experiment. Plotting those silently re-labels stale numbers with the
     committed artifact's release banner.
 
-    This is not hypothetical: an outputs directory holding a worker-v10,
-    7-mode run beside a committed worker-v11, 8-mode summary drew a 0.9973
-    binned-median flux ratio over an artifact that records exactly 1.0
-    (max_abs_dev 2.2e-16). House rule: a check that cannot run must say so,
-    and a mismatch is a hard error.
+    Measured case: raw files from a 7-mode worker-v10 run beside an 8-mode
+    worker-v11 summary drew a 0.9973 binned-median flux ratio over an
+    artifact that records exactly 1.0 (max_abs_dev 2.2e-16). A check that
+    cannot run says so, and a mismatch is a hard error.
     """
     s_star = summary["stars"][star]
     s_modes = {r["key"] for r in s_star["modes"]}

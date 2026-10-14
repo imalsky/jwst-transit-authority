@@ -1,8 +1,9 @@
 """A GUI worker must not outlive the script run that started it.
 
-Streamlit cancels a run with ScriptControlException, a BaseException; before
-`proc.terminating` that left a solver running after `runlimit` released its
-slot. The guard is pinned against Exception and BaseException both.
+Streamlit cancels a run with ScriptControlException, a BaseException; a guard
+that catches only Exception leaves a solver running after `runlimit` has
+released its slot. `proc.terminating` is pinned against Exception and
+BaseException both.
 """
 from __future__ import annotations
 

@@ -1,4 +1,5 @@
-"""summary_figure: the proposal summary figure (golden-ratio spectrum + up to three square posterior panels) composes headless.
+"""summary_figure: the proposal summary figure (golden-ratio spectrum + up to
+three square posterior panels) composes headless.
 
 Pure matplotlib (Agg): no Streamlit, no engine, no noise backend. Pins the
 loud input validation, the no-silent-empty-panel rule, and that the figure
@@ -306,7 +307,7 @@ def test_wide_co_panel_frames_the_curve_it_drew(sigma_ln):
     does -- set_xlim(inf) is a hard matplotlib error, and a merely large 1e62
     frames the panel on empty decades. So the window is clamped to the curve
     that was actually drawn. 1.33 is a real HD 149026 b run; 41 and 920 are
-    real SOSS order-2 widths that used to read "unconstrained".
+    real SOSS order-2 widths.
     """
     lo, hi = posteriors.co_curve_bounds()
     curve = posteriors.ln_gaussian_curve(0.55, sigma_ln, bounds=(lo, hi))

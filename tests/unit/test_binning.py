@@ -333,9 +333,9 @@ def test_invalid_inputs_raise_loudly():
 
 def test_smooth_clamped_model_span_preserves_constant_at_band_edge():
     """When the model grid spans EXACTLY the band, the working-grid edge clip
-    can collapse the final cell to zero width; pre-fix that cell's 0/1e-300
-    average filled the constant pad, dragging the weight=None blur ~49% low at
-    the band edge. Both invariants must hold at machine precision across a
+    can collapse the final cell to zero width; a 0/1e-300 average in that
+    cell fills the constant pad and drags the weight=None blur ~49% low at the
+    band edge. Both invariants must hold at machine precision across a
     band_hi sweep that toggles the zero-width alignment."""
     c, R = 0.0123, 60.0
     for band_hi in np.linspace(10.90, 11.10, 9):
@@ -397,7 +397,7 @@ def test_smooth_validates_the_native_r_table():
     ships it descending (13.86 -> 5.02 um). The kernel width is read with
     np.interp, which requires increasing sample points and silently returns
     the end value everywhere on a descending table -- so a raw pass-through
-    blurred the whole 5-12 um band at R(red end) = 42 instead of R = 42..208.
+    blurs the whole 5-12 um band at R(red end) = 42 instead of R = 42..208.
     The R curve itself is validated too (shape, positivity, finiteness)."""
     wl = np.geomspace(5.0, 12.0, 4000)
     y = np.full(wl.size, 0.01)

@@ -12,7 +12,7 @@ dex for lnZ/lnKzz, absolute C/O number ratio for dlnCO via
 The dlnCO curve is the forecast density in ln(C/O) on a log C/O axis
 (ln_gaussian_curve); its width is quoted in dex via fisher.format_co_width.
 
-HONESTY (baked into every returned record, keys ``kind``/``label``): these
+Labeling (every returned record carries ``kind`` and ``label``): these
 are linearized Fisher/Cramer-Rao forecasts around the input model under the
 quoted noise model -- Gaussian by construction, local, best-case. They are
 NOT sampled posteriors, and a retrieval freeing more parameters under the
@@ -24,11 +24,10 @@ comes back from ``fisher._marg_sigmas`` as inf; here it is an explicit
 ``constrained=False`` record with NO curve (theta/pdf None) -- never a fake
 finite Gaussian. Non-finite inputs raise (house style: fail fast and loud).
 
-Named combinations (``combo_forecast``): a combo is a
-user-facing name plus a list of registry mode keys, evaluated against the
-per-mode result dicts of a run through the EXISTING ``combined_forecast``
-(``mode_forecast`` is its single-mode case). Saturated modes are excluded
-with the same policy as the
+Named combinations (``combo_forecast``): a combo is a user-facing name plus
+a list of registry mode keys, evaluated against the per-mode result dicts of
+a run through ``fisher.combined_forecast`` (``mode_forecast`` is its
+single-mode case). Saturated modes are excluded with the same policy as the
 "All usable modes" row (a saturated mode is unusable data) and the
 exclusion is disclosed per combo; a combo with zero usable modes raises.
 """
@@ -45,8 +44,8 @@ from jwst_tool import fisher
 _AUTO_SIGMA, _AUTO_POINTS = 5.0, 201
 
 # Machine token + human sentence, carried on every record this module
-# returns, so any downstream surface (GUI phase, exports) can label the
-# curves honestly without re-deriving the wording.
+# returns, so every downstream surface (GUI, exports) labels the curves
+# with the same wording instead of re-deriving it.
 FORECAST_KIND = "fisher_gaussian_forecast"
 FORECAST_LABEL = (
     "Linearized Fisher (Cramer-Rao) forecast: a Gaussian approximation "
@@ -63,7 +62,7 @@ _SATURATED_REASON = "saturated at the shortest ramp tried (unusable data)"
 
 def _param_unit(name: str) -> str:
     """Display unit for ``name``, from the single source of truth
-    (fisher.PARAM_UNITS; local import keeps this module numpy-light).
+    (fisher.PARAM_UNITS).
 
     dlnCO reports "C/O ratio" (its display transform is the absolute number
     ratio). A name absent from the table is a caller-defined row already in

@@ -2,14 +2,14 @@
 the noise, the model, and every Jacobian row.
 
 Guardrails:
-* ONE operator bins noise, model, and Jacobians -- never reintroduce separate
-  binning paths; the model point must be the expectation of the statistic
+* ONE operator bins noise, model, and Jacobians -- never add a separate
+  binning path; the model point must be the expectation of the statistic
   whose variance is quoted.
 * Count-space weights (w_i = extracted stellar count rate F_i) are the
   estimator real reductions implement: d_b = sum(w d)/sum(w),
   Var_b = sum(w^2 Var)/(sum w)^2. In the photon limit this equals
   inverse-variance weighting; with background/read noise it is slightly
-  wider -- the honest variance of the estimator actually used.
+  wider -- the variance of the estimator actually used.
 * The model is averaged over each pixel's wavelength cell (exact integral of
   the piecewise-linear model), never point-sampled, so a finer model grid
   cannot alias.
@@ -115,8 +115,8 @@ def segment_ids(wl_pix: np.ndarray) -> np.ndarray:
 
 def bin_segments(op: dict, seg_pix: np.ndarray) -> np.ndarray:
     """Per-kept-bin segment id: the segment holding the bin's count weight.
-    Bins never straddle a segment gap in practice (gap >> bin width); if one
-    ever did, the count-majority segment is the honest assignment."""
+    Bins never straddle a segment gap in practice (gap >> bin width); a bin
+    that did would go to its count-majority segment."""
     seg = np.asarray(seg_pix)[op["pix_idx"]].astype(int)
     n_bins = op["wl_center"].size
     n_seg = int(seg.max()) + 1
@@ -146,7 +146,7 @@ def smooth_to_native_r(wl_model: np.ndarray, y: np.ndarray,
 
     ``weight`` is the stellar flux at ``wl_model``. The instrument measures
     LSF-averaged COUNTS, so d_obs = L[F d] / L[F], the flux-weighted LSF mean
-    -- never revert to the flat L[d] blur. ``None`` or a constant weight
+    -- never the flat L[d] blur. ``None`` or a constant weight
     reduces exactly to the flat blur. F is only pixel-resolved (sub-pixel
     stellar lines are a documented limit). The operator is LINEAR in d for
     fixed F, so a Jacobian row blurs with the SAME weight as the depth.

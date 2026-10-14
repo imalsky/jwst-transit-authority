@@ -6,7 +6,7 @@ narrative -- method, scope, and known intended differences -- lives in the
 harness docstrings (`run_parity.py` in this directory), and the full
 per-mode rows, noise-model attribution, and raw PandExo warnings stay in
 `parity_summary.json`, which is committed beside it. Do not grow this
-renderer back into a per-mode table dump; the JSON is already the record.
+renderer into a per-mode table dump; the JSON is already the record.
 
 The report is generated from RE-VALIDATED JSON only: it imports the shared
 gate (`parity_gate.py`) and re-runs `validate_artifact()` on the summary

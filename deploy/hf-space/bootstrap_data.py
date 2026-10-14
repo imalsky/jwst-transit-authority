@@ -1,15 +1,15 @@
 """Seed /data from the private HF dataset repo, idempotently and loudly.
 
-Runs at every container boot (entrypoint), before the GUI starts. If the
-marker files are already present the download is skipped, so a wake from
-sleep costs nothing (with the VULCAN data present and only PICASO's absent,
-the download is retried and a failure only warns). The HF hub cache is pointed at ephemeral /tmp so the
-persistent volume only holds the final ~10 GB copy (about 2.2 GB of it the
+The entrypoint runs it before the GUI starts on every boot without a dataset
+mount. When every marker file is present the download is skipped, so a wake
+from sleep costs nothing. The HF hub cache points at ephemeral /tmp, so the
+persistent volume holds only the final copy (~10 GB, about 2.2 GB of it the
 PICASO correlated-k tables).
 
-A missing PICASO file triggers the download like any marker, but one still
-missing afterwards only warns: VULCAN boots without PICASO, and every PICASO
-run stops with an error.
+A missing PICASO file triggers the download like any marker. When only
+PICASO files are absent, a failed download only warns; a PICASO file still
+missing afterwards only warns too. VULCAN then boots without PICASO, and
+every PICASO run stops with an error.
 """
 import os
 import sys

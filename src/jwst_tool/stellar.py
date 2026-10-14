@@ -10,7 +10,7 @@ and ExoJAX ``ArtEmisPure`` returns the planet's in the same convention, so
     eclipse depth  d_ec(nu) = (F_p(nu) / F_s(nu)) * (R_p/R_s)^2
 
 with NO extra pi. Guarded by an energy-closure check: band-integrated F_s
-must match band-integrated pi B_nu(T_eff) to within ~1.5x -- a grid that
+over band-integrated pi B_nu(T_eff) must lie in [0.5, 1.5] -- a grid that
 were secretly intensity (~3.1x) or Eddington flux (~12x) fails immediately.
 
 Heavy-path module: imports stsynphot on first call; never imported by the
@@ -44,8 +44,7 @@ def phoenix_surface_flux(nu_grid: np.ndarray, teff: float, logg: float,
 
     Parameters: nu_grid (cm^-1, any order), teff (K), logg (log10 cgs),
     feh ([Fe/H] dex). Raises with a remedy when the PHOENIX grid is absent
-    (``jwst-tool fetch``, which prints the manual STScI download) and on an
-    energy-closure failure.
+    (``jwst-tool fetch`` downloads it) and on an energy-closure failure.
     """
     from jwst_tool import instruments as ins
 
@@ -55,7 +54,7 @@ def phoenix_surface_flux(nu_grid: np.ndarray, teff: float, logg: float,
             f"PHOENIX grid not found at {phoenix_dir}: emission mode needs "
             "the stellar SED for the eclipse depth Fp/Fs. It is the same "
             "dataset the noise side uses -- run 'jwst-tool data' for status "
-            "and 'jwst-tool fetch', which prints the manual STScI download.")
+            "and 'jwst-tool fetch', which downloads it.")
     # Pin the tool's OWN cdbs root unconditionally: an inherited shell
     # PYSYN_CDBS set elsewhere must never redirect the grid.
     os.environ["PYSYN_CDBS"] = ins.PYSYN_CDBS
@@ -67,7 +66,7 @@ def phoenix_surface_flux(nu_grid: np.ndarray, teff: float, logg: float,
         synphot.conf.vega_file = vega
     import stsynphot
     from synphot import units as syn_units
-    stsynphot.conf.rootdir = ins.PYSYN_CDBS   # belt over the env suspenders
+    stsynphot.conf.rootdir = ins.PYSYN_CDBS   # config too, not only the env var
 
     spec = stsynphot.grid_to_spec("phoenix", float(teff), float(feh),
                                   float(logg))

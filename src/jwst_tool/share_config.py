@@ -4,11 +4,12 @@ The GUI's "Download configuration (JSON)" button writes the dict `build_share`
 assembles: the canonical model parameters (the same dictionary every result
 stores as provenance) plus the science-goal and observation settings, and --
 when the run uses uploaded tables -- the table content itself. That is every
-input the GUI takes -- condensation, settling, escape and the boundary-condition
-fluxes are API-only, pinned off in the GUI and REFUSED on load -- so the same
-tool version reproduces a GUI run from the file alone. Exact code revisions,
-science-data checksums, cache schemas,
-Pandeia/PandExo identity, and the random seed are recorded in ``provenance``.
+input the GUI takes -- condensation is API-only, pinned off in the GUI and
+REFUSED on load; settling, escape and the boundary-condition fluxes are
+refused by ``forward.canonical_params`` everywhere -- so the same tool version
+reproduces a GUI run from the file alone. Exact code revisions, science-data
+checksums, cache schemas, Pandeia/PandExo identity, and the random seed are
+recorded in ``provenance``.
 They remain informational on load so old configurations stay portable, but a
 collaborator can compare them before claiming an exact reproduction.
 
@@ -431,9 +432,9 @@ def _reject_removed_physics(cp: dict) -> None:
 
 
 def _network_suffix(cp: dict) -> str:
-    """Widget-key suffix for the non-default kinetics network: the sncho keys
-    carry no suffix (shipped key contract), ncho widgets get their own keys
-    (same pattern as the provider-suffixed molecule keys)."""
+    """Widget-key suffix for a non-default kinetics network: the sncho keys
+    carry no suffix (shipped key contract), ncho and sncho2025 widgets get
+    their own keys (same pattern as the provider-suffixed molecule keys)."""
     net = str(cp["network"])
     return "" if net == "sncho" else f"_{net}"
 

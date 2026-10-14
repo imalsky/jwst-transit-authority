@@ -100,10 +100,10 @@ def walk(name: str) -> None:
     for raw in dist.requires or []:
         req = Requirement(raw)
         if req.marker is not None:
-            # Evaluate WITHOUT platform context is not possible; evaluate
-            # for this platform and additionally keep linux-relevant deps:
-            # the only direction that matters here is mac-excluded/linux-
-            # needed, which is rare -- flag candidates loudly instead.
+            # A marker can only be evaluated for THIS platform. The case
+            # that matters is a dep excluded here but needed on the Linux
+            # image; it is rare, so a skipped Linux-marked dep is printed
+            # for review instead of pinned.
             if not req.marker.evaluate({"extra": ""}):
                 m = str(req.marker)
                 if "linux" in m:

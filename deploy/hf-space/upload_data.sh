@@ -60,11 +60,11 @@ stage_tree() {                  # stage_tree <src-dir> <dst-dir> <label> [skip..
 echo "Staging jwst-data (first run copies ~7 GB, needs the disk space) ..."
 PICASO_DIR="picaso_refdata-$(python3 -c 'from jwst_tool import datacheck as d; print(d.PICASO_RELEASE)')"
 stage_tree "$REPO_ROOT/data" "$STAGE/jwst-data" jwst-data "$PICASO_DIR"
-# The engine's opacity cache (CIA) still lives in the retrieval checkout
-# on the maintainer's machine; the dataset folder keeps the name
-# "retrieval-data" deliberately, because renaming it would mean
-# re-uploading gigabytes. $VULCAN_FORWARD_DATA points at it at boot. The
-# exojax_linelists tree fed the deleted line-by-line mode; nothing reads it.
+# The engine's opacity cache (CIA) lives in the retrieval checkout on the
+# maintainer's machine; the dataset folder keeps the name "retrieval-data"
+# deliberately, because renaming it would mean re-uploading gigabytes.
+# $VULCAN_FORWARD_DATA points at it at boot. The exojax_linelists tree is
+# skipped: nothing reads it.
 stage_tree "$ROOT/vulcan-retrieval/data" "$STAGE/retrieval-data" retrieval-data \
     exomolop exojax_linelists
 
@@ -95,10 +95,9 @@ PYEOF
         [ -e "$dst" ] || ln "$src" "$dst" 2>/dev/null || cp -c "$src" "$dst"
     done
     # Provenance must describe what was STAGED, not the maintainer's whole
-    # local tree. Copying it wholesale once made the dataset repo claim 17
-    # tables when 11 were uploaded, and a check that trusted it
-    # concluded SH/SO were present when they had never been staged -- the
-    # Space then failed at run time on the default molecule set.
+    # local tree: a wholesale copy lists tables the dataset does not carry,
+    # and a check that trusts it passes a molecule the Space cannot open,
+    # which then fails at run time.
     KTABLE_MOLS="$KTABLE_MOLS" python3 - "$KTABLE_SRC/provenance.json" \
             "$STAGE/retrieval-data/exomolop/provenance.json" <<'PYEOF'
 import json, os, sys

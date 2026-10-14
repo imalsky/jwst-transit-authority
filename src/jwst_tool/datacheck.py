@@ -29,8 +29,9 @@ from jwst_tool import planets
 
 # Report structure
 
-#: OK = present; MISSING = absent, manual fetch; AUTO = fetched
-#: automatically on first use (network required then)
+#: OK = present; MISSING = absent until fetched (``jwst-tool fetch`` or the
+#: item's remedy); AUTO = fetched automatically on first use (network
+#: required then)
 OK, MISSING, AUTO = "ok", "missing", "on-first-use"
 
 
@@ -155,8 +156,9 @@ def check_engine_data(base_mols: list[str], extra_mols: list[str]) -> list[Item]
         key="cia:H2-He", label="H2-He collision-induced absorption table",
         status=OK if h2he.is_file() else MISSING, required=True,
         detail=_found(h2he) if h2he.is_file() else f"absent: {h2he}",
-        remedy="Manual, one-time, ~147 MB (the RT refuses to build without "
-               "it): download https://hitran.org/data/CIA/main/H2-He_2011.cia "
+        remedy="One-time, ~147 MB (the RT refuses to build without it): "
+               "`jwst-tool fetch` downloads it, or download "
+               "https://hitran.org/data/CIA/main/H2-He_2011.cia "
                f"to {h2he} (the /main/ path segment is required)."))
 
     # ExoMolOP k-tables: the gas opacity every run reads, ~389 MB per
@@ -365,8 +367,8 @@ def check_synphot_cdbs(cdbs: str | Path = None) -> list[Item]:
                "hlsp_reference-atlases_hst_multi_pheonix-models_multi_v3_"
                "synphot5.tar ('pheonix' spelling is STScI's own), extract, "
                f"and place its grp/redcat/trds/grid/phoenix tree at {phx} "
-               "(a real directory is fine; the shipped symlink just points "
-               "at an existing local copy)."))
+               "(`jwst-tool fetch` does all of this; a symlink to an "
+               "existing local copy also works)."))
     # the CALSPEC Vega copy is only an offline pin for the tool-side
     # synphot/stsynphot; the engine loads its own refdata Vega
     for rel, label, required, remedy in (
@@ -638,8 +640,8 @@ def format_report(report: dict) -> str:
 
 # Disk-persisted report cache
 # The full report walks every external dataset (slow on remote volumes), so
-# it is persisted: the GUI serves the file when fresh, the Space entrypoint
-# warms it in the background at boot, and the refresh button rebuilds.
+# it is persisted: the GUI serves the file when fresh, and the Space
+# entrypoint warms it at boot, before serving.
 
 REPORT_CACHE_FILE = Path(ins.OUTPUT_DIR) / "datacheck_report.json"
 REPORT_CACHE_MAX_AGE_S = 3600.0

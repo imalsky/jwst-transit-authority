@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """One-shot Hugging Face setup, run AFTER `hf auth login`.
 
-Does everything the browser/CLI deployment sequence does:
-creates the private dataset + Space repos, uploads the Space shim files,
-sets the HF_TOKEN secret from $HF_DATASET_READ_TOKEN (+ DATASET_REPO variable
-if non-default), requests
-persistent storage / CPU Upgrade hardware / 1 h sleep (these three need
-billing configured at hf.co/settings/billing), and finally uploads the
+Does everything the browser/CLI deployment sequence does: creates the
+private dataset + Space repos, uploads the Space shim files, sets the
+HF_TOKEN secret from $HF_DATASET_READ_TOKEN (+ DATASET_REPO variable if
+non-default), mounts the dataset read-only and a private cache bucket
+writable, requests CPU Upgrade hardware and a 1 h sleep timer (paid: billing
+must be configured at hf.co/settings/billing), and finally uploads the
 staged ~10 GB data (resumable -- re-run this script if interrupted;
 completed steps are skipped or idempotent).
 
@@ -151,8 +151,8 @@ def main() -> int:
             print(f"DATASET_REPO variable set to {dataset}")
 
         step("mounting volumes (dataset read-only + writable cache bucket)")
-        # 2026 volumes API (replaces the retired persistent-storage
-        # endpoint): the dataset repo mounts read-only at /srv/hub-data so
+        # Volumes API (per-Space persistent storage is retired): the
+        # dataset repo mounts read-only at /srv/hub-data so
         # the container needs NO download at boot; a private bucket mounts
         # writable at /data for the model/noise/adjoint caches.
         from huggingface_hub import Volume
@@ -195,8 +195,8 @@ def main() -> int:
           "(Build logs tab; 15-30 min).")
     print("2. If the build ran before your GitHub push: Settings -> "
           "Factory rebuild.")
-    print("3. Verify in the app: data status panel all OK, then a default "
-          "W39b run + one noise panel.")
+    print("3. Verify in the app: no 'Required data missing' error, then a "
+          "default W39b run + one noise panel.")
     print("4. Invite users: Space Settings -> collaborators.")
     print(f"5. Optional: delete the staging copy at {STAGE}")
     return 0

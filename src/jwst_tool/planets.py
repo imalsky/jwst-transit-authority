@@ -145,7 +145,7 @@ PLANETS = {
         tp_table_note="vulcan_jax bundles no measured T-P/Kzz table for this planet.",
         # Guillot T_int: Sing et al. 2024 (Nature 630, 831) retrieve
         # T_int = 460 +/- 40 K from the CH4 depletion; Welbanks et al. 2024
-        # (Nature 630, 836) give > 345 K. The generic 100 K put the quench
+        # (Nature 630, 836) give > 345 K. The generic 100 K puts the quench
         # level, and with it this planet's headline CH4 result, in the wrong
         # place.
         tint_k=460.0,

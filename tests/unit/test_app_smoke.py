@@ -1,9 +1,9 @@
 """GUI smoke tests: the app renders end-to-end with no exception.
 
-Needs the GUI extras (streamlit + pandas); the dependency-light CI skips it.
-Uses Streamlit's AppTest; no forward-model run is launched. AppTest boots are
-the expensive part, so every assertion that examines the same booted app lives
-in one test (maintainer: fewer, stronger tests).
+Needs the GUI extras (streamlit + pandas); the CI unit lane skips it and the
+gui-smoke lane runs it. Uses Streamlit's AppTest; no forward-model run is
+launched. AppTest boots are the expensive part, so every assertion that
+examines the same booted app lives in one test.
 """
 from __future__ import annotations
 
@@ -36,8 +36,8 @@ def _synthetic_out(science_mode="transmission", saturated=False,
     ``with_jac=True`` adds a two-parameter Jacobian (lnZ, dlnCO + lnR0) and a
     SECOND mode, so the Fisher table, combo builder, forecast posteriors and
     summary figure all render. ymix is the FULL network state, wider than the
-    RT molecule list and in a different order -- the shape that exposed the
-    mixing-ratio mislabelling; it also drives the one log-x panel.
+    RT molecule list and in a different order -- the shape that catches a
+    positional mixing-ratio mislabelling; it also drives the one log-x panel.
     """
     import json
 
@@ -115,8 +115,8 @@ def _run_with_result(out, out_meta, **state):
 
 def test_fresh_boot_pre_run_contract():
     """One default boot: no intro gate, the speed-first mode trio (the ETC
-    computes only the selected modes), the data-status panel + annotated
-    molecules, noise multiplier at 1.0, and the mock controls -- the seed
+    computes only the selected modes), the "Data" panel with its opacity
+    sources, noise multiplier at 1.0, and the mock controls -- the seed
     field keeps a realization reproducible; widget keys are the shipped
     contract, so share_config round-trips."""
     from jwst_tool import instruments as ins
@@ -135,8 +135,8 @@ def test_fresh_boot_pre_run_contract():
     assert ms, "extra-molecule multiselect missing"
     # Opacity data: exactly one of {the sources table, a loud provenance
     # warning} exists, depending on whether the fetcher's record is
-    # installed; the picker's VALUES stay species tokens while its OPTIONS
-    # name the dataset behind each one.
+    # installed; the picker's values and options are bare species tokens and
+    # the Data table names the dataset behind each one.
     from jwst_tool import datacheck, forward, planets
     pp = datacheck.exomolop_provenance_path()
     have = bool(pp and pp.is_file())
@@ -182,7 +182,7 @@ def test_fresh_boot_pre_run_contract():
 
 def test_gui_structure_defaults_match_canonical_params():
     """GUI and API defaults must mean the same atmosphere on EVERY planet
-    (a hard-coded API T_irr once drifted 470 K from the widget on HD 209458 b).
+    (a hard-coded API T_irr would sit 470 K off the widget on HD 209458 b).
     """
     from jwst_tool import forward, planets
 
@@ -241,15 +241,14 @@ def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
        and the DEFAULT is structure-aware: W39b transmission defaults
        to its measured table's own bottom, emission (Guillot everywhere)
        to the round parametric default.
-    2. Photochemistry is always settable -- it used to be force-locked ON
-       whenever a Jacobian was requested, which made the photolysis-off
-       carbon-rich path unreachable from the shipped defaults. AD with it off
-       is refused at the Run block instead, by the message canonical_params
-       already raises.
-    3. The noise floor defaults to "constant" (maintainer) -- the
-       CONSERVATIVE side, since it claims LESS precision than "No floor";
-       "none" stays an explicit choice; "Wavelength table" with no upload is
-       the one state that still BLOCKS the run.
+    2. Photochemistry is always settable: forcing it ON whenever a Jacobian
+       is requested makes the photolysis-off carbon-rich path unreachable
+       from the shipped defaults. AD with it off is refused at the Run block
+       instead, by the message canonical_params raises.
+    3. The noise floor defaults to "constant" -- the CONSERVATIVE side,
+       since it claims LESS precision than "No floor"; "none" stays an
+       explicit choice; "Wavelength table" with no upload is the one state
+       that BLOCKS the run.
     """
     from jwst_tool import forward
 
@@ -278,7 +277,7 @@ def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
     assert not at.checkbox(key="n0_photo").disabled
     at.checkbox(key="n0_photo").set_value(False).run()
     assert not at.exception, at.exception
-    # the value STICKS (the lock used to overwrite it on every rerun) ...
+    # the value STICKS across reruns (nothing overwrites it) ...
     assert at.checkbox(key="n0_photo").value is False
     at.radio(key="n0_scimode").set_value("transmission").run()   # plain rerun
     assert at.checkbox(key="n0_photo").value is False
@@ -466,7 +465,7 @@ def test_results_render_and_below_target_is_warning_not_error(monkeypatch):
 
     The mixing-ratio panel selects species by NAME: ymix is the FULL network
     state, model["mols"] the short RT list, and zipping them positionally
-    once labelled H2 (0.847 at 1 bar on Tsai et al. 2023's W39b run) as CO2.
+    labels H2 (0.847 at 1 bar on Tsai et al. 2023's W39b run) as CO2.
     """
     from streamlit.delta_generator import DeltaGenerator
     from jwst_tool import plotting, summary_figure as _sf
@@ -638,8 +637,8 @@ def test_combo_builder_fisher_table_naming_and_reset():
     assert not at.exception, at.exception
     subs = [s.value for s in at.subheader]
     exps = [e.label for e in at.get("expander")]
-    # the combo builder and the marginalized-forecast control were MERGED
-    # into the constraint-forecast panel; neither is a section of its own
+    # the combo builder and the marginalized-forecast control live in the
+    # constraint-forecast panel; neither is a section of its own
     assert "Add a custom mode set" not in exps, exps
     assert "Mode combinations" not in exps, exps
     assert "Marginalized Fisher forecasts" not in exps, exps
@@ -669,7 +668,7 @@ def test_combo_builder_fisher_table_naming_and_reset():
     assert "My set" in first, f"combos should lead the table, got {first!r}"
     # C/O is reported in log10(C/O), the coordinate the Fisher Gaussian is
     # symmetric in: the row names it and each marginalized cell is the value
-    # and its error there (a 3-sigma cell in linear C/O used to cross zero)
+    # and its error there (a 3-sigma cell in linear C/O can cross zero)
     df = tables[0]
     col = next(c for c in df.columns if str(c).startswith("marginalized"))
     cells = [str(r[col]).strip() for _, r in df.iterrows()
@@ -743,7 +742,7 @@ def test_emission_mode_archive_fill_skips_transit_duration():
     # CS2/C2H6 are out of the default (no ExoMolOP table); SH+SO are in
     # (measured 10.0 and 48.1 ppm on W39b -- forward.EXTRA_MOLECULES_DEFAULT)
     [("n0_mol_vulcan_C2H2_C2H4_H2S_HCN_NH3_OCS_SH_SO", "CO2",
-      "target_mol"),                                # the reported bug
+      "target_mol"),                                # not a canonical param
      ("n0_noisescale", 2.0, "noise_scale"),         # an observation-block field
      ("n0_provider", "picaso", "chem_provider"),    # the chemistry engine
      # DISPLAY-ONLY: the seed redraws the mock from the cached run and
@@ -752,13 +751,13 @@ def test_emission_mode_archive_fill_skips_transit_duration():
 def test_changing_any_run_input_marks_the_result_stale(widget, value, field,
                                                        monkeypatch):
     """The staleness guard compares the WHOLE non-canonical input set minus
-    the display-only fields, not a hand-picked subset. The bug this pins: the
-    detection target is absent from the canonical model params, so switching
-    SO2 to CO2 without pressing Run left the curve, legend and CSV on the
-    previous target with no notice (reported as a caching bug). The noise
-    scale represents the observation block because a subset guard is exactly
-    how the next one gets missed; the seed represents the display-only
-    fields, which change nothing that was computed."""
+    the display-only fields, not a hand-picked subset. The detection target
+    is absent from the canonical model params, so without the guard switching
+    SO2 to CO2 without pressing Run leaves the curve, legend and CSV on the
+    previous target with no notice. The noise scale represents the
+    observation block because a subset guard misses the next such field; the
+    seed represents the display-only fields, which change nothing that was
+    computed."""
     from jwst_tool import share_config as _sc
     seen = {}
     _real = _sc.build_share
@@ -889,9 +888,9 @@ def test_a_nonpositive_bound_on_a_log_axis_warns_instead_of_killing_the_page():
     ENTIRE results page down. A typed number is a user choice, not a defect:
     warn, fall back to the automatic fit, keep the page alive.
 
-    Only the summary figure carries axis controls now; the structure figure
-    has none (it draws at the module defaults), so there is no typed bound
-    left to poison there."""
+    Only the summary figure carries axis controls; the structure figure has
+    none (it draws at the module defaults), so there is no typed bound to
+    poison there."""
     key, label = "n0_sum_x", "Wavelength"
     out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
     at = _run_with_result(out, out_meta,
@@ -1006,7 +1005,7 @@ def test_combined_forecast_is_reported_when_no_single_mode_constrains():
     """Complementary degeneracies: each mode alone puts the goal parameter on
     a null direction (lnZ = +dlnCO in one, -dlnCO in the other), the two
     jointly do not. The joint width IS the answer, so it is reported and the
-    page keeps rendering -- an empty per-mode set used to st.stop() and take
+    page keeps rendering -- an empty per-mode set must not st.stop() and take
     the structure panel, the constraint forecast and the figure with it. The
     verdict is a SHORTFALL warning: it speaks for a joint width that misses
     the target and stays silent for one that meets it."""

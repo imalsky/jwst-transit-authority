@@ -106,10 +106,10 @@ def test_degenerate_directions_read_inf_never_garbage():
 def test_wide_co_width_is_reported_not_hidden():
     """A wide C/O width is a weak measurement, not a missing one: it must come
     back as a NUMBER end to end -- reported width AND a drawable curve -- at
-    every width the tool can compute. The old no-information cut hid anything
-    past sigma_lnCO = 1, which was derived for a LINEAR C/O display (where the
-    minus-1-sigma edge reached C/O = 0); every surface now reports log10 C/O,
-    where the Gaussian is symmetric and nothing crosses a boundary. "inf" is
+    every width the tool can compute. There is no cut at sigma_lnCO = 1: such
+    a cut belongs to a LINEAR C/O display (where the minus-1-sigma edge
+    reaches C/O = 0); every surface reports log10 C/O, where the Gaussian is
+    symmetric and nothing crosses a boundary. "inf" is
     reserved for a genuine null direction (test_degenerate_directions_...).
     Sigma scales linearly with the per-bin noise, so one design reaches any
     target width. 920 is the real extreme of a SOSS order-2 run,
@@ -330,8 +330,8 @@ def test_fisher_transits_to_target_limits():
     assert tt["reachable"]
     tt2 = fisher.transits_to_target(_fisher_result(100.0), names, "lnZ", 1e9)
     assert np.isfinite(tt2["sig_inf"]) and tt2["sig_inf"] > 0.0
-    # one transit already meets the 0.1 dex target here (0.031 dex); the
-    # clipped zero bin used to collapse the whitened rank -> unreachable
+    # one transit already meets the 0.1 dex target here (0.031 dex); clipping
+    # the zero bin would collapse the whitened rank and read unreachable
     r = dict(jac_bins=1e-3 * np.array([[1, 0, -1, 0], [0, 1, 0, -1.0]]),
              sigma=np.full(4, 1e-4), var_phot=np.full(4, 1e-8),
              floor=np.array([0.0, 1e-5, 1e-5, 1e-5]), n_transits_eval=1,

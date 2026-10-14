@@ -30,9 +30,10 @@ directions the run actually built (_NUISANCE_JAC below; still conditional) and
 is the number to prefer for narrow margins -- any caption describing it must
 name the rows that were present, which metric_label does.
 
-Multi-transit extrapolation: the random term scales as 1/N; the minimum
-floor is a hard lower bound at every N, so "transits to target" saturates
-honestly instead of promising 1/sqrt(N) forever.
+Multi-transit extrapolation: the random variance scales as 1/N; the minimum
+floor is a hard lower bound at every N, so with a floor in every bin the
+score reaches a ceiling (``sig_inf`` in transits_to_target) instead of
+growing as sqrt(N) without bound.
 """
 from __future__ import annotations
 
@@ -101,7 +102,7 @@ def detection_significance(signal: np.ndarray, sigma: np.ndarray,
         raise ValueError("detection_significance: sigma must match signal's "
                          "shape and be finite and > 0")
     # keep the constant row even for a single bin: one bin + free offset =
-    # zero shape information, so the honest score is 0 (never |s|/sigma)
+    # zero shape information, so the score is 0 (never |s|/sigma)
     rows = [np.ones_like(signal)] if marginalize_offset else []
     rows += [np.asarray(r, float) for r in (nuisance or [])]
     w = 1.0 / np.asarray(sigma, float) ** 2
@@ -202,7 +203,7 @@ def detection_score(result: dict, sigma: np.ndarray | None = None,
     ``projected=False`` is the calibration-profiled score.
     ``projected=True`` additionally profiles the available local T-P,
     reference-radius, and cloud Jacobian directions. The latter is the
-    collaborator-facing score whenever those Jacobians are available.
+    reported score (detection_metric) whenever those Jacobians are available.
     """
     if result.get("depth_wo") is None:
         return float("nan")
@@ -374,8 +375,8 @@ def _certify_emission_band(model: dict, order: np.ndarray, wl_model: np.ndarray,
             tau_s[m], np.where(measured[m], flux_s[m], 0.0), nu[m])
         frac = max(frac, core_frac)
         if frac > forward.EMIS_THIN_FLUX_FRAC:
-            # one line: this goes into the GUI's exclusion warning beside up
-            # to eleven others, so it states what and where, not what to do
+            # one line: this goes into the GUI's exclusion warning beside the
+            # other excluded modes, so it states what and where, not what to do
             raise ModeUnusable(
                 f"over the {lo:.2f}-{hi:.2f} um it measures, "
                 f"{100.0 * frac:.1f}% of the emitted flux ({stage}) comes "

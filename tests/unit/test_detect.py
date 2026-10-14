@@ -321,7 +321,7 @@ def test_miri_lsf_uses_local_native_r_not_the_dispersion_order_end_value():
 
     The MIRI LRS pixel grid arrives DESCENDING; np.interp requires ascending
     sample points and silently returns the last table value everywhere on a
-    reversed one, so passing the raw grid blurred the entire 5-12 um band at
+    reversed one, so passing the raw grid blurs the entire 5-12 um band at
     the red-end R (~42) instead of R = 42..208. Both orderings describe the
     same instrument, so both must give the same binned depth.
     """
@@ -347,9 +347,9 @@ def test_miri_lsf_uses_local_native_r_not_the_dispersion_order_end_value():
 
 
 def test_worker_warnings_and_the_ramp_advisory_reach_the_evaluated_result():
-    """The worker computes a per-mode `warnings` dict; evaluate_mode was
-    dropping it, so nothing downstream could ever show it. The short-ramp
-    advisory rides the same dict rather than opening a second channel."""
+    """The worker computes a per-mode `warnings` dict; evaluate_mode must
+    forward it, or nothing downstream can show it. The short-ramp advisory
+    rides the same dict rather than opening a second channel."""
     m = ins.MODES["miri_lrs"]
     wl_pix = np.linspace(m["wl_min"] * 1.001, m["wl_max"] * 0.999, 300)
     mr = dict(wl=wl_pix.tolist(), flux=np.full(wl_pix.size, 1e6).tolist(),

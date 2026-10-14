@@ -25,7 +25,7 @@ def test_rt_profile_common_golden_default():
     # config.WIDE passes through untouched...
     assert prof["nu_min"] == 666.0
     assert prof["some_engine_default"] == "kept"
-    # ...plus exactly the pre-refactor RT-facing overrides
+    # ...plus exactly these RT-facing overrides
     assert prof["nz"] == 100 and prof["art_nlayer"] == 100
     assert prof["art_ptop_bar"] == 1.0e-7
     assert prof["rt_integration"] == "simpson"

@@ -1,23 +1,25 @@
-"""Full-chain end-to-end regression: VULCAN chemistry -> ExoJAX RT -> spectrum.
+"""Full-chain end-to-end regression: chemistry -> ExoJAX RT -> spectrum, for
+both engines (VULCAN kinetics; PICASO climate + equilibrium chemistry).
 
 Runs the tool's real `run_model` for the default WASP-39 b case in BOTH
-science modes -- a fresh chemistry solve each (on an empty model cache, so
-this validates the chain, not the cache) -- and asserts the R = 100
-binned spectrum against a committed reference fixture generated under the
-same `forward._VERSION`. The engine side of the physics is separately pinned
+science modes -- a fresh solve each (on an empty model cache, so this
+validates the chain, not the cache) -- and asserts the R = 100 binned
+spectrum against a committed reference fixture generated under the same
+`forward._VERSION`. The engine side of the physics is separately pinned
 against petitRADTRANS in vulcan-forward's own e2e suite; THIS test pins that
 the whole tool still reproduces its own verified state end to end.
 
-Cost: ~2 minutes per mode (chemistry warm-up dominates). Gated like the FD
-closure test: JWST_TOOL_RUN_SLOW=1, plus clean skips without the RT stack or
-the engine data.
+Cost: one cold solve per case, about 9 min per VULCAN mode and 20 min per
+PICASO mode on daw. Gated like the FD closure test: JWST_TOOL_RUN_SLOW=1,
+plus clean skips without the RT stack, the engine data or the PICASO
+environment.
 
 Tolerances: cross-run JAX nondeterminism on this chain measures under a ppm
 (the committed reference reproduces bit-identically), so the band is set per
 mode at 5% of the reference's own structure -- an absolute ppm would be far
 too loose on emission, where a quarter of the bins sit below 100 ppm while
 transmission runs near 20000. On a breach: if the change is INTENDED,
-regenerate the fixture (tools note inside its meta) and bump forward._VERSION.
+regenerate the fixture (its meta["regenerate"]) and bump forward._VERSION.
 """
 from __future__ import annotations
 

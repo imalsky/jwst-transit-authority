@@ -1,10 +1,12 @@
-"""External-audit regression suite: three confirmed defects, pinned.
+"""Noise-floor semantics and the Fisher/nuisance invariances, pinned:
 
   * the minimum noise floor has exact PandExo semantics: sigma_final =
     max(sigma_random, floor) on the FINAL bins -- no quadrature, no
-    sqrt(R/100) rescaling, no averaging below the floor with added transits;
+    sqrt(R/100) rescaling, no averaging below the floor with added transits,
+    and no floor the caller did not ask for;
   * Fisher rank detection is invariant under per-parameter unit rescaling;
-  * the nuisance projection is invariant under nuisance-row rescaling.
+  * the nuisance projection is invariant under nuisance-row rescaling;
+  * public noise inputs are validated loudly.
 """
 import numpy as np
 import pytest
@@ -274,7 +276,7 @@ def _tiny_mode_result(n=50):
 
 def test_public_noise_inputs_fail_fast():
     """noise_inflation must be finite and positive (it is squared, so -1
-    silently acted as +1); pixel_depth_variance and make_bins validate
+    would silently act as +1); pixel_depth_variance and make_bins validate
     shapes, signs and finiteness loudly."""
     mr = _tiny_mode_result()
     edges = np.geomspace(3.0, 4.0, 12)

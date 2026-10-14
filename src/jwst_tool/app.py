@@ -6,21 +6,21 @@ directly:  streamlit run src/jwst_tool/app.py  (from the repo root).
 Pipeline per run: VULCAN-JAX photochemistry (or PICASO climate + equilibrium
 chemistry) -> ExoJAX
 transmission/emission spectrum (local subprocess, disk-cached) -> Pandeia ETC
-noise per instrument mode (subprocess in its own conda env, disk-cached) ->
+noise per instrument mode (subprocess in its own environment, disk-cached) ->
 science-goal scoring per mode.
 Two goal types: DETECT a molecule (conditional template S/N) or CONSTRAIN a
 parameter (Fisher forecast from consistency-checked Jacobians, vs a target
 uncertainty). Planets beyond WASP-39b come from the registry in planets.py (or
 a fully custom system).
 
-Layout: four numbered sidebar steps (Target, Atmosphere, Science goal,
-Observation) plus one "More settings" group; the result page leads with a
-shortfall warning when the target is missed, then physical structure, the
-constraint forecast, and the summary figure. Widget KEYS must never change
-(tests and cached session state rely on them); only placement, labels, and
-help text may move. A downloaded configuration JSON is a complete, shareable
-run setup; "Load a configuration" (share_config.py) restores it into the
-widget state before any widget instantiates.
+Layout: five numbered sidebar steps (0 Configuration, 1 Target, 2 Atmosphere,
+3 Science goal, 4 Observation) plus one "More settings" group; the result
+page leads with a shortfall warning when the target is missed, then physical
+structure, the constraint forecast, and the summary figure. Widget KEYS must
+never change (tests and cached session state rely on them); only placement,
+labels, and help text may move. A downloaded configuration JSON is a
+complete, shareable run setup; "Load a configuration" (share_config.py)
+restores it into the widget state before any widget instantiates.
 """
 from __future__ import annotations
 
@@ -152,13 +152,13 @@ _LN10 = np.log(10.0)                    # ln-coordinate sigma -> dex
 
 # The reporting coordinate of a WIDTH, for every surface that prints one.
 # C/O is fitted in ln and reported in log10, so its numbers are dex; the other
-# rows are already log quantities under their own names. fisher.param_axis
-# stays the PHYSICAL C/O the forecast panel's x axis draws -- that is a
-# different thing from the coordinate its width is quoted in, and printing one
-# under the other's name is how the table and the figure legend drifted apart.
-# The constraint table names its rows the same way (the C/O row is pinned
-# as "log10 C/O"): a bare "Metallicity" row read as the x-solar number the
-# input widget carries, and the row is in dex.
+# rows are quoted in their own display units under their own names.
+# fisher.param_axis stays the PHYSICAL C/O the forecast panel's x axis draws
+# -- that is a different thing from the coordinate its width is quoted in,
+# and printing one under the other's name lets the table and the figure
+# legend disagree. The constraint table names its rows the same way (the C/O
+# row is pinned as "log10 C/O"): a bare "Metallicity" row reads as the
+# x-solar number the input widget carries, and the row is in dex.
 def _row_label(n):
     return "log10 C/O" if n == "dlnCO" else fisher_mod.param_axis(n)
 
@@ -275,9 +275,8 @@ def _data_label(it) -> str:
 @st.cache_data(ttl=3600, show_spinner="Checking installed data ...")
 def _cached_full_report():
     # Disk-persisted (the Space entrypoint warms it at boot) on top of the
-    # in-process st.cache. The manifest check is sampled, not exhaustive
-    # (full pass: `jwst-tool data --deep`). Invalidation: the two 1-hour TTLs
-    # (this one and datacheck.REPORT_CACHE_MAX_AGE_S).
+    # in-process st.cache. Invalidation: the two 1-hour TTLs (this one and
+    # datacheck.REPORT_CACHE_MAX_AGE_S).
     cached = datacheck.load_cached_report()
     if cached is not None:
         return cached
@@ -307,7 +306,7 @@ def _ktable_sources(stamp: int) -> dict:
     # stamp = provenance.json mtime_ns, so a re-fetch invalidates the cache;
     # exceptions are not cached, so an absent file re-raises on every rerun.
     # NO leading underscore: Streamlit skips underscore-prefixed args when
-    # hashing, which made this cache permanent for the process lifetime.
+    # hashing, which would make this cache permanent for the process lifetime.
     return provenance.ktable_sources()
 
 
@@ -437,10 +436,10 @@ with st.expander("Data" +
                   if _missing_req else "")):
     _opacity_slot = st.container()
 
-# All wall-time constants below were measured on the maintainer's laptop; the
-# HF Space (SPACE_ID set there and only there) is slower, so every DISPLAYED
-# estimate and progress-bar prior is scaled by this factor. The forward.py
-# PROG weights are relative fractions and need no scaling.
+# The VULCAN wall-time constants below were measured on the maintainer's
+# laptop; the HF Space (SPACE_ID set there and only there) is slower, so the
+# progress-bar prior is scaled by this factor. The forward.py PROG weights are
+# relative fractions and need no scaling.
 _RUNTIME_SCALE = 2.5 if os.environ.get("SPACE_ID") else 1.0
 # PICASO Guillot/file run, measured on daw: 94 s with three FD rows
 _PICASO_BASE_S, _PICASO_ROW_S = 40.0, 18.0
@@ -508,8 +507,9 @@ class _TimedBar:
                 # see the two things that dominate a slow run -- an FD stencil
                 # point that rides the step cap before its escalation fires,
                 # and an AD row that falls to the cadence-1 retry -- so it
-                # underestimates badly there. Weighting it by (1 - frac) kept
-                # a wrong prior in charge of the countdown for most of the run.
+                # underestimates badly there. Weighting it by (1 - frac) would
+                # keep a wrong prior in charge of the countdown for most of
+                # the run.
                 w = min(1.0, 3.0 * self._frac)
                 remaining = w * measured_left + (1.0 - w) * prior_left
             else:
@@ -546,8 +546,7 @@ def _watch_proc(proc, on_line, on_tick) -> None:
     """Dispatch each stdout line of ``proc`` to ``on_line``, calling
     ``on_tick`` at least once a second of silence. Selects on the
     raw pipe fd (os.read chunking) so the clock ticks through silent solver
-    stages; never revert to blocking readline loops (they freeze the
-    readout)."""
+    stages; never use a blocking readline loop (it freezes the readout)."""
     fd = proc.stdout.fileno()
     tail = b""
     while True:
@@ -635,11 +634,11 @@ def _axis_range(container, label: str, key: str, warn, *, unit: str = "",
     through ``warn`` rather than half-applied.
 
     ``positive``: a bound at or below zero is refused here, with
-    ``positive_reason`` naming WHY for this axis (log-scale axes like
-    wavelength; positive-definite linear axes like C/O). The figure builders
-    raise on it -- correctly, they are the API backstop -- but that exception
-    reaches Streamlit uncaught and kills the whole results page. A typed
-    number is a user choice, not a defect: warn and fall back to the
+    ``positive_reason`` naming WHY for this axis (the log-scale wavelength
+    axis; the C/O axis, a ratio with no values at or below zero). The figure
+    builders raise on it -- correctly, they are the API backstop -- but that
+    exception reaches Streamlit uncaught and kills the whole results page. A
+    typed number is a user choice, not a defect: warn and fall back to the
     automatic fit, the same way a one-sided window does.
     """
     _u = f" ({unit})" if unit else ""
@@ -703,7 +702,8 @@ def _apply_pending_archive_fill() -> None:
     this applies it at the top of the next run, before any widget renders.
     Out-of-range/missing fields are never written
     (Streamlit silently discards an out-of-range value, substituting the
-    default); archive.custom_fill reports them by name instead."""
+    default); archive.custom_fill leaves them out of its result, so those
+    fields keep their current values."""
     name = st.session_state.pop("_archive_fill_pending", None)
     if not name:
         return
@@ -1145,7 +1145,8 @@ with st.sidebar:
         # photolysis) pair; which part of it is legal for the current pair is
         # canonical_params' call, and an illegal value stops the Run with its
         # one-sentence reason. A widget ceiling that moved with the other two
-        # settings had to clamp a stored value silently to stay in range.
+        # settings would have to clamp a stored value silently to stay in
+        # range.
         if K("co") not in st.session_state:
             st.session_state[K("co")] = float(forward.CO_DEFAULT)
         # key always seeded above, so no value= default
@@ -1230,7 +1231,8 @@ with st.sidebar:
             # silently reverting.
             use_photo = st.checkbox(
                 "Photochemistry (UV photolysis)", key=K("photo"))
-            # default 83 deg = upstream VULCAN's dayside-average zenith angle
+            # default 83 deg = the zenith angle of vulcan_jax's WASP-39 b
+            # config (configs/W39b.yaml); upstream's dayside average is 58 deg
             sl_angle_deg = st.number_input(
                 "Photolysis zenith angle (degrees)", 0.0, 89.0, 83.0, 1.0,
                 key=K("sza"), disabled=not use_photo)
@@ -1244,12 +1246,13 @@ with st.sidebar:
                 key=K("vmmol"), disabled=not use_moldiff)
 
     # Opacity settings live in the Atmosphere step so extra_mols is a
-    # live variable by step 3; all extras default ON.
+    # live variable by step 3.
     with st.expander("Opacity (ExoJAX)"):
         _base_set, _extra_set = forward.MOLECULES, forward.EXTRA_MOLECULES
-        # The sulfur-free network removes the S species from both sets; its
-        # widgets get their own keys (same pattern as the provider switch) so
-        # a selection from one network never strands in the other's options.
+        # The sulfur-free network removes the S species from both sets. Each
+        # non-default network's widgets get their own keys (same pattern as
+        # the provider switch) so a selection from one network never strands
+        # in another's options.
         _net_sfx = "" if network == "sncho" else f"_{network}"
         if network == "ncho":
             _base_set = [m for m in _base_set
@@ -1274,8 +1277,7 @@ with st.sidebar:
                 "--molecules " + ",".join(_unattributed))))
         # Preselect the MEASURED-relevant subset, not everything with a
         # table: most species contribute under 1 ppm, and each default-on
-        # molecule pays a leave-one-out spectrum. The ppm measurements are
-        # in forward.py (EXTRA_MOLECULES_DEFAULT).
+        # molecule pays a leave-one-out spectrum.
         extra_mols = st.multiselect(
             "Extra opacity molecules", list(_extra_set),
             default=[m for m in _extra_set
@@ -1531,9 +1533,8 @@ with st.sidebar:
         if _k("tbase") not in st.session_state:
             st.session_state[_k("tbase")] = _tb_auto
         t_base = st.number_input(
-            # max 20 h, not 10: t14 itself spans 0.5-10 h, so a 2 x T14
-            # baseline is unreachable above T14 = 5 h and Streamlit would
-            # clamp the seeded value silently.
+            # max 20 h, not 10: t14 itself spans 0.5-10 h, so a 10 h cap
+            # would make a 2 x T14 baseline unreachable above T14 = 5 h.
             f"Out-of-{_evw} baseline (hours)", 0.5, 20.0,
             step=0.1, key=_k("tbase"),
             help="Total out-of-event time per visit. Default T14 (PandExo).")
@@ -1602,7 +1603,7 @@ with st.sidebar:
                              or floor_mode == "constant"
                              or (floor_mode == "file" and floor_table is not None))
 
-        # per-mode multipliers; the global "Noise multiplier" above scales all
+        # per-mode multipliers; the "Global noise multiplier" above scales all
         # of them (composed below, so neither control is a hidden override)
         _infl_mode = {k: st.number_input(
             f"{ins.MODES[k]['label']} random-noise multiplier", 1.0, 3.0,
@@ -1749,7 +1750,7 @@ with _opacity_slot:
         if _ksrc and len({r["grid_sha256"] for r in _ksrc.values()}) != 1:
             st.error("Incompatible k-table grids installed.")
 
-# rough runtime hint keyed off the resolution settings
+# rough runtime prior for the progress bar, keyed off the resolution settings
 base_min = 0.1 + 0.010 * nz
 if yconv_cri <= 1.5e-3:              # strict convergence costs extra iterations
     base_min += 0.5
@@ -1846,7 +1847,8 @@ _obs_meta = dict(
     n_transits=int(n_transits), r_bin=int(r_bin),
     floor_mode=floor_mode,
     # a 2-D table is recorded by CONTENT: the staleness guard reads this
-    # block, and a fixed label made two different uploaded tables one run
+    # block, and a fixed label would make two different uploaded tables
+    # look like one run
     floors={k: (None if floors[k] is None
                 else (float(floors[k]) if np.isscalar(floors[k])
                       else "table:" + hashlib.sha1(
@@ -1947,8 +1949,9 @@ def _compute_locked(slot):
             return None
         with st.status(f"Running {'PICASO' if _pic else 'VULCAN-JAX'} + "
                        "ExoJAX forward model …", expanded=True) as status:
-            # prior = the same rough pre-run estimate shown next to the Run
-            # button; the bar's remaining time converges to the measured pace
+            # prior = the rough pre-run estimate (_est_total_min, never
+            # shown as text); the bar's remaining time converges to the
+            # measured pace
             bar = _TimedBar(prior_total_s=_est_total_min * 60.0,
                             text="starting …")
             # unique per launch: a key-only name is SHARED between two
@@ -2292,8 +2295,8 @@ else:
     if not per_mode:
         # No mode constrains gp ALONE, but complementary degeneracies can
         # still leave the joint Fisher full rank. That joint number is the
-        # answer, so report it and carry on: stopping here also discarded the
-        # structure panel, the constraint forecast and the summary figure.
+        # answer, so report it and carry on: stopping here would also discard
+        # the structure panel, the constraint forecast and the summary figure.
         if not np.isfinite(comb):
             _verdict_slot.warning(
                 f"{glabel} is unconstrained in this run, by any mode and by "
@@ -2505,8 +2508,8 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
         # --- custom mode sets (builder) ------------------------------------
         # Named combinations of the modes that were run, evaluated through
         # posteriors.combo_forecast (the same combination math as the
-        # all-usable-modes row). They add rows to the table below and bars
-        # to the comparison chart above.
+        # all-usable-modes row). They add rows to the table below and series
+        # to the summary figure.
         _cb_opts = [r["mode_key"] for r in with_jac]
         # a stored selection can reference a mode absent from this run's results
         # (Streamlit crashes at widget instantiation on off-menu session state)
@@ -2655,7 +2658,7 @@ with st.expander("Parameter constraint forecast (local Fisher)"):
         _post_slot = st.container()
     else:
         # Saved combinations outlive the run that could evaluate them; without
-        # this they vanished from the page with no word about why.
+        # this they would vanish from the page with no word about why.
         for _cname, _cerr in combo_errs:
             st.info(f"Combination {_cname!r} could not be forecast: {_cerr}")
 
@@ -2753,7 +2756,7 @@ if _have_fisher:
             for _lbl in _src_labels_drawn:
                 # one curve per SELECTED SERIES, colored to match its series
                 # on the spectrum so the two halves of the figure read
-                # together (see _series_color below for the shared mapping)
+                # together (see _series_color above for the shared mapping)
                 _pr = _recs_by_src[_lbl]["params"].get(_p)
                 _col = _series_color(_lbl)
                 if _pr is None:
@@ -2938,9 +2941,9 @@ with _fig_ctx.expander("Figure settings"):
     _post_xlims = [
         _axis_range(st, p["axis_label"], K("sum_post_" + p["param"]),
                     _fig_box.warning,
-                    # C/O is the one panel on a positive-only axis: the
-                    # axis is LINEAR, but a ratio has no values at or
-                    # below zero (the wavelength axis is the log case)
+                    # C/O is the one panel on a positive-only axis: a
+                    # ratio has no values at or below zero, and its curves
+                    # are drawn on a log x axis (summary_figure)
                     positive=(p["param"] == "dlnCO"),
                     positive_reason="C/O is a ratio, so only positive "
                                     "values exist",
@@ -2955,7 +2958,8 @@ _sum_points = []
 for r in results:
     # saturated modes are excluded from every ranking, combination and
     # forecast; plotting simulated points for one would give unusable data
-    # scientific weight. The saturation itself is disclosed in the verdict.
+    # scientific weight. The saturation itself is disclosed in the
+    # excluded-modes warning above.
     if r["saturated"]:
         continue
     if (f"mode:{r['mode_key']}" not in _sel_series

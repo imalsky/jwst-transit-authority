@@ -57,9 +57,9 @@ def test_pandeia_backend_missing_and_misconfigured(tmp_path):
 
     The PSF blocks pin the worker-preflight rules: a PSF tree from a
     DIFFERENT release must not read as OK (the worker refuses the set, so
-    the status panel has to agree); VERSION_PSF is required, not just an
-    existing directory; and an empty psf_dir is a misconfiguration that
-    must surface, never read as "embedded PSFs".
+    the `jwst-tool data` report has to agree); VERSION_PSF is required, not
+    just an existing directory; and an empty psf_dir is a misconfiguration
+    that must surface, never read as "embedded PSFs".
     """
     # all three paths absent
     items = datacheck.check_pandeia_backend(

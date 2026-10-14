@@ -15,11 +15,12 @@ from jwst_tool import noise
 
 
 # Repository identity -> the DIRECTORY names it may sit under; the solver's
-# GitHub repo is `jax-vulcan` but its working copy is usually `VULCAN-JAX`, and
-# a name-only lookup dropped it from every exported block. Every entry is
+# GitHub repo is `jax-vulcan` but its working copy is usually `VULCAN-JAX`, so
+# a name-only lookup would drop it from every exported block. Every entry is
 # always reported, with an explicit status when absent or unversioned: an
-# omitted row reads as "nothing to record" rather than "not found". The last
-# two are reference oracles, not dependencies.
+# omitted row reads as "nothing to record" rather than "not found".
+# vulcan-retrieval is a sibling application and the last two are reference
+# oracles; none of the three is a dependency.
 REPOSITORIES = {
     "vulcan-jax": ("VULCAN-JAX", "jax-vulcan"),
     "vulcan-forward": ("vulcan-forward",),

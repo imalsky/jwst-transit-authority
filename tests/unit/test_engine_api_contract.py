@@ -10,7 +10,7 @@ test say nothing, because no test called the engine.
 
 This closes that at the consumer boundary: CI installs the siblings at the
 pinned commits, so an incompatible pair fails HERE. It is deliberately a
-signature check, not a run -- it needs no data, no line lists and no solve.
+signature check, not a run -- it needs no data, no k-tables and no solve.
 
 The sibling repository carries the mirror of this test for its own calls into
 VULCAN-JAX's private API (`vulcan-forward/tests/test_vulcan_jax_private_api.py`).
@@ -78,7 +78,7 @@ def test_the_rt_namespaces_carry_what_the_tool_reads_off_them():
     """build_rt_model / build_emis_model return SimpleNamespaces, so a missing
     attribute is an AttributeError deep inside a multi-minute run rather than
     an import error. Checked against the engine's source, because building the
-    real namespaces needs line lists and an opacity build."""
+    real namespaces needs the k-tables and an opacity build."""
     _skip_without_engine()
     if importlib.util.find_spec("exojax") is None:           # pragma: no cover
         pytest.skip("RT stack (exojax) not installed")
@@ -124,8 +124,8 @@ def test_the_profile_keys_the_tool_sets_are_ones_the_engine_reads():
 
 def test_the_engine_calls_in_forward_py_pass_arguments_it_accepts():
     """AST-scan the tool's own calls into the engine and check each against the
-    live signature. This is the shape of the break that shipped: a sibling
-    dropped a parameter and the caller kept passing it."""
+    live signature. This catches a sibling that drops a parameter while the
+    caller keeps passing it."""
     _skip_without_engine()
     if importlib.util.find_spec("exojax") is None:           # pragma: no cover
         pytest.skip("RT stack (exojax) not installed")

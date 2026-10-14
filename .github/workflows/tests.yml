@@ -1,12 +1,12 @@
 name: tests
 
-# Fast, dependency-light CI: the whole unit suite is numpy-only (the pandeia and
-# JAX/VULCAN-JAX/ExoJAX imports are function-local, so every jwst_tool module
-# imports with numpy alone), plus two LIGHT touchpoints on the sibling packages
-# that the install step below supplies. It exercises the count-space binning operator, the
-# noise/floor math, detection + Fisher nuisance projection and the forward-param
-# gating. The JWST_TOOL_RUN_SLOW=1 tier (real forward runs) and the
-# pandeia/PandExo parity harness need the full stack and are NOT run here.
+# Fast, dependency-light CI: every jwst_tool module imports with numpy alone
+# (the pandeia and JAX/VULCAN-JAX/ExoJAX imports are function-local); jax and
+# the two sibling packages, without exojax, are installed for the tests that
+# reach the engine. It exercises the count-space binning operator, the
+# noise/floor math, detection + Fisher nuisance projection and the
+# forward-param gating. The JWST_TOOL_RUN_SLOW=1 tier (real forward runs) and
+# the pandeia/PandExo parity harness need the full stack and are NOT run here.
 on:
   push:
     branches: [main]
@@ -18,8 +18,9 @@ jobs:
     timeout-minutes: 15
     strategy:
       matrix:
-        # requires-python = ">=3.10"; 3.10 is the NAS deploy interpreter. Keep
-        # all three tested so the floor claim stays verified.
+        # requires-python = ">=3.10", the sibling packages' floor (their NAS
+        # env runs 3.10). Keep all three tested so the floor claim stays
+        # verified.
         python-version: ["3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v5
@@ -29,15 +30,14 @@ jobs:
       - name: Install minimal deps (no pandeia / ExoJAX stack)
         # --no-deps throughout: the siblings are not on PyPI, so a plain
         # editable install would try (and fail) to resolve them there, and
-        # their own trees (exojax, the full JAX stack) are not needed here.
+        # exojax and the rest of their trees are not needed here.
         #
-        # The two siblings ARE needed, from GitHub, for two light touchpoints
-        # the unit suite reaches:
-        #   vulcan-jax     located with importlib.find_spec for its bundled
-        #                  atm/*.txt T-P tables; the package is never executed
-        #   vulcan-forward `from vulcan_forward import constants`, pure
-        #                  constants, no jax/exojax imports
-        # Installed at the PINNED commits from deploy/pins.env -- the same
+        # The unit suite reaches both siblings: conftest imports
+        # vulcan_forward.vulcan_chem (jax, for the import order), the
+        # engine-contract tests import vulcan_forward modules and
+        # vulcan_jax.atm_setup, and the T-P table helpers locate vulcan-jax's
+        # bundled atm/*.txt with importlib.find_spec. Tests that need exojax
+        # skip. Installed at the PINNED commits from deploy/pins.env -- the same
         # manifest the Space Dockerfile enforces (tests/unit/test_deploy_pins
         # keeps the two in lock-step), so CI validates the sibling code that
         # actually deploys, not whatever main points to at run time.

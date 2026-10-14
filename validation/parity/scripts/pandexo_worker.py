@@ -1,9 +1,9 @@
-"""PandExo parity worker -- runs INSIDE a current-Pandeia conda env.
+"""PandExo parity worker -- runs INSIDE a current-Pandeia environment.
 
 Standalone on purpose (mirrors src/jwst_tool/pandeia_worker.py): stdlib +
-numpy + pandexo only. Executes current PandExo (master, pinned commit in the
-parity report) on matched star/instrument configurations and dumps the raw
-quantities the parity comparison needs.
+numpy + pandexo only. Executes current PandExo (master, at the commit
+parity_gate.REQUIRED_PANDEXO_COMMIT pins) on matched star/instrument
+configurations and dumps the raw quantities the parity comparison needs.
 
     python pandexo_worker.py job.json result.json
 
@@ -52,8 +52,7 @@ def _pandexo_commit(pandexo_dir):
     PandExo is consumed from MASTER, whose behavior moves between releases with
     no version bump (the NIRISS SOSS 30-group cap landed on master without
     changing `pandexo.engine`'s version). A version string alone therefore
-    does not identify what ran, so
-    the gate requires this commit.
+    does not identify what ran, so the gate requires this commit.
 
     Two sources, in order of authority:
 
@@ -68,10 +67,9 @@ def _pandexo_commit(pandexo_dir):
 
     The tracking proof is load-bearing. `git rev-parse` walks UP from its
     -C directory, so for a pip-installed package it finds whatever repository
-    happens to enclose the environment and reports ITS head: a conda env
-    under /opt/homebrew returned Homebrew's own HEAD
-    as "the PandExo commit", and any enclosing Python repo passed the old
-    ancestor/marker checks. `git ls-files --error-unmatch` on the imported
+    happens to enclose the environment and reports ITS head (a conda env
+    under /opt/homebrew reports Homebrew's own HEAD as "the PandExo commit").
+    `git ls-files --error-unmatch` on the imported
     ``__init__.py`` cannot be satisfied by an enclosing repository that does
     not actually version this package. Worktrees are fine (no `.git`-is-a-dir
     requirement); everything unattributable returns None, and the gate then

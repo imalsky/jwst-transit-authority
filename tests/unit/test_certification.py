@@ -217,8 +217,8 @@ def test_emission_tau_bottom_gate_measures_the_flux_that_leaks_through():
     # independently of the implementation
     assert frac == pytest.approx(
         (nu.max() - 1.0e4 / 2.0) / (nu.max() - nu.min()), rel=0.01)
-    # THE regression: an unweighted sample sum reports half of that, which is
-    # what turned a 1% gate into a ~3% one
+    # an unweighted sample sum reports half of that, which turns a 1% gate
+    # into a ~3% one
     assert frac > 1.5 * float(thin.sum()) / thin.size
 
     # Same fraction, now as the gate every consumed emission spectrum passes.
@@ -265,9 +265,10 @@ def test_emission_tau_bottom_gate_accepts_either_grid_direction():
 
 def test_an_abundant_species_with_no_k_table_is_named_not_swallowed():
     """A network species the RT cannot see is missing ABSORPTION, not a
-    missing trace. Measured at C/O 10 on sncho2025: C6H6 reaches 3.6e-3 over
-    the transmission photosphere -- comparable to CO -- and ExoMolOP publishes
-    no benzene table, so the spectrum is a lower bound on the true contrast.
+    missing trace. Measured at C/O 10 on sncho2025, photolysis on: C6H6
+    reaches 3.6e-3 over the transmission photosphere -- comparable to CO --
+    and ExoMolOP publishes no benzene table, so the spectrum is a lower bound
+    on the true contrast.
     The run has to say so."""
     sp = ["H2O", "CO", "C6H6", "C2H2", "H2", "H"]
     # two layers inside the photosphere band, one far below it
@@ -297,8 +298,9 @@ def test_an_abundant_species_with_no_k_table_is_named_not_swallowed():
 
 def test_a_bulk_absorber_with_no_k_table_refuses_the_run():
     """An absorber the RT has no table for is a caveat while it is a trace and
-    a wrong spectrum once it is a bulk carrier: at C/O 10 on sncho2025 C6H6
-    reaches 3.3e-3 in the photosphere and no benzene table exists anywhere.
+    a wrong spectrum once it is a bulk carrier: at C/O 10 on sncho2025
+    (photolysis off) C6H6 reaches 3.3e-3 in the photosphere and no benzene
+    table exists anywhere.
     Above UNMODELED_VMR_REFUSE the run stops and names the species; between it
     and UNMODELED_VMR_WARN the column is modelable and the run proceeds with a
     caveat; below the warning floor it is reported nowhere."""

@@ -67,9 +67,9 @@ def test_ngroup_ordering_and_pandexo_caps_hold_for_every_mode():
 
 
 def test_every_mode_pins_the_full_tso_configuration():
-    """Parity lesson: engine defaults are the WRONG non-TSO
-    choices, so every mode must pin readout_pattern, the extraction strategy,
-    and BOTH background keys explicitly."""
+    """Engine defaults are the WRONG (non-TSO) choices, so every mode must
+    pin readout_pattern, the extraction strategy, and BOTH background keys
+    explicitly."""
     for key, m in ins.MODES.items():
         assert m["config"]["detector"].get("readout_pattern"), (
             f"{key}: readout_pattern not pinned (engine defaults are "
@@ -87,8 +87,8 @@ def test_every_mode_pins_the_full_tso_configuration():
 
 
 # Every mode's band, pinned to its PUBLISHED source so a hand-narrowed edge
-# cannot pass again (a G395M red edge of 5.10 shipped for weeks, cited to a
-# jwst-docs number that does not exist in any jwst-docs table).
+# (e.g. a G395M red edge of 5.10 um, cited to a jwst-docs number no
+# jwst-docs table carries) cannot pass.
 #   NIRSpec: Birkmann et al. 2022 (A&A 661, A83) Table 2, "Available filter
 #     and disperser combinations for time-series observations with the
 #     S1600A1 aperture", SUB2048 column -- identical to jwst-docs "NIRSpec
@@ -125,7 +125,7 @@ def test_every_mode_band_matches_its_published_source():
             f"pinned published source {lo}-{hi}; narrowing an edge silently "
             "discards real coverage")
     # G395M and G395H are the SAME disperser band; only the detector gap
-    # differs. They drifted apart once and must not again.
+    # differs, so their bands must not drift apart.
     assert (ins.MODES["nirspec_g395m"]["wl_min"],
             ins.MODES["nirspec_g395m"]["wl_max"]) == \
            (ins.MODES["nirspec_g395h"]["wl_min"],
@@ -153,7 +153,7 @@ def test_r_native_med_still_matches_the_refdata_over_the_registry_band():
     Skipped wherever the Pandeia reference tree or astropy is absent (the
     light CI job has neither). Where it runs, it re-measures the median of
     R(lambda) from the same dispersion file the worker reads, over the band
-    the registry now declares, and requires the shipped figure to be within
+    the registry declares, and requires the shipped figure to be within
     3% -- loose enough for the deliberate rounding onto jwst-docs' nominal
     R ~ 2,700 / 1,000 for the NIRSpec gratings, tight enough to catch a band
     change that moved the median."""

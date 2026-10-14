@@ -8,7 +8,7 @@
 #
 # Datasets are NOT in the image. Preferred layout: the private HF dataset repo
 # mounted READ-ONLY at /srv/hub-data plus a writable bucket volume at /data
-# (buckets replaced the retired per-Space persistent storage). Fallback, when
+# (HF has retired per-Space persistent storage). Fallback, when
 # no dataset mount exists: the entrypoint seeds /data by download, which needs
 # the secret HF_TOKEN.
 # Base image pinned by DIGEST, not :latest. What that fixes under fixed source
@@ -26,7 +26,8 @@ RUN conda create -y -n app python=3.12 \
     && conda create -y -n pandeia python=3.12 \
     && conda clean -afy
 
-# Clone name VULCAN-JAX is load-bearing for the engine's path contract.
+# Clone directories follow the workspace layout (VULCAN-JAX for the
+# jax-vulcan repository).
 #
 # RESTART NONCE: 2. Any commit to the Space repo re-runs the platform init
 # steps -- the only restart path an `hf auth login` token has. Bump this
@@ -35,7 +36,8 @@ RUN conda create -y -n app python=3.12 \
 # container simply restarts.
 #
 # Every deployed repository is pinned to an EXACT commit: jwst-tool = the
-# validated content commit, siblings = the heads CI validated against.
+# validated content commit, siblings = the deploy/pins.env commits CI tests
+# against.
 # Changing an ARG default busts the cache of the layers that use it, so the
 # pins are also the cache-bust. The build FAILS on a pin/rev-parse mismatch;
 # BUILD_INFO records the enforced pins.
@@ -100,7 +102,7 @@ RUN chmod +x /srv/app/entrypoint.sh \
     && chown -R 1000:1000 /srv/vulcan /srv/app
 USER 1000
 
-# BACKEND. The tool ships exactly one: the STScI-supported 2026.7 triple,
+# BACKEND PIN. The tool ships exactly one: the STScI-supported 2026.7 triple,
 # pandeia.engine==2026.7 (requirements-pandeia.txt) + pandeia_data-2026.7-jwst
 # + pandeia_psfs-2026.7-jwst. The engine, the reference data and the PSF
 # library must all be the SAME release; the worker refuses a mismatched set
@@ -109,10 +111,11 @@ USER 1000
 # Upgrading the release means, in this order: download both data trees into
 # vulcan-jwst-tool/data/ (STScI Box; the PSF transfer truncates and still
 # exits 0, so check byte counts), upload them to the dataset repo under
-# jwst-data/ (upload_data.sh -- DELETE the staging dir first, it skips staging
-# when one already exists), then rebuild the Space. Rebuilding before the
-# dataset carries the trees is fail-closed by design: the data panel reports
-# them missing and every noise step stops with an error.
+# jwst-data/ (upload_data.sh -- it stages only top-level entries missing from
+# the staging dir, so delete a stale entry first), then rebuild the Space.
+# Rebuilding before the dataset carries the trees is fail-closed by design:
+# the app lists them as required data missing and every noise step stops
+# with an error.
 ENV VULCAN_FORWARD_DATA=/data/retrieval-data \
     JWST_TOOL_DATA_DIR=/data/jwst-data \
     JWST_TOOL_OUTPUT_DIR=/data/output \

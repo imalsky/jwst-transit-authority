@@ -20,8 +20,8 @@ sides are on the same SUPPORTED engine/refdata/PSF triple.
 
 Required environment (all loud, no defaults -- machine paths stay out of git;
 main() scrubs absolute paths from the provenance before writing the summary):
-  JWST_TOOL_PANDEIA_PYTHON   python of a conda env with pandeia.engine 2026.7
-                             AND pandexo (master) installed
+  JWST_TOOL_PANDEIA_PYTHON   python of an environment with pandeia.engine
+                             2026.7 AND pandexo (master) installed
   JWST_TOOL_PANDEIA_REFDATA  extracted pandeia_data-2026.7-jwst tree
   JWST_TOOL_PANDEIA_PSF_DIR  extracted pandeia_psfs-2026.7-jwst tree
   JWST_TOOL_DATA_DIR         directory whose cdbs/ holds the phoenix grid,
@@ -29,12 +29,14 @@ main() scrubs absolute paths from the provenance before writing the summary):
   JWST_TOOL_OUTPUT_DIR       the tool's own worker noise cache (model_cache /
                              noise_cache); unrelated to the parity artifacts
 
-Usage: python validation/parity/run_parity.py
-Everything parity lives in THIS directory (validation/parity/): the raw per-run
-JSON (git-ignored, see .gitignore) is written here alongside the committed
-artifacts (parity_summary.json, REPORT.md, the figures). The tool's Pandeia
-noise cache still goes under JWST_TOOL_OUTPUT_DIR (that is the app's cache,
-not a parity output).
+Usage: python validation/parity/scripts/run_parity.py [--impulse]
+(--impulse adds the LSF impulse-response block to an existing
+parity_summary.json; it reuses the full run's shared stellar spectrum.)
+The raw per-run JSON (git-ignored) is written to validation/parity/outputs/,
+beside the committed parity_summary.json and REPORT.md; make_parity_plots.py
+writes the figures to validation/parity/figs/. The tool's Pandeia noise
+cache goes under JWST_TOOL_OUTPUT_DIR (that is the app's cache, not a parity
+output).
 """
 import json
 import os
@@ -46,7 +48,7 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent        # validation/parity/scripts
 OUTPUTS = HERE.parent / "outputs"             # raw JSON + parity_summary.json
-REPO = HERE.parents[2]                         # scripts -> parity -> tests -> repo
+REPO = HERE.parents[2]                         # scripts -> parity -> validation -> repo
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(HERE))
 
@@ -103,8 +105,9 @@ PANDEXO_MODES = {
     #     under RAPID PandExo reports a data-volume excess warning (~28 GB
     #     against a 15 GB advisory) on every star tested. It is recorded per
     #     row in parity_summary.json with the rest of PandExo's raw warnings,
-    #     which is where REPORT.md points; the gate does not adjudicate it,
-    #     and the GUI says only that it checks no program limits.
+    #     which is where REPORT.md points; the gate does not adjudicate it.
+    #     The tool reports its own port of the same estimate as a per-mode
+    #     advisory (instruments.nircam_data_excess_gb).
     #   * MIRI: 'slitlessprism' is 72 x 416 with tframe 0.15904 s (this
     #     tool's registry choice). PandExo's current default
     #     'slitlessprism_ip' is a cropped 68 x 384 variant; all three
@@ -146,9 +149,9 @@ assert set(PANDEXO_MODES) == set(pg.MODE_KEYS), (
 
 
 def run_ours(star: dict, keys: list[str], star_spectrum: dict) -> dict:
-    # Parity submits the SAME job noise_job builds for a normal run -- never a
-    # parity-only mode rename (that was the bug: a parity-only patch let NIRCam
-    # pass the gate while the production path silently sent a rejected token).
+    # Parity submits the SAME job noise_job builds for a normal run, never a
+    # parity-only mode rename: a parity-only patch can pass the gate while the
+    # production path sends a token Pandeia rejects.
     job = noise.noise_job(star, keys, sat_limit=SAT_LIMIT)
     job["star_spectrum"] = star_spectrum
     eng = noise.backend_fingerprint()["engine_version"]
@@ -337,9 +340,8 @@ def compare_mode(key: str, ours: dict, px: dict) -> dict:
     # Saturation is classified from the MEASURED saturation fraction (of
     # Pandeia's per-mode saturation level, NOT of the physical full well) as
     # well as the worker's `unusable` flag. A configuration can return usable
-    # pixels while sitting above the saturation limit -- two such rows have
-    # been labeled OK, one at 7.31x that level.
-    # Those numbers are still reported; they just cannot count as a
+    # pixels while sitting above the saturation limit (one row measured at
+    # 7.31x that level). Its numbers are reported but never count as a
     # validation row.
     _sat_frac = float(ours["sat_frac"])
     _status = "OK" if _sat_frac <= SAT_LIMIT else "SATURATED_ABOVE_LIMIT"

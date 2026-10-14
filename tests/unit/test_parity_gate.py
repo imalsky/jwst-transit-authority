@@ -87,7 +87,7 @@ def passing(gate):
                 "pandexo_commit": gate["REQUIRED_PANDEXO_COMMIT"],
             },
             # sorted(): REQUIRED_UNSATURATED_MODES is a set; unsorted
-            # iteration made 4 tests hash-seed-flaky (which mode lands at
+            # iteration makes tests hash-seed-flaky (which mode lands at
             # index 0 varies).
             "modes": [_ok_row(k)
                       for k in sorted(gate["REQUIRED_UNSATURATED_MODES"])],
@@ -226,9 +226,9 @@ _CASES = [
      "saturation grids matched fraction"),
     (lambda p: _upd(p, R0 + ("saturation_mask",), full_equal_frac=0.999,
                     full_disagree=1), "full-saturation mask agreement"),
-    # row status comes from the measurement, never a label: artifacts have
-    # carried saturated rows labeled OK (one at 7.31x Pandeia's per-mode
-    # level), and skipping an unknown status hid a 65.9%-pixel-match row
+    # row status comes from the measurement, never a label: a saturated row
+    # can carry an OK label (one measured at 7.31x Pandeia's per-mode level),
+    # and skipping an unknown status lets a 65.9%-pixel-match row through
     (lambda p: _mut(p, R0 + ("sat_frac_ours",), 0.8548803964),
      ("above the", "limit")),
     (lambda p: _mut(p, R0 + ("sat_frac_ours",), 7.3110978), "7.3111"),

@@ -8,8 +8,9 @@ Holds what the planner needs from the ``vulcan-forward`` engine:
 - the engine's data locations, resolved lazily so importing this module never
   touches the filesystem.
 
-The attribute surface is a contract: ``forward``, ``datacheck``, ``fetch``
-and ``app`` reach for these names, so keep them working.
+The attribute surface is a contract: ``forward``, ``picaso_engine``,
+``datacheck``, ``fetch`` and ``app`` reach for these names (``adjoint_diag``
+through forward's assembler), so keep them working.
 """
 from __future__ import annotations
 

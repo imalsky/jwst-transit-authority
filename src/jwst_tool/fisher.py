@@ -9,7 +9,7 @@ and the marginalized 1-sigma forecast on parameter i is sqrt((F^-1)_ii).
 Nuisances, jointly fit and marginalized out of the report:
   * per mode: lnR0 (reference radius) + one constant depth OFFSET per detector
     SEGMENT (NRS1/NRS2 separately for the two-detector gratings -- a
-    detector-to-detector step of tens of ppm is universal in real fits and can
+    detector-to-detector step of tens of ppm is common in real fits and can
     otherwise masquerade as atmospheric structure).
   * combined: one SHARED lnR0 + one offset per SEGMENT across all modes.
 
@@ -184,11 +184,12 @@ def display_sigma(name: str, sigma: float, co_eval: float | None = None) -> floa
     is in delta-ln(C/O) and the local Jacobian is exactly C/O, so
     sigma_CO = C/O * sigma_lnCO is the exact Jacobian rescaling of the local
     Fisher width -- NOT the standard deviation of the nonlinear transformed
-    distribution, and not what any surface prints. It survives only because
-    meta["target_prec"] is a user-entered target in absolute C/O; display goes
-    through format_co_width. ``co_eval`` is the atmosphere's C/O at the
-    evaluation point (params_json co_ratio); it is REQUIRED for dlnCO (a loud
-    error beats a silently-wrong scale)."""
+    distribution, and not what any surface prints. It serves the comparisons
+    made in absolute C/O: meta["target_prec"] (a user-entered target), the
+    transit-count logic, and the off-scale test in posteriors.mock_center_co.
+    Every displayed C/O width goes through format_co_width. ``co_eval`` is the
+    atmosphere's C/O at the evaluation point (params_json co_ratio); it is
+    REQUIRED for dlnCO (a loud error beats a silently-wrong scale)."""
     if name == "dlnCO":
         if co_eval is None:
             raise ValueError(

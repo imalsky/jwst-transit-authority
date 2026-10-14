@@ -1,20 +1,18 @@
 """Writes validation/data/case_<name>.npz: the chemistry solves behind the
 Tsai-2023 and ERS-CO2 validation figures. One WASP-39 b case per invocation
-(fresh process).
-Needs the engine data root and this repo's jax environment:
+(fresh process). Needs the engine data root and this repo's jax environment:
 
     python validation/scripts/inputs/chem_cases.py tsai_e5   # no argument lists the cases
 
-Metallicity is set where the engine actually reads it: the config's explicit
-C_H/N_H/O_H/S_H elemental knobs (the equilibrium seed in ini_abun reads those
-for network elements). He stays at the config value. The ERS fiducial keeps 10x O/N/S and sets
-C_H = 0.35 * O_H (their C/O = 0.35).
+Metallicity is set where the engine reads it: the config's explicit
+C_H/N_H/O_H/S_H elemental settings (the equilibrium seed in ini_abun reads
+those for network elements). He stays at the config value. The ERS fiducial
+keeps 10x O/N/S and sets C_H = 0.35 * O_H (their C/O = 0.35).
 
-NOTE the theta route was tried first and rejected on evidence: audit_init
-confirms lnZ = ln 2 doubles the initial column inventory exactly, yet the
-converged column returns to the baseline inventory (closed column, so that
-cannot be atom-conserving) -- recorded as an open engine question. Each case
-here therefore runs at theta = 0 and ASSERTS the converged column inventory.
+Metallicity is not set through theta: audit_init confirms lnZ = ln 2 doubles
+the initial column inventory exactly, yet the converged column returns to the
+baseline inventory (a closed column, so that cannot be atom-conserving). Each
+case therefore runs at theta = 0 and ASSERTS the converged column inventory.
 
 The morning T-P file ships without a Kzz column; Tsai et al. 2023 use one
 Kzz profile, so the evening file's Kzz(P) is interpolated onto the morning

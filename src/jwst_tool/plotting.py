@@ -23,8 +23,9 @@ correct and is the intended pattern. The lock is process-wide and
 in-process; it says nothing about other processes (the ETC/forward
 subprocesses render nothing).
 
-Pinned by tests/unit/test_plotting.py (threaded stress + a structural check
-that no unlocked layout/export call survives in app.py).
+Pinned by tests/unit/test_plotting.py (a threaded check that every builder
+blocks while another thread holds the lock + a structural check that no
+unlocked layout/export call survives in app.py).
 """
 from __future__ import annotations
 
@@ -238,7 +239,7 @@ def build_structure_figure(p_bar, T_K, columns, caveats=()):
 
         # ONE pressure axis for both panels (sharey), inverted once. Tick
         # labels are drawn on BOTH panels (plt.subplots(sharey=True) hides
-        # the right panel's, which left the mixing-ratio panel with no
+        # the right panel's, which would leave the mixing-ratio panel with no
         # visible pressure scale across the gap), but the "pressure (bar)"
         # label appears ONCE, at the far left of the figure -- never between
         # the panels (maintainer decision).
