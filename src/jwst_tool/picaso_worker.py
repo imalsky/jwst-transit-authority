@@ -10,7 +10,7 @@ job.json:
     {"refdata": <picaso reference root>, "cdbs": <PYSYN_CDBS root>,
      "versions": {"picaso": "4.1", "photochem": "0.9.2"},
      "ck_molecules": [...],            # the climate correlated-k set, all loaded
-     "requests": [{
+     "request": {
         "xh": {atom: X/H for every atom except H},   # the tool's composition
         "metallicity": Z,             # linear; quench timescales + tripwire
         "g_cgs": g,                   # one constant gravity (picaso #384)
@@ -20,16 +20,15 @@ job.json:
         "climate": null | {"tint", "rfacv", "teq_guess", "nlevel",
                            "p_top_bar", "p_bottom_bar", "rcb",
                            "star": {"teff", "logg", "feh", "rstar_rsun",
-                                    "orbit_au"}}}, ...]}
+                                    "orbit_au"}}}}
 
-out.npz, per request i: "{i}/error" ("" = ok) and on success the evaluation
-column ("T", "gas_names", "gas_mass", "vmr" (n_p, n_gas), "converged",
-"atoms_names", "atoms" (n_p, n_atoms; all phases), "target", "quench_json",
-"chem_fail" (every failed layer solve of the request)) plus, for climate
-requests, the solve record ("clim_p", "clim_T", "cvz", "conv_flag",
-"flux_net", "tidal", "chem_calls", "wall_s").
-"versions_json" names the stack that ran. The host certifies; this file only
-computes.
+out.npz: the evaluation column ("T", "gas_names", "gas_mass", "vmr" (n_p,
+n_gas), "converged", "atoms_names", "atoms" (n_p, n_atoms; all phases),
+"target", "quench_json", "chem_fail" (every failed layer solve of the
+request)) plus, for a climate request, the solve record ("clim_p", "clim_T",
+"cvz", "conv_flag", "flux_net", "tidal", "chem_calls", "wall_s");
+"versions_json" names the stack that ran. A failure exits with a traceback
+and writes nothing. The host certifies; this file only computes.
 
 The composition is imposed exactly: a subclass of picaso's
 EquilibriumChemistry solves every layer from the requested atom mole
@@ -216,16 +215,15 @@ def _climate(jdi, u, solver, req, opa):
             "wall_s": np.array(time.time() - t0)}
 
 
-def _run(jdi, u, job, req, opa_cache):
+def _run(jdi, u, job, req):
     thermo = os.path.join(job["refdata"], "chemistry", "thermo_data",
                           "thermo-sonora-component.yaml")
     solver = _solver_class()(thermo, req["xh"], req["metallicity"])
     p = np.asarray(req["p_bar"], float)
     if not np.all(np.diff(p) > 0):
         raise ValueError("evaluation grid must be strictly ascending in pressure")
-    rec = {}
-    need_opa = req["climate"] is not None or req["quench_kzz"] is not None
-    if need_opa and "opa" not in opa_cache:
+    rec, opa = {}, None
+    if req["climate"] is not None or req["quench_kzz"] is not None:
         want = sorted(job["ck_molecules"])
         opa = jdi.opannection(method="resortrebin", preload_gases=want)
         # picaso drops a missing table with only a warning, which would change
@@ -234,9 +232,8 @@ def _run(jdi, u, job, req, opa_cache):
             raise RuntimeError(
                 f"picaso loaded correlated-k tables {sorted(opa.molecules)}, "
                 f"expected {want}")
-        opa_cache["opa"] = opa
     if req["climate"] is not None:
-        rec = _climate(jdi, u, solver, req, opa_cache["opa"])
+        rec = _climate(jdi, u, solver, req, opa)
         if p[-1] > rec["clim_p"][-1] * (1 + 1e-9):
             raise RuntimeError(f"evaluation grid bottom {p[-1]:.3g} bar lies below "
                                f"the climate grid bottom {rec['clim_p'][-1]:.3g} bar")
@@ -247,7 +244,7 @@ def _run(jdi, u, job, req, opa_cache):
     vmr, atoms, conv = solver.solve_column(p, T)
     quench = {}
     if req["quench_kzz"] is not None:
-        vmr, quench = _quenched_column(jdi, u, solver, req, p, T, opa_cache["opa"])
+        vmr, quench = _quenched_column(jdi, u, solver, req, p, T, opa)
     # every layer solve of this request: climate iterations, the column, and
     # the quench recipe's own equilibrium solves
     return dict(rec, T=T, vmr=vmr, atoms=atoms, converged=conv,
@@ -263,18 +260,9 @@ def main(job_path, out_path):
     with open(job_path) as fh:
         job = json.load(fh)
     jdi, u, got = _bootstrap(job)
-    out = {"versions_json": np.array(json.dumps(got))}
-    opa_cache = {}
-    for i, req in enumerate(job["requests"]):
-        try:
-            arrays = _run(jdi, u, job, req, opa_cache)
-            out[f"{i}/error"] = np.array("")
-            out.update({f"{i}/{k}": v for k, v in arrays.items()})
-        except Exception as e:                                  # noqa: BLE001
-            out[f"{i}/error"] = np.array(f"{type(e).__name__}: {e}")
-        print(f"[pic] request {i + 1}/{len(job['requests'])} done", flush=True)
+    out = _run(jdi, u, job, job["request"])
     tmp = out_path + ".part.npz"
-    np.savez(tmp, **out)
+    np.savez(tmp, versions_json=np.array(json.dumps(got)), **out)
     os.replace(tmp, out_path)
 
 

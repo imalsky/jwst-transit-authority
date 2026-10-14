@@ -38,10 +38,8 @@ def test_fetch_specs_are_well_formed():
         ck / n: m for n, m in datacheck.PICASO_CK_MD5.items()}
     assert len(tables) == 36
     assert any(f.url.endswith("/H3%2B_1460.hdf5?download=1") for f in tables)
-    # the release the fetcher and the report name, and the env the recipe's
-    # two lock files build, are the ones the worker requires
+    # the env the recipe's two lock files build is the one the worker requires
     from jwst_tool.picaso_engine import PICASO_VERSIONS
-    assert datacheck.PICASO_RELEASE == PICASO_VERSIONS["picaso"]
     recipe = datacheck.PICASO_ENV_RECIPE
     assert "--no-deps" in recipe
     conda = (REPO / "deploy" / "picaso-conda-lock.txt").read_text()

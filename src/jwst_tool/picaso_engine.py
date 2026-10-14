@@ -40,7 +40,7 @@ from jwst_tool import datacheck, planets
 from jwst_tool import instruments as ins
 from jwst_tool import proc as proc_mod
 
-PICASO_VERSIONS = {"picaso": "4.1", "photochem": "0.9.2"}
+PICASO_VERSIONS = {"picaso": datacheck.PICASO_RELEASE, "photochem": "0.9.2"}
 WORKER_VERSION = 3      # bump when picaso_worker.py output changes
 PICASO_CACHE = ins.OUTPUT_DIR / "picaso_cache"
 # flock files stay container-local like runlimit's slots: the output dir may be
@@ -48,11 +48,13 @@ PICASO_CACHE = ins.OUTPUT_DIR / "picaso_cache"
 LOCK_DIR = Path(tempfile.gettempdir()) / "jwst_tool_picaso_locks"
 # the climate correlated-k set picaso must load, every table of the pinned record
 CK_MOLECULES = sorted(f.split("_1460")[0] for f in datacheck.PICASO_CK_MD5)
-# A climate solve takes ~9 min on one daw core and is not threaded; a request
-# batch is at most one FD row (4 solves).
+# One worker launch is one request; a climate solve takes ~9 min on one daw
+# core (~17 min on the Space) and is not threaded. A waiter on the lock
+# outlasts a holder at its cap.
 WALL_CAP_S = 4.0 * 3600.0
-LOCK_TIMEOUT_S = 3.0 * 3600.0
+LOCK_TIMEOUT_S = WALL_CAP_S + 600.0
 LOCK_POLL_S = 5.0
+LOCK_LOG_S = 60.0
 
 # Lodders (2020) Table 8, present-day solar system, log eps (H = 12), for the
 # atoms picaso's on-the-fly solver carries besides H, He, C, N, O, S. They
@@ -98,10 +100,6 @@ def eval_grid(p_btm_bar: float, rt_ptop_bar: float, nz: int, quench: bool) -> np
     return np.r_[p, p[-1] * 10.0 ** (step * np.arange(1, n_ext + 1))]
 
 
-def _carried(name: str) -> bool:
-    return name != "e-" and not name.endswith(("+", "-"))
-
-
 def composition(met_x_solar: float, co_ratio: float) -> dict:
     """X/H for every non-H atom: C, N, O, S exactly the VULCAN path's
     (forward.elemental_abundances: C/O moves carbon at fixed oxygen), He the
@@ -126,23 +124,23 @@ def require_picaso_python() -> str:
 
 def certify(req: dict, res: dict, stage: str) -> dict:
     """Raise on the first failed gate; return the certificate record."""
-    if res["error"]:
-        raise RuntimeError(f"PICASO {stage}: {res['error']}")
     p = np.asarray(req["p_bar"], float)
     for k in ("vmr", "atoms", "T"):
         if not np.all(np.isfinite(np.asarray(res[k], float))):
             raise RuntimeError(f"PICASO {stage}: non-finite {k} in the worker result.")
-    if int(res["chem_fail"]):
-        raise RuntimeError(
-            f"PICASO {stage}: {int(res['chem_fail'])} chemistry layer solves did "
-            "not converge inside picaso (climate iterations or the quench "
-            "recipe).")
+    # the column's own layers first: chem_fail counts them too, so checked
+    # second it names what is left (climate iterations, the quench recipe)
     bad = ~np.asarray(res["converged"], bool)
     if bad.any():
         raise RuntimeError(
             f"PICASO {stage}: equilibrium chemistry did not converge in "
             f"{int(bad.sum())} of {bad.size} layers ({p[bad].min():.3g}-"
             f"{p[bad].max():.3g} bar); refusing the column.")
+    if int(res["chem_fail"]):
+        raise RuntimeError(
+            f"PICASO {stage}: {int(res['chem_fail'])} chemistry layer solves did "
+            "not converge inside picaso (climate iterations or the quench "
+            "recipe).")
     names = [str(a) for a in res["atoms_names"]]
     iH = names.index("H")
     ix = [names.index(a) for a in ("C", "N", "O", "S")]
@@ -202,7 +200,9 @@ def request_key(req: dict) -> str:
 
 
 def _load(path: Path, req: dict, stage: str):
-    """A cached result, served only if its certificate re-passes."""
+    """A cached result with its certificate re-run. One that no longer passes
+    raises here: the solve is reproducible, so a re-solve would only refuse
+    the same way after minutes."""
     if not path.is_file():
         return None
     try:
@@ -210,11 +210,8 @@ def _load(path: Path, req: dict, stage: str):
             res = {k: z[k] for k in z.files}
     except (OSError, ValueError, KeyError, EOFError, zipfile.BadZipFile, zlib.error):
         return None      # unreadable: a miss; the solve rewrites it atomically
-    res["error"] = str(res["error"])
-    try:
-        res["cert"] = certify(req, res, stage)
-    except (RuntimeError, KeyError, ValueError, IndexError):
-        return None
+    res.pop("error", None)       # older cache files carry an always-empty one
+    res["cert"] = certify(req, res, stage)
     return res
 
 
@@ -224,7 +221,7 @@ def _locked(key: str, log):
     another process may still hold gives two "exclusive" locks)."""
     LOCK_DIR.mkdir(parents=True, exist_ok=True)
     fh = open(LOCK_DIR / f"{key}.lock", "a+")   # noqa: SIM115 (held across the yield)
-    t0 = time.time()
+    t0 = next_log = time.time()
     try:
         while True:
             try:
@@ -233,21 +230,24 @@ def _locked(key: str, log):
             except OSError as exc:
                 if exc.errno not in (errno.EAGAIN, errno.EACCES, errno.EWOULDBLOCK):
                     raise RuntimeError(
-                        f"PICASO cache lock failed on {fh.name} ({exc!r}): the "
-                        "output directory needs a filesystem with flock.") from exc
-                if time.time() - t0 > LOCK_TIMEOUT_S:
+                        f"PICASO cache lock failed on {fh.name} ({exc!r}): set "
+                        "TMPDIR to a filesystem with working advisory locks.") from exc
+                now = time.time()
+                if now - t0 > LOCK_TIMEOUT_S:
                     raise RuntimeError(
                         f"timed out after {LOCK_TIMEOUT_S:.0f} s waiting for a "
                         f"concurrent PICASO solve of the same request ({key}).")
-                log(f"[fwd] PICASO: waiting for a concurrent identical solve "
-                    f"({time.time() - t0:.0f} s)")
+                if now >= next_log:
+                    log(f"[fwd] PICASO: waiting for a concurrent identical solve "
+                        f"({now - t0:.0f} s)")
+                    next_log = now + LOCK_LOG_S
                 time.sleep(LOCK_POLL_S)
         yield
     finally:
         fh.close()
 
 
-def _run_worker(reqs: list, log) -> list:
+def _run_worker(req: dict, stage: str, log) -> dict:
     py = Path(require_picaso_python())
     if not py.exists():
         raise RuntimeError(f"PICASO python not found at {py} (JWST_TOOL_PICASO_PYTHON).")
@@ -258,7 +258,7 @@ def _run_worker(reqs: list, log) -> list:
     job_path.write_text(json.dumps({
         "refdata": str(ins.PICASO_REFDATA), "cdbs": ins.PYSYN_CDBS,
         "versions": PICASO_VERSIONS, "ck_molecules": CK_MOLECULES,
-        "requests": reqs}))
+        "request": req}))
     env = dict(os.environ, OMP_NUM_THREADS="1", NUMBA_NUM_THREADS="1",
                NUMBA_CACHE_DIR=str(ins.OUTPUT_DIR / "numba_cache" / "picaso"))
     lines = []
@@ -280,22 +280,14 @@ def _run_worker(reqs: list, log) -> list:
             finally:
                 killer.cancel()
         if proc.returncode != 0 or not out_path.exists():
-            raise RuntimeError(
-                "PICASO worker failed: " + proc_mod.exception_sentence(
-                    lines, f"exit code {proc.returncode} with no traceback"))
+            raise RuntimeError(f"PICASO {stage}: " + proc_mod.exception_sentence(
+                lines, f"the worker exited with code {proc.returncode} and no "
+                       "traceback"))
         with np.load(out_path, allow_pickle=False) as z:
-            arr = {k: z[k] for k in z.files}
+            return {k: z[k] for k in z.files}
     finally:
         job_path.unlink(missing_ok=True)
         out_path.unlink(missing_ok=True)
-    out = []
-    for i in range(len(reqs)):
-        res = {k.split("/", 1)[1]: v for k, v in arr.items()
-               if k.startswith(f"{i}/")}
-        res["error"] = str(res["error"])
-        res["versions_json"] = arr["versions_json"]
-        out.append(res)
-    return out
 
 
 def solve(req: dict, stage: str, log) -> dict:
@@ -314,10 +306,9 @@ def solve(req: dict, stage: str, log) -> dict:
         t0 = time.time()
         log(f"[fwd] PICASO {stage}: "
             + ("climate solve (minutes) ..." if req["climate"] else "chemistry ..."))
-        res = _run_worker([req], log)[0]
+        res = _run_worker(req, stage, log)
         res["cert"] = certify(req, res, stage)
-        arrays = {k: v for k, v in res.items() if k not in ("cert", "error")}
-        arrays["error"] = np.array("")
+        arrays = {k: v for k, v in res.items() if k != "cert"}
         ins.atomic_write(path, lambda fh: np.savez_compressed(fh, **arrays))
         log(f"[fwd] PICASO {stage}: certified in {time.time() - t0:.0f} s "
             f"({json.dumps(res['cert'])})")
@@ -331,7 +322,7 @@ def column(res: dict, n_tool: int) -> SimpleNamespace:
     ``n_tool`` evaluation levels (the tool grid; deeper levels exist only for
     the quench search), reversed to bottom-to-top like a VULCAN build."""
     names = [str(s) for s in res["gas_names"]]
-    keep = [j for j, s in enumerate(names) if _carried(s)]
+    keep = [j for j, s in enumerate(names) if not s.endswith(("+", "-"))]
     sp = [SPECIES_ALIAS.get(names[j], names[j]) for j in keep]
     if len(set(sp)) != len(sp):
         raise RuntimeError(f"PICASO species map is not one-to-one: {sp}")
@@ -383,11 +374,11 @@ def assemble(cp: dict, log) -> SimpleNamespace:
                                 cp["p_ref_bar"], p_anchor)
         return cp["gs_cgs"] * (rp_cm / r) ** 2
 
-    def request(met, co, g, T_eval=None, tint=None):
+    def request(met, co, g, T_eval=None):
         clim = None
         if T_eval is None:
             teq = planets.system_teq(cp["star_teff"], cp["rstar_rsun"], cp["orbit_au"])
-            clim = {"tint": float(cp["Tint"] if tint is None else tint),
+            clim = {"tint": float(cp["Tint"]),
                     "rfacv": float(cp["rfacv"]), "teq_guess": float(teq),
                     "nlevel": CLIMATE_N_LEVELS, "p_top_bar": CLIMATE_P_SPAN_BAR[0],
                     "p_bottom_bar": CLIMATE_P_SPAN_BAR[1], "rcb": CLIMATE_RCB,
@@ -419,33 +410,24 @@ def assemble(cp: dict, log) -> SimpleNamespace:
             g = g_at_anchor(np.asarray(fw._build_tp(cp, g)[0](tp, p_tool)), mu)
         tp_eval = fw._build_tp(cp, g)[0]
         theta_tp, names_tp = list(tp), fw.TP_PARAM_NAMES["guillot"]
-
-        def T_of(gg):
-            return np.asarray(tp_eval(tp, p_eval))
+        T_fixed = np.asarray(tp_eval(tp, p_eval))
     elif mode == "file":
+        # canonical_params has refused a table too shallow for the quench search
         tab = fw._read_tp_table(fw._tp_file_from_cp(cp), fw.chem_p_span_dyn(cp))
         P_tab, T_tab = tab["P_dyn"] / 1.0e6, tab["T"]
         o = np.argsort(P_tab)
-        if p_eval[-1] > P_tab.max() * (1 + 1e-9):
-            raise RuntimeError(
-                f"the T-P table ends at {P_tab.max():.3g} bar but the PICASO "
-                f"quench search needs it to {p_eval[-1]:.3g} bar; extend the "
-                "table or switch quench off.")
         # linear in P with the end rows held, as VULCAN-JAX's file mode reads a table
-        T_file = np.interp(p_eval, P_tab[o], T_tab[o])
-        mu = _mu(run(request(cp["met_x_solar"], cp["co_ratio"], cp["gs_cgs"], T_file),
+        T_fixed = np.interp(p_eval, P_tab[o], T_tab[o])
+        mu = _mu(run(request(cp["met_x_solar"], cp["co_ratio"], cp["gs_cgs"], T_fixed),
                      "geometry probe"))
-        g = g_at_anchor(T_file[:nz][::-1], mu)
-
-        def T_of(gg):
-            return T_file
+        g = g_at_anchor(T_fixed[:nz][::-1], mu)
     elif mode == "picaso_climate":     # T_int is a setting, not a theta row
         # first gravity from a Guillot guess column, then the climate's own
         tirr = planets.system_teq(cp["star_teff"], cp["rstar_rsun"],
                                   cp["orbit_au"]) * np.sqrt(2.0)
-        cp0 = dict(cp, tp_mode="guillot", Tirr=tirr, log_kappa=-2.0, log_gamma=-1.0)
         tp0 = np.array([tirr, cp["Tint"], -2.0, -1.0])
-        T0 = np.asarray(fw._build_tp(cp0, cp["gs_cgs"])[0](tp0, p_eval))
+        T0 = np.asarray(fw._build_tp(dict(cp, tp_mode="guillot"),
+                                     cp["gs_cgs"])[0](tp0, p_eval))
         g = g_at_anchor(T0[:nz][::-1], _mu(run(request(
             cp["met_x_solar"], cp["co_ratio"], cp["gs_cgs"], T0), "geometry probe")))
         for k in range(ANCHOR_PASSES):
@@ -461,7 +443,7 @@ def assemble(cp: dict, log) -> SimpleNamespace:
             raise RuntimeError(
                 f"PICASO climate gravity anchor did not settle to {ANCHOR_TOL:g} "
                 f"in {ANCHOR_PASSES} passes (last {g:.2f} -> {g_new:.2f} cm/s2).")
-        T_of = None
+        T_fixed = None               # every build solves its own climate
     else:
         raise ValueError(f"tp_mode {mode!r} is not a PICASO profile")
 
@@ -471,8 +453,7 @@ def assemble(cp: dict, log) -> SimpleNamespace:
                    photo_frq=None):
         met = (extra_abun or {}).get("met_x_solar", cp["met_x_solar"])
         co = (extra_abun or {}).get("co_ratio", cp["co_ratio"])
-        T_eval = None if T_of is None else T_of(g)
-        return run(request(met, co, g, T_eval), tag)
+        return run(request(met, co, g, T_fixed), tag)
 
     def abundance_overrides(met_x_solar: float, co_ratio: float) -> dict:
         return {"met_x_solar": float(met_x_solar), "co_ratio": float(co_ratio)}

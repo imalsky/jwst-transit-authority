@@ -26,7 +26,7 @@ def test_composition_is_the_vulcan_convention(met, co):
 def _result(n=4, climate=True):
     atoms_names = np.array(["H", "He", "C", "N", "O", "S"])
     target = np.array([0.8, 0.1, 0.03, 0.01, 0.05, 0.01])
-    res = {"error": "", "converged": np.ones(n, bool), "atoms_names": atoms_names,
+    res = {"converged": np.ones(n, bool), "atoms_names": atoms_names,
            "atoms": np.tile(target, (n, 1)), "target": target, "chem_fail": np.array(0),
            "vmr": np.full((n, 2), 0.5), "T": np.full(n, 1000.0)}
     if climate:
@@ -57,8 +57,8 @@ def test_certificate_passes_and_refuses_each_gate():
             else:
                 r[k] = v
         return r
-    for r, msg in [(bad(error="ValueError: boom"), "boom"),
-                   (bad(layer=2), "did not converge in 1 of 4"),
+    # a failed column layer is also counted in chem_fail; the layer gate names it
+    for r, msg in [(bad(layer=2, chem_fail=np.array(1)), "did not converge in 1 of 4"),
                    (bad(carbon=2e-3), "element budget"),
                    (bad(conv_flag=np.array(0)), "did not converge"),
                    (bad(flux_net=np.array([1e-2])), "flux balance"),
@@ -90,17 +90,17 @@ _FAKE_WORKER = textwrap.dedent("""
     import json, sys, numpy as np
     job = json.load(open(sys.argv[1]))
     open(job["refdata"] + "/calls", "a").write("x")
-    if job["requests"][0]["metallicity"] < 0:
+    if job["request"]["metallicity"] < 0:
         raise RuntimeError("picaso exploded on purpose")
     t = np.array([0.8, 0.1, 0.03, 0.01, 0.05, 0.01])
-    n = len(job["requests"][0]["p_bar"])
-    print("[pic] request 1/1 done", flush=True)
-    np.savez(sys.argv[2], **{"versions_json": np.array("{}"), "0/error": np.array(""),
-             "0/converged": np.ones(n, bool), "0/target": t, "0/atoms": np.tile(t, (n, 1)),
-             "0/atoms_names": np.array(["H", "He", "C", "N", "O", "S"]),
-             "0/vmr": np.ones((n, 2)), "0/gas_names": np.array(["H2", "He"]),
-             "0/gas_mass": np.array([2.0, 4.0]), "0/T": np.full(n, 900.0),
-             "0/quench_json": np.array("{}"), "0/chem_fail": np.array(0)})
+    n = len(job["request"]["p_bar"])
+    print("[pic] climate solve: 30 s", flush=True)
+    np.savez(sys.argv[2], versions_json=np.array("{}"), converged=np.ones(n, bool),
+             target=t, atoms=np.tile(t, (n, 1)),
+             atoms_names=np.array(["H", "He", "C", "N", "O", "S"]),
+             vmr=np.ones((n, 2)), gas_names=np.array(["H2", "He"]),
+             gas_mass=np.array([2.0, 4.0]), T=np.full(n, 900.0),
+             quench_json=np.array("{}"), chem_fail=np.array(0))
 """)
 
 
@@ -116,11 +116,16 @@ def test_solve_runs_the_worker_once_caches_and_surfaces_failures(tmp_path, monke
     first = pe.solve(req, "probe", lines.append)
     again = pe.solve(req, "probe", lines.append)
     assert (tmp_path / "calls").read_text() == "x"          # one worker launch
-    assert first["cert"] == again["cert"] and "[fwd] [pic] request 1/1 done" in lines
-    with pytest.raises(RuntimeError, match="picaso exploded on purpose"):
+    assert first["cert"] == again["cert"] and "[fwd] [pic] climate solve: 30 s" in lines
+    with pytest.raises(RuntimeError, match="PICASO probe: picaso exploded on purpose"):
         pe.solve(dict(req, metallicity=-1.0), "probe", lines.append)
     assert [p.suffix for p in (tmp_path / "cache").iterdir()] == [".npz"]   # failures never cached
     json.dumps(first["cert"])        # the certificate is stored as JSON in the npz
+    # a cached result that no longer certifies refuses at once, with no re-solve
+    monkeypatch.setattr(pe, "ELEMENT_TOL", -1.0)
+    with pytest.raises(RuntimeError, match="element budget"):
+        pe.solve(req, "probe", lines.append)
+    assert (tmp_path / "calls").read_text() == "xx"   # only the exploding launch
 
 
 def test_no_picaso_interpreter_is_one_actionable_error(monkeypatch):

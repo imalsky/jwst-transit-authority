@@ -157,7 +157,7 @@ def climate(sub):
            "climate": {"tint": 100.0, "rfacv": 0.5, "teq_guess": teq, "nlevel": 91,
                        "p_top_bar": 1e-6, "p_bottom_bar": 100.0, "rcb": 85, "star": star}}
     job["ck_molecules"] = json.loads(os.environ["PICASO_CASE_CK"])
-    res = pw._run(jdi, u, job, req, {})
+    res = pw._run(jdi, u, job, req)
     return {"P": res["clim_p"], "T": res["clim_T"]}
 
 
