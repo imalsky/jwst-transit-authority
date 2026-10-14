@@ -89,7 +89,11 @@ def walk(name: str) -> None:
     try:
         dist = distribution(name)
     except PackageNotFoundError:
-        return                     # optional/extra dep not installed here
+        # extras and marker-false deps are skipped before the recursion, so
+        # this one is required: a lock written without it would install
+        # an env that fails at import
+        raise SystemExit(f"{name} is required but not installed; repair the "
+                         "env (pip check) and regenerate") from None
     if c not in LOCAL and (PIP_ONLY is None
                            or pep503(dist.metadata["Name"]) in PIP_ONLY):
         pins[canon(dist.metadata["Name"])] = dist.version
@@ -100,15 +104,12 @@ def walk(name: str) -> None:
             # for this platform and additionally keep linux-relevant deps:
             # the only direction that matters here is mac-excluded/linux-
             # needed, which is rare -- flag candidates loudly instead.
-            try:
-                if not req.marker.evaluate({"extra": ""}):
-                    m = str(req.marker)
-                    if "linux" in m:
-                        print(f"NOTE: skipped linux-marked dep {req.name} "
-                              f"({m}) -- verify it is not needed")
-                    continue
-            except Exception:  # noqa: BLE001 -- keep going, pin what we can
-                pass
+            if not req.marker.evaluate({"extra": ""}):
+                m = str(req.marker)
+                if "linux" in m:
+                    print(f"NOTE: skipped linux-marked dep {req.name} "
+                          f"({m}) -- verify it is not needed")
+                continue
         walk(req.name)
 
 

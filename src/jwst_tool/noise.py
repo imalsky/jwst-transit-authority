@@ -269,8 +269,11 @@ def run_pandeia(job: dict, progress=None) -> dict:
     if cached is not None:
         return cached
     result = _run_worker(job, progress)
-    ins.atomic_write(cache,
-                     lambda fh: fh.write(json.dumps(result).encode()))
+    # a per-mode failure cached with the job would be served forever (the
+    # same rule as run_modes)
+    if not any(isinstance(v, dict) and "error" in v for v in result.values()):
+        ins.atomic_write(cache,
+                         lambda fh: fh.write(json.dumps(result).encode()))
     return result
 
 
