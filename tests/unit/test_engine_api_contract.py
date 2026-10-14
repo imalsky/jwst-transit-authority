@@ -46,10 +46,12 @@ EXPECTED = {
 # The RT namespaces build_rt_model / build_emis_model return. A missing entry
 # means an engine too old for this tool, which is exactly the pin bug: the
 # tool would call it and fail at run time on a user's machine instead of here.
-RT_NAMESPACE = ["transmission_depth", "transmission_depth_r", "wl_um",
-                "art_ptop_bar", "art_pbtm_bar", "p_ref_bar", "molecules"]
-EMIS_NAMESPACE = ["emission_flux", "emission_flux_tau", "emission_radius",
-                  "tau_bottom", "art_pbtm_bar", "p_ref_emission_bar"]
+# Exactly the attributes forward.py reads (the RT echo keys included).
+RT_NAMESPACE = ["transmission_depth_r", "wl_um", "nu_grid", "p_art_bar",
+                "molecules", "art_ptop_bar", "art_pbtm_bar", "p_ref_bar",
+                "rt_integration", "opacity_mode"]
+EMIS_NAMESPACE = ["eclipse_flux_tau", "emission_radius", "art_pbtm_bar",
+                  "p_ref_emission_bar"]
 
 
 def _skip_without_engine():
@@ -107,8 +109,8 @@ def test_the_profile_keys_the_tool_sets_are_ones_the_engine_reads():
             f"the engine never reads profile[{key!r}], so the tool sets a knob "
             "that does nothing")
     # the chemistry side: the solver knobs the tool drives, plus the two
-    # margins the AD dlnCO gate refuses without (their absence must be an
-    # import-time failure here, not a silent pass at run time)
+    # margins the AD dlnCO gate reads (their absence must fail here, not at
+    # run time)
     chem_src = (Path(importlib.import_module("vulcan_forward.vulcan_chem").__file__)
                 .read_text())
     for key in ("yconv_cri", "yconv_min", "dt_max", "co_mode"):
@@ -117,7 +119,7 @@ def test_the_profile_keys_the_tool_sets_are_ones_the_engine_reads():
     for attr in ("co_bz_bound", "co_bz_margin"):
         assert f"{attr}=" in chem_src, (
             f"the engine no longer returns {attr!r}; forward.check_ad_co_margin "
-            "refuses the AD dlnCO row without it")
+            "reads it")
 
 
 def test_the_engine_calls_in_forward_py_pass_arguments_it_accepts():

@@ -10,8 +10,8 @@ and worst |dlog10 band-mean sigma| binned R=1000 -> R=100, and the H2O
 band-mean spectrum at 1100 K, 1 mbar over 2000-10000 cm^-1.
 
 exo_k pulls numpy 2 and never enters this repo's jax environment. Run OFFLINE
-in a throwaway venv (same recipe as the exok_ref_overlap.npz fixture
-generator, plus the engine itself for the comparison side):
+in a throwaway venv (same recipe as vulcan-forward's exok_ref_overlap.npz
+fixture generator, plus the engine itself for the comparison side):
 
     python -m venv exok-venv
     exok-venv/bin/pip install "exo_k==1.3.1" jax h5py

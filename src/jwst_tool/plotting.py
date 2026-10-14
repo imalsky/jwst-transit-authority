@@ -153,16 +153,14 @@ TP_XLIM_DEFAULT = (1.0, 3000.0)
 VMR_XLIM_DEFAULT = (1e-12, 1.0)
 
 
-# Structure figure: ONE canvas, two square panels side by side plus the
-# mixing-ratio legend strip on the right. Both panels get the SAME allocated
-# rect and set_box_aspect(1.0), so matplotlib squares them identically -- the
-# two can never drift to different sizes the way two separate figures did.
 # Raster resolution for every PNG this app hands out or displays. Matplotlib
 # takes the dpi from the SAVE, not from the figure, so the figure-construction
-# value below only matters for interactive backends -- app._fig_bytes is what
+# value only matters for interactive backends -- app._fig_bytes is what
 # actually sets the resolution of the bytes a user gets.
 FIG_DPI = 300
-STRUCT_FIG_DPI = FIG_DPI
+# Structure figure: ONE canvas, two square panels side by side plus the
+# mixing-ratio legend strip on the right. Both panels get the SAME allocated
+# rect and set_box_aspect(1.0), so matplotlib squares them identically.
 STRUCT_FIG_W_IN = 11.0
 STRUCT_FIG_H_IN = 4.8
 STRUCT_AXES_RECT = dict(left=0.078, right=0.863, bottom=0.13, top=0.97,
@@ -201,12 +199,17 @@ def build_structure_figure(p_bar, T_K, columns, caveats=()):
     if p.ndim != 1 or p.shape != T.shape or p.size == 0:
         raise ValueError(f"build_structure_figure: p_bar {p.shape} and T_K "
                          f"{T.shape} must be matching non-empty 1-D arrays")
-    cols = list(columns)
+    cols = [(m, np.asarray(y, dtype=float)) for m, y in columns]
     if not cols:
         raise ValueError("build_structure_figure: columns is empty")
+    for m, ya in cols:            # validated before any figure exists
+        if ya.shape != p.shape:
+            raise ValueError(
+                f"build_structure_figure: {m} column {ya.shape} does not "
+                f"match the pressure grid {p.shape}")
     with render_lock:
         fig, (ax_t, ax_v) = plt.subplots(
-            1, 2, figsize=(STRUCT_FIG_W_IN, STRUCT_FIG_H_IN), dpi=STRUCT_FIG_DPI,
+            1, 2, figsize=(STRUCT_FIG_W_IN, STRUCT_FIG_H_IN), dpi=FIG_DPI,
             sharey=True)
         fig.subplots_adjust(**STRUCT_AXES_RECT)
         for ax in (ax_t, ax_v):
@@ -225,12 +228,7 @@ def build_structure_figure(p_bar, T_K, columns, caveats=()):
         ax_t.set_ylabel("pressure (bar)")
 
         extra = itertools.cycle(VMR_EXTRA_COLORS)
-        for m, y in cols:
-            ya = np.asarray(y, dtype=float)
-            if ya.shape != p.shape:
-                raise ValueError(
-                    f"build_structure_figure: {m} column {ya.shape} does not "
-                    f"match the pressure grid {p.shape}")
+        for m, ya in cols:
             ax_v.plot(np.clip(ya, 1e-14, None), p, lw=STRUCT_LW, label=str(m),
                       color=VMR_COLORS.get(str(m)) or next(extra))
         ax_v.set_xscale("log")

@@ -160,10 +160,9 @@ print(json.dumps(out))'''
         if config.is_file():
             out["refdata"]["version"] = "unreadable"
             out["refdata"]["sha256"] = _sha256(config)
-            # an older picaso tree has no version field: say so, never guess
-            out["refdata"]["version"] = str(json.loads(
-                config.read_text()).get("version", "unversioned"))
-    except (OSError, ValueError, AttributeError):
+            out["refdata"]["version"] = str(
+                json.loads(config.read_text())["version"])
+    except (OSError, ValueError, KeyError, TypeError):
         pass
     # the status is datacheck's (every pinned table present, right size)
     out["climate_tables"] = {"zenodo_record": dc.PICASO_CK_RECORD,
@@ -187,12 +186,6 @@ def ktable_sources() -> dict:
     out = {}
     for mol, rec in sorted(exomolop.provenance().items()):
         info = exomolop.table_info(mol)
-        try:
-            grid_sha, band_r = info["grid_sha256"], info["band_resolution"]
-        except KeyError as exc:
-            raise RuntimeError(
-                f"vulcan-forward >= 0.11.1 required: table_info lacks {exc}"
-            ) from exc
         out[mol] = {
             "dataset": rec["dataset"], "iso": rec["iso"],
             "natural_abundance": bool(rec["natural_abundance"]),
@@ -206,7 +199,8 @@ def ktable_sources() -> dict:
             "t_range_K": [float(v) for v in info["t_range_k"]],
             "p_range_bar": [float(v) for v in info["p_range_bar"]],
             "wl_range_um": [float(v) for v in info["wl_range_um"]],
-            "grid_sha256": grid_sha, "band_resolution": float(band_r),
+            "grid_sha256": info["grid_sha256"],
+            "band_resolution": float(info["band_resolution"]),
         }
     return out
 
@@ -264,9 +258,7 @@ def _base_snapshot() -> dict:
     pandeia.update({
         "required_release": ins.BACKEND_RELEASE,
         "refdata": _marker(Path(ins.PANDEIA_REFDATA) / "VERSION_DATA"),
-        "psf": _marker(Path(ins.PANDEIA_PSF_DIR) / "VERSION_PSF")
-        if ins.PANDEIA_PSF_DIR else {
-            "name": "VERSION_PSF", "version": "missing", "sha256": None},
+        "psf": _marker(Path(ins.PANDEIA_PSF_DIR) / "VERSION_PSF"),
     })
     return {
         "schema": 1,

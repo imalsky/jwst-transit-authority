@@ -183,11 +183,6 @@ PICASO_PYTHON = os.environ.get("JWST_TOOL_PICASO_PYTHON")
 PICASO_REFDATA = os.environ.get("JWST_TOOL_PICASO_REFDATA",
                                 str(DATA_DIR / "picaso_refdata-4.1"))
 
-# Star normalization is band-integrated 2MASS Ks vegamag inside the worker
-# (the web-ETC convention) -- never the monochromatic at_lambda shortcut,
-# which mis-scales flux by ~1-4% with spectral type and carries that error
-# into saturation/ngroup selection.
-
 # Fixed categorical color per mode, never re-assigned when the selection
 # changes. Every color holds >= 3:1 contrast on white (WCAG 2.2 non-text) and
 # the set passes the dataviz palette validator in wavelength-adjacency order,
@@ -383,8 +378,8 @@ MODES = {
     # resolving power for a brighter saturation limit than PRISM while keeping
     # the full 3-5 um band on one detector pair (the G395M-vs-G395H
     # duty-cycle / saturation trade). Tokens verified against
-    # pandeia_data-2026.7-jwst/jwst/nirspec/config.json (and the 2026.2
-    # tree): bots dispersers include "g395m"; config_constraints allow
+    # pandeia_data-2026.7-jwst/jwst/nirspec/config.json: bots dispersers
+    # include "g395m"; config_constraints allow
     # f290lp + sub2048 for it; readout_patterns include "nrsrapid";
     # range.s1600a1.f290lp spans 2.87-5.27 um.
     "nirspec_g395m": dict(
@@ -563,11 +558,9 @@ NIRCAM_RAW_GROUP_RATE_GB_PER_HOUR = 8.60103
 NIRCAM_SUSTAINABLE_GB_PER_HOUR = 3.132
 NIRCAM_ALLOCATION_OVERHEAD_S = 694.0 + 2100.0
 NIRCAM_DATA_EXCESS_GB = (5.0, 15.0)         # PandExo's flag threshold, APT limit
-# readout pattern -> (frame cadence per group, frames averaged per group)
-NIRCAM_READOUT = {"rapid": (1, 1), "bright1": (2, 1), "bright2": (2, 2),
-                  "shallow2": (5, 2), "shallow4": (5, 4), "medium2": (10, 2),
-                  "medium8": (10, 8), "mediumdeep2": (15, 2),
-                  "mediumdeep8": (15, 8), "deep2": (20, 2), "deep8": (20, 8)}
+# readout pattern -> (frame cadence per group, frames averaged per group), for
+# the patterns MODES pins; a new pattern takes its row from PandExo's table
+NIRCAM_READOUT = {"rapid": (1, 1)}
 
 
 def nircam_data_excess_gb(mode_key: str, ngroup, exposure_hours: float) -> float:

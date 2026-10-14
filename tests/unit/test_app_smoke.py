@@ -61,6 +61,11 @@ def _synthetic_out(science_mode="transmission", saturated=False,
                                    "tp_mode": "guillot",
                                    "met_x_solar": 10.0,
                                    "science_mode": science_mode}),
+        # every cached result carries the caveat fields (forward.py writes
+        # them unconditionally); empty = nothing to report
+        "unmodeled": np.array([], dtype="U32"),
+        "photo_escalated": np.array([], dtype="U48"),
+        "rate_rows_outside": np.array([0]), "rate_rows_total": np.array([0]),
     }
     nb = 12
     rng = np.random.default_rng(0)
@@ -82,19 +87,17 @@ def _synthetic_out(science_mode="transmission", saturated=False,
         }
 
     results = [_mode("nirspec_g395h", "NIRSpec G395H", 2.9, 5.1)]
-    fisher_names = []
     if with_jac:
         results.append(_mode("nirspec_prism", "NIRSpec PRISM", 0.7, 5.2))
         model["jac"] = np.zeros((3, n))
         model["jac_names"] = np.array(["lnZ", "dlnCO", "lnR0"], dtype="U8")
-        fisher_names = ["lnZ", "dlnCO"]
-    out = dict(model=model, results=results, failed=[], unusable=[],
-               fisher_names=fisher_names, provenance=None)
+    out = dict(model=model, results=results, failed=[], unusable=[])
+    # run_sig left empty: every non-canonical field reads as changed
     out_meta = dict(
         goal="detect", target="SO2", goal_param=None, target_prec=None,
-        target_sig=3.0, n_transits=n_transits, show_noise=False, seed=0,
-        r_bin=100, planet="WASP-39 b",
-        floor_mode="constant")
+        target_sig=3.0, n_transits=n_transits, r_bin=100,
+        planet="WASP-39 b", sat_limit=0.8,
+        run_sig=dict(goal={}, observation={}))
     return out, out_meta
 
 
@@ -113,9 +116,9 @@ def _run_with_result(out, out_meta, **state):
 def test_fresh_boot_pre_run_contract():
     """One default boot: no intro gate, the speed-first mode trio (the ETC
     computes only the selected modes), the data-status panel + annotated
-    molecules, noise multiplier at 1.0, and the mock controls -- there is no
-    'New draw' button, the seed field keeps a realization reproducible;
-    widget keys are the shipped contract, so share_config round-trips."""
+    molecules, noise multiplier at 1.0, and the mock controls -- the seed
+    field keeps a realization reproducible; widget keys are the shipped
+    contract, so share_config round-trips."""
     from jwst_tool import instruments as ins
 
     at = _run_app()
@@ -128,8 +131,7 @@ def test_fresh_boot_pre_run_contract():
     labels = [e.label for e in at.expander]
     assert any(label == "Data" or label.startswith("Data (")
                for label in labels)
-    assert "Opacity sources" not in labels
-    ms = [w for w in at.multiselect if w.label == "Extra opacity molecules"]
+    ms =[w for w in at.multiselect if w.label == "Extra opacity molecules"]
     assert ms, "extra-molecule multiselect missing"
     # Opacity data: exactly one of {the sources table, a loud provenance
     # warning} exists, depending on whether the fetcher's record is
@@ -172,8 +174,6 @@ def test_fresh_boot_pre_run_contract():
         (sld.label, sld.value)
     assert at.checkbox(key="n0_shownoise").value is True   # ON by default
     assert at.number_input(key="n0_seed").value == 0
-    assert not [b for b in at.get("button") if b.key == "n0_reroll"], \
-        "the 'New draw' button was removed (maintainer decision)"
     # editing the seed still redraws without recomputing
     at.number_input(key="n0_seed").set_value(7).run()
     assert not at.exception, at.exception
@@ -341,7 +341,7 @@ def test_engine_switch_keeps_each_engines_settings(monkeypatch):
     profile hides. A missing PICASO setup blocks a PICASO Run with one
     sentence and leaves VULCAN alone."""
     from jwst_tool import datacheck, fisher, forward
-    monkeypatch.setattr(datacheck, "picaso_missing", lambda r: [
+    monkeypatch.setattr(datacheck, "picaso_missing", lambda: [
         datacheck.Item(key="picaso:python", label="PICASO python",
                        status=datacheck.MISSING, required=False,
                        detail="JWST_TOOL_PICASO_PYTHON not set")])
@@ -423,9 +423,9 @@ def test_source_pins_fig_width_fisher_table_and_noise_recording():
     """Source-level pins for three maintainer decisions: (1) the
     global noise multiplier COMPOSES with the per-mode multipliers and the
     config records the two factors APART (the product would re-multiply on
-    restore); (2) every figure gets an explicit pixel width -- st.pyplot
-    defaults to "stretch", so omitting the argument does not stop the resize
-    wiggle, and the constant must be defined before first use; (3) the Fisher
+    restore); (2) every figure is shown from the PNG bytes its download
+    button carries, at an explicit pixel width (st.pyplot hardcodes dpi 200
+    and "stretch" makes the figure wiggle on resize); (3) the Fisher
     table is st.table, never st.dataframe -- its mode column is BLANKED on
     repeat rows, so a header-click re-sort would attribute numbers to the
     wrong instrument, while the CSV is built from the UNBLANKED rows."""
@@ -436,26 +436,12 @@ def test_source_pins_fig_width_fisher_table_and_noise_recording():
         "noise_infl must record the PER-MODE widget values, not the product"
     assert "noise_scale=float(noise_scale)," in src, \
         "the global scale is not recorded, so a run cannot be reproduced"
-    assert "st.pyplot(fig, width=_FIG_DISPLAY_PX)" in src, \
-        "the tight branch no longer pins the display width"
-    assert 'width=_FIG_DISPLAY_PX)' in src.split("def _show_fig")[1], \
-        "the full-canvas branch no longer pins the display width"
-    assert "_show_fig(fig3, tight=False, png=_struct_png)" in src, \
-        "the structure figure must reuse the PNG the download button already " \
-        "rasterized, not pay a second savefig of the same figure"
-    assert "_show_fig(fig_sum, png=_sum_png)" in src, \
-        "the summary figure must display the bytes the download button " \
-        "rasterized: st.pyplot hardcodes dpi 200 and would ignore FIG_DPI"
-    assert 'st.pyplot(fig, width="stretch"' not in src
-    assert not [ln for ln in src.splitlines()
-                if "st.pyplot(" in ln and "bbox_inches" in ln], \
-        "st.pyplot takes no savefig keywords (deprecated in Streamlit)"
-    lines = src.splitlines()
-    define = next(i for i, l in enumerate(lines)
-                  if l.startswith("_FIG_DISPLAY_PX"))
-    use = next(i for i, l in enumerate(lines)
-               if "st.pyplot(fig, width=_FIG_DISPLAY_PX)" in l)
-    assert define < use, (define, use)
+    assert "width=_FIG_DISPLAY_PX" in src.split("def _show_fig")[1], \
+        "_show_fig no longer pins the display width"
+    assert ("_show_fig(fig3, _struct_png)" in src
+            and "_show_fig(fig_sum, _sum_png)" in src), \
+        "a figure must display the PNG its download button rasterized"
+    assert "st.pyplot(" not in src, "st.pyplot hardcodes dpi 200"
     i = src.index('with st.expander("Parameter constraint forecast (local Fisher)")')
     j = src.index('st.download_button("Constraint forecast (CSV)"', i)
     block = src[i:j]
@@ -465,20 +451,6 @@ def test_source_pins_fig_width_fisher_table_and_noise_recording():
         "mode names are no longer blanked; re-check whether st.table is needed"
     assert "_csv_bytes(pd.DataFrame(frows), _model_caveats)" in src, \
         "the Fisher CSV is no longer built from the unblanked rows"
-
-
-def test_mode_picker_native_r_labels_are_measured():
-    """Pins the registry's measured native-R values (r_native_med: no longer
-    shown in the picker, still cross-checked against the refdata; display
-    metadata measured from the 2026.7 refdata dispersion files -- re-measure
-    on any refdata change, never edit the numbers freehand)."""
-    from jwst_tool import instruments as ins
-    for k, m in ins.MODES.items():
-        assert int(m["r_native_med"]) > 0, f"{k} lacks r_native_med"
-    # PRISM's median is taken over its registry band, which starts at the
-    # model's 1.0 um short edge (not the instrument's 0.6 um)
-    assert ins.MODES["nirspec_prism"]["r_native_med"] == 110
-    assert ins.MODES["nirspec_g395h"]["r_native_med"] == 2700
 
 
 def test_results_render_and_below_target_is_warning_not_error(monkeypatch):
@@ -491,6 +463,10 @@ def test_results_render_and_below_target_is_warning_not_error(monkeypatch):
     bytes: the CSVs carry the full text in their header and every result
     FIGURE carries the short form as a footnote in its own bottom strip --
     a pasted PNG has neither the st.warning nor the CSV header.
+
+    The mixing-ratio panel selects species by NAME: ymix is the FULL network
+    state, model["mols"] the short RT list, and zipping them positionally
+    once labelled H2 (0.847 at 1 bar on Tsai et al. 2023's W39b run) as CO2.
     """
     from streamlit.delta_generator import DeltaGenerator
     from jwst_tool import plotting, summary_figure as _sf
@@ -508,10 +484,12 @@ def test_results_render_and_below_target_is_warning_not_error(monkeypatch):
 
     # The app closes every Figure it builds, so record what each builder
     # DREW and whether it landed on a panel.
-    drawn = {}
+    drawn, columns = {}, []
 
     def _spy(name, real):
         def _f(*a, **kw):
+            if name == "structure":              # (p_bar, T_K, columns, ...)
+                columns.extend(a[2])
             fig = real(*a, **kw)
             with plotting.render_lock:
                 fig.canvas.draw()
@@ -540,7 +518,7 @@ def test_results_render_and_below_target_is_warning_not_error(monkeypatch):
     dl_labels = {b.label for b in at.get("download_button")}
     assert {"Figure (PDF, vector)", "Figure (PNG)", "Binned points (CSV)",
             "Native model (CSV)", "T-P values (CSV)",
-            "Mixing ratios (CSV)"} <= dl_labels
+            "Mixing ratios (CSV)", "Mock observation (CSV)"} <= dl_labels
     assert any("No signal" in w.value for w in at.warning)
     assert not any("Best mode" in e.value for e in at.error)
     assert "Constraint forecast (CSV)" in downloads
@@ -554,6 +532,11 @@ def test_results_render_and_below_target_is_warning_not_error(monkeypatch):
         assert "No opacity table for C6H6" in text, (name, text)
         assert "FD dlnCO row" in text, (name, text)
         assert not on_a_panel, f"the {name} caveat footnote covers a panel"
+    # the fixture puts H2 (not an RT molecule) first at 0.85; by NAME, not
+    # by position
+    got = {n: float(np.asarray(y)[0]) for n, y in columns}
+    assert set(got) == {"H2O", "CO2", "CO", "CH4", "SO2"}, got
+    assert (got["CO"], got["H2O"], got["CO2"]) == pytest.approx((1e-3, 1e-4, 1e-6))
 
 
 def test_emission_results_use_eclipse_terms():
@@ -639,22 +622,6 @@ def test_custom_archive_fill_and_uv_menu_never_moves():
         "sflux-W39b_Tsai2023.txt"
 
 
-def test_mock_observation_disclosure_and_recovery_overlay():
-    """Mock layer ON + Jacobians: the seeded mock CSV appears, the noiseless
-    result downloads stay, and the mock_recovery posterior overlay renders.
-    NOT "display-only" -- the draw is fitted; the CSV split pins that the
-    draw rides in its own clearly-named export and never contaminates the
-    noiseless result CSVs."""
-    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    at = _run_with_result(out, out_meta, n0_shownoise=True, n0_seed=7)
-    assert not at.exception, at.exception
-    dl = {b.label for b in at.get("download_button")}
-    assert "Mock observation (CSV)" in dl
-    assert {"Binned points (CSV)", "Native model (CSV)"} <= dl
-    _exps = [e.label for e in at.get("expander")]
-    assert any("forecast summary" in e for e in _exps), _exps
-
-
 def test_combo_builder_fisher_table_naming_and_reset():
     """One booted app with Jacobians carries the whole combo story: every
     results section is an expander (renames pinned); a primed
@@ -700,6 +667,20 @@ def test_combo_builder_fisher_table_naming_and_reset():
     assert any("All usable modes" == m for m in modes), modes[:8]
     first = next(m for m in modes if m.strip())
     assert "My set" in first, f"combos should lead the table, got {first!r}"
+    # C/O is reported in log10(C/O), the coordinate the Fisher Gaussian is
+    # symmetric in: the row names it and each marginalized cell is the value
+    # and its error there (a 3-sigma cell in linear C/O used to cross zero)
+    df = tables[0]
+    col = next(c for c in df.columns if str(c).startswith("marginalized"))
+    cells = [str(r[col]).strip() for _, r in df.iterrows()
+             if str(r["parameter"]) == "log10 C/O"]
+    cells = [c for c in cells if c not in ("unconstrained", "")]
+    assert cells, "no constrained C/O row to check"
+    for cell in cells:
+        assert "log10" not in cell and "(C/O" not in cell, cell
+        centre, width = cell.split("±")
+        assert float(centre) == pytest.approx(np.log10(0.55), abs=5e-3), cell
+        assert float(width) > 0.0, cell
 
     # add a named combination through the builder widgets
     at.text_input(key="n0_cb_name").set_value("PRISM + G395H")
@@ -717,6 +698,11 @@ def test_combo_builder_fisher_table_naming_and_reset():
                .apply(lambda c: c.str.contains("PRISM \\+ G395H"))
                .any().any() for t in tables), \
         "combo rows missing from the Fisher table"
+    # a name that would replace another series is refused
+    at.text_input(key="n0_cb_name").set_value("All usable modes")
+    at.button(key="n0_cb_add").click().run()
+    assert at.session_state["n0_combos"] == combos
+    assert any("already taken" in e.value for e in at.error)
     # remove works (index 0 = the first listed combo)
     removed_first = combos[0]
     at.button(key="n0_cb_rm_0").click().run()
@@ -961,64 +947,6 @@ def test_axis_bounds_refuse_one_sided_and_reach_the_figure(monkeypatch):
     assert seen["wl_range"] == pytest.approx((3.0, 5.5))
     assert seen["depth_range"] == pytest.approx((20500.0, 21500.0))
     assert seen["panel_xlims"][0] == pytest.approx((-0.4, 0.4))
-
-
-def test_mixing_ratio_panel_selects_species_by_name(monkeypatch):
-    """ymix is the FULL network state (89 species for SNCHO); model["mols"]
-    is the short RT list. Zipping them positionally reads the wrong species:
-    measured against Tsai et al. 2023's published WASP-39 b VULCAN run, the
-    curve labelled CO2 sat at 0.847 at 1 bar, which is H2 -- the panel and
-    its CSV were mislabelled for every species."""
-    from jwst_tool import plotting
-    seen = {}
-    _real = plotting.build_structure_figure
-
-    def _spy(p_bar, T_K, columns, **kw):
-        seen["columns"] = list(columns)
-        return _real(p_bar, T_K, columns, **kw)
-
-    monkeypatch.setattr(plotting, "build_structure_figure", _spy)
-    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    at = _run_with_result(out, out_meta)
-    assert not at.exception, at.exception
-    got = {name: float(np.asarray(y)[0]) for name, y in seen["columns"]}
-    # the fixture puts H2 first at 0.85; it is NOT an RT molecule and must
-    # not appear, and no RT molecule may take its column
-    assert "H2" not in got
-    assert set(got) == {"H2O", "CO2", "CO", "CH4", "SO2"}, got
-    assert got["CO"] == pytest.approx(1e-3)     # by NAME, not by position
-    assert got["H2O"] == pytest.approx(1e-4)
-    assert got["CO2"] == pytest.approx(1e-6)
-    assert 0.85 not in got.values()
-
-
-def test_co_row_is_log10_value_and_error():
-    """C/O is reported in log10(C/O) -- the coordinate the Fisher Gaussian
-    lives in, and is symmetric in. The row NAMES that coordinate and the
-    marginalized cell is the value and its error there, nothing else: a
-    symmetric 3-sigma cell in linear C/O used to cross zero."""
-    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    at = _run_with_result(out, out_meta)
-    assert not at.exception, at.exception
-    tables = [t.value for t in at.table
-              if "mode" in getattr(t.value, "columns", [])
-              and "parameter" in getattr(t.value, "columns", [])]
-    assert tables, "no constraint-forecast table rendered"
-    df = tables[0]
-    col = next(c for c in df.columns if str(c).startswith("marginalized"))
-    seen = False
-    for _, row in df.iterrows():
-        if str(row["parameter"]) != "log10 C/O":
-            continue
-        cell = str(row[col]).strip()
-        if cell in ("unconstrained", ""):
-            continue
-        seen = True
-        assert "log10" not in cell and "(C/O" not in cell, cell
-        centre, width = cell.split("±")
-        assert float(centre) == pytest.approx(np.log10(0.55), abs=5e-3), cell
-        assert float(width) > 0.0, cell
-    assert seen, "no constrained C/O row to check"
 
 
 def _render_order(at):

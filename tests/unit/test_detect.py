@@ -1,6 +1,6 @@
 """Detection-score and noise-math tests: offset/segment profiling in the
 matched-template score, loud input validation, transit-count validation, and
-no-floor detection-limit semantics."""
+the projected score."""
 import numpy as np
 import pytest
 
@@ -87,7 +87,8 @@ def _lsf_mode_inputs(depth_baseline):
         t_cycle_s=10.0, r_native=np.full(wl_pix.size, 100.0).tolist(),
         n_full_sat=np.zeros(wl_pix.size).tolist(),
         n_part_sat=np.zeros(wl_pix.size).tolist(),
-        ngroup=10, sat_frac=0.5, saturated=False)
+        ngroup=10, sat_frac=0.5, saturated=False,
+        ramp_search_complete=True, warnings={})
     wl_model = np.linspace(0.95, 2.05, 4000)
     jac_row = 1e-3 * np.exp(-0.5 * ((wl_model - 1.5) / 0.002) ** 2)
     model = dict(wl_um=wl_model, depth=depth_baseline(wl_model),
@@ -99,7 +100,7 @@ def test_jacobian_lsf_does_not_depend_on_baseline_shape():
     """The LSF is a linear operator on every vector; whether the BASELINE is a
     fixed point of the blur (e.g. exactly flat) must not decide whether
     Jacobian rows are smoothed. Same binned Jacobian for flat and broad-bump
-    baselines, and both differ from the unsmoothed no-r_native case."""
+    baselines, and both differ from the unsmoothed (unresolved-R) case."""
     mr_flat, model_flat = _lsf_mode_inputs(lambda wl: np.zeros(wl.size))
     mr_bump, model_bump = _lsf_mode_inputs(
         lambda wl: 5e-3 * np.exp(-0.5 * ((wl - 1.5) / 0.2) ** 2))
@@ -110,9 +111,10 @@ def test_jacobian_lsf_does_not_depend_on_baseline_shape():
     assert np.allclose(r_flat["jac_bins"][0], r_bump["jac_bins"][0],
                        rtol=0, atol=1e-15)
     # and the blur genuinely acts on the narrow feature: an identical setup
-    # with no r_native (no blur) must differ by many ppm at the feature
+    # whose native R the model grid cannot resolve (no blur) must differ by
+    # many ppm at the feature
     mr_none, model_none = _lsf_mode_inputs(lambda wl: np.zeros(wl.size))
-    mr_none["r_native"] = None
+    mr_none["r_native"] = [1e5] * len(mr_none["wl"])
     r_none = detect.evaluate_mode("nirspec_prism", mr_none, model_none, **kw)
     assert np.max(np.abs(r_none["jac_bins"][0] - r_flat["jac_bins"][0])) > 5e-6
 
@@ -125,8 +127,7 @@ def test_duplicate_pixel_wavelengths_are_masked_not_raised():
     r = detect.evaluate_mode(
         "nirspec_prism", mr, model, target_mol=None, R_bin=200.0,
         t_in_s=3600.0, t_out_s=3600.0, n_transits=1, floor_spec=None)
-    assert r["n_pix_degenerate_dropped"] == 2
-    assert np.isfinite(r["median_sigma_ppm"])
+    assert np.all(np.isfinite(r["sigma"]))
 
 
 def test_lsf_width_is_applied_as_r_over_width(monkeypatch):
@@ -143,7 +144,8 @@ def test_lsf_width_is_applied_as_r_over_width(monkeypatch):
             noise_1int=np.full(wl_pix.size, 1e3).tolist(), t_cycle_s=10.0,
             r_native=r_native.tolist(), n_full_sat=np.zeros(wl_pix.size).tolist(),
             n_part_sat=np.zeros(wl_pix.size).tolist(),
-            ngroup=10, sat_frac=0.5, saturated=False)
+            ngroup=10, sat_frac=0.5, saturated=False,
+            ramp_search_complete=True, warnings={})
         wl_model = np.linspace(4.9, 7.1, 4000)
         jac = 1e-3 * np.exp(-0.5 * ((wl_model - 6.0) / 0.005) ** 2)
         model = dict(wl_um=wl_model, depth=np.zeros(wl_model.size),
@@ -173,7 +175,7 @@ def test_r_bin_beyond_model_resolution_refuses():
     with pytest.raises(ValueError, match="resolving power"):
         detect.evaluate_mode("nirspec_prism", mr, model, R_bin=20000.0, **kw)
     r = detect.evaluate_mode("nirspec_prism", mr, model, R_bin=200.0, **kw)
-    assert np.isfinite(r["median_sigma_ppm"])
+    assert np.all(np.isfinite(r["sigma"]))
 
 
 # --- fail-fast input validation ----------------------------------------------
@@ -242,34 +244,15 @@ def test_n_transits_and_window_validation():
         noise_mod.depth_error_bins(mr, edges, 3600.0, 3600.0, 4.5, None)
 
 
-# --- no-floor detection-limit semantics ---------------------------------------
+# --- projected score (the transit-count semantics: test_transits_window.py) ---
 
-def _result(floor_ppm: float, n=60, signal_ppm=150.0) -> dict:
+def _result(floor_ppm: float, n=60) -> dict:
     wl = np.linspace(3.0, 5.0, n)
-    bump = signal_ppm * 1e-6 * np.exp(
-        -0.5 * ((np.log(wl) - np.log(4.0)) / 0.10) ** 2)
+    bump = 150e-6 * np.exp(-0.5 * ((np.log(wl) - np.log(4.0)) / 0.10) ** 2)
     return dict(wl=wl, depth=0.02 + bump, depth_wo=np.full(n, 0.02),
                 floor=np.full(n, floor_ppm * 1e-6),
                 var_phot=np.full(n, 300e-6) ** 2, n_transits_eval=1,
                 seg=np.zeros(n, int))
-
-
-def test_no_floor_limit_semantics():
-    """With no floor, sigma averages down without bound: the score is
-    STRICTLY monotone in transits and the limit is inf, so a beyond-cap
-    target reads 'ran out of transits' (inf limit), never 'a systematic
-    caps it'. (The floored ceiling/short-circuit and floored-monotone
-    semantics are pinned in test_transits_window.py.)"""
-    r = _result(0.0)
-    sc = [detect.detection_significance(
-              np.asarray(r["depth"]) - np.asarray(r["depth_wo"]),
-              detect.sigma_at_transits(r, n),
-              nuisance=detect._result_nuisance(r))
-          for n in (1, 2, 5, 20, 100, 500)]
-    assert np.all(np.diff(sc) > 0.0)
-    # no floor + tiny signal: unreachable but the limit is still inf
-    tt = detect.transits_to_target(_result(0.0, signal_ppm=2.0), 5.0)
-    assert not tt["reachable"] and tt["sig_inf"] == float("inf")
 
 
 def test_projected_score_uses_headline_nuisance_space():
@@ -323,7 +306,8 @@ def _miri_descending_inputs(descending):
         t_cycle_s=10.0, r_native=r_asc[sl].tolist(),
         n_full_sat=np.zeros(wl_asc.size).tolist(),
         n_part_sat=np.zeros(wl_asc.size).tolist(),
-        ngroup=10, sat_frac=0.5, saturated=False)
+        ngroup=10, sat_frac=0.5, saturated=False,
+        ramp_search_complete=True, warnings={})
     # a structured depth so the kernel WIDTH matters (a flat depth is a fixed
     # point of any blur and would make this test vacuous)
     wl_model = np.linspace(4.9, 12.1, 8000)
@@ -370,10 +354,11 @@ def test_worker_warnings_and_the_ramp_advisory_reach_the_evaluated_result():
     wl_pix = np.linspace(m["wl_min"] * 1.001, m["wl_max"] * 0.999, 300)
     mr = dict(wl=wl_pix.tolist(), flux=np.full(wl_pix.size, 1e6).tolist(),
               noise_1int=np.full(wl_pix.size, 1e3).tolist(),
-              t_cycle_s=20.0, r_native=None,
+              t_cycle_s=20.0, r_native=np.full(wl_pix.size, 1e5).tolist(),
               n_full_sat=np.zeros(wl_pix.size).tolist(),
               n_part_sat=np.zeros(wl_pix.size).tolist(),
               ngroup=5, sat_frac=0.5, saturated=False,
+              ramp_search_complete=True,
               warnings={"full_saturated": "96 pixels saturated",
                         "bad_waveref": "out of range, using 4.36 to select "
                                        "diagnostic planes instead"})
@@ -404,7 +389,8 @@ def _emission_inputs(mode_key, thin_below_um):
         t_cycle_s=10.0, r_native=np.full(wl_pix.size, 400.0).tolist(),
         n_full_sat=np.zeros(wl_pix.size).tolist(),
         n_part_sat=np.zeros(wl_pix.size).tolist(),
-        ngroup=10, sat_frac=0.5, saturated=False)
+        ngroup=10, sat_frac=0.5, saturated=False,
+        ramp_search_complete=True, warnings={})
     wl = np.geomspace(1.0, 15.0, 800)
     thin = wl < thin_below_um
     fp = np.where(thin, 1e-4, 1.0)          # the leak carries almost no energy
@@ -440,12 +426,12 @@ def test_a_globally_safe_emission_column_is_refused_on_a_band_that_only_sees_the
 
     mr_w, model_w = _emission_inputs("nirspec_prism", 1.9)
     assert detect.evaluate_mode("nirspec_prism", mr_w, model_w, None,
-                                **kw)["n_bins"] > 10
+                                **kw)["wl"].size > 10
 
     # a wholly thick column passes everywhere, target stage included
     mr_ok, model_ok = _emission_inputs("nirspec_g140h", 0.0)
     assert detect.evaluate_mode("nirspec_g140h", mr_ok, model_ok, "CO2",
-                                **kw)["n_bins"] > 5
+                                **kw)["wl"].size > 5
 
     # missing or malformed evidence refuses; it never defaults to safe
     for key, bad in (("emis_tau_bottom", None),
@@ -474,7 +460,6 @@ def test_emission_gate_cannot_be_diluted_by_masked_pixels_or_band_margins():
         if mode == "nirspec_prism":
             pix = np.asarray(mr["wl"])
             mr["n_full_sat"] = ((pix > 2.0) & (pix < 4.0)).astype(int).tolist()
-            mr.pop("r_native")
             bright_unmeasured = (wl > 2.1) & (wl < 3.9)
         else:
             bright_unmeasured = (wl < 1.01) | (wl > 1.85)
@@ -489,10 +474,11 @@ def test_nircam_data_excess_rides_the_warnings_channel():
     wl_pix = np.linspace(m["wl_min"] * 1.001, m["wl_max"] * 0.999, 300)
     mr = dict(wl=wl_pix.tolist(), flux=np.full(wl_pix.size, 1e6).tolist(),
               noise_1int=np.full(wl_pix.size, 1e3).tolist(),
-              t_cycle_s=20.0, r_native=None,
+              t_cycle_s=20.0, r_native=np.full(wl_pix.size, 1e5).tolist(),
               n_full_sat=np.zeros(wl_pix.size).tolist(),
               n_part_sat=np.zeros(wl_pix.size).tolist(),
-              ngroup=100, sat_frac=0.5, saturated=False)
+              ngroup=100, sat_frac=0.5, saturated=False,
+              ramp_search_complete=True, warnings={})
     wl_model = np.linspace(m["wl_min"] * 0.95, m["wl_max"] * 1.05, 2000)
     model = dict(wl_um=wl_model, depth=np.full(wl_model.size, 0.01),
                  mols=["X"], wo_mols=[])

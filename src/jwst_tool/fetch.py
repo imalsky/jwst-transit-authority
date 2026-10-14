@@ -4,11 +4,11 @@ Downloads every missing dataset that has a public direct URL, skips whatever
 is already present, and ends with exact instructions for the few pieces it
 does not fetch itself: two STScI Box downloads (Box shared links serve HTML,
 not the file, so they need either a browser or the markup-dependent recipe in
-MANUAL) and the Pandeia conda environment. Line lists and the
-ExoMol CO tables are left to their existing on-first-use fetchers.
+MANUAL) and the Pandeia conda environment. The ExoMolOP k-tables have their
+own fetcher (``python -m vulcan_forward.fetch_exomolop``).
 ``--picaso`` (opt-in, about 2.4 GB) adds the optional PICASO engine's
-reference tree and climate tables. Stdlib only, like datacheck; every failure
-is loud and the command is idempotent.
+reference tree and climate tables. Every failure is loud and the command is
+idempotent.
 """
 from __future__ import annotations
 
@@ -151,15 +151,12 @@ The Pandeia engine runs in its own conda environment (once):
   conda run -n pandeia_{env_suffix} pip install pandeia.engine=={release}
 then point JWST_TOOL_PANDEIA_PYTHON at that environment's python.
 
-Fetched automatically on first use, nothing to do now: HITRAN molecular
-line lists and the ExoMol CO tables."""
+The ExoMolOP k-tables have their own fetcher; `jwst-tool data` names the
+missing ones and the exact command."""
 
 
 def _present(f: Fetch) -> bool:
-    try:
-        d = f.dest()
-    except Exception:
-        return False
+    d = f.dest()          # run_fetch reports an unresolvable root as FAILED
     if f.check:
         return not f.check(Path(os.path.realpath(d)))
     if f.tar_subtree:
@@ -290,8 +287,7 @@ def run_fetch(argv: list[str] = ()) -> int:
     print(MANUAL.format(refdata=ins.PANDEIA_REFDATA,
                         release=ins.BACKEND_RELEASE,
                         env_suffix=ins.BACKEND_RELEASE.replace(".", "_"),
-                        psf=ins.PANDEIA_PSF_DIR or "(backend has no split "
-                        "PSF dir; not needed)"))
+                        psf=ins.PANDEIA_PSF_DIR))
     if picaso:
         print(f"\nThe PICASO engine runs in its own environment (picaso "
               f"{dc.PICASO_RELEASE} needs numpy >= 2), created once:\n  "

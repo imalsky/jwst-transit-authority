@@ -23,17 +23,12 @@ MOLECULES = _fwd.MOLECULES
 W39B_CFG_NAME = _fwd.DEFAULT_CFG_NAME
 
 # --- the planner's own base RT profile -------------------------------------
-# run_model overrides the resolution knobs from the canonical parameter set;
-# the band edges come from the engine, which owns the supported 1-15 um window
-# (short edge = the H2-H2 CIA table).
+# Only the band edges: run_model sets every other key from the canonical
+# parameter set. The engine owns the supported 1-15 um window (short edge =
+# the H2-H2 CIA table).
 WIDE = {
-    "use_photo": True,
-    "nz": 150,
-    "yconv_cri": 1.0e-3,
-    "molecules": ["H2O", "CO2", "CO", "CH4", "SO2"],
     "nu_min": _fwd.WIDE_BAND_NU_MIN,    # 667 cm^-1 = 15 um
     "nu_max": _fwd.WIDE_BAND_NU_MAX,    # 10000 cm^-1 = 1 um (H2-H2 CIA edge)
-    "art_nlayer": 60,
 }
 
 # --- data locations --------------------------------------------------------

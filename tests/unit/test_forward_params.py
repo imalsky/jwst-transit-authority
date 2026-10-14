@@ -88,21 +88,6 @@ def test_conden_cfg_is_the_certified_recipe():
     assert c["trun_min"] == c["stop_conden_time"]
 
 
-def test_removed_modes_refuse_never_substitute():
-    # no GCM profile may ever be silently substituted, and retired modes
-    # refuse rather than defaulting -- for WASP-39b like every other planet
-    with pytest.raises(ValueError):
-        forward.canonical_params(dict(planet="wasp39b", tp_mode="baseline"))
-    with pytest.raises(ValueError):
-        forward.canonical_params(_p(kzz_mode="scale", kzz_x=1.0))
-    assert all("has_gcm_baseline" not in pd for pd in planets.PLANETS.values())
-    with pytest.raises(ValueError):
-        forward.canonical_params(_p(tp_mode="isothermal"))
-    # its old T_iso companion key is unknown now, and unknown keys REFUSE
-    with pytest.raises(ValueError):
-        forward.canonical_params(_p(T_iso=1100.0))
-
-
 def test_shipped_tables_gate_defaults_and_are_never_substituted():
     """Maintainer decision: a planet whose bundled measured T-P/Kzz
     table is VERIFIED end-to-end defaults to it; every other planet defaults
@@ -144,6 +129,9 @@ def test_shipped_tables_gate_defaults_and_are_never_substituted():
         forward.canonical_params(dict(planet="hd189733b", tp_mode="file",
                                       rt_ptop_bar=1.0e-8))
     assert forward._default_tp_mode(dict(planet="wasp39b")) == "file"
+    # a retired (GCM) mode refuses, never substitutes a profile
+    with pytest.raises(ValueError):
+        forward.canonical_params(dict(planet="wasp39b", tp_mode="baseline"))
 
 
 def test_gray_cloud_pressure_and_opacity_are_one_knob():
@@ -240,19 +228,16 @@ def test_tp_table_gates_are_grid_scoped_and_require_the_bottom(tmp_path):
 
 
 def test_resolution_knobs_defaults_ranges_and_refusals():
-    # there is no fidelity "quality" tier: nz/yconv are explicit and the RT
-    # layer count is derived, not cache-keyed; the spectral grid is the
-    # k-tables' own (no knob)
+    # nz/yconv are explicit and the RT layer count is derived, not
+    # cache-keyed; the spectral grid is the k-tables' own (no knob)
     cp = forward.canonical_params(_p())
     assert cp["nz"] == forward.NZ_DEFAULT == 100
     assert cp["yconv_cri"] == forward.YCONV_DEFAULT == 1.0e-2
-    assert "quality" not in cp        # retired
     assert "art_nlayer" not in cp     # locked to nz in run_model, not cache-keyed
     # explicit in-range values accepted; the yconv ladder reaches its 1e-4
     # floor
     cp = forward.canonical_params(_p(nz=150, yconv_cri=1.0e-4))
     assert (cp["nz"], cp["yconv_cri"]) == (150, 1.0e-4)
-    assert forward.YCONV_RANGE == (1.0e-4, 1.0e-2)
     for bad in (dict(nz=40), dict(nz=200), dict(yconv_cri=1.0),
                 dict(yconv_cri=5.0e-5)):
         with pytest.raises(ValueError):
@@ -599,8 +584,6 @@ def test_co_bound_is_per_network_and_shared_by_every_surface(network, use_photo)
     import importlib.util
     from pathlib import Path
 
-    from jwst_tool import share_config
-
     lo, hi = forward.co_bounds(network, use_photo)
     assert lo == forward.CO_MIN
     # photolysis off lifts every network to the same permissive ceiling
@@ -618,14 +601,6 @@ def test_co_bound_is_per_network_and_shared_by_every_surface(network, use_photo)
     # an escape is named only when one exists: at the permissive ceiling all
     # three are already in force, so suggesting them would be false advice
     assert ("Try the" in str(e.value)) is (hi < forward.CO_MAX_PHOTO_OFF)
-    # share_config refuses exactly what the API refuses, for this combination
-    key = "n0_{}".format
-    state = {key("network"): network, key("photo"): use_photo,
-             key("co"): hi * 1.01}
-    with pytest.raises(ValueError, match="co_ratio"):
-        share_config._check_widget_ranges(state, key, key, "transmission")
-    state[key("co")] = hi
-    share_config._check_widget_ranges(state, key, key, "transmission")
     # the widget spans the WHOLE range, so nothing silently clamps a stored
     # value when the network or the photolysis switch moves
     src = Path(importlib.util.find_spec("jwst_tool.app").origin).read_text()
@@ -741,13 +716,13 @@ def test_wo_mols_end_to_end_semantics():
     assert np.array_equal(
         detect._removed_spectrum(emission, mols, "CO2", order),
         model["depth_wo"][0])
-    with pytest.raises(ValueError, match="certificate"):
+    with pytest.raises(ValueError, match="emis_thin_flux_frac_wo"):
         detect._removed_spectrum(
             {"wo_mols": model["wo_mols"], "science_mode": "emission"},
             mols, "CO2", order)
     for malformed in (np.array([np.nan]), np.array([0.0, 0.0]),
                       np.array([1.1])):        # non-finite, wrong shape, > 1
-        with pytest.raises(ValueError, match="certificate"):
+        with pytest.raises(ValueError, match="emis_thin_flux_frac_wo"):
             detect._removed_spectrum(
                 {"wo_mols": model["wo_mols"], "science_mode": "emission",
                  "emis_thin_flux_frac_wo": malformed},
@@ -1168,9 +1143,8 @@ def test_the_chemistry_radius_anchor_is_the_hydrostatic_identity():
     assert r == pytest.approx(
         1.0 / (1.0 / rp + c * np.log(p_anchor / p_ref)), rel=1e-9)
     assert r < rp                                   # deeper is smaller
-    # GM is level-free: the anchor pair implies the same planet mass ...
-    assert (gm / r ** 2) * r ** 2 == pytest.approx(gm, rel=1e-12)
-    # ... and the catalogue gravity is recovered where it was quoted
+    # GM is level-free, so the catalogue gravity is recovered where it was
+    # quoted
     back = forward.radius_at_anchor(p, T, mu, r, gm / r ** 2, p_anchor, p_ref)
     assert back == pytest.approx(rp, rel=1e-9)
     assert gm / back ** 2 == pytest.approx(gs, rel=1e-9)

@@ -83,7 +83,6 @@ def test_space_build_and_boot_read_only_files_this_repo_ships():
         assert (REPO / ref).is_file(), f"{ref} is read on the Space but not in the repo"
     assert "JWST_TOOL_PICASO_PYTHON=/opt/conda/envs/picaso/bin/python" in shim
 
-    assert not (REPO / "deploy" / "picaso-refdata.md5").exists()
     for name in ("upload_data.sh", "bootstrap_data.py", "finish_hf_setup.py",
                  "entrypoint.sh"):
         text = (DOCKERFILE.parent / name).read_text()

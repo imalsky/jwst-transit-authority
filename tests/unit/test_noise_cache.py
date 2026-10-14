@@ -71,13 +71,6 @@ def test_cache_key_isolates_star_saturation_and_mode(stub):
     assert noise.missing_modes(STAR, ["nirspec_g395h"]) == ["nirspec_g395h"]
 
 
-def test_force_recomputes_everything(stub):
-    keys = ["nirspec_prism", "miri_lrs"]
-    noise.run_modes(STAR, keys)
-    noise.run_modes(STAR, keys, force=True)
-    assert stub == [keys, keys]
-
-
 def test_per_mode_files_carry_their_own_provenance(stub, tmp_path):
     noise.run_modes(STAR, ["nirspec_prism"])
     files = list(tmp_path.glob("*.json"))

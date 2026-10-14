@@ -1,4 +1,4 @@
-# Serif style for the scientific-plotting skill.
+# House figure style (the app and validation/figstyle.py).
 
 figure.figsize : 8, 6
 figure.dpi : 100

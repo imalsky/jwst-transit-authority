@@ -11,6 +11,7 @@ sig_inf = nan and only the scan decides.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from jwst_tool import detect
 
@@ -31,7 +32,7 @@ def _score(r, n):
     return detect.detection_significance(
         np.asarray(r["depth"]) - np.asarray(r["depth_wo"]),
         detect.sigma_at_transits(r, n),
-        nuisance=detect._result_nuisance(r))
+        nuisance=detect._segment_rows(r["seg"]))
 
 
 def test_floor_ceiling_short_circuits_and_smallest_n_is_returned():
@@ -56,10 +57,13 @@ def test_floor_ceiling_short_circuits_and_smallest_n_is_returned():
     assert tt3["reachable"] and tt3["n"] == 1 and np.isnan(tt3["sig_inf"])
 
 
-def test_score_is_monotone_in_n_with_a_floor():
-    r = _result()
-    sc = [_score(r, n) for n in (1, 2, 4, 9, 16, 32, 64, 200, 500)]
-    assert np.all(np.diff(sc) >= 0.0)
+@pytest.mark.parametrize("floor_ppm", [100.0, 0.0])
+def test_score_is_monotone_in_n(floor_ppm):
+    """Non-decreasing with a floor; STRICTLY increasing without one (sigma
+    averages down without bound)."""
+    sc = np.diff([_score(_result(floor_ppm), n)
+                  for n in (1, 2, 4, 9, 16, 32, 64, 200, 500)])
+    assert np.all(sc > 0.0) if floor_ppm == 0.0 else np.all(sc >= 0.0)
 
 
 def test_no_floor_never_reports_floor_proven_unreachable():
@@ -67,6 +71,12 @@ def test_no_floor_never_reports_floor_proven_unreachable():
     tt = detect.transits_to_target(r, 8.0)
     assert tt["sig_inf"] == float("inf")
     assert tt["reachable"] and tt["n"] is not None
+    # a tiny signal runs out of transits, but the limit is still inf (never
+    # "a systematic caps it")
+    r2 = _result(floor_ppm=0.0)
+    r2["depth"] = r2["depth_wo"] + (r2["depth"] - r2["depth_wo"]) * (2.0 / 150.0)
+    tt2 = detect.transits_to_target(r2, 5.0)
+    assert not tt2["reachable"] and tt2["sig_inf"] == float("inf")
     # a signal entirely inside the offset span scores 0 at every N: the
     # limit is 0, never "inf" with a failed 500-transit scan
     r0 = _result(floor_ppm=0.0)

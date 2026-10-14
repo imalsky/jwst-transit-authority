@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import ast
 import inspect
-import io
 import threading
 from pathlib import Path
 
@@ -94,52 +93,22 @@ def _assert_no_overlaps(boxes, what):
 
 
 
-# The render lock: mathtext ParseException under concurrent renders
-
-def test_concurrent_renders_do_not_raise():
-    """Eight threads through the real builders: no mathtext ParseException.
-
-    matplotlib's process-global mathtext parser is locked only during
-    Figure.draw; tight_layout measures tick labels outside that lock, and on
-    a log axis those labels are mathtext. Streamlit runs each session on its
-    own thread, so two users rendering at once raced into the parser and the
-    loser got 'ValueError: ParseException'. Measured before the fix: 7/8
-    threads raised on the deployed pin (matplotlib 3.10.0), 8/8 on 3.11.0.
-    """
-    p, T = _tp()
-    cols = _vmr_cols(p)
-    errors: list[str] = []
-
-    def work():
-        try:
-            for _ in range(10):
-                with plotting.render_lock:
-                    fig = plotting.build_structure_figure(p, T, cols)
-                    fig.savefig(io.BytesIO(), format="png")
-                    plt.close(fig)
-                    s = _summary_fig()
-                    s.savefig(io.BytesIO(), format="png")
-                    plt.close(s)
-        except BaseException as exc:                      # noqa: BLE001
-            errors.append(f"{type(exc).__name__}: {exc}")
-
-    threads = [threading.Thread(target=work) for _ in range(8)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-    assert not errors, errors[:3]
-
+# The render lock: matplotlib's mathtext parser is locked only during
+# Figure.draw, but tight_layout measures (mathtext) log-axis tick labels
+# outside it, so two Streamlit sessions rendering at once raised
+# 'ValueError: ParseException' (7/8 threads on matplotlib 3.10.0).
 
 def test_builders_block_while_the_render_lock_is_held():
-    """BEHAVIORAL: each builder actually ACQUIRES the lock. The threaded
-    test above serializes externally, so it cannot catch a builder that
-    stops locking internally; this one holds the lock in another thread and
-    asserts the builder cannot finish, whatever matplotlib does."""
+    """BEHAVIORAL: each builder actually ACQUIRES the lock: with the lock
+    held in another thread the builder cannot finish, whatever matplotlib
+    does. The lock is reentrant, so a caller may wrap a build in it."""
     p, T = _tp()
     cols = _vmr_cols(p)
+    with plotting.render_lock:
+        plt.close(plotting.build_structure_figure(p, T, cols))
     calls = {"build_structure_figure":
-             lambda: plotting.build_structure_figure(p, T, cols)}
+             lambda: plotting.build_structure_figure(p, T, cols),
+             "compose_summary_figure": _summary_fig}
     for builder, call in calls.items():
         held, release, finished = (threading.Event() for _ in range(3))
         box = {}

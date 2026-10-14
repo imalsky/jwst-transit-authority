@@ -4,20 +4,20 @@ Pure matplotlib + numpy, importable and renderable without Streamlit (the GUI
 builds the input dicts; tests render headless). The composition takes plain
 dicts/arrays so it is unit-testable without any engine or noise backend.
 
-Three equal, square panels side by side answer the collaborator's three
-questions in one graphic:
+One row of panels:
 
-* LEFT  -- can the hypothesis be tested, and which mode is best at what
-  precision? The model spectrum with each mode's simulated data points
-  (per-mode color + marker; optionally one seeded mock noise realization).
-  Each legend entry carries that mode's expected performance number (the
-  caller appends it to the point-series label: a conditional template S/N
-  for a detection goal, an expected +/- for a constraint goal).
-* CENTER and RIGHT -- what would the measurement look like? Up to three 1D
-  marginalized Fisher-Gaussian forecast curves (linearized Cramer-Rao
-  forecasts, never sampled retrieval posteriors). An unconstrained direction
-  renders as an EMPTY panel, never a fake finite curve and never a caption
-  on the axes: no figure this module draws carries prose.
+* LEFT (golden-ratio wide) -- can the hypothesis be tested, and which mode
+  is best at what precision? The model spectrum with each mode's simulated
+  data points (per-mode color + marker; optionally one seeded mock noise
+  realization). Each legend entry carries that mode's expected performance
+  number (the caller appends it to the point-series label: a conditional
+  template S/N for a detection goal, an expected +/- for a constraint goal).
+* RIGHT (up to three square panels) -- what would the measurement look
+  like? One 1D marginalized Fisher-Gaussian forecast curve per parameter
+  (linearized Cramer-Rao forecasts, never sampled retrieval posteriors). An
+  unconstrained direction renders as an EMPTY panel, never a fake finite
+  curve and never a caption on the axes: no figure this module draws
+  carries prose.
 
 House style: science.mplstyle (also the validation figures' style) plus
 the white-face overrides this module owns (_STYLE_OVERRIDES, which the GUI
@@ -197,8 +197,6 @@ def _validate_panels(posterior_panels) -> list[dict]:
                                width_text=(None if _wt is None else str(_wt)),
                                curve_family=(None if _fam is None
                                              else str(_fam)),
-                               kind=(None if c.get("kind") is None
-                                     else str(c["kind"])),
                                color=str(c.get("color", "#333333")),
                                ls=str(c.get("ls", "-")),
                                lw=float(c.get("lw", 1.6))))
@@ -324,9 +322,8 @@ def _visible_ylim(spec: dict, lo: float, hi: float):
 def _plot_spectrum(ax, spec: dict) -> None:
     """Render the model spectrum and each mode's simulated points."""
     # zorder 4: ABOVE the points (zorder 3). The model is the thing the points
-    # are being compared against, so it must stay continuous and unbroken --
-    # with the points on top it was chopped into fragments wherever a mode had
-    # coverage, which is exactly the occlusion the smaller markers address.
+    # are being compared against, so it must stay continuous wherever a mode
+    # has coverage.
     ax.plot(spec["wl_um"], spec["depth_ppm"], color="#444444", lw=1.1,
             alpha=0.9, zorder=4, label=spec["model_label"])
     if spec["depth2_ppm"] is not None:
@@ -343,9 +340,8 @@ def _plot_spectrum(ax, spec: dict) -> None:
         # shared with the forecast panels, so it has to read.
         # ms 3.0: the points crowd at R=100 over a wide band, and smaller
         # markers keep the model line readable underneath them. The per-mode
-        # SHAPE (D/^/v, P/X/*) no longer separates at this size -- colour,
-        # shared with the series' forecast panel, plus the legend entry carry
-        # mode identity, and the legend renders the shape at full size.
+        # SHAPE does not separate at this size: colour plus the legend entry
+        # (which renders the shape at full size) carry mode identity.
         ax.errorbar(p["wl_um"], p["depth_ppm"], yerr=p["sigma_ppm"],
                     fmt=p["marker"], ms=3.0, lw=0.9, color=p["color"],
                     markerfacecolor=p["color"], markeredgecolor=p["color"],
@@ -421,12 +417,8 @@ def _plot_spectrum(ax, spec: dict) -> None:
     ax.tick_params(labelsize=_TICK)
     ax.grid(alpha=0.25)
     if spec["points"]:
-        # Legend INSIDE the axes. loc="best" lets matplotlib score the
-        # candidate corners against the plotted artists, so it lands where
-        # the data is not -- there is NO y-limit inflation to make room, which
-        # would distort the visible depth range purely for the legend's
-        # benefit.
-        # A translucent frame keeps it readable if it must sit over gridlines.
+        # Legend INSIDE the axes, in the headroom reserved above; a
+        # translucent frame keeps it readable over gridlines.
         # TWO COLUMNS BY GROUP: model curves in the first, instrument modes in
         # the second. matplotlib fills a legend COLUMN-MAJOR, so the handle list
         # is ordered models-then-modes and the SHORTER group is padded with
@@ -510,16 +502,14 @@ def _width_text(pan: dict, c: dict) -> str | None:
 
 def _plot_posterior_panel(axp, pan: dict,
                           xlim: tuple | None = None) -> None:
-    """One marginalized forecast density: its curve, and the width QUOTED in
-    the panel title.
+    """One marginalized forecast density per curve, each width QUOTED in its
+    legend entry.
 
     ONE PANEL PER PARAMETER, never a merged box with twin x-axes: the curves
     are peak-normalized and each grid spans its own center +/- 5 sigma, so
     every parameter draws the SAME outline and one curve hides exactly under
     the other. The width therefore cannot be read from a curve's shape and is
-    reported the way marginalized posteriors are published -- as a number
-    above the panel (corner.py annotates the median and 68% interval over each
-    histogram) against real tick values.
+    reported as a number against real tick values.
     """
     for c in pan["curves"]:
         theta = np.asarray(c["theta"], dtype=float)
@@ -530,9 +520,8 @@ def _plot_posterior_panel(axp, pan: dict,
         # The colour IS the series identity, shared with that series on the
         # spectrum, so it always comes from the curve (_validate_panels
         # guarantees one). No shaded 1-sigma band: with one curve per selected
-        # series the overlapping fills muddy the panel. With several sources
-        # the title cannot quote one width without silently picking a source,
-        # so each ENTRY carries its own.
+        # series the overlapping fills muddy the panel. Each ENTRY carries its
+        # own width, so no single source is silently picked.
         _lab = str(c["label"])
         _wt = _width_text(pan, c)
         if _wt:
@@ -637,7 +626,7 @@ def _plot_posterior_panel(axp, pan: dict,
 
 def compose_summary_figure(spectrum: dict, posterior_panels=None,
                            panel_xlims=None, caveats=()):
-    """Compose the three-panel proposal summary figure; returns the Figure.
+    """Compose the proposal summary figure; returns the Figure.
 
     ``spectrum``: dict(wl_um, depth_ppm, depth_label, model_label,
     points=[dict(label, color, marker, wl_um, depth_ppm, sigma_ppm), ...]).
@@ -649,8 +638,8 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
     ``posterior_panels``: up to three dicts, one per parameter:
     dict(axis_label, curves=[dict(label, theta, pdf, color, ls, lw), ...],
     center=float|None). An unconstrained direction draws no curve and gets
-    no annotation: the figure carries axis labels, ticks, title and legend
-    and NOTHING else -- prose about a panel belongs in the page, never on
+    no annotation: the figure carries axis labels, ticks and legends and
+    NOTHING else -- prose about a panel belongs in the page, never on
     the axes.
 
     ``panel_xlims``: one entry per forecast panel, each ``(lo, hi)`` in that
@@ -666,7 +655,8 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
     figure still carries them -- the panels themselves stay free of prose.
 
     All inputs are validated loudly (house style); the caller's arrays are
-    never mutated. The caller owns the Figure (close it after saving).
+    never mutated. The caller owns the Figure (close it after saving); a
+    figure that fails part-way is closed here before the error propagates.
     """
     spec = _validate_spectrum(spectrum)
     panels = _validate_panels(posterior_panels)
@@ -690,10 +680,8 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
     # argument). Reentrant, so a caller holding it already is fine.
     with plotting.render_lock, \
             plt.style.context([str(_STYLE_FILE), _STYLE_OVERRIDES]):
-        # Spectrum at 2x width, then ONE PANEL PER PARAMETER -- never a
-        # single merged twin-axis box (_plot_posterior_panel says why). A 2:1
-        # wavelength panel is the right shape for a spectrum and matches how
-        # these appear in papers; the posterior panels stay square.
+        # The spectrum, then ONE PANEL PER PARAMETER -- never a single merged
+        # twin-axis box (_plot_posterior_panel says why).
         # ASPECT RATIOS: the spectrum is golden
         # ratio (PHI:1 wide) and every forecast panel is SQUARE. Both are
         # enforced twice over -- the figure size is SOLVED so each gridspec
@@ -715,31 +703,36 @@ def compose_summary_figure(spectrum: dict, posterior_panels=None,
         _axes_h = _FIG_W_IN / _k
         fig = plt.figure(figsize=(_FIG_W_IN, _axes_h / (_top - _bottom)),
                          dpi=plotting.FIG_DPI)
-        gs = fig.add_gridspec(1, _ncols,
-                              width_ratios=[_PHI] + [1.0] * _npan,
-                              wspace=_wspace,
-                              left=_left, right=_right,
-                              top=_top, bottom=_bottom)
+        try:
+            gs = fig.add_gridspec(1, _ncols,
+                                  width_ratios=[_PHI] + [1.0] * _npan,
+                                  wspace=_wspace,
+                                  left=_left, right=_right,
+                                  top=_top, bottom=_bottom)
 
-        # -- LEFT: spectrum with per-mode simulated points (2x width) -------
-        ax = fig.add_subplot(gs[0, 0])
-        ax.set_box_aspect(1.0 / _PHI)      # PHI:1 wide, golden ratio
-        _plot_spectrum(ax, spec)
+            # -- LEFT: spectrum with per-mode simulated points --------------
+            ax = fig.add_subplot(gs[0, 0])
+            ax.set_box_aspect(1.0 / _PHI)      # PHI:1 wide, golden ratio
+            _plot_spectrum(ax, spec)
 
-        # -- RIGHT: one square panel per marginalized forecast posterior ----
-        for i in range(_npan):
-            axp = fig.add_subplot(gs[0, i + 1])
-            # SQUARE. The figure height is solved so a square panel exactly
-            # fills the row, so square and same-height-as-the-spectrum are the
-            # same thing here.
-            axp.set_box_aspect(1.0)
-            if i >= len(panels):
-                axp.set_axis_off()
-                continue
-            _plot_posterior_panel(
-                axp, panels[i],
-                xlim=(xlims[i] if i < len(xlims) else None))
+            # -- RIGHT: one square panel per marginalized forecast ----------
+            for i in range(_npan):
+                axp = fig.add_subplot(gs[0, i + 1])
+                # SQUARE. The figure height is solved so a square panel
+                # exactly fills the row, so square and same-height-as-the-
+                # spectrum are the same thing here.
+                axp.set_box_aspect(1.0)
+                if i >= len(panels):
+                    axp.set_axis_off()
+                    continue
+                _plot_posterior_panel(
+                    axp, panels[i],
+                    xlim=(xlims[i] if i < len(xlims) else None))
 
-        # Inside the style context so the footnote is set in the house font.
-        plotting.draw_caveats(fig, caveats)
+            # Inside the style context so the footnote is set in the house
+            # font.
+            plotting.draw_caveats(fig, caveats)
+        except BaseException:
+            plt.close(fig)
+            raise
     return fig

@@ -89,12 +89,6 @@ def test_curves_match_fisher_and_are_honestly_labeled():
         CO * sig["dlnCO"], rel=1e-12)
     assert out["params"]["dlnCO"]["unit"] == "C/O ratio"
 
-    # a caller-supplied grid is used verbatim
-    grid = np.linspace(-2.0, 4.0, 33)
-    out2 = posteriors.marginalized_posteriors(
-        r, FREE, CENTERS, co_eval=CO, grids={"lnZ": grid})
-    assert np.array_equal(out2["params"]["lnZ"]["theta"], grid)
-
     # a list of results combines via combined_forecast
     rs = [_result(seed=1), _result(seed=2)]
     outc = posteriors.marginalized_posteriors(rs, FREE, CENTERS, co_eval=CO)
@@ -338,7 +332,7 @@ def test_mock_recovery_zero_mean_fisher_covariance_and_labels():
     r = _mode_result(21, k1)
     real = posteriors.mock_realization([r], seed=5)
     rec = posteriors.mock_recovery([r], FREE, real, co_eval=CO)
-    assert rec["kind"] == posteriors.MOCK_KIND
+    assert rec["kind"] == posteriors.MOCK_RECOVERY_KIND
     assert "not a retrieval" in rec["label"]
     assert rec["seed"] == 5
     assert rec["recovered"] == {n: True for n in FREE}
@@ -355,7 +349,9 @@ def test_mock_center_co_refuses_an_off_scale_draw():
     constrained direction exp(delta) runs orders of magnitude past that
     width and the pairing breaks. mock_center_co returns the shifted center
     inside the forecast window and None past it, so no curve is drawn at a
-    center the input-point width does not describe."""
+    center the input-point width does not describe. A center outside the
+    C/O range the forward model solves is refused too (it once reached
+    ln_gaussian_curve, whose unbounded grid overflowed)."""
     sig_ln = 0.2
     mu = posteriors.mock_center_co(CO, CO * sig_ln, 0.15)
     assert mu == pytest.approx(CO * np.exp(0.15), rel=1e-12)
@@ -364,6 +360,11 @@ def test_mock_center_co_refuses_an_off_scale_draw():
 
     # unconstrained C/O: a 1-sigma draw in ln(C/O) lands e^40 out
     assert posteriors.mock_center_co(CO, CO * 40.0, 40.0) is None
+    lo, hi = posteriors.co_curve_bounds()
+    assert posteriors.mock_center_co(CO, 506.0, 6.0) is None    # -> 221.9
+    assert posteriors.mock_center_co(CO, 506.0, -3.0) is None   # -> 0.027
+    inside = posteriors.mock_center_co(CO, 506.0, 1.0)
+    assert inside is not None and lo <= inside <= hi
 
 
 def test_scoring_modules_never_reference_the_mock_layer():
@@ -437,7 +438,8 @@ def test_ln_gaussian_curve_is_a_normalized_density_per_dln():
     1/theta Jacobian. We CHOOSE to show density per unit d ln(C/O), so no
     1/(C/O) Jacobian is applied to the ordinate; the curve therefore
     integrates to 1 in ln theta and peaks on its own center, not at
-    center*exp(-sigma**2) as a density per unit linear C/O would."""
+    center*exp(-sigma**2) as a density per unit linear C/O would. CO_MIN and
+    CO_MAX are legal centers, so the bounds clamp is inclusive at both ends."""
     center, s = 0.55, 0.9218
     c = posteriors.ln_gaussian_curve(center, s)
     _trapz = getattr(np, "trapezoid", None) or np.trapz
@@ -449,5 +451,8 @@ def test_ln_gaussian_curve_is_a_normalized_density_per_dln():
         1.0 / (s * np.sqrt(2.0 * np.pi)), rel=1e-12)
     assert np.all(c["theta"] > 0.0)
     assert c["pdf"] == pytest.approx(c["pdf"][::-1], rel=1e-9)   # sym. in ln
-    assert not hasattr(posteriors, "lognormal_curve"), \
-        "the density per unit linear C/O is gone, not deprecated"
+    lo, hi = posteriors.co_curve_bounds()
+    for edge in (lo, hi):
+        theta = posteriors.ln_gaussian_curve(edge, 920.0, bounds=(lo, hi))["theta"]
+        assert np.all(np.isfinite(theta)) and np.all(np.diff(theta) > 0.0)
+        assert theta[0] >= lo and theta[-1] <= hi

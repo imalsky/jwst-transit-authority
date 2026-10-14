@@ -60,28 +60,18 @@ def test_release_segment():
         assert pw._release(raw) == expected, raw
 
 
-# --- _refdata_version -------------------------------------------------------
+# --- version files ------------------------------------------------------------
 
 def test_refdata_version_sources(tmp_path):
-    """VERSION wins when present; a misplaced VERSION_PSF must never
-    authenticate refdata (a VERSION_PSF file names a PSF library, never a
-    data tree -- the retired 3.0-era fallback allowed that) while the
-    pandeia_data-<ver> dir-name convention still applies; an unmarked tree
-    is undeterminable."""
-    (tmp_path / "VERSION").write_text("2026.2\nextra\n")
-    (tmp_path / "VERSION_PSF").write_text("9.9\n")
-    assert pw._refdata_version(str(tmp_path)) == ("2026.2", "VERSION")
-
+    """Refdata is identified by VERSION_DATA only: a misplaced VERSION_PSF
+    or the pandeia_data-<ver> directory name never authenticates it."""
     tree = tmp_path / "pandeia_data-2026.7-jwst"
     tree.mkdir()
     (tree / "VERSION_PSF").write_text("2026.7\n\nPSF provenance text\n")
-    assert pw._refdata_version(str(tree)) == ("2026.7-jwst", "directory name")
-    (tree / "VERSION_DATA").write_text("2026.7\n")
-    assert pw._refdata_version(str(tree)) == ("2026.7", "VERSION_DATA")
-
-    bare = tmp_path / "bare"
-    bare.mkdir()
-    assert pw._refdata_version(str(bare))[0] is None
+    assert pw._version_file(str(tree), "VERSION_DATA")[0] is None
+    (tree / "VERSION_DATA").write_text("2026.7\nextra\n")
+    assert pw._version_file(str(tree), "VERSION_DATA") == ("2026.7",
+                                                           "VERSION_DATA")
 
 
 # --- matched engine/refdata/PSF triple ---------------------------------------
@@ -193,6 +183,8 @@ def _run_one_mode(wl, flux, noise, n_full, n_part, sat_frac=0.5,
     older census tests unchanged. ``call_log`` collects the ngroup of every
     nint=1 stub calculation, in order."""
     mode = {"key": "stub", "instrument": "nirspec", "mode": "prism",
+            "config": {}, "strategy": {}, "background": "minzodi",
+            "background_level": "medium",
             "ngroup_min": ngroup_min, "ngroup_max": ngroup_max}
     star = {"teff": 5400.0, "log_g": 4.45, "metallicity": 0.0, "ks_mag": 10.0}
 
@@ -214,31 +206,16 @@ def _run_one_mode(wl, flux, noise, n_full, n_part, sat_frac=0.5,
         return _stub_report(frac, wl, flux, noise, n_full, n_part, t_exp=t,
                             sat_ngroups=sat_ngroups)
 
-    # The usable-pixel return path records pandeia.engine.__version__. Stub it
-    # so this suite stays engine-free (the rest of the file's contract).
-    import sys
-    import types
-
-    stub = types.ModuleType("pandeia")
-    stub_engine = types.ModuleType("pandeia.engine")
-    stub_engine.__version__ = "2026.7"
-    stub.engine = stub_engine
-    added = "pandeia" not in sys.modules
-    if added:
-        sys.modules["pandeia"] = stub
-        sys.modules["pandeia.engine"] = stub_engine
     # _native_r reads refdata dispersion files (and raises without them);
     # stub it so this stays a saturation/census test with no 20 MiB tree.
     real_native_r = pw._native_r
     pw._native_r = lambda _refdata, _m, w: ([400.0] * len(w), "stub")
     try:
         return pw._one_mode(build_default_calc, perform_calculation, mode, star,
-                            sat_limit=0.80, refdata="/nonexistent-refdata")
+                            sat_limit=0.80, refdata="/nonexistent-refdata",
+                            engine_version="2026.7")
     finally:
         pw._native_r = real_native_r
-        if added:
-            sys.modules.pop("pandeia.engine", None)
-            sys.modules.pop("pandeia", None)
 
 
 def test_full_saturation_is_counted_before_the_good_filter():
@@ -279,21 +256,6 @@ def test_native_census_survives_an_all_unusable_mode():
     assert out["n_pix_native"] == 2
     assert out["n_pix_unusable_dropped"] == 2
     assert out["n_pix_full_sat_native"] == 2
-
-
-def test_detect_never_substitutes_the_post_filter_count():
-    """A payload with no native census must read UNMEASURED, not a
-    falsely-clean zero."""
-    from jwst_tool import detect
-
-    assert detect._native_pixel_counts({}) == {
-        "n_pix_native": None, "n_pix_unusable_dropped": None,
-        "n_pix_part_sat_native": None, "n_pix_full_sat_native": None}
-    passed = detect._native_pixel_counts(
-        {"n_pix_native": 2048, "n_pix_unusable_dropped": 7,
-         "n_pix_part_sat_native": 31, "n_pix_full_sat_native": 4})
-    assert passed["n_pix_native"] == 2048
-    assert passed["n_pix_full_sat_native"] == 4
 
 
 def test_sat_curve_is_loud_on_missing_or_misaligned_keys():

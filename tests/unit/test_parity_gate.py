@@ -4,10 +4,9 @@ A runner that writes a summary and exits 0 no matter what lets stale or
 saturated artifacts look like passing release gates. The gate lives in the
 import-safe `validation/parity/scripts/parity_gate.py`, shared by the runner, the
 renderers, and these tests -- no exec tricks, no duplicated constants. Each
-`_fails` block breaks one thing in a synthetic full-matrix passing summary
-and proves `validate()` (or `validate_artifact()`) fails; related fail-closed
-branches are grouped into one test each. The committed artifact must
-re-validate as a current pass.
+`_CASES` row breaks one thing in a synthetic full-matrix passing summary and
+proves `validate()` reports it (or a legitimate near-miss still passes). The
+committed artifact must re-validate as a current pass.
 """
 from __future__ import annotations
 
@@ -128,150 +127,173 @@ def _upd(passing, path, **kv):
     return s
 
 
-def _fails(gate, s, needle):
-    """validate(s) must report a problem containing `needle`."""
-    problems = gate["validate"](s)
-    assert any(needle in p for p in problems), (needle, problems)
-    return problems
+def _drop_last_w39_mode(p):
+    s = copy.deepcopy(p)
+    s["stars"]["w39_like"]["modes"].pop()
+    return s
 
 
-def test_a_clean_artifact_passes(gate, passing):
-    assert gate["validate"](passing) == []
+def _drop_two_stars(p):
+    s = copy.deepcopy(p)
+    del s["stars"]["bright_hot"], s["stars"]["faint_k"]
+    return s
 
 
-def test_provenance_drift_fails(gate, passing):
-    """Provenance identity is exact: worker version, PSF release (a mixed
-    PSF release changes the extracted flux), the supported engine release
-    (two sides can agree with each other and still both be archival), and
-    the reviewed, clean PandExo commit (PandExo runs from master, so a
-    version string alone does not identify it)."""
-    _fails(gate, _mut(passing, OURS + ("worker_version",), 5),
-           "worker_version=5")
-    _fails(gate, _mut(passing, PDX + ("psf_version",), "2026.2"),
-           "psf release differs")
-    _fails(gate, _upd(_upd(passing, OURS, engine_version="2026.2",
-                           refdata_version="2026.2", psf_version="2026.2"),
-                      PDX, pandeia_engine_version="2026.2",
-                      refdata_version="2026.2", psf_version="2026.2"),
-           "not the supported")
-    _fails(gate, _mut(passing, PDX + ("pandexo_commit",)),
-           "PandExo git commit")
-    for commit in ("0" * 40,                        # unreviewed, and dirty:
-                   "34e42d81f782c8358bb30fc6e8cdf4b87e488263-dirty"):
-        _fails(gate, _mut(passing, PDX + ("pandexo_commit",), commit),
-               "is not the reviewed")
-    _fails(gate, _mut(passing, PDX + ("pandexo_version",), "unknown"),
-           "PandExo version is unknown")
+def _append_w39_row(p, row=None):
+    s = copy.deepcopy(p)
+    modes = s["stars"]["w39_like"]["modes"]
+    modes.append(copy.deepcopy(modes[0]) if row is None else row)
+    return s
 
 
-def test_saturation_mask_evidence_is_required(gate, passing):
-    """Per-pixel mask agreement is evidence, not decoration: a missing mask
-    and a disagreeing mask must both fail."""
-    _fails(gate, _mut(passing, R0 + ("saturation_mask",)),
-           "saturation grids matched fraction")
-    _fails(gate, _upd(passing, R0 + ("saturation_mask",),
-                      full_equal_frac=0.999, full_disagree=1),
-           "full-saturation mask agreement")
-
-
-def test_row_status_gates(gate, passing):
-    """Row status must come from the measurement, never a label. Artifacts
-    have carried saturated rows labeled OK, one at 7.31x the saturation
-    level (Pandeia's per-mode value, not the physical full well), and a
-    validator that silently skips any non-OK/ERROR status hides a
-    65.9%-pixel-match row behind SATURATED_ABOVE_LIMIT."""
-    problems = _fails(gate, _mut(passing, R0 + ("sat_frac_ours",),
-                                 0.8548803964), "above the")
-    assert any("above the" in p and "limit" in p for p in problems), problems
-    _fails(gate, _mut(passing, R0 + ("sat_frac_ours",), 7.3110978), "7.3111")
-
-    key = passing["stars"]["w39_like"]["modes"][0]["key"]
-    _fails(gate, _mut(passing, R0, {"key": key, "status": "ERROR",
-                                    "ours_error": "boom"}), "error row")
-    _fails(gate, _mut(passing, R0 + ("status",), "SATURATED_ISH"),
-           "unknown status")
-    # SATURATED_ABOVE_LIMIT label while sat_frac (0.5) is BELOW the limit
-    _fails(gate, _mut(passing, R0 + ("status",), "SATURATED_ABOVE_LIMIT"),
-           "label must come from the measurement")
-
-
-def test_matrix_membership_gates(gate, passing):
-    """The full star x mode matrix is the experiment: nothing missing,
-    nothing extra, nothing duplicated. Deleting whole stars must fail: a
-    coverage-only check passes with two of three stars removed. One star
-    losing a mode fails even though the coverage set is still satisfied by
-    the other stars."""
-    s = copy.deepcopy(passing)
-    dropped = s["stars"]["w39_like"]["modes"].pop()
-    _fails(gate, s, f"declared mode {dropped['key']!r} has no row")
-
-    s = copy.deepcopy(passing)
-    del s["stars"]["bright_hot"]
-    del s["stars"]["faint_k"]
-    _fails(gate, s, "missing from the artifact")
-
-    _fails(gate, _mut(passing, ("stars", "mystery"),
-                      copy.deepcopy(passing["stars"]["w39_like"])),
-           "not part of the declared experiment")
-
-    s = copy.deepcopy(passing)
-    s["stars"]["w39_like"]["modes"].append(
-        copy.deepcopy(s["stars"]["w39_like"]["modes"][0]))
-    _fails(gate, s, "appears 2 times")
-
-    s = copy.deepcopy(passing)
-    s["stars"]["w39_like"]["modes"].append(_ok_row("nirspec_g140m"))
-    _fails(gate, s, "'nirspec_g140m' is not part of the declared")
-
-
-def test_config_and_measurement_drift_fails(gate, passing):
-    """The declared experiment config, the matched pixel grid, and the
-    extracted-flux ratio are each gated."""
-    _fails(gate, _mut(passing, ("config", "depth"), 0.02),
-           "does not match the declared experiment")
-    _fails(gate, _mut(passing, R0 + ("npix_matched",), 900),      # 90%
-           "usable pixels matched")
-    _fails(gate, _mut(passing, R0 + ("flux_ratio", "median"), 1.05),
-           "extracted-flux median ratio")
-
-
-def test_config_mismatch_fails_outside_exact_miri_exception(gate, passing):
-    """A real disagreement or missing value in any config field fails; the
-    one exception is MIRI LRS's engine-derived disperser (ours unset,
-    PandExo "p750l"), a representation difference, which must not."""
-    s = copy.deepcopy(passing)
+def _w39_config(p, miri, **ours):
+    """Edit config_ours on the MIRI LRS row (or the first non-MIRI row); the
+    MIRI row also gets PandExo's engine-derived disperser "p750l"."""
+    s = copy.deepcopy(p)
     row = next(r for r in s["stars"]["w39_like"]["modes"]
-               if r["key"] == "miri_lrs")
-    row["config_ours"]["disperser"] = None
-    row["config_pandexo"]["disperser"] = "p750l"
-    assert not [p for p in gate["validate"](s) if "disperser" in p]
-
-    row["config_ours"]["readout"] = "FASTR1"
-    _fails(gate, s, "submitted readout differs")
-
-    for field in ("subarray", "readout", "filter", "disperser"):
-        s = copy.deepcopy(passing)
-        row = next(r for r in s["stars"]["w39_like"]["modes"]
-                   if r["key"] != "miri_lrs")        # non-MIRI: no exception
-        row["config_ours"][field] = None
-        _fails(gate, s, f"submitted {field} differs")
+               if (r["key"] == "miri_lrs") == miri)
+    if miri:
+        row["config_ours"]["disperser"] = None
+        row["config_pandexo"]["disperser"] = "p750l"
+    row["config_ours"].update(ours)
+    return s
 
 
-def test_ngroup_rounding_tolerance_and_real_divergence(gate, passing):
-    """At ngroup ~500 a 5-group rounding difference is 1.006%, so a pure 1%
-    gate would fail the real, matched artifact; a real optimizer divergence
-    still fails, and on a bright star a difference of two groups fails."""
-    s = copy.deepcopy(passing)
-    star = s["stars"]["faint_k"]
-    star["modes"][0].update(ngroup_ours=497, ngroup_pandexo=492)   # 1.006%
-    star["modes"][1].update(ngroup_ours=195, ngroup_pandexo=193)   # 1.03%
-    assert not [p for p in gate["validate"](s) if "ngroup" in p]
+def _faint_ngroups(p, *pairs):
+    s = copy.deepcopy(p)
+    for row, (ours, pandexo) in zip(s["stars"]["faint_k"]["modes"], pairs):
+        row.update(ngroup_ours=ours, ngroup_pandexo=pandexo)
+    return s
 
-    star["modes"][2].update(ngroup_ours=500, ngroup_pandexo=400)
-    _fails(gate, s, "ngroup")
 
-    _fails(gate, _upd(passing, R0, ngroup_ours=20, ngroup_pandexo=18),
-           "ngroup 20 vs 18")
+def _saturated_row(key, fw="% full well>80% (360% > 80%)", **overrides):
+    row = {"key": key, "status": "SATURATED",
+           "ours_reason": "no unsaturated pixels at the shortest ramp",
+           "ngroup_ours": 1, "sat_frac_ours": 3.56,
+           "ngroup_pandexo": 1,
+           "pandexo_warnings": {"% full well high?": fw},
+           "saturation_mask": {
+               "n_ours": 1000, "n_pandexo": 1000, "n_matched": 1000,
+               "matched_frac": 1.0, "partial_equal_frac": 1.0,
+               "full_equal_frac": 1.0, "partial_disagree": 0,
+               "full_disagree": 0,
+           }}
+    row.update(overrides)
+    return row
+
+
+def _saturate_bh(p, drop_verdict=False, **kw):
+    row = _saturated_row(p["stars"]["bright_hot"]["modes"][0]["key"], **kw)
+    if drop_verdict:
+        del row["pandexo_warnings"]
+    return _mut(p, BH_R0, row)
+
+
+_ARCHIVAL = dict(refdata_version="2026.2", psf_version="2026.2")
+
+# (mutation of the passing summary, needle). None: it must still pass
+# cleanly; otherwise the needle (or every string of a tuple) must appear in
+# ONE reported problem.
+_CASES = [
+    # the clean artifact and the legitimate near-misses that must pass
+    (lambda p: p, None),
+    # MIRI LRS's engine-derived disperser (ours unset, PandExo "p750l") is a
+    # representation difference, not a mismatch
+    (lambda p: _w39_config(p, True), None),
+    # at ngroup ~500 a 5-group rounding difference is 1.006%: a pure 1% gate
+    # would fail the real, matched artifact
+    (lambda p: _faint_ngroups(p, (497, 492), (195, 193)), None),
+    # exact agreement at 2 groups is not a short-ramp divergence
+    (lambda p: _upd(p, BH_R0, ngroup_ours=2, ngroup_pandexo=2), None),
+    (lambda p: _saturate_bh(p), None),               # an honest SATURATED row
+    # provenance identity is exact: worker version, PSF release, the supported
+    # engine release (two sides can agree and still both be archival), and the
+    # reviewed, clean PandExo commit (a version string does not identify master)
+    (lambda p: _mut(p, OURS + ("worker_version",), 5), "worker_version=5"),
+    (lambda p: _mut(p, PDX + ("psf_version",), "2026.2"), "psf release differs"),
+    (lambda p: _upd(_upd(p, OURS, engine_version="2026.2", **_ARCHIVAL),
+                    PDX, pandeia_engine_version="2026.2", **_ARCHIVAL),
+     "not the supported"),
+    (lambda p: _mut(p, PDX + ("pandexo_commit",)), "PandExo git commit"),
+    (lambda p: _mut(p, PDX + ("pandexo_commit",), "0" * 40), "is not the reviewed"),
+    (lambda p: _mut(p, PDX + ("pandexo_commit",),
+                    "34e42d81f782c8358bb30fc6e8cdf4b87e488263-dirty"),
+     "is not the reviewed"),
+    (lambda p: _mut(p, PDX + ("pandexo_version",), "unknown"),
+     "PandExo version is unknown"),
+    # per-pixel mask agreement is evidence: missing or disagreeing fails
+    (lambda p: _mut(p, R0 + ("saturation_mask",)),
+     "saturation grids matched fraction"),
+    (lambda p: _upd(p, R0 + ("saturation_mask",), full_equal_frac=0.999,
+                    full_disagree=1), "full-saturation mask agreement"),
+    # row status comes from the measurement, never a label: artifacts have
+    # carried saturated rows labeled OK (one at 7.31x Pandeia's per-mode
+    # level), and skipping an unknown status hid a 65.9%-pixel-match row
+    (lambda p: _mut(p, R0 + ("sat_frac_ours",), 0.8548803964),
+     ("above the", "limit")),
+    (lambda p: _mut(p, R0 + ("sat_frac_ours",), 7.3110978), "7.3111"),
+    (lambda p: _mut(p, R0, {"key": p["stars"]["w39_like"]["modes"][0]["key"],
+                            "status": "ERROR", "ours_error": "boom"}),
+     "error row"),
+    (lambda p: _mut(p, R0 + ("status",), "SATURATED_ISH"), "unknown status"),
+    (lambda p: _mut(p, R0 + ("status",), "SATURATED_ABOVE_LIMIT"),  # sat 0.5
+     "label must come from the measurement"),
+    # the full star x mode matrix is the experiment: one star losing a mode
+    # fails though the coverage set is still met, and deleting stars fails
+    (_drop_last_w39_mode,
+     lambda p: f"declared mode {p['stars']['w39_like']['modes'][-1]['key']!r} has no row"),
+    (_drop_two_stars, "missing from the artifact"),
+    (lambda p: _mut(p, ("stars", "mystery"), copy.deepcopy(p["stars"]["w39_like"])),
+     "not part of the declared experiment"),
+    (_append_w39_row, "appears 2 times"),
+    (lambda p: _append_w39_row(p, _ok_row("nirspec_g140m")),
+     "'nirspec_g140m' is not part of the declared"),
+    # declared config, matched pixel grid, extracted-flux ratio
+    (lambda p: _mut(p, ("config", "depth"), 0.02),
+     "does not match the declared experiment"),
+    (lambda p: _mut(p, R0 + ("npix_matched",), 900), "usable pixels matched"),
+    (lambda p: _mut(p, R0 + ("flux_ratio", "median"), 1.05),
+     "extracted-flux median ratio"),
+    # any other config disagreement or missing value fails, MIRI included
+    (lambda p: _w39_config(p, True, readout="FASTR1"), "submitted readout differs"),
+    *[(lambda p, f=f: _w39_config(p, False, **{f: None}), f"submitted {f} differs")
+      for f in ("subarray", "readout", "filter", "disperser")],
+    # a real optimizer divergence fails; on a bright star so do two groups
+    (lambda p: _faint_ngroups(p, (497, 492), (195, 193), (500, 400)), "ngroup"),
+    (lambda p: _upd(p, R0, ngroup_ours=20, ngroup_pandexo=18), "ngroup 20 vs 18"),
+    # 1 vs 2 groups is a ramp-policy divergence, not rounding: at or below
+    # LOW_NGROUP_EXACT the counts must be equal (the committed
+    # bright_hot/niriss_soss regression)
+    (lambda p: _upd(p, BH_R0, ngroup_ours=1, ngroup_pandexo=2), "short ramp"),
+    # a 33% integration-time gap fails though the group diff passes; a 7x
+    # median sigma ratio is an anomaly, not a noise-model difference (< 2x)
+    (lambda p: _upd(p, BH_R0, t_int_ours_s=11.008, t_int_pandexo_s=16.482),
+     "per-integration time"),
+    (lambda p: _mut(p, BH_R0 + ("sigma_ratio_matched",), {"median": 7.08}),
+     "anomaly band"),
+    # an OK row missing a gate's input fails that gate, never skips it
+    (lambda p: _mut(p, R0 + ("t_int_ours_s",)), "timing gate cannot run"),
+    (lambda p: _mut(p, R0 + ("sigma_ratio_matched",), {}), "anomaly gate cannot run"),
+    # a SATURATED row carries the measured fraction and PandExo's full-well
+    # verdict, agrees with it, and saturates at the same ramp floor
+    (lambda p: _saturate_bh(p, fw="All good (42% < 80%)"),
+     "saturation-status disagreement"),
+    (lambda p: _saturate_bh(p, drop_verdict=True), "no PandExo full-well verdict"),
+    (lambda p: _saturate_bh(p, sat_frac_ours=0.5), "must come from the measurement"),
+    (lambda p: _saturate_bh(p, ngroup_pandexo=2), "floors the two tools saturate at"),
+]
+
+
+@pytest.mark.parametrize("mutate,needle", _CASES)
+def test_validate_fails_closed_on_every_broken_input(gate, passing, mutate,
+                                                     needle):
+    problems = gate["validate"](mutate(passing))
+    if needle is None:
+        assert problems == []
+        return
+    needle = needle(passing) if callable(needle) else needle
+    needles = (needle,) if isinstance(needle, str) else needle
+    assert any(all(n in p for n in needles) for p in problems), (needle, problems)
 
 
 def test_validate_artifact_revalidates_and_pins_the_gate_block(gate, passing):
@@ -360,79 +382,3 @@ def test_plots_revalidate_instead_of_trusting_the_passed_bit(plots, gate,
 
     assert plots.require_passing_summary(s) == \
         gate["REQUIRED_PANDEIA_RELEASE"]
-
-
-# --- short ramps, timing, sigma anomaly --------------------------------------
-
-def test_short_ramp_policy(gate, passing):
-    """1 vs 2 groups is a ramp-policy divergence, not rounding: whenever
-    either side is at or below LOW_NGROUP_EXACT the counts must be equal.
-    This is the committed bright_hot/niriss_soss regression. Exact
-    agreement at 2 groups still passes."""
-    assert gate["validate"](_upd(passing, BH_R0, ngroup_ours=2,
-                                 ngroup_pandexo=2)) == []
-    _fails(gate, _upd(passing, BH_R0, ngroup_ours=1, ngroup_pandexo=2),
-           "short ramp")
-
-
-def test_timing_and_sigma_anomaly_gates(gate, passing):
-    """A 33% per-integration-time gap must fail even if the group diff
-    passes its own tolerance; and the documented noise-model envelope tops
-    out well under 2x, so a 7x median sigma ratio is an anomaly and must
-    fail, not pass as a 'noise-model difference'."""
-    _fails(gate, _upd(passing, BH_R0, t_int_ours_s=11.008,
-                      t_int_pandexo_s=16.482), "per-integration time")
-    _fails(gate, _mut(passing, BH_R0 + ("sigma_ratio_matched",),
-                      {"median": 7.08}), "anomaly band")
-
-
-# --- review round 2: no fail-open paths --------------------------------------
-
-def test_ok_row_missing_gate_inputs_fails_closed(gate, passing):
-    """An OK row missing the data a gate needs must FAIL that gate, never
-    skip it: per-integration times for the timing gate, the sigma-ratio
-    median for the anomaly gate."""
-    _fails(gate, _mut(passing, R0 + ("t_int_ours_s",)),
-           "timing gate cannot run")
-    _fails(gate, _mut(passing, R0 + ("sigma_ratio_matched",), {}),
-           "anomaly gate cannot run")
-
-
-def _saturated_row(key, fw="% full well>80% (360% > 80%)", **overrides):
-    row = {"key": key, "status": "SATURATED",
-           "ours_reason": "no unsaturated pixels at the shortest ramp",
-           "ngroup_ours": 1, "sat_frac_ours": 3.56,
-           "ngroup_pandexo": 1,
-           "pandexo_warnings": {"% full well high?": fw},
-           "saturation_mask": {
-               "n_ours": 1000, "n_pandexo": 1000, "n_matched": 1000,
-               "matched_frac": 1.0, "partial_equal_frac": 1.0,
-               "full_equal_frac": 1.0, "partial_disagree": 0,
-               "full_disagree": 0,
-           }}
-    row.update(overrides)
-    return row
-
-
-def test_saturated_row_claims_are_gated(gate, passing):
-    """A SATURATED row must carry the measured fraction and PandExo's
-    full-well verdict; a PandExo 'All good' on the same configuration is a
-    saturation-status disagreement, and the two tools must saturate at the
-    same ramp floor."""
-    key = passing["stars"]["bright_hot"]["modes"][0]["key"]
-
-    # honest saturated row passes
-    assert gate["validate"](_mut(passing, BH_R0, _saturated_row(key))) == []
-    _fails(gate, _mut(passing, BH_R0,
-                      _saturated_row(key, fw="All good (42% < 80%)")),
-           "saturation-status disagreement")
-    no_verdict = _saturated_row(key)
-    del no_verdict["pandexo_warnings"]
-    _fails(gate, _mut(passing, BH_R0, no_verdict),
-           "no PandExo full-well verdict")
-    # a saturation claim without the measurement backing it
-    _fails(gate, _mut(passing, BH_R0, _saturated_row(key, sat_frac_ours=0.5)),
-           "must come from the measurement")
-    # the two tools saturate at different ramp floors
-    _fails(gate, _mut(passing, BH_R0, _saturated_row(key, ngroup_pandexo=2)),
-           "floors the two tools saturate at")

@@ -27,7 +27,7 @@ widget.
 
 Scope: a Pandeia-extracted-noise BOX-TRANSIT planning forecast under the
 selected extraction/detector configuration. NEVER label sigmas
-PandExo-identical; parity status is per-backend and lives in
+PandExo-identical; parity status lives in
 validation/parity/outputs/REPORT.md, kept honest by the fail-closed gate
 (validation/parity/scripts/run_parity.py). Pandeia's extracted noise is not a
 time-series systematics model (no 1/f residuals, visit-long trends,
@@ -40,8 +40,10 @@ invalidated when the Pandeia backend changes.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import subprocess
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -66,7 +68,6 @@ WORKER_VERSION = 12
 # (no output, no exit) holds a run slot forever, because the stdout loop and
 # proc.wait() below are both unbounded. SOSS is ~600 s of CPU locally and the
 # Space is ~4.5x slower, so an hour is well clear of a legitimate run.
-# ponytail: wall cap, not a cancel path; select-with-tick if a user-cancel is wanted
 PANDEIA_WALL_CAP_S = 3600.0
 
 
@@ -102,20 +103,15 @@ def backend_fingerprint() -> dict:
                 f"{r.stderr.strip()[-400:]}")
         engine = r.stdout.strip().splitlines()[-1]
     refver = []
-    # refdata identifies itself via VERSION/VERSION_DATA; a VERSION_PSF file
-    # inside a refdata tree is a misplaced PSF marker, never a data version:
-    # it must never authenticate the tree
-    for root, names in ((Path(ins.PANDEIA_REFDATA),
-                         ("VERSION", "VERSION_DATA")),
-                        (Path(ins.PANDEIA_PSF_DIR) if ins.PANDEIA_PSF_DIR
-                         else None, ("VERSION_PSF",))):
-        if root is None:
-            continue
-        for name in names:
-            f = root / name
-            if f.exists():
-                refver.append(
-                    f"{name}:{hashlib.sha1(f.read_bytes()).hexdigest()[:12]}")
+    # refdata identifies itself via VERSION_DATA, the PSF library via
+    # VERSION_PSF; a VERSION_PSF file inside a refdata tree is a misplaced
+    # PSF marker and never authenticates it
+    for root, name in ((ins.PANDEIA_REFDATA, "VERSION_DATA"),
+                       (ins.PANDEIA_PSF_DIR, "VERSION_PSF")):
+        f = Path(root) / name
+        if f.exists():
+            refver.append(
+                f"{name}:{hashlib.sha1(f.read_bytes()).hexdigest()[:12]}")
     ref = Path(ins.PANDEIA_REFDATA)
     # CDBS identity: the PHOENIX grid is a machine-specific symlink and a
     # repointed tree changes every result, so the resolved real path + the
@@ -136,8 +132,7 @@ def backend_fingerprint() -> dict:
         "refdata_name": ref.name,
         # PSF tree identity is a FIRST-CLASS key: a mixed PSF release changes
         # the extracted flux and noise (the worker also refuses a mismatch)
-        "psf_name": (Path(ins.PANDEIA_PSF_DIR).name
-                     if ins.PANDEIA_PSF_DIR else ""),
+        "psf_name": Path(ins.PANDEIA_PSF_DIR).name,
         "backend_token": ins.JWST_TOOL_BACKEND,
         "backend_release": ins.BACKEND_RELEASE,
         "refdata_version_files": sorted(refver),
@@ -149,22 +144,19 @@ def backend_fingerprint() -> dict:
 def noise_job(star: dict, mode_keys: list[str], sat_limit: float = 0.80) -> dict:
     modes = []
     for key in mode_keys:
-        m = dict(ins.MODES[key])
+        m = ins.MODES[key]
         modes.append({
             "key": key, "instrument": m["instrument"], "mode": m["mode"],
-            "config": m.get("config", {}), "strategy": m.get("strategy", {}),
-            "background": m.get("background"),
-            "background_level": m.get("background_level"),
+            "config": m["config"], "strategy": m["strategy"],
+            "background": m["background"],
+            "background_level": m["background_level"],
             "ngroup_min": m["ngroup_min"], "ngroup_max": m["ngroup_max"],
         })
-    job_extra = {}
-    if ins.PANDEIA_PSF_DIR:
-        # split-layout PSF library: part of the cache key (every supported
-        # backend uses the split layout; the worker refuses an empty psf_dir)
-        job_extra["psf_dir"] = ins.PANDEIA_PSF_DIR
     return {
         "refdata": ins.PANDEIA_REFDATA, "cdbs": ins.PYSYN_CDBS,
-        **job_extra,
+        # the split-layout PSF library is part of the cache key; the worker
+        # refuses an empty psf_dir
+        "psf_dir": ins.PANDEIA_PSF_DIR,
         "backend": backend_fingerprint(),
         "star": {k: float(star[k]) for k in ("teff", "log_g", "metallicity", "ks_mag")},
         "sat_limit": float(sat_limit),
@@ -217,7 +209,7 @@ def missing_modes(star: dict, mode_keys: list[str],
 
 
 def run_modes(star: dict, mode_keys: list[str], sat_limit: float = 0.80,
-              progress=None, force: bool = False, launch: bool = True) -> dict:
+              progress=None, launch: bool = True) -> dict:
     """The production ETC path: per-mode cache, one worker batch.
 
     Each mode is cached under its own single-mode job key, so a run computes
@@ -233,11 +225,10 @@ def run_modes(star: dict, mode_keys: list[str], sat_limit: float = 0.80,
     so a cache entry that vanished since ``missing_modes`` never launches
     Pandeia outside the limiter.
     """
-    ins.NOISE_CACHE.mkdir(parents=True, exist_ok=True)
     out: dict = {}
     todo = []
     for k in mode_keys:
-        cached = None if force else _read_cached_json(
+        cached = _read_cached_json(
             ins.NOISE_CACHE / f"{_mode_key(star, k, sat_limit)}.json")
         if cached is None:
             todo.append(k)
@@ -273,7 +264,6 @@ def run_pandeia(job: dict, progress=None) -> dict:
     Raises RuntimeError (loudly, with stderr) if the worker process itself dies;
     per-mode pandeia failures come back as {"error": traceback} entries.
     """
-    ins.NOISE_CACHE.mkdir(parents=True, exist_ok=True)
     cache = ins.NOISE_CACHE / f"{job_key(job)}.json"
     cached = _read_cached_json(cache)
     if cached is not None:
@@ -308,8 +298,6 @@ def _run_worker(job: dict, progress=None) -> dict:
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         # drain stderr on a thread while streaming stdout: reading only stdout
         # deadlocks once the worker fills the ~64 KB stderr pipe buffer
-        import io
-        import threading
         err_buf = io.StringIO()
         t_err = threading.Thread(target=lambda: err_buf.write(proc.stderr.read()),
                                  daemon=True)

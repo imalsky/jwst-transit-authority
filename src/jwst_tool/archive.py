@@ -4,25 +4,26 @@ The GUI fills the custom planet's system parameters from a SHIPPED SNAPSHOT of
 the archive's PSCompPars table (one adopted row per planet), committed next to
 this module and refreshed per release with ``jwst-tool archive-refresh`` --
 the only step that touches the network. Runtime lookups never query the
-archive: the snapshot date is disclosed in the GUI, and a planet announced
-after the shipped snapshot is entered by hand like before.
+archive; a planet announced after the shipped snapshot is entered by hand.
 
 Fill policy (standing loud-errors rule): values outside the custom form's
-bounds (``planets.CUSTOM_FIELD_RANGES``) and values missing from the archive
-row are NEVER clamped or guessed -- the field is left unchanged and the
-refusal is reported by name. An out-of-range value written into Streamlit
-session state would crash the widget at instantiation, so the range check is
-a crash guard, not politeness.
-
-Stdlib-only at module scope (light CI installs no pandas/astropy/requests);
-``urllib`` is imported lazily inside the refresh path, fetch.py-style.
+bounds (``planets.CUSTOM_FIELD_RANGES``), values missing from the archive row
+and one-sided limits are NEVER clamped or guessed -- the field is left
+unchanged. An out-of-range value written into Streamlit session state would
+crash the widget at instantiation, so the range check is a crash guard, not
+politeness. Stdlib only.
 """
 from __future__ import annotations
 
 import csv
+import datetime
 import functools
 import math
+import os
 import re
+import tempfile
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -130,9 +131,9 @@ def load_snapshot(path: str | None = None) -> Snapshot:
     return Snapshot(fetched_utc=fetched, names=tuple(names), rows=rows)
 
 
-def lookup(name: str, path: str | None = None) -> dict:
+def lookup(name: str) -> dict:
     """The snapshot row for ``name`` (normalized); KeyError names the input."""
-    snap = load_snapshot(path)
+    snap = load_snapshot()
     key = normalize_name(name)
     if key not in snap.rows:
         raise KeyError(
@@ -218,13 +219,9 @@ def refresh_snapshot(dest: Path | None = None, url: str = TAP_SYNC_URL) -> tuple
     Deterministic output (ADQL orders by pl_name; fixed column order; cells
     verbatim) so the per-release diff shows real archive changes only.
     Returns (rows, bytes) written. Loud on HTTP errors, header drift, a
-    too-small response, or a normalized-name collision; atomic replace."""
-    import datetime
-    import os
-    import tempfile
-    import urllib.parse
-    import urllib.request
-
+    too-small response, a malformed row or a normalized-name collision (the
+    loader's own checks, run on the written file before it replaces
+    ``dest``)."""
     dest = Path(dest) if dest else SNAPSHOT_PATH
     dest.parent.mkdir(parents=True, exist_ok=True)
     q = urllib.parse.urlencode({"query": SNAPSHOT_ADQL, "format": "csv"})
@@ -240,24 +237,6 @@ def refresh_snapshot(dest: Path | None = None, url: str = TAP_SYNC_URL) -> tuple
             f"TAP response header {got} != expected {SNAPSHOT_COLUMNS}; the "
             "archive schema drifted -- update archive.py before shipping.")
     body = rows[1:]
-    if len(body) < _MIN_ROWS:
-        raise SnapshotError(
-            f"TAP response has only {len(body)} rows (expected >= "
-            f"{_MIN_ROWS}); refusing to write a truncated snapshot.")
-    for r in body:
-        if len(r) != len(SNAPSHOT_COLUMNS):
-            raise SnapshotError(
-                f"TAP response row starting {r[0]!r} has {len(r)} cells, "
-                f"expected {len(SNAPSHOT_COLUMNS)}; refusing to replace a "
-                "valid snapshot with a malformed one.")
-    seen: dict = {}
-    for r in body:
-        key = normalize_name(r[0])
-        if key in seen:
-            raise SnapshotError(
-                f"two archive rows normalize to {key!r} ({seen[key]!r} and "
-                f"{r[0]!r}); tighten normalize_name before shipping.")
-        seen[key] = r[0]
     fetched = datetime.datetime.now(datetime.timezone.utc).strftime(
         "%Y-%m-%dT%H:%M:%SZ")
     fd, tmp = tempfile.mkstemp(dir=str(dest.parent), suffix=".tmp")
@@ -272,6 +251,7 @@ def refresh_snapshot(dest: Path | None = None, url: str = TAP_SYNC_URL) -> tuple
             w = csv.writer(fh, lineterminator="\n")
             w.writerow(SNAPSHOT_COLUMNS)
             w.writerows(body)
+        load_snapshot.__wrapped__(tmp)   # refuses a bad response; uncached
         os.replace(tmp, dest)
     finally:
         if os.path.exists(tmp):
@@ -299,5 +279,5 @@ def run_refresh(argv: list[str]) -> int:
         return 1
     out = dest if dest else SNAPSHOT_PATH
     print(f"archive-refresh: wrote {n} planets ({size} bytes) to {out}")
-    print("Review the diff and commit; the GUI discloses the fetched date.")
+    print("Review the diff and commit.")
     return 0

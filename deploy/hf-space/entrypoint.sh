@@ -69,9 +69,8 @@ if [ -d /srv/hub-data/jwst-data ]; then
              "will stop with an error (upload them: deploy/hf-space/" \
              "upload_data.sh, or see 'jwst-tool data')"
     fi
-    # The forward engine takes its data root from the environment now, so no
-    # symlink into a checkout is needed (the dataset folder keeps its name --
-    # renaming it would mean re-uploading gigabytes).
+    # (the dataset folder keeps the name retrieval-data: renaming it would
+    # mean re-uploading gigabytes)
     export VULCAN_FORWARD_DATA="$STATE/retrieval-data"
 else
     if [ "$STATE" != /data ]; then

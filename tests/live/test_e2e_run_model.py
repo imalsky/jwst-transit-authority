@@ -1,8 +1,8 @@
 """Full-chain end-to-end regression: VULCAN chemistry -> ExoJAX RT -> spectrum.
 
 Runs the tool's real `run_model` for the default WASP-39 b case in BOTH
-science modes -- a fresh chemistry solve each (the cached spectrum is deleted
-first, so this validates the chain, not the cache) -- and asserts the R = 100
+science modes -- a fresh chemistry solve each (on an empty model cache, so
+this validates the chain, not the cache) -- and asserts the R = 100
 binned spectrum against a committed reference fixture generated under the
 same `forward._VERSION`. The engine side of the physics is separately pinned
 against petitRADTRANS in vulcan-forward's own e2e suite; THIS test pins that
@@ -10,9 +10,7 @@ the whole tool still reproduces its own verified state end to end.
 
 Cost: ~2 minutes per mode (chemistry warm-up dominates). Gated like the FD
 closure test: JWST_TOOL_RUN_SLOW=1, plus clean skips without the RT stack or
-the engine data. JWST_TOOL_E2E_ALLOW_CACHE=1 skips the cache delete for a
-quick re-check (then it validates the cache, not the chain -- so the flag is
-opt-in and says so).
+the engine data.
 
 Tolerances: cross-run JAX nondeterminism on this chain measures under a ppm
 (the committed reference reproduces bit-identically), so the band is set per
@@ -125,12 +123,10 @@ def test_full_chain_reproduces_the_verified_reference(mode, engine, tmp_path,
     assert key == ref["params_key"], (
         "the canonical parameter set moved since the fixture was generated")
 
-    if os.environ.get("JWST_TOOL_E2E_ALLOW_CACHE") != "1":
-        # BOTH caches: cache_path is the SPECTRUM, chem_cache_path the converged
-        # CHEMISTRY. Clearing only the first re-runs the RT off a cached column,
-        # which is not the full-chain solve this test exists to exercise.
-        for cache in (forward.cache_path(params), forward.chem_cache_path(params)):
-            cache.unlink(missing_ok=True)
+    # An empty model cache: no cached spectrum AND no cached chemistry column
+    # (a cached column would re-run only the RT), and the real cache that the
+    # GUI's default run reads is left alone.
+    monkeypatch.setattr(forward, "MODEL_CACHE", tmp_path / "model_cache")
 
     out = np.load(forward.run_model(params, log=lambda *a: None),
                   allow_pickle=False)

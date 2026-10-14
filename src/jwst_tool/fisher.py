@@ -201,14 +201,10 @@ def display_sigma(name: str, sigma: float, co_eval: float | None = None) -> floa
 def format_pm(center, width: float) -> str:
     """``value ± error`` with the ERROR setting the precision: the error is
     rounded to 2 significant figures and the value to that SAME decimal
-    place. ``center`` None reports the error alone.
-
-    This is the reason a bare "%.3g" on each is wrong -- it printed
-    "1 ± 0.922" and "-0.26 ± 0.599", quoting a value to a precision its own
-    uncertainty does not support and an error to one more digit than it
-    carries. A zero or non-finite width has no scale to round against and
-    falls back to fixed precision. PLAIN TEXT: this lands in a Streamlit
-    cell, a CSV and a matplotlib legend alike."""
+    place. ``center`` None reports the error alone. A zero or non-finite
+    width has no scale to round against and uses fixed precision. PLAIN
+    TEXT: this lands in a Streamlit cell, a CSV and a matplotlib legend
+    alike."""
     w = abs(float(width))
     if not np.isfinite(w) or w == 0.0:
         return (f"±{float(width):.3g}" if center is None
@@ -221,7 +217,7 @@ def format_pm(center, width: float) -> str:
     return f"{round(float(center), d) + 0.0:.{dec}f} ± {err}"
 
 
-def format_co_width(center: float, sigma_ln: float, k: float = 1.0) -> str:
+def format_co_width(center: float, sigma_ln: float) -> str:
     """The C/O legend string: the value AND its error in log10(C/O), Batalha
     & Line's convention ("Error on log C/O", their cases tagged
     "logC/O = -0.26" for C/O 0.55).
@@ -235,23 +231,8 @@ def format_co_width(center: float, sigma_ln: float, k: float = 1.0) -> str:
     if not (np.isfinite(center) and center > 0.0):
         raise ValueError(f"format_co_width: center must be a finite C/O > 0, "
                          f"got {center!r}")
-    sig = float(sigma_ln) * float(k) / _LN10
+    sig = float(sigma_ln) / _LN10
     return f"log10(C/O) = {format_pm(np.log10(center), sig)}"
-
-
-def _segment_offset_rows(result: dict) -> np.ndarray:
-    """One constant-offset indicator row per detector segment INCLUDING
-    segment 0 (n_seg rows), from result["seg"].
-
-    lnR0 is a physical derivative, not a constant in wavelength, so it never
-    stands in for the first segment's offset; any exact redundancy between
-    rows is what the rank-aware _marg_sigmas handles. With every segment
-    present, mode_forecast(r) implements the same model as
-    combined_forecast([r]) (pinned by test)."""
-    nb = np.asarray(result["sigma"]).size
-    seg = np.asarray(result.get("seg", np.zeros(nb, int)), int)
-    n_seg = int(seg.max()) + 1 if seg.size else 1
-    return np.stack([(seg == s).astype(float) for s in range(n_seg)])
 
 
 def _fisher(Jn: np.ndarray, result: dict) -> np.ndarray:
@@ -263,19 +244,14 @@ def _fisher(Jn: np.ndarray, result: dict) -> np.ndarray:
 def mode_forecast(result: dict, free_names: list[str],
                   diag: dict | None = None,
                   conditional: dict | None = None) -> dict:
-    """Per-mode marginalized sigmas. result needs jac_bins (n_par, n_bins) whose rows
-    are [free..., lnR0], sigma (n_bins,), and (optionally) seg (n_bins,) for the
-    per-segment offset nuisances. ``diag``: see _marg_sigmas.
-    Pass a dict as ``conditional`` to also receive the conditional sigmas
-    (others fixed; see _conditional_sigmas) from the SAME Fisher matrix."""
-    J = np.asarray(result["jac_bins"])
-    Jn = np.vstack([J, _segment_offset_rows(result)])
-    F = _fisher(Jn, result)
-    if conditional is not None:
-        conditional.update(
-            dict(zip(free_names, _conditional_sigmas(F, len(free_names)))))
-    sig = _marg_sigmas(F, len(free_names), diag=diag)
-    return dict(zip(free_names, sig))
+    """Per-mode marginalized sigmas: combined_forecast of the one mode.
+    result needs jac_bins (n_par, n_bins) whose rows are [free..., lnR0],
+    sigma (n_bins,), and (optionally) seg (n_bins,) for the per-segment
+    offset nuisances. ``diag``: see _marg_sigmas. Pass a dict as
+    ``conditional`` to also receive the conditional sigmas (others fixed;
+    see _conditional_sigmas) from the SAME Fisher matrix."""
+    return combined_forecast([result], free_names, diag=diag,
+                             conditional=conditional)
 
 
 def _combined_system(results: list[dict], n_f: int) -> tuple[int, list]:
@@ -283,24 +259,25 @@ def _combined_system(results: list[dict], n_f: int) -> tuple[int, list]:
     linearized mock recovery (posteriors.mock_recovery): global parameter
     layout [free..., shared lnR0, per-mode per-segment offsets...].
 
+    Every segment gets its own offset, segment 0 included: lnR0 is a
+    physical derivative, not a constant in wavelength, so it never stands
+    in for an offset; any exact redundancy between rows is what the
+    rank-aware _marg_sigmas handles.
+
     Returns ``(n_tot, [(Jg, r), ...])`` with one augmented Jacobian
     (n_tot, n_bins) per result, in input order. Keeping this in ONE place is
     what guarantees the recovery offsets are consistent with the
     marginalized sigmas -- never re-derive the layout elsewhere.
     """
-    seg_counts = []
-    for r in results:
-        nb = np.asarray(r["sigma"]).size
-        seg = np.asarray(r.get("seg", np.zeros(nb, int)), int)
-        seg_counts.append(int(seg.max()) + 1 if seg.size else 1)
-    n_tot = n_f + 1 + int(sum(seg_counts))         # free + lnR0 + offsets
+    segs = [np.asarray(r.get("seg", np.zeros(np.asarray(r["sigma"]).size, int)),
+                       int) for r in results]
+    seg_counts = [int(seg.max()) + 1 if seg.size else 1 for seg in segs]
+    n_tot = n_f + 1 + sum(seg_counts)              # free + lnR0 + offsets
     out = []
     col = n_f + 1
-    for r, n_seg in zip(results, seg_counts):
+    for r, seg, n_seg in zip(results, segs, seg_counts):
         J = np.asarray(r["jac_bins"])             # rows: free..., lnR0
-        nb = J.shape[1]
-        seg = np.asarray(r.get("seg", np.zeros(nb, int)), int)
-        Jg = np.zeros((n_tot, nb))
+        Jg = np.zeros((n_tot, J.shape[1]))
         Jg[:n_f] = J[:n_f]
         Jg[n_f] = J[n_f]                          # shared lnR0
         for s_id in range(n_seg):                 # this mode's per-segment offsets

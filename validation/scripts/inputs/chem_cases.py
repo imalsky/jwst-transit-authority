@@ -106,6 +106,6 @@ def main(name):
 
 if __name__ == "__main__":
     if len(sys.argv) != 2 or sys.argv[1] not in cases():
-        print("usage: run_cases.py <case>; cases:", " ".join(cases()))
+        print("usage: chem_cases.py <case>; cases:", " ".join(cases()))
         sys.exit(2)
     main(sys.argv[1])

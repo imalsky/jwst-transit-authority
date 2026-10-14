@@ -4,10 +4,9 @@ name: tests
 # JAX/VULCAN-JAX/ExoJAX imports are function-local, so every jwst_tool module
 # imports with numpy alone), plus two LIGHT touchpoints on the sibling packages
 # that the install step below supplies. It exercises the count-space binning operator, the
-# noise/floor/covariance math, detection + Fisher nuisance projection, the
-# scenario covariances, and the forward-param gating. The env-gated slow test
-# (JWST_TOOL_RUN_SLOW=1: 3 real forward runs) and the pandeia/PandExo parity
-# harness are NOT run here -- those need the full stack and run locally / on HPC.
+# noise/floor math, detection + Fisher nuisance projection and the forward-param
+# gating. The JWST_TOOL_RUN_SLOW=1 tier (real forward runs) and the
+# pandeia/PandExo parity harness need the full stack and are NOT run here.
 on:
   push:
     branches: [main]
@@ -75,4 +74,4 @@ jobs:
           pip install --no-deps "vulcan-forward @ git+https://github.com/imalsky/vulcan-forward.git@${VULCAN_FORWARD_SHA}"
           pip install --no-deps -e .
       - name: Run the Streamlit result-page smoke tests
-        run: python -m pytest tests/unit/test_app_smoke.py tests/unit/test_share_config.py -q -ra
+        run: python -m pytest tests/unit/test_app_smoke.py -q -ra

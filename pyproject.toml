@@ -16,7 +16,7 @@ name = "jwst-transit-authority"
 dynamic = ["version"]
 description = "JWST instrument selector: VULCAN-JAX chemistry -> ExoJAX transmission and emission spectra -> Pandeia ETC noise; conditional template S/N + Fisher forecasts (Streamlit GUI + programmatic API)"
 readme = "README.md"
-# 3.10 floor matches the sibling packages (vulcan-jax, vulcan-retrieval): the code
+# 3.10 floor matches the sibling packages (vulcan-jax, vulcan-forward): the code
 # is 3.10-clean and the deliberately-separate Pandeia env carries no constraint here.
 requires-python = ">=3.10"
 license = "GPL-3.0-only"
@@ -35,9 +35,7 @@ dependencies = [
     "matplotlib",
     "jax>=0.6.2",
     # Emission converts the local PHOENIX grid into a stellar surface-flux
-    # spectrum in jwst_tool.stellar.  These were present in the Space lock but
-    # missing from the package metadata, so a clean local install failed only
-    # when the first emission model reached the stellar-SED step.
+    # spectrum in jwst_tool.stellar.
     "synphot>=1.5",
     "stsynphot>=1.4",
     # Shared forward-model engine (this tool does not depend on the retrieval
@@ -60,9 +58,7 @@ Repository = "https://github.com/imalsky/jwst-transit-authority"
 # streamlit floor: app.py uses the width="stretch" API on st.button/st.pyplot/
 # st.dataframe, introduced for those widgets by 1.49.0.
 gui = ["streamlit>=1.49", "pandas"]
-# No PICASO extra: the PICASO path is removed and canonical_params and
-# share_config refuse its keys.
-dev = ["ruff>=0.11", "build>=1.2", "twine>=5"]
+dev =["ruff>=0.11", "build>=1.2", "twine>=5"]
 
 [project.scripts]
 jwst-tool = "jwst_tool.cli:main"

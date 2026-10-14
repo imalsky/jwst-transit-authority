@@ -13,13 +13,14 @@ They remain informational on load so old configurations stay portable, but a
 collaborator can compare them before claiming an exact reproduction.
 
 `widget_state` is the inverse: it maps such a file (or a bare canonical-params
-dict from an older download) onto Streamlit session-state widget keys. It
-validates through `forward.canonical_params` first, then checks every numeric
-value against its widget's range, and raises ValueError on anything invalid --
-the caller applies either the whole mapping or nothing. The range check is
-load-bearing: Streamlit does not reject an out-of-range session-state value,
-it silently discards it and the widget falls back to its default, so an
-unchecked restore would run a different model than the file describes.
+dict) onto Streamlit session-state widget keys. It validates through
+`forward.canonical_params` first and restores from its output, then checks
+every widget-only numeric against its widget's range, and raises ValueError on
+anything invalid or unrestorable -- the caller applies either the whole
+mapping or nothing. The range check is load-bearing: Streamlit does not
+reject an out-of-range session-state value, it silently discards it and the
+widget falls back to its default, so an unchecked restore would run a
+different model than the file describes.
 
 Both chemistry engines (VULCAN-JAX kinetics and PICASO climate + equilibrium
 chemistry) round-trip, each onto its own widget keys.
@@ -35,17 +36,27 @@ import os
 import re
 
 from jwst_tool import fisher, forward, picaso_engine, planets, provenance
+from jwst_tool import instruments as ins
 
 SHARE_FORMAT = 1
 
+# The display name of the every-usable-mode forecast row. A mode combination
+# may take neither it nor a mode's label: either would replace that series.
+ALL_USABLE = "All usable modes"
+
+
+def reserved_combo_names() -> set:
+    return {ALL_USABLE} | {m["label"] for m in ins.MODES.values()}
+
+
 # Widget ranges mirrored from app.py, cross-checked by
-# tests/unit/test_share_config.py so they cannot drift. Session-global keys;
-# forward.* constants are shared with the widgets themselves.
+# tests/unit/test_share_config.py so they cannot drift. Session-global keys.
+# Values canonical_params range-checks itself (nz, p_btm_bar, rfacv, C/O,
+# metallicity) are refused there, before this check runs.
 _GLOBAL_BOUNDS = {
     "sza": (0.0, 89.0), "fdiur": (0.1, 1.0),
     "yconv": (1.0e-4, 1.0e-2), "yconvmin": (1.0e-4, 0.1),
     "ck": (-7.0, 2.0), "ca": (0.0, 4.0), "cpt": (-6.0, 1.0),
-    "nz": forward.NZ_RANGE,
     "rtptop": (1.0e-9, 1.0e-6),
     "pref": (1.0e-6, 7.0),
     "tsig": (1.0, 10.0),
@@ -68,32 +79,17 @@ _TGT_BOUNDS_K = (5.0, 500.0)      # target-uncertainty widget, Kelvin params
 _TGT_BOUNDS = (0.01, 3.0)         # target-uncertainty widget, dex/ratio params
 
 
-def _check_widget_ranges(state: dict, key, pk, science_mode: str) -> None:
+def _check_widget_ranges(state: dict, key, pk) -> None:
     """Refuse any restored numeric outside its widget's range.
 
     Streamlit does not reject an out-of-range session-state value: it
     silently discards it and the widget falls back to its default, which
     would run a different model than the file describes."""
-    from jwst_tool import instruments as ins
     checks = {key(w): (w, b) for w, b in _GLOBAL_BOUNDS.items()}
     checks.update({pk(w): (w, b) for w, b in _PLANET_BOUNDS.items()})
     for m in ins.MODES:
         checks[key(f"floor_{m}")] = (f"floor for {m}", _FLOOR_BOUNDS)
         checks[key(f"infl_{m}")] = (f"noise multiplier for {m}", _INFL_BOUNDS)
-    checks[key(f"pbtm_{science_mode}")] = ("p_btm_bar", forward.P_BTM_RANGE)
-    checks[key(f"rfacv_picaso_{science_mode}")] = ("rfacv",
-                                                   forward.RFACV_RANGE)
-    # C/O: the widget's ceiling follows the kinetics network AND the
-    # photolysis switch, so the accepted range is theirs, not one literal pair.
-    # PICASO has neither and takes the whole range, as canonical_params does,
-    # but caps metallicity lower.
-    pic = state.get(key("provider")) == "picaso"
-    checks[key("co")] = ("co_ratio", (
-        (forward.CO_MIN, forward.CO_MAX_PHOTO_OFF) if pic else
-        forward.co_bounds(str(state.get(key("network"), "sncho")),
-                          bool(state.get(key("photo"), True)))))
-    checks[key("met")] = ("met", forward.PICASO_MET_RANGE if pic
-                          else forward.MET_RANGE)
     for p, unit in fisher.PARAM_UNITS.items():
         checks[key(f"tgt_{p}")] = (
             f"target uncertainty for {p}",
@@ -140,7 +136,7 @@ def build_share(canon: dict, goal: dict, observation: dict,
     # log_kappa_cloud / alpha_cloud / fisher_params, which are. Recorded rather
     # than re-derived on load because the canonical block zeroes star_teff in
     # transmission, so the mapping's T_eq cannot be rebuilt from it.
-    if cloud_top_bar and canon.get("cloud_on"):
+    if cloud_top_bar and canon["cloud_on"]:
         share["cloud_top_bar"] = float(cloud_top_bar)
     if tp_table_text:
         share["tp_table_text"] = str(tp_table_text)
@@ -160,15 +156,15 @@ def widget_state(cfg: dict, key) -> dict:
     """Map a shared configuration onto widget session-state keys.
 
     ``key`` is the app's widget-key namespacer (``app.K``). Returns the
-    complete {session_key: value} mapping. Anything the file records that
-    this version cannot restore is dropped SILENTLY, and the corresponding
-    widget keeps its current value. Raises ValueError on an invalid file;
-    nothing is partially applied because nothing is applied here at all.
+    complete {session_key: value} mapping. Raises ValueError on an invalid
+    file or on an entry this interface does not offer (a mode, molecule,
+    parameter, floor type or combination); nothing is partially applied
+    because nothing is applied here at all.
     """
     if not isinstance(cfg, dict):
         raise ValueError("the configuration file must contain a JSON object")
     # Format gate: the marker this tool writes must be one it can read. A
-    # bare canonical dict (older download, no marker) stays a supported path.
+    # bare canonical dict (no marker) stays a supported path.
     if "jwst_tool_config" in cfg and cfg["jwst_tool_config"] != SHARE_FORMAT:
         raise ValueError(
             f"configuration format {cfg['jwst_tool_config']!r} is not "
@@ -179,7 +175,7 @@ def widget_state(cfg: dict, key) -> dict:
         cp = cfg["canonical_params"]
         goal = cfg.get("goal") or {}
         obs = cfg.get("observation") or {}
-    else:                       # bare canonical dict from an older download
+    else:                       # bare canonical dict
         cp, goal, obs = cfg, {}, {}
     if not isinstance(cp, dict) or "planet" not in cp:
         raise ValueError(
@@ -194,18 +190,20 @@ def widget_state(cfg: dict, key) -> dict:
             "from a current tool version") from e
 
 
-def _resolve_embedded_tp(cp: dict, cfg: dict, tp_mode: str):
+def _resolve_embedded_tp(cp: dict, cfg: dict):
     """Validate the canonical payload and STAGE its T-P upload.
 
-    Returns ``(path, pending)``. The staged file is not committed here: the
-    caller finishes validating the rest of the restore first, then commits or
-    discards, so a later failure leaves nothing behind (``_widget_state``
-    promises that nothing is partially applied).
+    Returns ``(canonical, path, pending)``: the restore reads the canonical
+    dict, never the raw file entries. The staged file is not committed here:
+    the caller finishes validating the rest of the restore first, then
+    commits or discards, so a later failure leaves nothing behind
+    (``_widget_state`` promises that nothing is partially applied).
     """
     restored = None
     pending = None
     validate = dict(cp)
-    if tp_mode == "file" and str(cp.get("tp_file", "")) == forward.TP_FILE_UPLOAD:
+    if (cp.get("tp_mode") == "file"
+            and cp.get("tp_file") == forward.TP_FILE_UPLOAD):
         text = cfg.get("tp_table_text")
         if text:
             raw = str(text).encode()
@@ -234,12 +232,12 @@ def _resolve_embedded_tp(cp: dict, cfg: dict, tp_mode: str):
                     "local uploads archive; upload the table again after loading")
         validate["tp_file_path"] = restored
     try:
-        forward.canonical_params(validate)
+        canonical = forward.canonical_params(validate)
     except Exception:
         if pending is not None:
             pending[0].unlink(missing_ok=True)
         raise
-    return restored, pending
+    return canonical, restored, pending
 
 
 def _restore_goal(state: dict, cp: dict, goal: dict, key,
@@ -255,27 +253,29 @@ def _restore_goal(state: dict, cp: dict, goal: dict, key,
     if cp["cloud_on"]:
         avail += [p for p in forward.CLOUD_FISHER_PARAMS
                   if cloud_mode != "gray" or p != "alpha_cloud"]
-    requested = [str(p) for p in (goal.get("fisher_params")
-                                  or cp.get("fisher_params") or [])]
-    fisher = [p for p in requested if p in avail]
-    selected_goal = str(goal.get("goal", "") or "")
-    if selected_goal not in ("detect", "constrain"):
+    fisher = [str(p) for p in (goal.get("fisher_params")
+                               or cp["fisher_params"])]
+    selected_goal = str(goal.get("goal") or "")
+    if not selected_goal:
         return
+    if selected_goal not in ("detect", "constrain"):
+        raise ValueError(f"unknown goal {selected_goal!r}: the interface "
+                         "offers 'detect' and 'constrain'")
+    _offered("free parameter", fisher, avail)
     state[key("goal")] = selected_goal
     if goal.get("target_sig") is not None:
         state[key("tsig")] = float(goal["target_sig"])
-    method = str(goal.get("jac_method", cp.get("jac_method", "fd")))
+    method = str(goal.get("jac_method", cp["jac_method"]))
     # PICASO is FD-only on its own widget: writing "fd" here would overwrite
     # the stored VULCAN choice
     if method in ("fd", "ad") and not pic:
         state[key("jacm")] = method
     if selected_goal == "detect":
         extras = state[key(_xmols_key(cp))]
-        mol_opts = forward.active_molecules(
-            {"network": str(cp.get("network", "sncho")),
-             "extra_mols": extras})
         target = goal.get("target_mol")
-        if target in mol_opts:
+        if target is not None:
+            _offered("detection target", [target], forward.active_molecules(
+                {"network": str(cp["network"]), "extra_mols": extras}))
             state[key(("mol_picaso_" if pic
                        else f"mol_vulcan{_network_suffix(cp)}_")
                       + "_".join(sorted(extras)))] = target
@@ -284,7 +284,8 @@ def _restore_goal(state: dict, cp: dict, goal: dict, key,
             state[key(f"fp_{suffix}")] = fisher
         return
     goal_param = goal.get("goal_param")
-    if goal_param in avail:
+    if goal_param is not None:
+        _offered("goal parameter", [goal_param], avail)
         state[key(f"gp_{suffix}")] = goal_param
         if goal.get("target_prec") is not None:
             state[key(f"tgt_{goal_param}")] = float(goal["target_prec"])
@@ -294,32 +295,52 @@ def _restore_goal(state: dict, cp: dict, goal: dict, key,
         state[key(f"fx_{suffix}")] = [p for p in fisher if p != goal_param]
 
 
-def _restore_combos(obs: dict, valid_modes: dict) -> list[dict]:
-    """Saved mode combinations. A nameless entry, one whose modes are all
-    unknown, and a duplicate name are dropped without a word."""
+def _offered(what: str, values, options) -> None:
+    """Refuse a restored selection the interface does not offer: dropping it
+    would run a different setup than the file describes."""
+    bad = [v for v in values if v not in options]
+    if bad:
+        raise ValueError(f"{what} {bad} not offered by this interface "
+                         f"(choose from {list(options)})")
+
+
+def _numeric(name: str, value) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a number in the configuration "
+                         f"(got {value!r})")
+    return float(value)
+
+
+def _restore_combos(obs: dict) -> list[dict]:
+    """Saved mode combinations; a malformed one is refused, never dropped."""
     combos: list[dict] = []
     for candidate in obs.get("combos") or []:
-        if not isinstance(candidate, dict) \
-                or not str(candidate.get("name", "")).strip():
-            continue
-        name = str(candidate["name"]).strip()
-        modes = [m for m in (candidate.get("modes") or []) if m in valid_modes]
-        if modes and not any(item["name"] == name for item in combos):
-            combos.append({"name": name, "modes": modes})
+        name = (str(candidate.get("name", "")).strip()
+                if isinstance(candidate, dict) else "")
+        modes = list(candidate.get("modes") or []) if name else []
+        if not name or not modes:
+            raise ValueError(f"mode combination {candidate!r} needs a name "
+                             "and at least one mode")
+        if (name in reserved_combo_names()
+                or any(item["name"] == name for item in combos)):
+            raise ValueError(f"mode combination name {name!r} is already "
+                             "taken by a combination or a mode")
+        _offered(f"mode combination {name!r}: mode", modes, ins.MODES)
+        combos.append({"name": name, "modes": modes})
     return combos
 
 
 def _restore_observation(state: dict, obs: dict, cfg: dict, key, pk) -> None:
     if not obs:
         return
-    from jwst_tool import instruments as ins
     for source, widget, cast in (
             ("ks_mag", "ks", float), ("t14", "t14", float),
             ("t_base", "tbase", float), ("star_teff", "teff", float),
             ("star_logg", "logg", float), ("star_feh", "feh", float)):
         if obs.get(source) is not None:
             state[pk(widget)] = cast(obs[source])
-    modes = [m for m in (obs.get("modes") or []) if m in ins.MODES]
+    modes = list(obs.get("modes") or [])
+    _offered("instrument mode", modes, ins.MODES)
     if modes:
         state[key("modes")] = modes
     for source, widget, cast in (
@@ -329,29 +350,27 @@ def _restore_observation(state: dict, obs: dict, cfg: dict, key, pk) -> None:
         if obs.get(source) is not None:
             state[key(widget)] = cast(obs[source])
     floor_mode = obs.get("floor_mode")
-    if floor_mode in ("constant", "none", "file"):
+    if floor_mode is not None:
+        _offered("floor type", [floor_mode], ("constant", "none", "file"))
         state[key("floormode")] = floor_mode
-        if floor_mode == "constant":
-            for mode, value in (obs.get("floors") or {}).items():
-                if mode not in ins.MODES:
-                    continue
-                if isinstance(value, (int, float)):
-                    state[key(f"floor_{mode}")] = float(value)
-        elif floor_mode == "file":
-            table = cfg.get("floor_table")
-            if table:
-                state["restored_floor_table"] = [
-                    [float(a), float(b)] for a, b in table]
-    for mode, value in (obs.get("noise_infl") or {}).items():
-        if mode not in ins.MODES:
-            continue
-        if isinstance(value, (int, float)):
-            state[key(f"infl_{mode}")] = float(value)
-    scale = obs.get("noise_scale")
-    if isinstance(scale, (int, float)):
-        # range-checked by _check_widget_ranges, never silently dropped
-        state[key("noisescale")] = float(scale)
-    combos = _restore_combos(obs, ins.MODES)
+    if floor_mode == "constant":
+        floors = obs.get("floors") or {}
+        _offered("floor mode key", list(floors), ins.MODES)
+        for mode, value in floors.items():
+            state[key(f"floor_{mode}")] = _numeric(f"floor for {mode}", value)
+    elif floor_mode == "file":
+        table = cfg.get("floor_table")
+        if table:
+            state["restored_floor_table"] = [
+                [float(a), float(b)] for a, b in table]
+    infl = obs.get("noise_infl") or {}
+    _offered("noise multiplier mode key", list(infl), ins.MODES)
+    for mode, value in infl.items():
+        state[key(f"infl_{mode}")] = _numeric(f"noise multiplier for {mode}",
+                                              value)
+    if obs.get("noise_scale") is not None:
+        state[key("noisescale")] = _numeric("noise_scale", obs["noise_scale"])
+    combos = _restore_combos(obs)
     if combos:
         state[key("combos")] = combos
 
@@ -360,7 +379,7 @@ def _restore_system_profile(cp: dict, key, pk, planet: str,
                             tp_mode: str, restored_tp: str | None) -> dict:
     state = {
         key("planet"): planet,
-        key("scimode"): str(cp.get("science_mode", "transmission")),
+        key("scimode"): str(cp["science_mode"]),
         pk("rp"): float(cp["rp_rjup"]),
         pk("g"): float(cp["gs_cgs"]) / 100.0,
         pk("rstar"): float(cp["rstar_rsun"]),
@@ -381,13 +400,11 @@ def _restore_system_profile(cp: dict, key, pk, planet: str,
         state[pk("feh")] = float(cp["star_feh"])
     # the UV spectrum feeds only VULCAN photolysis; a PICASO payload carries
     # the registry default, which must not replace the VULCAN choice
-    if not _is_picaso(cp) and str(cp.get("sflux", "")) in planets.SFLUX_CHOICES:
+    if not _is_picaso(cp) and str(cp["sflux"]) in planets.SFLUX_CHOICES:
         state[pk("sflux")] = str(cp["sflux"])
     if tp_mode == "picaso_climate":
         state[pk("tint")] = float(cp["Tint"])
-        state[key("rfacv_picaso_"
-                  + str(cp.get("science_mode", "transmission")))] = \
-            float(cp["rfacv"])
+        state[key(f"rfacv_picaso_{cp['science_mode']}")] = float(cp["rfacv"])
     elif tp_mode == "guillot":
         state.update({
             pk("tirr"): float(cp["Tirr"]), pk("tirr_auto"): None,
@@ -395,7 +412,7 @@ def _restore_system_profile(cp: dict, key, pk, planet: str,
             pk("lg"): float(cp["log_gamma"]),
         })
     elif tp_mode == "file":
-        state[pk("tpsrc")] = str(cp.get("tp_file", forward.TP_FILE_SHIPPED))
+        state[pk("tpsrc")] = str(cp["tp_file"])
         if restored_tp:
             state["restored_tp_path"] = restored_tp
     state[key("met")] = float(cp["met_x_solar"])
@@ -404,7 +421,7 @@ def _restore_system_profile(cp: dict, key, pk, planet: str,
 
 
 def _reject_removed_physics(cp: dict) -> None:
-    if bool(cp.get("use_condense", False)):
+    if cp["use_condense"]:
         raise ValueError(
             "this configuration enables condensation (use_condense), "
             "atmospheric physics the interface no longer offers. It remains "
@@ -417,12 +434,12 @@ def _network_suffix(cp: dict) -> str:
     """Widget-key suffix for the non-default kinetics network: the sncho keys
     carry no suffix (shipped key contract), ncho widgets get their own keys
     (same pattern as the provider-suffixed molecule keys)."""
-    net = str(cp.get("network", "sncho"))
+    net = str(cp["network"])
     return "" if net == "sncho" else f"_{net}"
 
 
 def _is_picaso(cp: dict) -> bool:
-    return str(cp.get("chem_provider", "vulcan")) == "picaso"
+    return cp["chem_provider"] == "picaso"
 
 
 def _xmols_key(cp: dict) -> str:
@@ -432,15 +449,15 @@ def _xmols_key(cp: dict) -> str:
 
 
 def _restore_picaso_physics(state: dict, cp: dict, key, pk) -> None:
-    quench = bool(cp.get("picaso_quench", False))
+    quench = bool(cp["picaso_quench"])
     state[key("quench_picaso")] = quench
     if quench:
         state[pk("kzz")] = _log10(cp["kzz_const"], "kzz_const")
 
 
 def _restore_vulcan_physics(state: dict, cp: dict, key, pk) -> None:
-    state[key("network")] = str(cp.get("network", "sncho"))
-    mode = str(cp.get("kzz_mode", "const"))
+    state[key("network")] = str(cp["network"])
+    mode = str(cp["kzz_mode"])
     state[pk("kzzmode")] = mode
     if mode == "const":
         state[pk("kzz")] = _log10(cp["kzz_const"], "kzz_const")
@@ -450,7 +467,7 @@ def _restore_vulcan_physics(state: dict, cp: dict, key, pk) -> None:
     elif mode == "JM16":
         state[pk("kzkdeep")] = _log10(cp["kzz_kdeep"], "kzz_kdeep")
     if mode != "const":
-        state[pk("kzzx")] = _log10(cp.get("kzz_x", 1.0), "kzz_x")
+        state[pk("kzzx")] = _log10(cp["kzz_x"], "kzz_x")
     state.update({
         key("photo"): bool(cp["use_photo"]),
         key("sza"): float(cp["sl_angle_deg"]),
@@ -458,7 +475,7 @@ def _restore_vulcan_physics(state: dict, cp: dict, key, pk) -> None:
         key("moldiff"): bool(cp["use_moldiff"]),
         key("vmmol"): bool(cp["use_vm_mol"]),
         key("yconv"): float(cp["yconv_cri"]),
-        key("yconvmin"): float(cp.get("yconv_min", forward.YCONV_MIN_DEFAULT)),
+        key("yconvmin"): float(cp["yconv_min"]),
     })
     _reject_removed_physics(cp)
 
@@ -475,57 +492,42 @@ def _restore_rt_state(state: dict, cp: dict, key,
         else:
             state[key("ck")] = float(cp["log_kappa_cloud"])
             state[key("ca")] = float(cp["alpha_cloud"])
-    extras_all = list(forward.EXTRA_MOLECULES)
-    state[key(_xmols_key(cp))] = [
-        molecule for molecule in (cp.get("extra_mols") or [])
-        if molecule in extras_all]
+    state[key(_xmols_key(cp))] = list(cp["extra_mols"])
     state.update({
         key("nz"): int(cp["nz"]),
         key("rtptop"): float(cp["rt_ptop_bar"]),
         key("rtint"): str(cp["rt_integration"]),
-        # .get with the default so a configuration saved before the key
-        # existed still loads: restoring it onto the current default is the
-        # correct physics, and the stale-key banner already says the run must
-        # be redone.
-        key("pref"): float(cp.get("p_ref_bar", 1.0e-3)),
-        # same .get treatment; per-geometry widget key (app.py's key contract)
-        key(f"pbtm_{cp.get('science_mode', 'transmission')}"):
-            float(cp.get("p_btm_bar", forward.default_p_btm_bar(cp))),
+        key("pref"): float(cp["p_ref_bar"]),
+        # per-geometry widget key (app.py's key contract)
+        key(f"pbtm_{cp['science_mode']}"): float(cp["p_btm_bar"]),
     })
 
 
 def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key) -> dict:
+    # canonical_params refuses the removed opacity keys (mie_condensate,
+    # opacity_mode) with their removal message; everything below reads its
+    # output, so the restore is the run canonical_params would compute.
+    cp, restored_tp, pending_tp = _resolve_embedded_tp(cp, cfg)
     planet = str(cp["planet"])
-    tp_mode = str(cp.get("tp_mode", "guillot"))
-    if str(cp.get("mie_condensate", "") or "") or \
-            str(cp.get("opacity_mode", "exomolop")) == "lbl":
-        raise ValueError(
-            "this configuration uses the Mie condensate deck or the sampled "
-            "line-by-line opacity mode (mie_condensate / opacity_mode='lbl'), "
-            "both removed in 0.48.0: correlated-k over the published ExoMolOP "
-            "k-tables is the only opacity path. Re-create the run with the "
-            "correlated-k default (the power-law cloud deck stays).")
+    tp_mode = str(cp["tp_mode"])
 
     def pk(name: str) -> str:            # per-planet widget keys
         return key(f"{planet}_{name}")
 
     # A gray cloud records the pressure it was entered as; its absence is the
-    # power-law haze -- what every configuration written before this was.
+    # power-law haze.
     cloud_top_bar = cfg.get("cloud_top_bar")
     cloud_mode = "haze" if cloud_top_bar is None else "gray"
-    if cloud_mode == "gray" and \
-            str(cp.get("science_mode", "transmission")) == "emission":
-        raise ValueError(
-            "this configuration pairs a gray cloud deck with an emission "
-            "run. The cloud-top pressure is mapped to an opacity through the "
-            "transmission chord, which the vertical emission integration does "
-            "not share, so the interface offers the gray deck in transmission "
-            "only. Restoring it as a power-law haze would run a different "
-            "cloud than the file describes; re-create the run with the haze "
-            "parameterization.")
-
-    restored_tp, pending_tp = _resolve_embedded_tp(cp, cfg, tp_mode)
     try:
+        if cloud_mode == "gray" and cp["science_mode"] == "emission":
+            raise ValueError(
+                "this configuration pairs a gray cloud deck with an emission "
+                "run. The cloud-top pressure is mapped to an opacity through "
+                "the transmission chord, which the vertical emission "
+                "integration does not share, so the interface offers the "
+                "gray deck in transmission only. Restoring it as a power-law "
+                "haze would run a different cloud than the file describes; "
+                "re-create the run with the haze parameterization.")
         state = _restore_system_profile(
             cp, key, pk, planet, tp_mode, restored_tp)
 
@@ -537,8 +539,7 @@ def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key) -> dict:
         _restore_rt_state(state, cp, key, cloud_top_bar)
         _restore_goal(state, cp, goal, key, tp_mode, cloud_mode)
         _restore_observation(state, obs, cfg, key, pk)
-        _check_widget_ranges(state, key, pk,
-                             str(cp.get("science_mode", "transmission")))
+        _check_widget_ranges(state, key, pk)
     except Exception:
         if pending_tp is not None:
             pending_tp[0].unlink(missing_ok=True)

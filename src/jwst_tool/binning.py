@@ -39,7 +39,7 @@ SEGMENT_GAP_FACTOR = 20.0
 # Local spacing below this fraction of the median = a DEGENERATE wavelength
 # solution (e.g. the G395H red-edge pileup). Counting such pixels as
 # independent samples overstates the information (~sqrt(n) too-small sigma),
-# so they are excluded loudly via n_pix_degenerate_dropped.
+# so detect.evaluate_mode excludes them from the operator.
 DEGENERATE_WL_FRAC = 0.02
 
 
@@ -119,7 +119,7 @@ def bin_segments(op: dict, seg_pix: np.ndarray) -> np.ndarray:
     ever did, the count-majority segment is the honest assignment."""
     seg = np.asarray(seg_pix)[op["pix_idx"]].astype(int)
     n_bins = op["wl_center"].size
-    n_seg = int(seg.max()) + 1 if seg.size else 1
+    n_seg = int(seg.max()) + 1
     w = np.zeros((n_seg, n_bins))
     np.add.at(w, (seg, op["pix_bin"]), op["pix_w"])
     return np.argmax(w, axis=0)
@@ -133,10 +133,9 @@ def smooth_to_native_r(wl_model: np.ndarray, y: np.ndarray,
     resolving power R(lambda) over [band_lo, band_hi]; returns a full-length copy.
 
     Only bites where the MODEL grid resolves the kernel, i.e. model R >=
-    2.3548 x the smallest R in the band (MIRI LRS, PRISM, and SOSS order 1
-    under the correlated-k default's R = 1000 grid); on higher-R modes the
-    kernel is unresolved and the input is returned unchanged. NIRCam, SOSS
-    order 2, and the M gratings are not resolved under that default.
+    2.3548 x the smallest R in the band (MIRI LRS, PRISM and SOSS on the
+    correlated-k R = 1000 grid); on higher-R modes (NIRCam, the M gratings)
+    the kernel is unresolved and the input is returned unchanged.
 
     ``wl_r``/``r_curve`` are the native resolving-power table. ``wl_r`` MUST
     be strictly ascending and is validated: the kernel width comes from
@@ -198,8 +197,12 @@ def smooth_to_native_r(wl_model: np.ndarray, y: np.ndarray,
                 "weight silently corrupts the count-ratio blur")
     lnw = np.log(wl)
     x_lo, x_hi = np.log(band_lo), np.log(band_hi)
-    in_band = (wl_r >= band_lo) & (wl_r <= band_hi)
-    r_band = np.asarray(r_curve, float)[in_band] if in_band.any() else np.asarray(r_curve, float)
+    in_band = (wl_r_v >= band_lo) & (wl_r_v <= band_hi)
+    if not in_band.any():
+        raise ValueError(
+            f"smooth_to_native_r: no native-R sample inside the band "
+            f"[{band_lo:g}, {band_hi:g}] um")
+    r_band = r_v[in_band]
     r_min = max(5.0, float(np.min(r_band)))
     r_max = max(r_min, float(np.max(r_band)))
     s_max = 1.0 / (2.3548 * r_min)          # widest kernel sigma, in ln-lambda
@@ -264,7 +267,7 @@ def smooth_to_native_r(wl_model: np.ndarray, y: np.ndarray,
     padF = np.concatenate([np.full(k, Fg[0]), Fg, np.full(k, Fg[-1])])
     win = np.lib.stride_tricks.sliding_window_view(pad, 2 * k + 1)
     winF = np.lib.stride_tricks.sliding_window_view(padF, 2 * k + 1)
-    sig = 1.0 / (2.3548 * np.maximum(np.interp(np.exp(grid), wl_r, r_curve), 5.0))
+    sig = 1.0 / (2.3548 * np.maximum(np.interp(np.exp(grid), wl_r_v, r_v), 5.0))
     off = dl * (np.arange(2 * k + 1) - k)
     w = np.exp(-0.5 * (off[None, :] / sig[:, None]) ** 2) * winF   # flux-weighted
     smoothed = (w * win).sum(axis=1) / w.sum(axis=1)
@@ -306,8 +309,8 @@ def build_operator(wl_pix: np.ndarray, w_pix: np.ndarray, edges: np.ndarray,
     A pixel belongs to the bin containing its CENTER wavelength (indivisible
     extracted samples, as real reductions group them); the MODEL is
     integrated over the pixel's full cell. Exact-duplicate pixels have
-    zero-width cells and drop out here; callers count them loudly via
-    degenerate_wl_mask (n_pix_degenerate_dropped). An operator left with NO
+    zero-width cells and drop out here; detect.evaluate_mode masks them via
+    degenerate_wl_mask before building the operator. An operator left with NO
     usable pixel raises with the per-criterion exclusion breakdown.
 
     Returns dict:

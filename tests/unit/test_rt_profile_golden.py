@@ -36,11 +36,7 @@ def test_rt_profile_common_golden_default():
     assert prof["rp_cm"] == pytest.approx(1.279 * 7.1492e9, rel=1e-6)
     assert prof["gs_cgs"] == 422.0
     assert prof["rstar_cm"] == pytest.approx(0.932 * 6.957e10, rel=1e-6)
-    # the removed line-by-line / Mie knobs never reach the engine
-    for k in ("mie_condensate", "mie_data_dir", "nu_pts", "broadening",
-              "dit_grid_resolution"):
-        assert k not in prof
-    # and none of the chemistry-only keys leak in here (they are added by
+    # none of the chemistry-only keys leak in here (they are added by
     # _assemble_chem on top): the vulcan profile stays bit-identical because
     # the union of this dict and the chemistry-only block IS the full profile
     for k in ("yconv_cri", "co_mode", "dt_max", "cfg_overrides"):

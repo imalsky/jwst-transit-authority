@@ -19,7 +19,8 @@ def _diag(*, longdy=0.05, longdydt=1e-11, branch=2, conv_normal=True,
     return SimpleNamespace(
         accept_count=accept, longdy=longdy, longdydt=longdydt,
         conv_branch=branch, conv_normal=conv_normal, aflux_change=aflux,
-        cell_species=species, cell_layer=layer, cell_vmr=vmr, t=t, dt=dt)
+        cell_species=species, cell_layer=layer, cell_vmr=vmr, t=t, dt=dt,
+        tangent_longdy=np.nan)
 
 
 def _chem(yconv_min=0.1, count_max=30000, nz=100):
@@ -106,11 +107,10 @@ def test_element_gate_refuses_a_leaked_column_and_names_the_element():
     assert forward.check_elements(top, chem, "s", log.append) == pytest.approx(0.0)
 
 
-def test_ad_dlnco_margin_refuses_on_both_columns_and_on_a_missing_engine():
+def test_ad_dlnco_margin_refuses_on_both_columns():
     """The AD dlnCO row needs the oxygen-reservoir margin above CO_BZ_MIN_AD
     on the BUILD column and again on the CONVERGED column the tangent starts
-    from. An engine that cannot report the margin refuses rather than passing
-    silently, and a NaN margin refuses too (the `not m > gate` form)."""
+    from. A NaN margin refuses too (the `not m > gate` form)."""
     gate = forward.CO_BZ_MIN_AD
     y = np.ones((4, 3))
 
@@ -136,11 +136,6 @@ def test_ad_dlnco_margin_refuses_on_both_columns_and_on_a_missing_engine():
                           co_bz_margin=lambda c: float("nan"))
     with pytest.raises(RuntimeError, match="oxygen-reservoir margin"):
         forward.check_ad_co_margin(nan, 0.55)
-
-    for missing in (SimpleNamespace(co_bz_margin=lambda c: 0.5),
-                    SimpleNamespace(co_bz_bound=0.5)):
-        with pytest.raises(RuntimeError, match="does not expose"):
-            forward.check_ad_co_margin(missing, 0.55)
 
 
 def test_ad_chemistry_rows_are_never_vmapped_over_tangent_directions():

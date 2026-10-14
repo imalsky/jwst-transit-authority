@@ -170,7 +170,7 @@ def run_adjoint(params: dict, species: str, log=print) -> Path:
     log("[adj] PROG 0.02 building chemistry model")
     chem = A.build_chem(tag="adjoint baseline")
     forward._check_t_window(A.tp_eval, A.theta, chem.p_bar, log,
-                            T_base=getattr(chem, "T_base", None))
+                            T_base=chem.T_base)
     if chem.sidx.get(vulcan_sp) is None:
         raise RuntimeError(f"species {vulcan_sp} not in the solved network")
     sp = int(chem.sidx[vulcan_sp])
@@ -181,13 +181,8 @@ def run_adjoint(params: dict, species: str, log=print) -> Path:
     longdy = float(final.longdy)
     # Canonical certification: longdy alone accepted budget-exhausted exits
     # with still-drifting photolysis flux; conv_normal is the runner's own
-    # gate recomputed at the exit state. A check that cannot run must refuse.
-    _cn = getattr(chem, "conv_normal_at_exit", None)
-    if _cn is None:
-        raise RuntimeError(
-            "the sibling forward engine does not export conv_normal_at_exit: "
-            "the adjoint fixed point cannot be canonically certified. "
-            "Upgrade vulcan-forward.")
+    # gate recomputed at the exit state.
+    _cn = chem.conv_normal_at_exit
     if not (bool(_cn(final)) and longdy < chem.yconv_min):
         raise RuntimeError(
             f"chemistry did NOT converge (longdy={longdy:.3g}, gate "
@@ -246,17 +241,16 @@ def run_adjoint(params: dict, species: str, log=print) -> Path:
             loss_fn=loss_fn, photo_recompute_k=recompute_k,
             body_terms=body_terms, body_dt=dt, print_report=False)
         audit_trail.append(dict(
-            body_dt=dt, ok=bool(a.get("ok", False)),
+            body_dt=dt, ok=bool(a["ok"]),
             max_rel_defect=float(a["max_rel_defect"]),
             loss_footprint_defect=float(a["loss_footprint_defect"])))
-        log(f"[adj] audit at body_dt {dt:.0e}: ok={a.get('ok')}, "
+        log(f"[adj] audit at body_dt {dt:.0e}: ok={a['ok']}, "
             f"max_rel_defect {a['max_rel_defect']:.3g}, "
             f"loss_footprint {a['loss_footprint_defect']:.3g}")
-        if a.get("ok", False):
+        if a["ok"]:
             audit, body_dt = a, float(dt)
             break
-    findings = ([dict(f) if isinstance(f, dict) else {"finding": str(f)}
-                 for f in a.get("findings", [])])
+    findings = a["findings"]
     if audit is None:
         errors = [f for f in findings
                   if str(f.get("severity", "")).lower() == "error"]
@@ -329,18 +323,14 @@ def run_adjoint(params: dict, species: str, log=print) -> Path:
     t1 = time.time()
     from vulcan_jax.gibbs import load_nasa9
     from vulcan_jax import rates_jax
-    from vulcan_jax._paths import resolve_data_path
     from vulcan_jax.phy_const import kb
 
     cfg = integ._cfg
-    thermo_dir = resolve_data_path(cfg.network).parent
-    if not (thermo_dir / "NASA9").exists():
-        import vulcan_jax
-        thermo_dir = Path(vulcan_jax.__file__).resolve().parent / "thermo"
-    nasa9, _present = load_nasa9(network.species, thermo_dir)
+    nasa9, _present = load_nasa9(network.species,
+                                 rates_jax._thermo_dir(cfg.network))
     nasa9_j = jnp.asarray(nasa9)
-    remove_list = getattr(cfg, "remove_list", None)
-    use_caps = bool(getattr(cfg, "use_lowT_limit_rates", False))
+    remove_list = cfg.remove_list
+    use_caps = bool(cfg.use_lowT_limit_rates)
     # frozen hydrostatic pressures: rebuild(T) varies T at fixed P (the
     # upstream-validated d/dT recipe; photolysis rows spliced in FROZEN)
     pco_j = jnp.asarray(np.asarray(atm_step.M) * kb * np.asarray(atm_step.Tco))
@@ -362,8 +352,7 @@ def run_adjoint(params: dict, species: str, log=print) -> Path:
         photo_recompute_k=recompute_k, body_terms=body_terms,
         return_info=True)
     dLdT_np = np.asarray(dLdT, dtype=float)
-    rc = info_T.get("rebuild_consistency", {})
-    rc_worst = float(max(rc.values())) if rc else 0.0
+    rc_worst = float(max(info_T["rebuild_consistency"].values()))
     log(f"[adj] dL/dT in {time.time()-t1:.0f} s: rebuild consistency "
         f"{rc_worst:.2e}, resid_median {info_T['resid_median']:.3g}")
 

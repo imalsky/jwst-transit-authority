@@ -31,7 +31,7 @@ def _matched_backend(root, rel, psf_rel=None):
     py.touch()
     ref = root / f"pandeia_data-{rel}-jwst"
     ref.mkdir()
-    (ref / "VERSION").write_text(f"{rel}\n")
+    (ref / "VERSION_DATA").write_text(f"{rel}\n")
     psf = root / "psfs"
     psf.mkdir()
     (psf / "VERSION_PSF").write_text(f"{psf_rel or rel}\n")
@@ -185,13 +185,13 @@ def test_check_picaso_states(tmp_path, monkeypatch, case, expect, fragment):
     # optional: a machine without PICASO keeps the required-data banner
     rep = {"sections": {datacheck.PICASO_SECTION: items}}
     assert datacheck.missing_required(rep) == []
-    assert datacheck.picaso_missing(rep) == [
-        it for it in items if it.status == datacheck.MISSING]
 
     # the export's PICASO record never raises on the same broken setups: the
     # touched "python" is not executable, and empty_config's one hangs
     monkeypatch.setattr(ins, "PICASO_PYTHON", str(py))
     monkeypatch.setattr(ins, "PICASO_REFDATA", str(ref))
+    assert datacheck.picaso_missing() == [
+        it for it in items if it.status == datacheck.MISSING]
     if case == "empty_config":
         def hang(cmd, **kw):
             raise subprocess.TimeoutExpired(cmd, kw.get("timeout"))
@@ -225,7 +225,6 @@ def test_full_report_structure_formatting_and_cache_stats():
         assert it.label in text
     assert "Generated caches" in text
     assert datacheck.PICASO_SECTION in rep["sections"]
-    assert datacheck.picaso_missing({"sections": {}}) == []   # older cache
     stats = datacheck.cache_stats()
     for key in ("model_cache", "noise_cache"):
         assert set(stats[key]) == {"n", "mb"}

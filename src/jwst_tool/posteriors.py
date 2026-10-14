@@ -9,14 +9,8 @@ units (the fisher-table convention:
 dex for lnZ/lnKzz, absolute C/O number ratio for dlnCO via
 ``fisher.display_sigma``, K for temperatures; a parameter unknown to
 ``fisher.PARAM_UNITS`` is already in display units and reports unit "").
-The dlnCO curve is the normalized marginalized Fisher forecast density in
-ln(C/O), displayed against physical C/O on a LOGARITHMIC axis
-(ln_gaussian_curve). We CHOOSE to show density per unit d ln(C/O) -- a log
-axis does not by itself fix the measure -- and therefore apply NO 1/(C/O)
-Jacobian to the ordinate, so the curve peaks on its own center rather than at
-center*exp(-sigma_ln**2). The builders return unit-area densities; the
-renderer divides by the peak, which is why the visible axis reads "relative
-forecast density". Widths are quoted in dex via fisher.format_co_width.
+The dlnCO curve is the forecast density in ln(C/O) on a log C/O axis
+(ln_gaussian_curve); its width is quoted in dex via fisher.format_co_width.
 
 HONESTY (baked into every returned record, keys ``kind``/``label``): these
 are linearized Fisher/Cramer-Rao forecasts around the input model under the
@@ -33,8 +27,8 @@ finite Gaussian. Non-finite inputs raise (house style: fail fast and loud).
 Named combinations (``combo_forecast``): a combo is a
 user-facing name plus a list of registry mode keys, evaluated against the
 per-mode result dicts of a run through the EXISTING ``combined_forecast``
-(single-mode combos equal ``mode_forecast`` -- that identity is pinned
-upstream). Saturated modes are excluded with the same policy as the
+(``mode_forecast`` is its single-mode case). Saturated modes are excluded
+with the same policy as the
 "All usable modes" row (a saturated mode is unusable data) and the
 exclusion is disclosed per combo; a combo with zero usable modes raises.
 """
@@ -46,13 +40,13 @@ import numpy as np
 
 from jwst_tool import fisher
 
-# Machine token + human sentence, carried on every record this module
-# returns, so any downstream surface (GUI phase, exports) can label the
-# curves honestly without re-deriving the wording.
 # Auto curve grid: +/- _AUTO_SIGMA widths, _AUTO_POINTS samples. Shared by
 # both curve builders and by the off-scale test in mock_center_co.
 _AUTO_SIGMA, _AUTO_POINTS = 5.0, 201
 
+# Machine token + human sentence, carried on every record this module
+# returns, so any downstream surface (GUI phase, exports) can label the
+# curves honestly without re-deriving the wording.
 FORECAST_KIND = "fisher_gaussian_forecast"
 FORECAST_LABEL = (
     "Linearized Fisher (Cramer-Rao) forecast: a Gaussian approximation "
@@ -78,8 +72,7 @@ def _param_unit(name: str) -> str:
     """
     if name == "dlnCO":
         return "C/O ratio"
-    unit = fisher.PARAM_UNITS.get(name)
-    return unit if unit is not None else ""
+    return fisher.PARAM_UNITS.get(name, "")
 
 
 def _validate_result(r: dict, n_free: int, where: str) -> None:
@@ -107,11 +100,11 @@ def _validate_result(r: dict, n_free: int, where: str) -> None:
         raise ValueError(f"{where}: sigma must be finite and > 0 everywhere")
 
 
-def gaussian_curve(center: float, sigma: float, grid=None) -> dict:
-    """Normalized Gaussian pdf N(center, sigma) on ``grid`` (caller-supplied,
-    1-D ascending) or the auto grid center +/- _AUTO_SIGMA*sigma.
+def gaussian_curve(center: float, sigma: float) -> dict:
+    """Normalized Gaussian pdf N(center, sigma) on the auto grid
+    center +/- _AUTO_SIGMA*sigma.
 
-    Returns dict(theta, pdf); pdf integrates to ~1 over an auto grid. All
+    Returns dict(theta, pdf); pdf integrates to ~1 over the grid. All
     inputs must be finite (sigma > 0) -- an inf/NaN sigma is an unconstrained
     direction and must be handled by the caller, never plotted.
     """
@@ -123,25 +116,12 @@ def gaussian_curve(center: float, sigma: float, grid=None) -> dict:
         raise ValueError(
             f"gaussian_curve: sigma must be finite and > 0, got {sigma!r} -- "
             "an unconstrained (inf) direction has no curve by design")
-    if grid is None:
-        theta = np.linspace(center - _AUTO_SIGMA * sigma,
-                            center + _AUTO_SIGMA * sigma, _AUTO_POINTS)
-    else:
-        theta = np.asarray(grid, float)
-        if theta.ndim != 1 or theta.size < 2:
-            raise ValueError("gaussian_curve: grid must be a 1-D array with "
-                             f"at least 2 points, got shape {theta.shape}")
-        if not np.all(np.isfinite(theta)):
-            raise ValueError("gaussian_curve: grid contains non-finite values")
-    # Both paths: a grid that repeats a value carries no curve. An AUTO grid
-    # collapses that way when the auto window is thinner than one
-    # float64 step at the center -- which is what a center shifted far from
-    # the point where its sigma was linearized produces. Name that cause
-    # rather than reporting it as a bad grid.
-    step = np.diff(theta)
-    if np.any(step < 0.0):
-        raise ValueError("gaussian_curve: grid must be strictly ascending")
-    if np.any(step == 0.0):
+    theta = np.linspace(center - _AUTO_SIGMA * sigma,
+                        center + _AUTO_SIGMA * sigma, _AUTO_POINTS)
+    # The grid collapses (repeats a value) when the window is thinner than
+    # one float64 step at the center -- which is what a center shifted far
+    # from the point where its sigma was linearized produces.
+    if np.any(np.diff(theta) == 0.0):
         raise ValueError(
             f"gaussian_curve: the window around center {center!r} is "
             f"unresolvable in float64 at sigma {sigma!r} -- the grid repeats "
@@ -152,7 +132,7 @@ def gaussian_curve(center: float, sigma: float, grid=None) -> dict:
     return dict(theta=theta, pdf=pdf)
 
 
-def ln_gaussian_curve(center: float, sigma_ln: float, grid=None,
+def ln_gaussian_curve(center: float, sigma_ln: float,
                       bounds: tuple | None = None) -> dict:
     """The normalized marginalized Fisher forecast density in ln(theta), on a
     geometric theta grid: the curve for a LOG-scaled physical axis.
@@ -160,20 +140,18 @@ def ln_gaussian_curve(center: float, sigma_ln: float, grid=None,
     We CHOOSE to show density per unit d ln(theta) -- a logarithmic axis does
     not by itself fix the measure -- and therefore apply NO 1/theta Jacobian
     to the ordinate. The curve peaks at ``center`` and is symmetric in
-    ln theta. Auto grid center*exp(+-_AUTO_SIGMA*sigma_ln), or a caller grid
-    (1-D ascending, > 0). This builder returns a UNIT-AREA density in
-    d ln(theta); summary_figure divides by the peak to render it as relative
-    forecast density.
+    ln theta, on the grid center*exp(+-_AUTO_SIGMA*sigma_ln). This builder
+    returns a UNIT-AREA density in d ln(theta); summary_figure divides by
+    the peak to render it as relative forecast density.
 
-    ``bounds`` (lo, hi) clips the AUTO window to the range the caller can
+    ``bounds`` (lo, hi) clips the window to the range the caller can
     actually produce -- for C/O, the range the forward model solves. A wide
     forecast otherwise spans decades of theta the model cannot reach, and past
     sigma_ln 142 the auto grid overflows float64 outright. The density is
     unchanged: only the drawn window moves, so the curve runs off the panel
     edge instead of being rescaled. Bounds that exclude ``center`` are ignored
     (the peak must stay in the window) -- callers keep their centers in range
-    instead, which is what mock_center_co's range test is for. A caller
-    ``grid`` is never clipped.
+    instead, which is what mock_center_co's range test is for.
     """
     center = float(center)
     sigma_ln = float(sigma_ln)
@@ -185,27 +163,21 @@ def ln_gaussian_curve(center: float, sigma_ln: float, grid=None,
             f"ln_gaussian_curve: sigma_ln must be finite and > 0, got "
             f"{sigma_ln!r} -- an unconstrained (inf) direction has no curve "
             "by design")
-    if grid is None:
-        u_lo, u_hi = -_AUTO_SIGMA * sigma_ln, _AUTO_SIGMA * sigma_ln
-        clip = None
-        if bounds is not None:
-            b_lo, b_hi = float(bounds[0]), float(bounds[1])
-            if b_lo <= center <= b_hi:
-                lnc = float(np.log(center))
-                u_lo = max(u_lo, float(np.log(b_lo)) - lnc)
-                u_hi = min(u_hi, float(np.log(b_hi)) - lnc)
-                clip = (b_lo, b_hi)
-        with np.errstate(over="ignore"):
-            theta = center * np.exp(np.linspace(u_lo, u_hi, _AUTO_POINTS))
-        if clip is not None:
-            # exp(log(hi) - log(center)) * center lands a few ulp outside;
-            # the window is a promise, so make the endpoints exact
-            theta = np.clip(theta, *clip)
-    else:
-        theta = np.asarray(grid, float)
-        if theta.ndim != 1 or theta.size < 2:
-            raise ValueError("ln_gaussian_curve: grid must be a 1-D array with "
-                             f"at least 2 points, got shape {theta.shape}")
+    u_lo, u_hi = -_AUTO_SIGMA * sigma_ln, _AUTO_SIGMA * sigma_ln
+    clip = None
+    if bounds is not None:
+        b_lo, b_hi = float(bounds[0]), float(bounds[1])
+        if b_lo <= center <= b_hi:
+            lnc = float(np.log(center))
+            u_lo = max(u_lo, float(np.log(b_lo)) - lnc)
+            u_hi = min(u_hi, float(np.log(b_hi)) - lnc)
+            clip = (b_lo, b_hi)
+    with np.errstate(over="ignore"):
+        theta = center * np.exp(np.linspace(u_lo, u_hi, _AUTO_POINTS))
+    if clip is not None:
+        # exp(log(hi) - log(center)) * center lands a few ulp outside;
+        # the window is a promise, so make the endpoints exact
+        theta = np.clip(theta, *clip)
     if not np.all(np.isfinite(theta)) or np.any(theta <= 0.0):
         raise ValueError(
             f"ln_gaussian_curve: the grid around center {center!r} at sigma_ln "
@@ -219,15 +191,13 @@ def ln_gaussian_curve(center: float, sigma_ln: float, grid=None,
 
 def marginalized_posteriors(results, free_names: list[str], centers: dict,
                             params: list[str] | None = None,
-                            co_eval: float | None = None,
-                            grids: dict | None = None) -> dict:
+                            co_eval: float | None = None) -> dict:
     """1D marginalized Fisher-Gaussian forecast densities for chosen parameters.
 
     ``results``: one mode result dict, or a list of them (>= 1) treated as
-    a combination. Everything goes through ``fisher.combined_forecast``,
-    which equals ``fisher.mode_forecast`` for a single mode (identity pinned
-    upstream). Each result needs ``jac_bins`` (rows [free..., lnR0]),
-    ``sigma``, and optionally ``seg``.
+    a combination. Everything goes through ``fisher.combined_forecast``
+    (``fisher.mode_forecast`` is its single-mode case). Each result needs
+    ``jac_bins`` (rows [free..., lnR0]), ``sigma``, and optionally ``seg``.
 
     ``centers``: {param: theta_input in DISPLAY units} -- the input-model
     value each Gaussian is centered on (e.g. lnZ: log10(met_x_solar) in dex;
@@ -237,8 +207,6 @@ def marginalized_posteriors(results, free_names: list[str], centers: dict,
     ``params``: subset of free_names to render (default: all).
     ``co_eval``: the atmosphere's C/O at the evaluation point; REQUIRED when
     dlnCO is requested (fisher.display_sigma raises without it).
-    ``grids``: optional {param: 1-D ascending display-unit grid}; parameters
-    not listed get the auto grid center +/- _AUTO_SIGMA * sigma_marg.
 
     Returns dict(kind, label, n_modes, co_eval, sigma_marginalized,
     sigma_conditional, params) where params[name] is a record with
@@ -269,11 +237,6 @@ def marginalized_posteriors(results, free_names: list[str], centers: dict,
         if not np.isfinite(float(centers[p])):
             raise ValueError(f"marginalized_posteriors: centers[{p!r}] must "
                              f"be finite, got {centers[p]!r}")
-    if grids is not None:
-        bad = [k for k in grids if k not in params]
-        if bad:
-            raise ValueError(f"marginalized_posteriors: grids has entries for "
-                             f"{bad}, which are not requested params")
 
     cond: dict = {}
     sig = fisher.combined_forecast(rlist, list(free_names), conditional=cond)
@@ -289,17 +252,16 @@ def marginalized_posteriors(results, free_names: list[str], centers: dict,
                    sigma_conditional_display=float(c_disp),
                    unit=_param_unit(name))
         if np.isfinite(s_disp):
-            grid = grids.get(name) if grids is not None else None
             if name == "dlnCO":
                 # the forecast density in its OWN coordinate, for the panel's
                 # log C/O axis; sigma_display stays the absolute-C/O width
                 # that meta["target_prec"] is compared against
-                curve = ln_gaussian_curve(rec["center"], s_int, grid=grid,
+                curve = ln_gaussian_curve(rec["center"], s_int,
                                           bounds=co_curve_bounds())
                 rec["curve_family"] = "ln_gaussian"
                 rec["sigma_ln"] = s_int
             else:
-                curve = gaussian_curve(rec["center"], s_disp, grid=grid)
+                curve = gaussian_curve(rec["center"], s_disp)
                 rec["curve_family"] = "gaussian"
                 rec["sigma_ln"] = None
             rec.update(constrained=True, theta=curve["theta"],
@@ -336,8 +298,8 @@ def combo_forecast(name: str, mode_keys: list[str], results_by_mode: dict,
     forecast to report.
 
     Goes through ``fisher.combined_forecast`` for any usable-mode count, so a
-    single-mode combo equals ``fisher.mode_forecast`` (identity pinned
-    upstream). Marginalized AND conditional display-unit sigmas are reported;
+    single-mode combo equals ``fisher.mode_forecast``. Marginalized AND
+    conditional display-unit sigmas are reported;
     curves are the caller's job (``marginalized_posteriors``).
     """
     from jwst_tool import instruments as ins  # data-root resolution stays lazy
@@ -455,14 +417,8 @@ def mock_realization(results, seed: int) -> dict:
     Returns dict(kind, label, seed, modes) where modes[mode_key] is
     dict(noise, depth_mock, sigma): ``noise`` is the N(0, sigma_i) draw per
     bin (sigma_i = that mode's FINAL per-bin depth error, floor included)
-    and ``depth_mock = depth + noise``.
-
-    This is a mock-observation layer, generated AFTER the forward model and
-    the noise model, never inside them. The invariant is one-directional, NOT
-    "display only": the draw may never enter the detection or Fisher scores,
-    the forecast widths, the caches, or the noiseless result exports -- but it
-    IS fitted by ``mock_recovery``, whose recovered-parameter shift the GUI
-    overlays on the posterior panels.
+    and ``depth_mock = depth + noise``. What the draw may and may not
+    enter: MOCK_LABEL.
     """
     seed = int(seed)
     if seed < 0:
@@ -548,11 +504,10 @@ def mock_recovery(results, free_names: list[str], realization: dict,
     F = np.zeros((n_tot, n_tot))
     b = np.zeros(n_tot)
     for Jg, r in system:
-        s2 = np.asarray(r["sigma"], float) ** 2
-        F += (Jg / s2[None, :]) @ Jg.T
+        F += fisher._fisher(Jg, r)
         noise = np.asarray(realization["modes"][r["mode_key"]]["noise"],
                            float)
-        b += Jg @ (noise / s2)
+        b += Jg @ (noise / np.asarray(r["sigma"], float) ** 2)
     delta = fisher._whitened_solve(F, b, n_f)
 
     out_delta, out_disp, recovered = {}, {}, {}
@@ -569,7 +524,7 @@ def mock_recovery(results, free_names: list[str], realization: dict,
             recovered[name] = False
             out_delta[name] = None
             out_disp[name] = None
-    return dict(kind=MOCK_KIND, label=MOCK_RECOVERY_LABEL,
+    return dict(kind=MOCK_RECOVERY_KIND, label=MOCK_RECOVERY_LABEL,
                 seed=realization.get("seed"),
                 delta=out_delta, delta_display=out_disp,
                 units={n: _param_unit(n) for n in free_names},
@@ -579,28 +534,19 @@ def mock_recovery(results, free_names: list[str], realization: dict,
 def param_center(name: str, cpj: dict):
     """Input-model value of ``name`` in DISPLAY units (the Gaussian's
     center), or None when the run's stored parameters define no single value
-    (e.g. lnKzz under a non-constant mixing profile, or a field the cached
-    run predates). A None center draws no curve -- the panel says so
-    explicitly instead of guessing a center."""
-    from jwst_tool import forward   # light path: no JAX/VULCAN imports
-
+    (lnKzz under a non-constant or zero mixing profile, or a T-P/cloud
+    parameter the run does not carry). A None center draws no curve -- the
+    panel says so explicitly instead of guessing a center. The canonical
+    payload always carries met_x_solar, co_ratio, kzz_mode and kzz_const."""
     if name == "lnZ":
-        v = cpj.get("met_x_solar")
-        return None if v in (None, "") else float(np.log10(float(v)))
+        return float(np.log10(float(cpj["met_x_solar"])))
     if name == "dlnCO":
-        return float(cpj.get("co_ratio", forward.CO_BASELINE))
+        return float(cpj["co_ratio"])
     if name == "lnKzz":
-        v = cpj.get("kzz_const")
-        if str(cpj.get("kzz_mode", "const")) == "const" and v not in (None, ""):
-            return float(np.log10(float(v)))
-        return None
-    direct = {"Tirr": "Tirr", "Tint": "Tint", "log_kappa": "log_kappa",
-              "log_gamma": "log_gamma", "log_kappa_cloud": "log_kappa_cloud",
-              "alpha_cloud": "alpha_cloud"}
-    k = direct.get(name)
-    if k is not None and cpj.get(k) is not None:
-        return float(cpj[k])
-    return None
+        v = float(cpj["kzz_const"])
+        return float(np.log10(v)) if cpj["kzz_mode"] == "const" and v > 0 else None
+    v = cpj.get(name)
+    return None if v is None else float(v)
 
 
 def co_curve_bounds() -> tuple:

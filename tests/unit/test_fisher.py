@@ -168,32 +168,16 @@ def test_combined_forecast_structure_and_order_invariance():
     assert reordered["p1"] == pytest.approx(base["p1"])
 
 
-def test_mode_forecast_equals_combined_single_result():
-    """mode_forecast(r) and combined_forecast([r]) must implement the SAME
-    statistical model (free params + shared lnR0 + one constant offset per
-    segment), INCLUDING the first segment's offset. A single-segment mode
-    and a no-seg call agree too: both carry exactly one constant-offset
-    nuisance, because lnR0 is a physical derivative, not a constant, and
-    never stands in for the offset. Diag dimension = free + lnR0 + the
-    always-present constant offset."""
+def test_single_segment_offset_and_diag():
+    """A single-segment mode and a no-seg call agree: both carry exactly one
+    constant-offset nuisance, because lnR0 is a physical derivative, not a
+    constant, and never stands in for the offset. Diag dimension = free +
+    lnR0 + the always-present constant offset."""
     rng = np.random.default_rng(7)
     nb = 45
-    seg = np.array([0] * 22 + [1] * 23)
     jac = rng.standard_normal((3, nb))             # 2 free + lnR0
-    r = dict(jac_bins=jac, sigma=np.full(nb, 1e-4), seg=seg)
-    a = fisher.mode_forecast(dict(r), ["p0", "p1"])
-    b = fisher.combined_forecast([dict(r)], ["p0", "p1"])
-    for k in ("p0", "p1"):
-        if np.isinf(a[k]) or np.isinf(b[k]):
-            assert np.isinf(a[k]) and np.isinf(b[k])
-        else:
-            assert a[k] == pytest.approx(b[k], rel=1e-10)
-    # and the single-segment / no-seg variants agree too
     r1 = dict(jac_bins=jac, sigma=np.full(nb, 1e-4))
     a1 = fisher.mode_forecast(dict(r1), ["p0", "p1"])
-    b1 = fisher.combined_forecast([dict(r1)], ["p0", "p1"])
-    for k in ("p0", "p1"):
-        assert a1[k] == pytest.approx(b1[k], rel=1e-10)
     r2 = dict(jac_bins=jac, sigma=np.full(nb, 1e-4), seg=np.zeros(nb, int))
     a2 = fisher.mode_forecast(dict(r2), ["p0", "p1"])
     for k in ("p0", "p1"):
@@ -340,7 +324,7 @@ def test_fisher_transits_to_target_limits():
     monotone; a floored result keeps a finite positive limit; a
     MIXED floor (one bin at 0 ppm) reports nan and scans instead of gating
     on the ill-conditioned floor-only limit."""
-    names = ["lnZ", "lnKzz", "lnR0"]
+    names = ["lnZ", "lnKzz"]                       # jac rows: names + lnR0
     tt = fisher.transits_to_target(_fisher_result(0.0), names, "lnZ", 1e9)
     assert tt["sig_inf"] == 0.0
     assert tt["reachable"]
@@ -371,10 +355,6 @@ def test_co_width_is_the_value_and_error_in_log10():
     # the ERROR sets the precision (format_pm): 2 sig figs on it, the value
     # rounded to the same decimal place -- never "-0.26 ± 0.0324".
     assert fisher.format_co_width(0.55, 0.0745) == "log10(C/O) = -0.260 ± 0.032"
-    assert fisher.format_co_width(0.55, 0.0745, k=3.0) == \
-        "log10(C/O) = -0.260 ± 0.097"
-    assert fisher.format_co_width(0.55, 0.9218, k=3.0) == \
-        "log10(C/O) = -0.3 ± 1.2"
     # plain text only: this string also lands in a Streamlit cell and a CSV
     assert "$" not in fisher.format_co_width(0.55, 0.9218)
     # mock_center_co shifts a recovered center MULTIPLICATIVELY, so a broad

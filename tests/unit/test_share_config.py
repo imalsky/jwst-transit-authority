@@ -203,22 +203,11 @@ def test_a_picaso_config_round_trips_on_its_own_widget_keys(kw, goal):
         assert state["n0_fp_picaso_guillot_0"] == ["lnZ", "Tirr"]
 
 
-def test_a_carbon_rich_config_is_refused_on_a_network_that_cannot_hold_it():
-    """The restore range for C/O follows the network, so a file written on
-    sncho2025 at C/O 2 must not silently restore onto the default network's
-    widget (Streamlit would discard it and run C/O 0.55 instead)."""
-    canon = _canon(network="sncho2025", co_ratio=2.0)
-    state = {"n0_network": "sncho", "n0_co": float(canon["co_ratio"])}
-    with pytest.raises(ValueError, match="co_ratio=2 outside"):
-        share_config._check_widget_ranges(state, "n0_{}".format,
-                                          "n0_{}".format, "transmission")
-
-
 def test_invalid_input_is_refused_before_anything_applies():
     """Fail closed: malformed files, unknown parameters, a missing uploaded
-    table, and an unsupported format version all raise before any state
-    could be applied; recoverable unknown entries are dropped WITH a note,
-    never silently."""
+    table, an unsupported format version, and an entry the interface does
+    not offer all raise before any state could be applied -- never dropped,
+    which would run a different setup than the file describes."""
     with pytest.raises(ValueError):
         share_config.widget_state({"foo": 1}, _key)
     with pytest.raises(ValueError):
@@ -244,12 +233,12 @@ def test_invalid_input_is_refused_before_anything_applies():
         share_config.widget_state(share, _key)
     assert share_config.build_share(_canon(), {}, {})["jwst_tool_config"] \
         == share_config.SHARE_FORMAT
-    # unknown entries are dropped with a note, not applied
+    # an unknown entry is refused by name, never dropped
     share = share_config.build_share(
         _canon(), goal={},
         observation=dict(modes=["nirspec_g395h", "not_a_mode"]))
-    state = share_config.widget_state(share, _key)
-    assert state["n0_modes"] == ["nirspec_g395h"]
+    with pytest.raises(ValueError, match="not_a_mode"):
+        share_config.widget_state(share, _key)
 
 
 def test_embedded_tp_table_is_all_or_nothing(tmp_path):
@@ -345,10 +334,10 @@ def test_provenance_block_is_complete_and_portable(tmp_path):
     assert rec["commit"] == "absent" and rec["directory"] is None, rec
 
 
-def test_combos_round_trip_and_invalid_entries_are_noted():
-    """Named mode combinations restore to the K('combos') session key;
-    unknown modes are dropped with a note, nameless/empty/duplicate
-    combinations are never applied silently."""
+def test_combos_round_trip_and_invalid_entries_are_refused():
+    """Named mode combinations restore to the K('combos') session key; an
+    unknown mode, a nameless combination, a duplicate name, or a name that
+    would replace another series is refused by name, never dropped."""
     share = share_config.build_share(
         _canon(),
         goal=dict(goal="constrain", goal_param="lnZ", target_prec=0.1,
@@ -371,26 +360,25 @@ def test_combos_round_trip_and_invalid_entries_are_noted():
         dict(name="SOSS + G395H + MIRI",
              modes=["niriss_soss", "nirspec_g395h", "miri_lrs"])]
 
-    # unknown mode dropped with a note; all-unknown combo not restored;
-    # nameless and duplicate-name combos noted, first duplicate wins
-    share["observation"]["combos"] = [
-        dict(name="partial", modes=["nirspec_g395h", "not_a_mode"]),
-        dict(name="hollow", modes=["ghost_mode"]),
-        dict(name="", modes=["nirspec_g395h"]),
-        dict(name="partial", modes=["miri_lrs"]),
-    ]
-    state = share_config.widget_state(share, _key)
-    assert state["n0_combos"] == [
-        dict(name="partial", modes=["nirspec_g395h"])]
+    g395h = dict(name="a", modes=["nirspec_g395h"])
+    for combos, needle in (
+            ([dict(name="partial", modes=["nirspec_g395h", "not_a_mode"])],
+             "not_a_mode"),
+            ([dict(name="", modes=["nirspec_g395h"])], "needs a name"),
+            ([g395h, g395h], "already taken"),
+            ([dict(g395h, name=share_config.ALL_USABLE)], "already taken")):
+        share["observation"]["combos"] = combos
+        with pytest.raises(ValueError, match=needle):
+            share_config.widget_state(share, _key)
 
 
 def test_noise_model_config_evolution_round_trips():
     """The global "Noise multiplier" and the per-mode multipliers round-trip
     as SEPARATE factors (the app composes them; recording the product would
     re-multiply on restore); a file predating the global knob restores the
-    same behavior (no scale invented, no failure); and the removed
-    correlated-floor scenarios load with a note (they never changed the
-    model) while scenario="random" loads silently."""
+    same behavior (no scale invented, no failure); an unknown floor type is
+    refused by name; and the removed correlated-floor scenarios load (they
+    never changed the model)."""
     goal = dict(goal="detect", goal_mol="H2O", target_sig=3.0)
 
     def _obs(**over):
@@ -416,13 +404,12 @@ def test_noise_model_config_evolution_round_trips():
     assert state[_key("infl_nirspec_g395h")] == 1.5, state
     assert _key("noisescale") not in state, state
 
-    # unknown floor type: noted, floor settings keep their current values
     share2 = share_config.build_share(_canon(), goal=goal,
                                       observation=_obs(floor_mode="bogus"))
-    state2 = share_config.widget_state(share2, _key)
-    assert _key("floormode") not in state2
+    with pytest.raises(ValueError, match="bogus"):
+        share_config.widget_state(share2, _key)
 
-    # removed correlated-floor scenario: noted, never restored
+    # removed correlated-floor scenario: never restored
     share["observation"]["scenario"] = "conservative"
     state = share_config.widget_state(share, _key)
     assert not any("scenario" in k for k in state)
@@ -462,17 +449,6 @@ def test_out_of_range_values_refuse_loudly():
     with pytest.raises(ValueError, match="tirr"):
         share_config.widget_state(
             share_config.build_share(_canon(Tirr=5000.0), {}, {}), _key)
-    # PICASO heat redistribution: the widget's range is forward.RFACV_RANGE
-    with pytest.raises(ValueError, match="rfacv=1.5 outside"):
-        share_config._check_widget_ranges(
-            {"n0_rfacv_picaso_emission": 1.5}, _key, _key, "emission")
-    # metallicity follows the engine: 50x is VULCAN-legal, above PICASO's cap
-    share_config._check_widget_ranges({"n0_met": 50.0}, _key, _key,
-                                      "transmission")
-    with pytest.raises(ValueError, match="met=50 outside"):
-        share_config._check_widget_ranges(
-            {"n0_provider": "picaso", "n0_met": 50.0}, _key, _key,
-            "transmission")
 
 
 def test_noise_star_round_trips_and_legacy_files_get_a_note():

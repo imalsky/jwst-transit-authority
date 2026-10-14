@@ -1,11 +1,12 @@
-"""Pandeia ETC worker -- runs INSIDE the selected backend's conda env
-(see instruments.BACKEND_STATUS). Standalone on purpose: no imports from the rest
+"""Pandeia ETC worker -- runs INSIDE the Pandeia environment
+(JWST_TOOL_PANDEIA_PYTHON). Standalone on purpose: no imports from the rest
 of the tool, stdlib + pandeia only.
 
     python pandeia_worker.py job.json result.json
 
 job.json:
-    {"refdata": <pandeia_refdata path>, "cdbs": <PYSYN_CDBS path>,
+    {"refdata": <pandeia_refdata path>, "psf_dir": <pandeia_psfs path>,
+     "cdbs": <PYSYN_CDBS path>,
      "star": {"teff":.., "log_g":.., "metallicity":.., "ks_mag":..},
      "sat_limit": 0.80,
      "modes": [{"key":.., "instrument":.., "mode":.., "config": {...},
@@ -24,9 +25,8 @@ result.json: one entry per mode key, plus a reserved "__provenance__" entry
                                     sum(saturation_mask == 1) and == 2. Only
                                     "> 0" is ever used downstream, but the
                                     counts are pixels, not groups.
-     "r_native": [...] | null,      native resolving power R(lambda) on the wl
-                                    grid (null = host skips the LSF blur,
-                                    safe for high-R modes only),
+     "r_native": [...],             native resolving power R(lambda) on the wl
+                                    grid (a missing dispersion file raises),
      "r_native_source": "..",
      "t_cycle_s": ..,               per-integration CYCLE time in a TSO series
                                     (nint=2 minus nint=1 exposure difference,
@@ -52,7 +52,8 @@ result.json: one entry per mode key, plus a reserved "__provenance__" entry
      "n_pix_full_sat_native": ..,    extracted noise, so `good` drops them).
                                      The two *_sat_native counts are numbers
                                      of CHANNELS holding at least one such
-                                     pixel; these four are the reporting truth.
+                                     pixel. Diagnostic only: no host code
+                                     reads these four.
      "warnings": {...}}      -- or {"error": "..."} if that mode failed.
 
 Star normalization: band-integrated synphot photsys normalization to the
@@ -97,21 +98,16 @@ import numpy as np
 
 def _make_calc(build_default_calc, m, star, star_spectrum=None):
     calc = build_default_calc("jwst", m["instrument"], m["mode"])
-    for section, kv in (m.get("config") or {}).items():
+    for section, kv in m["config"].items():
         calc["configuration"][section].update(kv)
     calc["configuration"]["detector"]["nint"] = 1
     calc["configuration"]["detector"]["nexp"] = 1
-    for k, v in (m.get("strategy") or {}).items():
+    for k, v in m["strategy"].items():
         calc["strategy"][k] = v
     # the registry pins PandExo's TSO background convention; the engine
     # needs BOTH keys (it resolves them to one canned file)
-    if m.get("background"):
-        calc["background"] = m["background"]
-        if not m.get("background_level"):
-            raise ValueError(
-                f"mode {m['key']}: background={m['background']!r} without "
-                "background_level -- the engine needs both (e.g. 'medium')")
-        calc["background_level"] = m["background_level"]
+    calc["background"] = m["background"]
+    calc["background_level"] = m["background_level"]
     spectrum = calc["scene"][0]["spectrum"]
     if star_spectrum is None:
         spectrum["sed"] = {
@@ -141,8 +137,8 @@ def _make_calc(build_default_calc, m, star, star_spectrum=None):
 def _native_r(refdata, m, wl):
     """Native resolving power R(lambda) interpolated onto the extracted grid,
     from the mode's refdata dispersion file. Returns (list, source file).
-    A missing or malformed file RAISES: the host would otherwise apply no
-    LSF blur without saying so.
+    A missing or malformed file RAISES: the LSF blur is never silently
+    skipped.
     """
     disp = (m.get("config", {}).get("instrument", {}) or {}).get("disperser")
     if m["instrument"] == "miri" and m["mode"] == "lrsslitless":
@@ -212,7 +208,7 @@ def _sat_curve(rpt, key, n_pix):
 
 
 def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
-              refdata, star_spectrum=None):
+              refdata, engine_version, star_spectrum=None):
     calc = _make_calc(build_default_calc, m, star, star_spectrum)
     ng_min, ng_max = int(m["ngroup_min"]), int(m["ngroup_max"])
 
@@ -262,8 +258,8 @@ def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
 
     # Native-grid saturation counts, taken BEFORE `good`: fully saturated
     # channels have non-finite extracted noise, so `good` removes them and a
-    # post-filter count would read zero. Reporting-only; the estimator still
-    # excludes unusable pixels. Display/export must quote these.
+    # post-filter count would read zero. Diagnostic only (the parity harness
+    # reads the native curves); the estimator still excludes unusable pixels.
     n_part = _sat_curve(rpt, "n_partial_saturated", wl.shape[0])
     n_full = _sat_curve(rpt, "n_full_saturated", wl.shape[0])
     native_counts = {
@@ -313,7 +309,6 @@ def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
             f"{t_exp_1!r}): the engine's timing report changed shape and "
             "the integration count cannot be trusted.")
 
-    import pandeia.engine
     return {
         "wl": wl[good].tolist(),
         "flux": flux[good].tolist(),
@@ -331,7 +326,7 @@ def _one_mode(build_default_calc, perform_calculation, m, star, sat_limit,
         "ramp_search_complete": bool(search_complete),
         **native_counts,
         **native_masks,
-        "engine_version": str(getattr(pandeia.engine, "__version__", "unknown")),
+        "engine_version": engine_version,
         "warnings": {k: str(v) for k, v in rpt["warnings"].items()},
     }
 
@@ -344,35 +339,17 @@ def _release(version):
     return m.group(1) if m else None
 
 
-def _refdata_version(refdata):
-    """Best-available refdata version: VERSION or VERSION_DATA first line,
-    else the pandeia_data-<ver> directory name. Returns (version|None, source).
-
-    A VERSION_PSF file is deliberately NOT accepted here: it names a PSF
-    library, and with every supported backend on the split layout a misplaced
-    PSF marker must not authenticate a data tree."""
-    for name in ("VERSION", "VERSION_DATA"):
-        p = os.path.join(refdata, name)
-        if os.path.isfile(p):
-            with open(p) as f:
-                first = f.readline().strip()
-            if first:
-                return first, name
-    base = os.path.basename(os.path.normpath(refdata))
-    if base.startswith("pandeia_data-"):
-        return base[len("pandeia_data-"):], "directory name"
-    return None, "no VERSION/VERSION_DATA file or pandeia_data-<ver> dir name"
-
-
-def _psf_version(psf_dir):
-    """PSF-library release from VERSION_PSF. Returns (version|None, source)."""
-    p = os.path.join(psf_dir, "VERSION_PSF")
+def _version_file(root, name):
+    """Release from the first line of ``root/name`` (VERSION_DATA for the
+    refdata tree, VERSION_PSF for the PSF library; neither ever
+    authenticates the other). Returns (version|None, source)."""
+    p = os.path.join(root, name)
     if os.path.isfile(p):
         with open(p) as f:
             first = f.readline().strip()
         if first:
-            return first, "VERSION_PSF"
-    return None, "no VERSION_PSF file"
+            return first, name
+    return None, f"no {name} file"
 
 
 def _check_backend_match(engine_version, refdata, psf_dir=None):
@@ -380,14 +357,13 @@ def _check_backend_match(engine_version, refdata, psf_dir=None):
     calculation: engine release == refdata release == PSF-library release.
 
     A mismatched pair runs with wrong calibrations; the PSF library is the
-    same hazard, so its RELEASE is checked, not just existence. Every
-    supported backend uses the split-PSF layout, so an empty ``psf_dir`` is
-    always refused.
+    same hazard, so its RELEASE is checked, not just existence. The release
+    uses the split-PSF layout, so an empty ``psf_dir`` is always refused.
 
     Returns the provenance fields; raises RuntimeError naming the offending
     component on any mismatch or undeterminable version.
     """
-    ref_ver, source = _refdata_version(refdata)
+    ref_ver, source = _version_file(refdata, "VERSION_DATA")
     if ref_ver is None:
         raise RuntimeError(
             f"cannot determine the pandeia_data version of {refdata} ({source}); "
@@ -405,15 +381,15 @@ def _check_backend_match(engine_version, refdata, psf_dir=None):
 
     prov = {"refdata_version": ref_ver, "refdata_version_source": source}
     if not psf_dir:
-        # every supported backend uses the split-PSF layout; a missing path
-        # would silently bypass a third of the matched-triple check
+        # a missing path would silently bypass a third of the matched-triple
+        # check
         raise RuntimeError(
             f"pandeia.engine {engine_version} requires a separate PSF "
             "library, but no PSF_DIR was supplied. Point "
             "JWST_TOOL_PANDEIA_PSF_DIR at the matching pandeia_psfs tree "
             f"for release {eng_rel}.")
 
-    psf_ver, psf_source = _psf_version(psf_dir)
+    psf_ver, psf_source = _version_file(psf_dir, "VERSION_PSF")
     if psf_ver is None:
         raise RuntimeError(
             f"cannot determine the pandeia_psfs version of {psf_dir} "
@@ -437,17 +413,16 @@ def _check_backend_match(engine_version, refdata, psf_dir=None):
 
 def _preflight(job):
     """Fail with the offending PATH, not a deep synphot traceback, when the
-    reference trees are missing (e.g. a stale job/cache from an old layout)."""
+    reference trees are missing."""
     problems = []
     if not os.path.isdir(job["refdata"]):
         problems.append(f"pandeia_refdata does not exist: {job['refdata']}")
+    # split-layout PSF library: must be an intact tree, not just a dir
     psf_dir = job.get("psf_dir")
-    if psf_dir:
-        # split-layout PSF library: must be an intact tree, not just a dir
-        if not os.path.isfile(os.path.join(psf_dir, "VERSION_PSF")):
-            problems.append(
-                f"PSF_DIR has no VERSION_PSF file: {psf_dir} (point "
-                "JWST_TOOL_PANDEIA_PSF_DIR at the extracted pandeia_psfs tree)")
+    if not psf_dir or not os.path.isfile(os.path.join(psf_dir, "VERSION_PSF")):
+        problems.append(
+            f"PSF_DIR has no VERSION_PSF file: {psf_dir!r} (point "
+            "JWST_TOOL_PANDEIA_PSF_DIR at the extracted pandeia_psfs tree)")
     cdbs = job["cdbs"]
     if not os.path.isdir(cdbs):
         problems.append(f"PYSYN_CDBS does not exist: {cdbs}")
@@ -465,8 +440,8 @@ def _preflight(job):
     if problems:
         raise RuntimeError(
             "pandeia worker preflight failed:\n  " + "\n  ".join(problems)
-            + "\n(check JWST_TOOL_PANDEIA_REFDATA / JWST_TOOL_DATA_DIR, or "
-            "regenerate a stale cached job)")
+            + "\n(check JWST_TOOL_PANDEIA_REFDATA / JWST_TOOL_PANDEIA_PSF_DIR "
+            "/ JWST_TOOL_DATA_DIR)")
 
 
 def main():
@@ -474,8 +449,7 @@ def main():
     _preflight(job)
     os.environ["pandeia_refdata"] = job["refdata"]
     os.environ["PYSYN_CDBS"] = job["cdbs"]
-    if job.get("psf_dir"):
-        os.environ["PSF_DIR"] = job["psf_dir"]
+    os.environ["PSF_DIR"] = job["psf_dir"]
     import warnings as _w
     _w.filterwarnings("ignore")
     # point synphot's vega_file (default: a URL) at the local CALSPEC copy as
@@ -491,16 +465,14 @@ def main():
     import pandeia.engine
     engine_version = str(getattr(pandeia.engine, "__version__", "unknown"))
     match = _check_backend_match(engine_version, job["refdata"],
-                                 job.get("psf_dir"))
-    _psf_dir = job.get("psf_dir") or ""
+                                 job["psf_dir"])
     out = {
         "__provenance__": {
             "engine_version": engine_version,
             "refdata_path": job["refdata"],
             "refdata_name": os.path.basename(os.path.normpath(job["refdata"])),
-            "psf_path": _psf_dir,
-            "psf_name": (os.path.basename(os.path.normpath(_psf_dir))
-                         if _psf_dir else ""),
+            "psf_path": job["psf_dir"],
+            "psf_name": os.path.basename(os.path.normpath(job["psf_dir"])),
             **match,
             "python": sys.version.split()[0],
             "numpy": np.__version__,
@@ -509,16 +481,16 @@ def main():
     }
     print(f"[pandeia] engine {engine_version} + {out['__provenance__']['refdata_name']} "
           f"(refdata {match['refdata_version']} from {match['refdata_version_source']}"
-          + (f"; PSFs {match['psf_version']} from {match['psf_version_source']}"
-             if match.get("psf_version") else "; PSFs inside refdata")
-          + ")", flush=True)
+          f"; PSFs {match['psf_version']} from {match['psf_version_source']})",
+          flush=True)
     for m in job["modes"]:
         key = m["key"]
         print(f"[pandeia] {key} ...", flush=True)
         try:
             out[key] = _one_mode(build_default_calc, perform_calculation,
-                                 m, job["star"], float(job.get("sat_limit", 0.8)),
-                                 job["refdata"], job.get("star_spectrum"))
+                                 m, job["star"], float(job["sat_limit"]),
+                                 job["refdata"], engine_version,
+                                 job.get("star_spectrum"))
             if out[key].get("unusable"):
                 print(f"[pandeia] {key}: UNUSABLE ({out[key]['reason']})", flush=True)
             else:

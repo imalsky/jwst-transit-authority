@@ -2,15 +2,16 @@
 
 Knows every external dataset the tool touches, probes the filesystem, and
 reports a structured status: present, missing, or fetched-on-first-use.
-Consumers: the ``jwst-tool data`` CLI, the GUI data-status panel and widget
-annotations, and the unit tests (every check takes explicit paths).
+Consumers: the ``jwst-tool data`` CLI, the Space boot warm, the GUI's
+missing-data error, UV-spectrum annotation and PICASO gate, and the unit
+tests (every check takes explicit paths).
 
 Detection never REPLACES the loud runtime failures (repo standing rule);
 it only makes the state visible up front, with the exact remedy.
 
-Import discipline: stdlib only (no numpy/jax/streamlit); the one non-stdlib
-touch is an optional ``import jwst_tool.engine_config``, whose RuntimeError
-text IS the status detail.
+Import discipline: no jax or streamlit at module scope; forward and
+``jwst_tool.engine_config`` are imported lazily, and the latter's
+RuntimeError text IS the status detail.
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -240,14 +242,10 @@ def check_stellar_uv() -> list[Item]:
 # Pandeia noise backend + synphot CDBS
 
 def _refdata_version(refdata: Path) -> str | None:
-    for name in ("VERSION", "VERSION_DATA"):
-        f = refdata / name
-        if f.is_file():
-            try:
-                return f.read_text().strip().splitlines()[0]
-            except OSError:
-                return None
-    return None
+    try:
+        return (refdata / "VERSION_DATA").read_text().strip().splitlines()[0]
+    except (OSError, IndexError):
+        return None
 
 
 def check_pandeia_backend(python: str | Path = None,
@@ -258,7 +256,7 @@ def check_pandeia_backend(python: str | Path = None,
     _py = python if python is not None else ins.PANDEIA_PYTHON
     python = Path(_py) if _py else None
     refdata = Path(refdata if refdata is not None else ins.PANDEIA_REFDATA)
-    psf_dir = (ins.PANDEIA_PSF_DIR if psf_dir is None else psf_dir) or ""
+    psf_dir = str(ins.PANDEIA_PSF_DIR if psf_dir is None else psf_dir)
 
     _py_ok = python is not None and python.exists()
     items = [Item(
@@ -289,78 +287,65 @@ def check_pandeia_backend(python: str | Path = None,
             "77530136/Pandeia%2BEngine%2BInstallation -- the engine, this "
             "tree, and the PSF tree must all be the same release.")))
 
-    if psf_dir:                                  # split-PSF layout (>= 2026)
-        pv = Path(psf_dir) / "VERSION_PSF"       # worker preflight checks this
-        # report the PSF RELEASE, not just presence: a release mismatch is
-        # exactly what the worker refuses, so it must show here
-        psf_ver = None
-        if pv.is_file():
-            try:
-                psf_ver = pv.read_text().splitlines()[0].strip() or None
-            except OSError:
-                psf_ver = None
-        _psf_matches = (psf_ver or "").startswith(ins.BACKEND_RELEASE)
-        items.append(Item(
-            key="pandeia:psf", label="Pandeia PSF library (split layout)",
-            status=(OK if (pv.is_file() and _psf_matches) else MISSING),
-            required=True,
-            detail=(
-                f"{_found(Path(psf_dir))} (release {psf_ver})"
-                if pv.is_file() and _psf_matches else
-                (f"RELEASE MISMATCH: PSF tree is {psf_ver}, backend needs "
-                 f"{ins.BACKEND_RELEASE} -- {psf_dir}" if pv.is_file() else
-                 f"no VERSION_PSF under: {psf_dir}")),
-            remedy=(
-                f"Download pandeia_psfs-{ins.BACKEND_RELEASE}-jwst (~4 GiB), "
-                "the SAME release as the engine and reference data, and "
-                "extract it to the path above (or point "
-                "JWST_TOOL_PANDEIA_PSF_DIR elsewhere). Links are on STScI's "
-                "installation page: https://outerspace.stsci.edu/spaces/PEN/"
-                "pages/77530136/Pandeia%2BEngine%2BInstallation")))
-    else:
-        # every supported backend uses the split-PSF layout; an empty PSF dir
-        # is a misconfiguration, never "PSFs embedded in refdata"
-        items.append(Item(
-            key="pandeia:psf", label="Pandeia PSF library (split layout)",
-            status=MISSING, required=True,
-            detail="no PSF directory configured (JWST_TOOL_PANDEIA_PSF_DIR "
-                   "is empty)",
-            remedy=(
-                f"Download pandeia_psfs-{ins.BACKEND_RELEASE}-jwst (~4 GiB) "
-                "and point JWST_TOOL_PANDEIA_PSF_DIR at it. Links are on "
-                "STScI's installation page: https://outerspace.stsci.edu/"
-                "spaces/PEN/pages/77530136/Pandeia%2BEngine%2BInstallation")))
+    pv = Path(psf_dir) / "VERSION_PSF"           # worker preflight checks this
+    # an empty setting is a misconfiguration, never "PSFs embedded in refdata"
+    has_pv = bool(psf_dir) and pv.is_file()
+    # report the PSF RELEASE, not just presence: a release mismatch is
+    # exactly what the worker refuses, so it must show here
+    psf_ver = None
+    if has_pv:
+        try:
+            psf_ver = pv.read_text().splitlines()[0].strip() or None
+        except (OSError, IndexError):
+            psf_ver = None
+    _psf_matches = (psf_ver or "").startswith(ins.BACKEND_RELEASE)
+    items.append(Item(
+        key="pandeia:psf", label="Pandeia PSF library",
+        status=(OK if (has_pv and _psf_matches) else MISSING),
+        required=True,
+        detail=(
+            f"{_found(Path(psf_dir))} (release {psf_ver})"
+            if has_pv and _psf_matches else
+            (f"RELEASE MISMATCH: PSF tree is {psf_ver}, backend needs "
+             f"{ins.BACKEND_RELEASE} -- {psf_dir}" if has_pv else
+             "no VERSION_PSF under: "
+             + (psf_dir or "(JWST_TOOL_PANDEIA_PSF_DIR is empty)"))),
+        remedy=(
+            f"Download pandeia_psfs-{ins.BACKEND_RELEASE}-jwst (~4 GiB), "
+            "the SAME release as the engine and reference data, and "
+            "extract it to the path above (or point "
+            "JWST_TOOL_PANDEIA_PSF_DIR elsewhere). Links are on STScI's "
+            "installation page: https://outerspace.stsci.edu/spaces/PEN/"
+            "pages/77530136/Pandeia%2BEngine%2BInstallation")))
     return items
 
 
-def probe_pandeia_engine(python: str | Path = None,
-                         timeout: float = 60.0) -> str:
-    """Ask the backend env for its pandeia.engine version (slow: subprocess).
-
-    Returns the version string, or an 'unavailable (...)' explanation.
-    Never raises -- this is a report, the run path has its own loud gate.
-    """
-    _py = python if python is not None else ins.PANDEIA_PYTHON
-    if not _py:
-        return ("unavailable (JWST_TOOL_PANDEIA_PYTHON is not set; the backend "
-                "environment is machine-specific and has no default)")
-    python = Path(_py)
-    if not python.exists():
+def _probe_env(python, env_var: str, code: str, timeout: float = 60.0) -> str:
+    """The last stdout line of ``code`` run by another environment's python
+    (slow: subprocess), or an 'unavailable (...)' explanation. Never raises
+    -- this is a report, the run path has its own loud gate."""
+    if not python:
+        return f"unavailable ({env_var} is not set)"
+    if not Path(python).exists():
         return f"unavailable (no python at {python})"
     try:
-        r = subprocess.run(
-            [str(python), "-c",
-             "import pandeia.engine; print(pandeia.engine.__version__)"],
-            capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run([str(python), "-c", code], capture_output=True,
+                           text=True, timeout=timeout, check=False)
     except subprocess.TimeoutExpired:
         return f"unavailable (probe timed out after {timeout:g} s)"
     except OSError as e:          # not executable / not a binary
         return f"unavailable ({e.strerror or e})"
     if r.returncode != 0 or not r.stdout.strip():
         tail = (r.stderr or "").strip().splitlines()
-        return ("unavailable (pandeia.engine not importable in that env"
-                + (f": {tail[-1]}" if tail else "") + ")")
+        return "unavailable (" + (tail[-1] if tail else
+                                  f"exit {r.returncode}") + ")"
     return r.stdout.strip().splitlines()[-1]
+
+
+def probe_pandeia_engine() -> str:
+    """The backend env's pandeia.engine version (``jwst-tool data --deep``)."""
+    return _probe_env(ins.PANDEIA_PYTHON, "JWST_TOOL_PANDEIA_PYTHON",
+                      "import pandeia.engine; print(pandeia.engine.__version__)")
 
 
 def check_synphot_cdbs(cdbs: str | Path = None) -> list[Item]:
@@ -542,38 +527,20 @@ def check_picaso(python: str | Path | None = None,
     return items
 
 
-def probe_picaso_env(python: str | Path | None = None, timeout: float = 60.0) -> str:
-    """Ask the PICASO env for its picaso / photochem / numpy versions (slow:
-    subprocess). It imports photochem (the compiled solver) but never picaso,
-    which needs its data paths at import. Never raises -- this is a report.
-    """
-    _py = python if python is not None else ins.PICASO_PYTHON
-    if not _py:
-        return "unavailable (JWST_TOOL_PICASO_PYTHON is not set)"
-    python = Path(_py)
-    if not python.exists():
-        return f"unavailable (no python at {python})"
-    code = ("import importlib.metadata as m, photochem; print(', '.join("
-            "f'{n} {m.version(n)}' for n in ('picaso', 'photochem', 'numpy')))")
-    try:
-        r = subprocess.run([str(python), "-c", code], capture_output=True,
-                           text=True, timeout=timeout, check=False)
-    except subprocess.TimeoutExpired:
-        return f"unavailable (probe timed out after {timeout:g} s)"
-    except OSError as e:          # not executable / not a binary
-        return f"unavailable ({e.strerror or e})"
-    if r.returncode != 0 or not r.stdout.strip():
-        tail = (r.stderr or "").strip().splitlines()
-        return "unavailable (" + (tail[-1] if tail else
-                                  f"exit {r.returncode}") + ")"
-    return r.stdout.strip().splitlines()[-1]
+def probe_picaso_env() -> str:
+    """The PICASO env's picaso / photochem / numpy versions. It imports
+    photochem (the compiled solver) but never picaso, which needs its data
+    paths at import."""
+    return _probe_env(
+        ins.PICASO_PYTHON, "JWST_TOOL_PICASO_PYTHON",
+        "import importlib.metadata as m, photochem; print(', '.join("
+        "f'{n} {m.version(n)}' for n in ('picaso', 'photochem', 'numpy')))")
 
 
-def picaso_missing(report: dict) -> list[Item]:
-    """MISSING items of the PICASO section (none for a report cached before
-    the section existed; the PICASO run path still stops loudly)."""
-    return [it for it in report["sections"].get(PICASO_SECTION, [])
-            if it.status == MISSING]
+def picaso_missing() -> list[Item]:
+    """MISSING items of a fresh PICASO check (about 40 stat calls, so a
+    PICASO install or fetch unblocks the Run at once)."""
+    return [it for it in check_picaso() if it.status == MISSING]
 
 
 # Generated caches (informational)
@@ -611,8 +578,7 @@ def full_report(base_mols: list[str] = None, extra_mols: list[str] = None,
         "Star normalization data (synphot CDBS)": check_synphot_cdbs(),
         PICASO_SECTION: check_picaso(),
     }
-    report = {"backend": ins.JWST_TOOL_BACKEND,
-              "backend_status": ins.BACKEND_STATUS,
+    report = {"backend_status": ins.BACKEND_STATUS,
               "sections": sections, "caches": cache_stats()}
     if deep:
         report["engine_probe"] = probe_pandeia_engine()
@@ -696,7 +662,6 @@ def _report_from_jsonable(d: dict) -> dict:
 
 def load_cached_report(max_age_s: float = REPORT_CACHE_MAX_AGE_S):
     """The disk-cached report if present and fresh, else None."""
-    import time
     try:
         if not REPORT_CACHE_FILE.is_file():
             return None
@@ -710,12 +675,9 @@ def load_cached_report(max_age_s: float = REPORT_CACHE_MAX_AGE_S):
 
 def warm_report_cache(**kw) -> dict:
     """Compute the full report and persist it (atomic write)."""
-    import os
-    import time
     report = full_report(**kw)
+    blob = json.dumps({"generated_at": time.time(),
+                       "report": _report_to_jsonable(report)}).encode()
     REPORT_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = REPORT_CACHE_FILE.with_suffix(".json.tmp.%d" % os.getpid())
-    tmp.write_text(json.dumps({"generated_at": time.time(),
-                               "report": _report_to_jsonable(report)}))
-    os.replace(tmp, REPORT_CACHE_FILE)
+    ins.atomic_write(REPORT_CACHE_FILE, lambda fh: fh.write(blob))
     return report

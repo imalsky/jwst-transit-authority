@@ -90,10 +90,6 @@ from importlib.metadata import version as v; \
 assert (v('picaso'), v('photochem')) == ('4.1', '0.9.2'), (v('picaso'), v('photochem')); \
 assert numpy.__version__.startswith('2.'), numpy.__version__"
 
-# Only /data persists on a Space. The forward engine's data root is
-# env-overridable ($VULCAN_FORWARD_DATA), so there are no repo-relative data
-# stubs to fix up: the entrypoint just exports the variable.
-
 COPY entrypoint.sh bootstrap_data.py /srv/app/
 # Spaces run the container as uid 1000; the base image may already ship a
 # UID-1000 user (miniforge does), so create one only if absent and chown
@@ -117,8 +113,7 @@ USER 1000
 # when one already exists), then rebuild the Space. Rebuilding before the
 # dataset carries the trees is fail-closed by design: the data panel reports
 # them missing and every noise step stops with an error.
-ENV VULCAN_PROJECT_ROOT=/srv/vulcan \
-    VULCAN_FORWARD_DATA=/data/retrieval-data \
+ENV VULCAN_FORWARD_DATA=/data/retrieval-data \
     JWST_TOOL_DATA_DIR=/data/jwst-data \
     JWST_TOOL_OUTPUT_DIR=/data/output \
     JWST_TOOL_PANDEIA_PYTHON=/opt/conda/envs/pandeia/bin/python \

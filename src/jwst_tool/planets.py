@@ -129,7 +129,7 @@ PLANETS = {
         tp_table_note=(
             "vulcan_jax bundles atm_HD209_Kzz.txt, but it is a full "
             "thermosphere model: re-gridded onto the chemistry span it reaches "
-            "2997 K at the grid top, above the 2980 K premodit opacity ceiling. "
+            "2997 K at the grid top, above the tool's 2980 K temperature window. "
             "Out-of-window profiles are refused, never clipped, so this planet "
             "keeps the analytic default."),
         note="The classic inflated hot Jupiter (G0V host; solar UV spectrum, "
@@ -173,8 +173,8 @@ CUSTOM_DEFAULTS = PLANETS["wasp39b"]
 # them -- Streamlit does NOT reject an out-of-range session-state value, it
 # silently discards it and the widget falls back to its default, so the two
 # consumers must never drift. Widening a range is a physics decision (PHOENIX
-# grid nodes, premodit opacity ceiling, validated chemistry envelope), not a
-# UI tweak.
+# grid nodes, the forward model's temperature window, validated chemistry
+# envelope), not a UI tweak.
 CUSTOM_FIELD_RANGES = {
     "teff": (3000.0, 7000.0),   # K; PHOENIX + chemistry validity
     "logg": (3.5, 5.5),         # log10 cm s^-2
@@ -247,23 +247,18 @@ _K_B_CGS = 1.380649e-16   # erg/K
 _M_U_CGS = 1.66053907e-24  # g
 
 
-def _gray_cloud_offset(gs_cgs: float, rp_rjup: float, t_eq_k: float) -> float:
-    """log10(kappa * P_top_bar), the constant of the mapping."""
+def gray_cloud_log_kappa(p_top_bar: float, gs_cgs: float, rp_rjup: float,
+                         t_eq_k: float) -> float:
+    """log10 kappa (cm^2/g) of the gray cloud whose slant tau reaches 1 at
+    ``p_top_bar``: log10(kappa * P_top_bar) is the constant of the mapping."""
+    if not float(p_top_bar) > 0.0:
+        raise ValueError(
+            f"cloud top pressure must be > 0 bar (got {p_top_bar!r})")
     g, rp = float(gs_cgs), float(rp_rjup) * R_JUP_CM
     if not (g > 0.0 and rp > 0.0 and float(t_eq_k) > 0.0):
         raise ValueError(
             f"gray cloud mapping needs positive gs_cgs/rp_rjup/t_eq_k (got "
             f"{gs_cgs!r}, {rp_rjup!r}, {t_eq_k!r})")
     h = _K_B_CGS * float(t_eq_k) / (MMW_CLOUD * _M_U_CGS * g)
-    return math.log10(g / (1.0e6 * math.sqrt(2.0 * math.pi * rp / h)))
-
-
-def gray_cloud_log_kappa(p_top_bar: float, gs_cgs: float, rp_rjup: float,
-                         t_eq_k: float) -> float:
-    """log10 kappa (cm^2/g) of the gray cloud whose slant tau reaches 1 at
-    ``p_top_bar``."""
-    if not float(p_top_bar) > 0.0:
-        raise ValueError(
-            f"cloud top pressure must be > 0 bar (got {p_top_bar!r})")
-    return (_gray_cloud_offset(gs_cgs, rp_rjup, t_eq_k)
+    return (math.log10(g / (1.0e6 * math.sqrt(2.0 * math.pi * rp / h)))
             - math.log10(float(p_top_bar)))

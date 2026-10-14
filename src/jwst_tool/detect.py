@@ -49,11 +49,10 @@ N_TRANSITS_CAP = 500
 # Nuisance directions for sigma_detect_proj: T-P parameters, the reference
 # radius, and the cloud deck (an uncertain deck absorbs broadband signal
 # like an offset). Never add the chemistry rows (lnZ, dlnCO, lnKzz) -- they
-# ARE the signal being scored. Must track forward.TP_PARAM_NAMES +
-# forward.CLOUD_FISHER_PARAMS.
+# ARE the signal being scored.
 _NUISANCE_JAC = frozenset(
-    {"Tirr", "Tint", "log_kappa", "log_gamma", "lnR0",
-     "log_kappa_cloud", "alpha_cloud"})
+    {"lnR0", *forward.CLOUD_FISHER_PARAMS,
+     *(p for names in forward.TP_PARAM_NAMES.values() for p in names)})
 
 
 def _segment_rows(seg: np.ndarray) -> list[np.ndarray]:
@@ -177,15 +176,10 @@ def sigma_at_transits(result: dict, n_transits: int) -> np.ndarray:
                       np.asarray(result["floor"]))
 
 
-def _result_nuisance(result: dict) -> list[np.ndarray]:
-    """The evaluated mode's profiled calibration rows: per-segment offset
-    steps."""
-    return _segment_rows(result["seg"]) if "seg" in result else []
-
-
 def _detection_nuisance(result: dict, projected: bool) -> list[np.ndarray]:
-    """Calibration rows, plus local physical nuisance rows when requested."""
-    rows = _result_nuisance(result)
+    """Calibration rows (per-segment offset steps), plus local physical
+    nuisance rows when requested."""
+    rows = _segment_rows(result["seg"])
     if not projected:
         return rows
     names = [str(x) for x in result.get("jac_names", [])]
@@ -260,27 +254,6 @@ def transits_to_target(result: dict, target_sig: float, *,
     return dict(n=None, reachable=False, sig_inf=sig_inf)
 
 
-# Native-grid pixel-census keys, counted BEFORE the worker's finite/positive
-# `good` filter: fully saturated channels have non-finite extracted noise,
-# so a post-filter count reads low (zero for a mode saturated everywhere).
-_NATIVE_PIXEL_KEYS = (
-    "n_pix_native",
-    "n_pix_unusable_dropped",
-    "n_pix_part_sat_native",
-    "n_pix_full_sat_native",
-)
-
-
-def _native_pixel_counts(mode_result: dict) -> dict:
-    """The worker's native-grid pixel census, or None per key.
-
-    None means UNMEASURED (an older payload) -- never substitute zero or the
-    post-filter count, which would report a saturated column as clean.
-    """
-    return {k: (int(mode_result[k]) if mode_result.get(k) is not None else None)
-            for k in _NATIVE_PIXEL_KEYS}
-
-
 def _removed_spectrum(model: dict, mols: list[str], target_mol,
                       order: np.ndarray) -> np.ndarray | None:
     if target_mol is None:
@@ -306,17 +279,10 @@ def _removed_spectrum(model: dict, mols: list[str], target_mol,
         # carrying a thousandth of the emitted flux must not refuse a target.
         # run_model writes this key with every emission model, and _VERSION
         # rides in the cache key, so a readable model always carries it.
-        if "emis_thin_flux_frac_wo" not in model:
-            raise ValueError("cached emission model is missing its removed-molecule certificate")
-        try:
-            cert = np.asarray(model["emis_thin_flux_frac_wo"], dtype=float)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("cached emission model has a malformed certificate") from exc
-        if (cert.ndim != 1 or cert.shape != (len(wo),)
-                or not np.all(np.isfinite(cert))
-                or np.any((cert < 0.0) | (cert > 1.0))):
-            raise ValueError(
-                "cached emission model has a malformed removed-molecule certificate")
+        cert = _emis_evidence(model, "emis_thin_flux_frac_wo", (len(wo),))
+        if np.any(cert > 1.0):
+            raise ValueError("cached emission model has a malformed "
+                             "'emis_thin_flux_frac_wo' (a fraction above 1)")
         frac = float(cert[index])
         if frac > forward.EMIS_THIN_FLUX_FRAC:
             raise ModeUnusable(
@@ -339,7 +305,8 @@ class ModeUnusable(ValueError):
     than showing a traceback for something that is a property of the target."""
 
 
-# Keep the existing padded-band check and check usable cells separately:
+# Band margin for the LSF blur and the emission band certificate. The
+# certificate checks the padded band AND the measured cells separately:
 # thick flux in gaps or margins can dilute a fraction, so a wider band is
 # not conservative. The margin is a support approximation; the smoother
 # internally extends its working grid further to evaluate its kernels.
@@ -361,14 +328,13 @@ def _emis_evidence(model: dict, key: str, shape: tuple) -> np.ndarray:
 
 
 def _certify_emission_band(model: dict, order: np.ndarray, wl_model: np.ndarray,
-                           cell_lo, cell_hi, mode_key: str, target_mol,
-                           blurred: bool) -> None:
+                           cell_lo, cell_hi, mode_key: str, target_mol) -> None:
     """Re-evaluate the thin-bottom gate over the wavelengths THIS mode measures.
 
     The band-global certificate cannot certify a narrower band: a mode
     measuring a small share of the emitted energy amplifies a local leak by the
-    inverse of that share (measured on the shipped columns: 5.9x for MIRI LRS,
-    11.9x for SOSS order 2), so a spectrum can pass at 1% globally while the
+    inverse of that share (5.9x for MIRI LRS on the shipped columns), so a
+    spectrum can pass at 1% globally while the
     band actually being measured is far thinner. Same gate, same threshold,
     restricted support. Raises so the mode is excluded from every ranking and
     forecast rather than reporting a contrast the column cannot support."""
@@ -379,8 +345,7 @@ def _certify_emission_band(model: dict, order: np.ndarray, wl_model: np.ndarray,
     measured = np.zeros(n, dtype=bool)
     for a, b in zip(cell_lo, cell_hi):
         measured |= (wl_model >= a) & (wl_model <= b)
-    if blurred:
-        lo, hi = lo * _LSF_BAND_MARGIN[0], hi * _LSF_BAND_MARGIN[1]
+    lo, hi = lo * _LSF_BAND_MARGIN[0], hi * _LSF_BAND_MARGIN[1]
     m = (wl_model >= lo) & (wl_model <= hi)
     if int(measured.sum()) < 2:
         raise ValueError(
@@ -422,8 +387,8 @@ def _certify_emission_band(model: dict, order: np.ndarray, wl_model: np.ndarray,
 def _usable_pixels(mode_key: str, mode_result: dict) -> tuple:
     wl = binning._validate_wl(mode_result["wl"], f"{mode_key}: wl")
     flux = np.asarray(mode_result["flux"], dtype=float)
-    full = np.asarray(mode_result.get("n_full_sat", np.zeros(wl.size)))
-    partial = np.asarray(mode_result.get("n_part_sat", np.zeros(wl.size)))
+    full = np.asarray(mode_result["n_full_sat"])
+    partial = np.asarray(mode_result["n_part_sat"])
     if wl.size < 2 or flux.shape != wl.shape:
         raise ValueError(f"{mode_key}: pixel wavelength and flux must be aligned 1-D arrays")
     if not np.all(np.isfinite(flux)) or np.any(flux < 0.0):
@@ -465,9 +430,7 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
     depth = depth_raw[order]
     # The model's own resolving power, measured from its grid (correlated-k
     # is fixed at the published k-tables' R = 1000 band grid).
-    _lnw = np.log(wl_model)
-    r_model = (1.0 / float(np.median(np.diff(_lnw)))
-               if _lnw.size > 2 else float("inf"))
+    r_model = 1.0 / float(np.median(np.diff(np.log(wl_model))))
     if float(R_bin) > r_model:
         raise ValueError(
             f"{mode_key}: analysis resolving power R_bin={float(R_bin):g} is "
@@ -486,51 +449,47 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
     if hi <= lo:
         raise ValueError(f"{mode_key}: no overlap between instrument band and model")
 
-    # blur the model to the native R(lambda) when exported; a no-op for
-    # high-R modes. Pixel cells extend at most one native pixel past the
-    # bin span, hence the margin.
-    r_native = mode_result.get("r_native")
+    # blur the model to the native R(lambda), always (a no-op for high-R
+    # modes). Pixel cells extend at most one native pixel past the bin span,
+    # hence the margin.
+    r_nat = np.asarray(mode_result["r_native"], float)
     jac_rows = None
     if "jac" in model:
         jac_rows = [np.asarray(row)[order] for row in model["jac"]]
-    if r_native is not None:
-        r_nat = np.asarray(r_native, float)
-        b_lo = max(float(wl_model.min()), lo * 0.97)
-        b_hi = min(float(wl_model.max()), hi * 1.03)
-        # stellar flux weights the LSF so it forms the observed count ratio
-        # L[F d]/L[F], never the flat depth blur L[d]; same weight for depth,
-        # removed-molecule, and Jacobian rows (operator stays linear in depth).
-        # Degenerate (duplicate-wavelength) pixels are masked out of the
-        # operator; the R(lambda) table excludes them too, since a repeated
-        # abscissa is not a strictly ascending curve.
-        po = np.flatnonzero(~degen)[np.argsort(wl_pix[~degen])]
-        # count DENSITY per d ln(lambda): pandeia's flux is counts per pixel
-        # COLUMN, whose widths vary across a band, and smooth_to_native_r
-        # integrates on a uniform ln-lambda grid
-        dens = flux_pix[po] / np.gradient(np.log(wl_pix[po]))
-        flux_model = np.maximum(np.interp(wl_model, wl_pix[po], dens), 0.0)
-        # R(lambda) must go in ASCENDING wavelength order: the pandeia pixel
-        # grid is dispersion order (MIRI LRS ships it 13.86 -> 5.02 um) and
-        # smooth_to_native_r refuses an out-of-order curve, so this sort is
-        # the contract, not a convenience. The kernel width is the MEASURED
-        # response, R_refdata / the mode's impulse-fitted width
-        # (instruments.LSF_WIDTH): on the slitless modes the PSF, not the
-        # dispersion, sets it.
-        wl_r = wl_pix[po]
-        r_curve = ins.lsf_r(mode_key, wl_r, r_nat[po])
-        depth_sm = binning.smooth_to_native_r(wl_model, depth, wl_r, r_curve,
-                                              b_lo, b_hi, weight=flux_model)
-        depth = depth_sm
-        if depth_wo is not None:
-            depth_wo = binning.smooth_to_native_r(wl_model, depth_wo, wl_r,
-                                                  r_curve, b_lo, b_hi,
-                                                  weight=flux_model)
-        if jac_rows is not None:
-            jac_rows = [binning.smooth_to_native_r(wl_model, row, wl_r,
-                                                   r_curve, b_lo, b_hi,
-                                                   weight=flux_model)
-                        for row in jac_rows]
-    # else: no native-R curve (synthetic input), depth and Jacobians stay unblurred
+    b_lo = max(float(wl_model.min()), lo * _LSF_BAND_MARGIN[0])
+    b_hi = min(float(wl_model.max()), hi * _LSF_BAND_MARGIN[1])
+    # stellar flux weights the LSF so it forms the observed count ratio
+    # L[F d]/L[F], never the flat depth blur L[d]; same weight for depth,
+    # removed-molecule, and Jacobian rows (operator stays linear in depth).
+    # Degenerate (duplicate-wavelength) pixels are masked out of the
+    # operator; the R(lambda) table excludes them too, since a repeated
+    # abscissa is not a strictly ascending curve.
+    po = np.flatnonzero(~degen)[np.argsort(wl_pix[~degen])]
+    # count DENSITY per d ln(lambda): pandeia's flux is counts per pixel
+    # COLUMN, whose widths vary across a band, and smooth_to_native_r
+    # integrates on a uniform ln-lambda grid
+    dens = flux_pix[po] / np.gradient(np.log(wl_pix[po]))
+    flux_model = np.maximum(np.interp(wl_model, wl_pix[po], dens), 0.0)
+    # R(lambda) must go in ASCENDING wavelength order: the pandeia pixel
+    # grid is dispersion order (MIRI LRS ships it 13.86 -> 5.02 um) and
+    # smooth_to_native_r refuses an out-of-order curve, so this sort is
+    # the contract, not a convenience. The kernel width is the MEASURED
+    # response, R_refdata / the mode's impulse-fitted width
+    # (instruments.LSF_WIDTH): on the slitless modes the PSF, not the
+    # dispersion, sets it.
+    wl_r = wl_pix[po]
+    r_curve = ins.lsf_r(mode_key, wl_r, r_nat[po])
+    depth = binning.smooth_to_native_r(wl_model, depth, wl_r, r_curve,
+                                       b_lo, b_hi, weight=flux_model)
+    if depth_wo is not None:
+        depth_wo = binning.smooth_to_native_r(wl_model, depth_wo, wl_r,
+                                              r_curve, b_lo, b_hi,
+                                              weight=flux_model)
+    if jac_rows is not None:
+        jac_rows = [binning.smooth_to_native_r(wl_model, row, wl_r,
+                                               r_curve, b_lo, b_hi,
+                                               weight=flux_model)
+                    for row in jac_rows]
 
     edges = noise_mod.make_bins(lo, hi, R_bin)
     op = binning.build_operator(wl_pix, flux_pix, edges,
@@ -541,7 +500,7 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         # model band the cached certificate was measured on
         _certify_emission_band(model, order, wl_model,
                                op["cell_lo"], op["cell_hi"],
-                               mode_key, target_mol, r_native is not None)
+                               mode_key, target_mol)
     nz = noise_mod.depth_error_bins(mode_result, edges, t_in_s, t_out_s,
                                     n_transits, floor_spec, op=op,
                                     noise_inflation=noise_inflation)
@@ -567,15 +526,15 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         # also profile the T-P/cloud/lnR0 Jacobian directions (conditional)
         sigma_detect_proj = float("nan")
         if jac_bins is not None and jac_names:
-            nuis = steps + [jac_bins[i] for i, n in enumerate(jac_names)
-                            if n in _NUISANCE_JAC]
-            sigma_detect_proj = detection_significance(s_b, nz["sigma"],
-                                                       nuisance=nuis)
+            sigma_detect_proj = detection_significance(
+                s_b, nz["sigma"], nuisance=_detection_nuisance(
+                    dict(seg=seg, jac_bins=jac_bins, jac_names=jac_names),
+                    projected=True))
     else:
         d_wo_b, sigma_detect, sigma_detect_proj = None, float("nan"), float("nan")
 
     # CURATED, never passed through (ins.REPORTED_WARNINGS).
-    warnings = {k: str(v) for k, v in (mode_result.get("warnings") or {}).items()
+    warnings = {k: str(v) for k, v in mode_result["warnings"].items()
                 if k in ins.REPORTED_WARNINGS}
     _adv = ins.ngroup_advisory(
         mode_key, mode_result["ngroup"], mode_result.get("sat_ngroups"))
@@ -604,16 +563,6 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         var_phot=nz["var_phot"], floor=nz["floor"],
         n_transits_eval=int(nz["n_transits"]),
         sigma_detect=sigma_detect, sigma_detect_proj=sigma_detect_proj,
-        median_sigma_ppm=float(np.median(nz["sigma"]) * 1e6),
-        n_bins=int(nz["wl_center"].size),
-        n_pix_degenerate_dropped=int(degen.sum()),
-        # native-grid truth from the worker; None = not measured -- never
-        # substitute the post-filter count
-        **_native_pixel_counts(mode_result),
-        ngroup=int(mode_result["ngroup"]),
-        sat_frac=float(mode_result["sat_frac"]),
-        sat_ngroups=mode_result.get("sat_ngroups"),
-        ramp_search_complete=bool(mode_result.get("ramp_search_complete", True)),
-        saturated=bool(mode_result.get("saturated", False)),
-        t_cycle_s=float(mode_result["t_cycle_s"]),
+        ramp_search_complete=bool(mode_result["ramp_search_complete"]),
+        saturated=bool(mode_result["saturated"]),
     )
