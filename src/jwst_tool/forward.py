@@ -54,8 +54,8 @@ EXTRA_MOLECULES = ["C2", "C2H2", "C2H4", "CH", "CH3", "CN", "CS",
 # GUI preselection: NEVER widen without a measured leave-one-out ppm impact.
 EXTRA_MOLECULES_DEFAULT = ["C2H2", "C2H4", "H2S", "HCN", "NH3", "OCS",
                            "SH", "SO"]
-# Kinetics networks -> the engine's import-frozen (VULCAN_JAX_NETWORK,
-# VULCAN_JAX_ATOM_LIST) pair. "sncho" (89 species) is the Tsai 2023 WASP-39 b
+# Kinetics networks -> the engine's import-frozen (VULCAN3_NETWORK,
+# VULCAN3_ATOM_LIST) pair. "sncho" (89 species) is the Tsai 2023 WASP-39 b
 # network and the default; "ncho" drops sulfur (69 species); "sncho2025" (93)
 # is what current upstream cfg_wasp39b.py ships -- the same lineage plus C3
 # isomers, C3H5 and H2CS. Only "sncho" is science-validated here.
@@ -485,7 +485,7 @@ CLOUD_FISHER_PARAMS = ("log_kappa_cloud", "alpha_cloud")
 KZZ_MODES = ("const", "Pfunc", "JM16", "file")
 
 # tp_mode="file" profile sources.
-TP_FILE_SHIPPED = "shipped"       # the vulcan_jax table bundled for the planet
+TP_FILE_SHIPPED = "shipped"       # the vulcan3 table bundled for the planet
 TP_FILE_UPLOAD = "upload"         # user-supplied table; content-addressed copy
                                   # under <output>/uploads/<sha1>.txt
 
@@ -616,11 +616,11 @@ def check_emission_thin(tau, flux, nu, stage, detail="") -> float:
 def chem_radius_anchor_bar(p_bar, p_btm_dyn: float, rocky: bool) -> float:
     """Pressure (bar) VULCAN anchors ``g = G*Mp/Rp**2`` at, for a built grid.
 
-    Mirrors ``vulcan_jax.atm_setup.compute_mu_dz_g``: the grid INTERFACE
+    Mirrors ``vulcan3.atm_setup.compute_mu_dz_g``: the grid INTERFACE
     nearest 1 bar for a non-rocky planet whose column reaches 1 bar, else the
     column bottom. Test-pinned against the engine, since it is the one rule
     this module restates rather than imports."""
-    from vulcan_jax.atm_setup import compute_pico
+    from vulcan3.atm_setup import compute_pico
 
     pico = np.asarray(compute_pico(np.asarray(p_bar, dtype=np.float64) * 1.0e6))
     if rocky or float(p_btm_dyn) < 1.0e6:
@@ -746,7 +746,7 @@ TP_PARAM_NAMES = {
     # no T-P row -- the T_int row does not certify (canonical_params)
     "picaso_climate": [],
 }
-# tp_mode="file" helpers (light path: no vulcan_jax/jax imports)
+# tp_mode="file" helpers (light path: no vulcan3/jax imports)
 
 def shipped_tp_table_name(planet: str) -> str:
     """Filename of the MEASURED structure table bundled for ``planet``, or ""
@@ -767,7 +767,7 @@ def shipped_tp_table_is_default(planet: str) -> bool:
 
 def _shipped_tp_file(planet: str) -> Path:
     """Path of the shipped T-P/Kzz table for ``planet``, WITHOUT importing
-    vulcan_jax (find_spec only: importing parses the reaction network, far too
+    vulcan3 (find_spec only: importing parses the reaction network, far too
     heavy for the GUI's cache-key path). A planet with no usable table raises
     the reason, never substitutes another planet's atmosphere."""
     name = shipped_tp_table_name(planet)
@@ -779,10 +779,10 @@ def _shipped_tp_file(planet: str) -> Path:
             "Choose tp_mode='guillot', or upload a table "
             "with tp_file='upload'.")
     import importlib.util
-    spec = importlib.util.find_spec("vulcan_jax")
+    spec = importlib.util.find_spec("vulcan3")
     if spec is None or not spec.origin:
         raise RuntimeError(
-            "vulcan_jax is not installed (or has no package origin): "
+            "vulcan3 is not installed (or has no package origin): "
             f"tp_mode='file' with tp_file='shipped' needs its bundled "
             f"atm/{name} table.")
     return Path(spec.origin).parent / "atm" / name
@@ -881,7 +881,7 @@ def _read_tp_table(path: Path, span: tuple | None = None) -> dict:
 
 def _resolve_tp_file(params: dict) -> tuple[Path, str]:
     """(path, content-sha1[:16]) of the requested T-P table: 'shipped' is the
-    vulcan_jax table bundled FOR THIS PLANET; 'upload' is
+    vulcan3 table bundled FOR THIS PLANET; 'upload' is
     params['tp_file_path'], which run_model copies to the content-addressed
     uploads/<sha1>.txt so canonical params alone can re-resolve it."""
     src = str(params.get("tp_file", TP_FILE_SHIPPED))
@@ -904,7 +904,7 @@ def _resolve_tp_file(params: dict) -> tuple[Path, str]:
     else:
         raise ValueError(
             f"tp_file={src!r}: choose '{TP_FILE_SHIPPED}' (the measured table "
-            f"bundled with vulcan_jax for this planet) or '{TP_FILE_UPLOAD}'")
+            f"bundled with vulcan3 for this planet) or '{TP_FILE_UPLOAD}'")
     if not path.exists():
         raise ValueError(f"T-P table not found: {path}")
     sha1 = hashlib.sha1(path.read_bytes()).hexdigest()[:16]
@@ -1799,8 +1799,8 @@ def _assemble_chem(cp: dict, log):
     # a sncho2025 run in the same process be served by sncho2025 and cached
     # under the sncho key.
     _net_path, _net_atoms = NETWORKS[cp["network"]]
-    os.environ["VULCAN_JAX_NETWORK"] = _net_path
-    os.environ["VULCAN_JAX_ATOM_LIST"] = _net_atoms
+    os.environ["VULCAN3_NETWORK"] = _net_path
+    os.environ["VULCAN3_ATOM_LIST"] = _net_atoms
     log(f"[fwd] kinetics network: {cp['network']} ({_net_path}, "
         f"atoms {_net_atoms})")
     from vulcan_forward import vulcan_chem
@@ -1810,7 +1810,7 @@ def _assemble_chem(cp: dict, log):
     # Persistent XLA compile cache, for adjoint_diag's step-VJP: a long cold
     # compile on CPU.
     jax.config.update("jax_compilation_cache_dir",
-                      str(Path.home() / ".cache" / "jax_vulcan"))
+                      str(Path.home() / ".cache" / "vulcan3"))
     jax.config.update("jax_persistent_cache_min_compile_time_secs", 1.0)
 
     tp_eval, n_tp, tp_vals, theta_names = _build_tp(cp, cp["gs_cgs"])
@@ -1896,7 +1896,7 @@ def _assemble_chem(cp: dict, log):
 
     # CFG_ABUNDANCES must equal the loaded cfg's O_H/C_H/N_H/S_H: a wrong set
     # here mislabels every C/O display and every exported abundance.
-    import vulcan_jax as _vj
+    import vulcan3 as _vj
     _cfg_chk = _vj.load_config(config.W39B_CFG_NAME)
     for _k, _v in CFG_ABUNDANCES.items():
         _cfg_v = float(getattr(_cfg_chk, _k))
@@ -2334,8 +2334,8 @@ def run_model(params: dict, log=print) -> Path:
     if _pic:       # no kinetic rate is evaluated under PICASO
         _rate_ex = {"any_outside": 0, "thermal_rows": 0}
     else:
-        from vulcan_jax import runtime_validation as _rv
-        from vulcan_jax.network import parse_network as _parse_network
+        from vulcan3 import runtime_validation as _rv
+        from vulcan3.network import parse_network as _parse_network
         _rate_ex = _rv.rate_temp_range_exposure(
             _parse_network(NETWORKS[cp["network"]][0]), T_check)
         log(f"[fwd] rate T-range exposure: {_rate_ex['any_outside']} of "

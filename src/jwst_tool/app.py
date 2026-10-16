@@ -235,7 +235,7 @@ with st.expander("Validation"):
     st.markdown(
         "This tool includes test suites, as well as other validation checks. "
         "The suites run in CI for each repository: "
-        "[jax-vulcan](https://github.com/imalsky/jax-vulcan), "
+        "[VULCAN3](https://github.com/imalsky/VULCAN3), "
         "[vulcan-forward](https://github.com/imalsky/vulcan-forward), and "
         "[jwst-transit-authority](https://github.com/imalsky/jwst-transit-authority). "
         "For end-to-end tests, see the set of validation figures that I've "
@@ -1231,7 +1231,7 @@ with st.sidebar:
             # silently reverting.
             use_photo = st.checkbox(
                 "Photochemistry (UV photolysis)", key=K("photo"))
-            # default 83 deg = the zenith angle of vulcan_jax's WASP-39 b
+            # default 83 deg = the zenith angle of vulcan3's WASP-39 b
             # config (configs/W39b.yaml); upstream's dayside average is 58 deg
             sl_angle_deg = st.number_input(
                 "Photolysis zenith angle (degrees)", 0.0, 89.0, 83.0, 1.0,

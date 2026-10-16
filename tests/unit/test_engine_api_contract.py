@@ -3,7 +3,7 @@
 `deploy/pins.env` pins the sibling repositories by commit, and
 `test_deploy_pins.py` checks that the Dockerfile and CI agree on those strings.
 What neither can check is whether the pinned pair is COMPATIBLE. Shipping
-VULCAN_JAX at a commit that has removed a parameter alongside vulcan-forward
+VULCAN3 at a commit that has removed a parameter alongside vulcan-forward
 at a commit that still passes it makes every fresh forward model on the
 deployed Space raise TypeError, while three green suites and a passing pin
 test say nothing, because no test called the engine.
@@ -13,7 +13,7 @@ pinned commits, so an incompatible pair fails HERE. It is deliberately a
 signature check, not a run -- it needs no data, no k-tables and no solve.
 
 The sibling repository carries the mirror of this test for its own calls into
-VULCAN-JAX's private API (`vulcan-forward/tests/test_vulcan_jax_private_api.py`).
+VULCAN-JAX's private API (`vulcan-forward/tests/test_vulcan3_private_api.py`).
 """
 from __future__ import annotations
 
@@ -165,7 +165,7 @@ def test_the_engine_calls_in_forward_py_pass_arguments_it_accepts():
 
 
 @pytest.mark.parametrize("dist,mod_name", [("vulcan-forward", "vulcan_forward"),
-                                           ("vulcan-jax", "vulcan_jax")])
+                                           ("vulcan3", "vulcan3")])
 def test_pinned_engine_floor_is_recorded(dist, mod_name):
     """pyproject must state a floor for BOTH engines, and each installed engine
     must meet it. A pin without a floor is a string, not a contract."""
@@ -191,12 +191,12 @@ def test_the_chemistry_radius_anchor_matches_the_engines_own_rule():
     `compute_mu_dz_g` on both branches (gas giant reaching 1 bar; shallow or
     rocky column). If this fails the engine moved its anchor and the tool is
     handing chemistry a radius quoted at the wrong pressure."""
-    if importlib.util.find_spec("vulcan_jax") is None:        # pragma: no cover
+    if importlib.util.find_spec("vulcan3") is None:        # pragma: no cover
         pytest.skip("VULCAN-JAX not installed (light CI job)")
     import numpy as np
     from types import SimpleNamespace
     from jwst_tool import forward
-    from vulcan_jax.atm_setup import compute_mu_dz_g, compute_pico
+    from vulcan3.atm_setup import compute_mu_dz_g, compute_pico
 
     for p_b_bar, p_t_bar, nz, rocky in ((7.6, 1e-7, 100, False),
                                         (300.0, 1e-7, 60, False),

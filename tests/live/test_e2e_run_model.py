@@ -36,7 +36,7 @@ pytestmark = pytest.mark.skipif(
     reason="full-chain e2e (~5 min): set JWST_TOOL_RUN_SLOW=1")
 
 if importlib.util.find_spec("exojax") is None or \
-        importlib.util.find_spec("vulcan_jax") is None:
+        importlib.util.find_spec("vulcan3") is None:
     pytest.skip("RT stack not installed", allow_module_level=True)
 
 FIXTURES = {"vulcan": Path(__file__).parent / "data" / "w39b_v59_reference.npz",
@@ -113,14 +113,14 @@ def test_full_chain_reproduces_the_verified_reference(mode, engine, tmp_path,
     # _VERSION moves with the TOOL; an engine release under the same _VERSION
     # would leave a reference solved by code that no longer runs here.
     import vulcan_forward
-    from vulcan_forward import vulcan_chem  # noqa: F401  freezes the engine env before vulcan_jax loads
-    import vulcan_jax
-    assert (meta["software"]["vulcan-jax"],
+    from vulcan_forward import vulcan_chem  # noqa: F401  freezes the engine env before vulcan3 loads
+    import vulcan3
+    assert (meta["software"]["vulcan3"],
             meta["software"]["vulcan-forward"]) == (
-        vulcan_jax.__version__, vulcan_forward.__version__), (
-        f"fixture solved on vulcan-jax {meta['software']['vulcan-jax']} / "
+        vulcan3.__version__, vulcan_forward.__version__), (
+        f"fixture solved on vulcan3 {meta['software']['vulcan3']} / "
         f"vulcan-forward {meta['software']['vulcan-forward']}, installed is "
-        f"{vulcan_jax.__version__} / {vulcan_forward.__version__} -- "
+        f"{vulcan3.__version__} / {vulcan_forward.__version__} -- "
         "regenerate it (meta['regenerate'])")
     assert key == ref["params_key"], (
         "the canonical parameter set moved since the fixture was generated")

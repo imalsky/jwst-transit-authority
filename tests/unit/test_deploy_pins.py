@@ -23,7 +23,7 @@ _SHA = r"([0-9a-f]{40})"
 def _pins() -> dict:
     out = {}
     for line in PINS.read_text().splitlines():
-        m = re.match(rf"^([A-Z_]+)={_SHA}$", line.strip())
+        m = re.match(rf"^([A-Z0-9_]+)={_SHA}$", line.strip())
         if m:
             out[m.group(1)] = m.group(2)
     return out
@@ -31,7 +31,7 @@ def _pins() -> dict:
 
 def _dockerfile_args() -> dict:
     out = {}
-    for m in re.finditer(rf"^ARG ([A-Z_]+)={_SHA}$",
+    for m in re.finditer(rf"^ARG ([A-Z0-9_]+)={_SHA}$",
                          DOCKERFILE.read_text(), re.MULTILINE):
         out[m.group(1)] = m.group(2)
     return out
@@ -40,7 +40,7 @@ def _dockerfile_args() -> dict:
 def test_sibling_pins_are_full_shas_and_agree():
     pins = _pins()
     args = _dockerfile_args()
-    assert set(pins) == {"VULCAN_JAX_SHA", "VULCAN_FORWARD_SHA"}, pins
+    assert set(pins) == {"VULCAN3_SHA", "VULCAN_FORWARD_SHA"}, pins
     for name, sha in pins.items():
         assert args.get(name) == sha, (
             f"{name}: pins.env has {sha} but the Dockerfile ARG default is "

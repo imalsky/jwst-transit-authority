@@ -117,13 +117,13 @@
  "software": {
   "jwst-transit-authority": "0.60.0",
   "vulcan-forward": "0.15.1",
-  "vulcan-jax": "0.5.1",
+  "vulcan3": "0.5.1",
   "exojax": "2.2.3",
   "jax": "0.7.1",
   "numpy": "1.26.4"
  },
  "repositories": {
-  "vulcan-jax": "9e0f4bd78d16f1cba18ddc59fb4ee63c4b49b86e",
+  "vulcan3": "9e0f4bd78d16f1cba18ddc59fb4ee63c4b49b86e",
   "vulcan-forward": "55613bc30d4c4846548bebd00c6d677cf6109742",
   "jwst-transit-authority": "957e802751836df18ac6df8a76bd492d426884ee"
  }

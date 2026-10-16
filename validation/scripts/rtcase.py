@@ -33,7 +33,7 @@ def build_trt(wl_lo_um: float, wl_hi_um: float):
 
 
 def _masses(species):
-    from vulcan_jax import composition as ba
+    from vulcan3 import composition as ba
     return np.array([ba.compo["mass"][ba.compo_row.index(s)] for s in species])
 
 

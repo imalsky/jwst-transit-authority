@@ -52,8 +52,8 @@ def _found(path: Path) -> str:
 # Python stack (this environment)
 
 _STACK = (
-    ("vulcan_jax", True,
-     'pip install "vulcan-jax @ git+https://github.com/imalsky/jax-vulcan.git"'),
+    ("vulcan3", True,
+     'pip install "vulcan3 @ git+https://github.com/imalsky/VULCAN3.git"'),
     ("vulcan_forward", True,
      'pip install "vulcan-forward @ '
      'git+https://github.com/imalsky/vulcan-forward.git"   (the shared '
@@ -194,11 +194,11 @@ def check_engine_data(base_mols: list[str], extra_mols: list[str]) -> list[Item]
     return items
 
 
-# VULCAN-JAX stellar UV spectra (ship inside the vulcan_jax package)
+# VULCAN-JAX stellar UV spectra (ship inside the vulcan3 package)
 
 def _vulcan_pkg_dir() -> Path | None:
     try:
-        spec = importlib.util.find_spec("vulcan_jax")
+        spec = importlib.util.find_spec("vulcan3")
     except (ImportError, ValueError):
         spec = None
     if spec is None or not spec.origin:
@@ -222,11 +222,11 @@ def check_stellar_uv() -> list[Item]:
     atm = vulcan_atm_dir()
     if atm is None:
         return [Item(
-            key="uv:package", label="stellar UV spectra (vulcan_jax/atm)",
+            key="uv:package", label="stellar UV spectra (vulcan3/atm)",
             status=MISSING, required=True,
-            detail="vulcan_jax is not importable, so its shipped spectra "
+            detail="vulcan3 is not importable, so its shipped spectra "
                    "cannot be located",
-            remedy="Install vulcan-jax (see the python-stack section).")]
+            remedy="Install vulcan3 (see the python-stack section).")]
     items = []
     for fname, label in planets.SFLUX_CHOICES.items():
         p = atm / "stellar_flux" / fname
@@ -235,9 +235,9 @@ def check_stellar_uv() -> list[Item]:
             status=OK if p.is_file() else MISSING, required=True,
             detail=_found(p) if p.is_file() else f"absent: {p}",
             remedy="" if p.is_file() else
-                   "Ships inside the vulcan-jax package (atm/stellar_flux/); "
+                   "Ships inside the vulcan3 package (atm/stellar_flux/); "
                    "a missing file means a broken/partial install -- "
-                   "reinstall vulcan-jax."))
+                   "reinstall vulcan3."))
     return items
 
 

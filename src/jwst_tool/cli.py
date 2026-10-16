@@ -14,7 +14,7 @@
 The GUI launch is equivalent to ``streamlit run src/jwst_tool/app.py``, but
 works from anywhere once the package is installed. Preflight checks catch the
 two external requirements with actionable messages instead of a mid-run stack
-trace: an importable ``vulcan_jax`` package and the Pandeia backend env
+trace: an importable ``vulcan3`` package and the Pandeia backend env
 (``$JWST_TOOL_PANDEIA_PYTHON``). A missing PICASO env
 (``$JWST_TOOL_PICASO_PYTHON``) only prints a note.
 """
@@ -61,12 +61,12 @@ def main() -> int:
         return 2
 
     import importlib.util
-    if importlib.util.find_spec("vulcan_jax") is None:
-        print("jwst-tool: the vulcan_jax package is not installed in this "
+    if importlib.util.find_spec("vulcan3") is None:
+        print("jwst-tool: the vulcan3 package is not installed in this "
               "environment.\n"
               "Install it:\n"
-              '  python -m pip install "vulcan-jax @ '
-              'git+https://github.com/imalsky/jax-vulcan.git"\n'
+              '  python -m pip install "vulcan3 @ '
+              'git+https://github.com/imalsky/VULCAN3.git"\n'
               "Run `jwst-tool data` for the full data-availability report.",
               file=sys.stderr)
         return 2

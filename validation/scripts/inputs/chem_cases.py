@@ -34,8 +34,8 @@ def morning_tp_kzz() -> Path:
     out = OUT / "atm_W39b_morning_TP_Kzz.txt"
     if out.exists():
         return out
-    import vulcan_jax
-    atm = Path(vulcan_jax.__file__).resolve().parent / "atm"
+    import vulcan3
+    atm = Path(vulcan3.__file__).resolve().parent / "atm"
     ev = np.genfromtxt(atm / "atm_W39b_evening_TP_Kzz.txt", skip_header=2)
     mo = np.genfromtxt(atm / "atm_W39b_10Xsolar_Twhole_morning_TP_20deg.txt", skip_header=2)
     k = 10.0 ** np.interp(np.log10(mo[:, 0]), np.log10(ev[:, 0][::-1]),
@@ -58,12 +58,12 @@ def cases():
 
 
 def main(name):
-    from vulcan_forward import vulcan_chem  # must precede any vulcan_jax import
-    import vulcan_jax
-    from vulcan_jax import composition as ba
+    from vulcan_forward import vulcan_chem  # must precede any vulcan3 import
+    import vulcan3
+    from vulcan3 import composition as ba
 
     factor, co_target, morning, photo = cases()[name]
-    base_cfg = vulcan_jax.load_config("W39b")
+    base_cfg = vulcan3.load_config("W39b")
     ovr = {f"{e}_H": float(getattr(base_cfg, f"{e}_H")) * factor for e in ELEMS}
     if co_target is not None:
         ovr["C_H"] = co_target * ovr["O_H"]

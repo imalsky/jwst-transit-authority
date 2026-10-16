@@ -22,7 +22,7 @@ pytestmark = pytest.mark.skipif(
     reason="PICASO live tests: set JWST_TOOL_RUN_SLOW=1")
 
 if any(i.status != datacheck.OK for i in datacheck.check_picaso()) or \
-        importlib.util.find_spec("vulcan_jax") is None:
+        importlib.util.find_spec("vulcan3") is None:
     pytest.skip("PICASO environment, its data or the VULCAN stack not installed",
                 allow_module_level=True)
 

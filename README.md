@@ -40,7 +40,7 @@ environment so that its dependencies do not change the forward-model
 environment.
 
 ```bash
-python -m pip install "vulcan-jax @ git+https://github.com/imalsky/jax-vulcan.git"
+python -m pip install "vulcan3 @ git+https://github.com/imalsky/VULCAN3.git"
 python -m pip install "vulcan-forward @ git+https://github.com/imalsky/vulcan-forward.git"
 python -m pip install "jwst-transit-authority[gui] @ git+https://github.com/imalsky/jwst-transit-authority.git"
 

@@ -39,7 +39,7 @@ pytestmark = pytest.mark.skipif(
     reason="PICASO vs published spectrum (~1 min): set JWST_TOOL_RUN_SLOW=1")
 
 if importlib.util.find_spec("exojax") is None or \
-        importlib.util.find_spec("vulcan_jax") is None:
+        importlib.util.find_spec("vulcan3") is None:
     pytest.skip("RT stack not installed", allow_module_level=True)
 
 DATA = Path(__file__).parent / "data" / "w39b_picaso_prism2023_r100.npz"

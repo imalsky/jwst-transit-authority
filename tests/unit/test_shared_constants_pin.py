@@ -5,7 +5,7 @@ planet mass VULCAN-JAX wants:
 
     Mp = gs_cgs * rp_cm**2 / planets.G_CGS
 
-and `vulcan_jax.atm_setup.surface_gravity` inverts it:
+and `vulcan3.atm_setup.surface_gravity` inverts it:
 
     gs = phy_const.G_grav * Mp / Rp**2
 
@@ -21,7 +21,7 @@ extra import edge. A pin is the fix, in the style of vulcan-forward's
 `_assert_composition_tables`.
 
 VULCAN-JAX is read from SOURCE with `ast`, never imported: the pin needs
-only the literals, and importing `vulcan_jax` sets process-wide JAX config
+only the literals, and importing `vulcan3` sets process-wide JAX config
 (x64) and loads its config module.
 """
 from __future__ import annotations
@@ -35,12 +35,12 @@ import pytest
 from jwst_tool import planets
 
 
-def _vulcan_jax_constant(name: str) -> float:
-    """Read a module-level float from vulcan_jax/phy_const.py without importing."""
-    spec = importlib.util.find_spec("vulcan_jax")
+def _vulcan3_constant(name: str) -> float:
+    """Read a module-level float from vulcan3/phy_const.py without importing."""
+    spec = importlib.util.find_spec("vulcan3")
     if spec is None or not spec.submodule_search_locations:
         pytest.skip(
-            "vulcan_jax is not installed, so the cross-repo constant pin "
+            "vulcan3 is not installed, so the cross-repo constant pin "
             "cannot run. Install the sibling (deploy/pins.env names the "
             "commit) to exercise it.")
     path = Path(list(spec.submodule_search_locations)[0]) / "phy_const.py"
@@ -52,7 +52,7 @@ def _vulcan_jax_constant(name: str) -> float:
                 if isinstance(target, ast.Name) and target.id == name:
                     return float(ast.literal_eval(node.value))
     raise AssertionError(
-        f"vulcan_jax.phy_const no longer defines {name!r}. The gs <-> Mp "
+        f"vulcan3.phy_const no longer defines {name!r}. The gs <-> Mp "
         f"round-trip in forward.py depends on it; find where it moved and "
         f"re-point this pin rather than deleting the check.")
 
@@ -64,16 +64,16 @@ def _vulcan_jax_constant(name: str) -> float:
     # R_sun converts rstar_rsun on both sides; same argument as G.
     ("r_sun", planets.R_SUN_CM, True),
     # AU differs at the 9th digit (IAU 2012 exact 1.495978707e13 here vs
-    # vulcan_jax's 1.49597871e13): it only converts orbit_au into local
+    # vulcan3's 1.49597871e13): it only converts orbit_au into local
     # irradiation geometry and never crosses into the chemistry. The
     # tolerance keeps that true.
     ("au", planets.AU_CM, False),
 ])
-def test_constants_match_vulcan_jax(name, ours, exact):
-    theirs = _vulcan_jax_constant(name)
+def test_constants_match_vulcan3(name, ours, exact):
+    theirs = _vulcan3_constant(name)
     if exact:
         assert ours == theirs, (
-            f"{name}: {ours!r} here vs {theirs!r} in vulcan_jax.phy_const. "
+            f"{name}: {ours!r} here vs {theirs!r} in vulcan3.phy_const. "
             "Change both together or not at all.")
     else:
         rel = abs(ours - theirs) / theirs

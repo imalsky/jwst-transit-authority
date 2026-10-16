@@ -292,7 +292,7 @@ def test_embedded_tp_table_is_all_or_nothing(tmp_path):
 
 def test_provenance_block_is_complete_and_portable(tmp_path):
     """Release provenance carries no machine paths and reports EVERY declared
-    repository: keying on the GitHub name (`jax-vulcan`) alone misses the
+    repository: keying on the GitHub name (`VULCAN3`) alone misses the
     working copy (`VULCAN-JAX`) and silently drops the solver from every
     export. The identity helper must find the solver under either directory
     name, report an unversioned copy as such, and make a missing repository
@@ -313,12 +313,12 @@ def test_provenance_block_is_complete_and_portable(tmp_path):
     for name, rec in repos.items():
         assert rec["commit"], f"{name} carries no commit field"
 
-    # VULCAN-JAX and jax-vulcan are the same repository
-    for directory in ("VULCAN-JAX", "jax-vulcan"):
+    # VULCAN-JAX, VULCAN3 and the old jax-vulcan are the same repository
+    for directory in ("VULCAN-JAX", "VULCAN3", "jax-vulcan"):
         workspace = tmp_path / directory
         (workspace / directory / ".git").mkdir(parents=True)
         rec = provenance._repo_identity(
-            workspace, provenance.REPOSITORIES["vulcan-jax"])
+            workspace, provenance.REPOSITORIES["vulcan3"])
         assert rec["directory"] == directory, rec
     # unversioned copy reported as such; genuinely missing repo explicit
     plain = tmp_path / "plain"

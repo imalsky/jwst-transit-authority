@@ -15,14 +15,14 @@ from jwst_tool import noise
 
 
 # Repository identity -> the DIRECTORY names it may sit under; the solver's
-# GitHub repo is `jax-vulcan` but its working copy is usually `VULCAN-JAX`, so
+# GitHub repo is `VULCAN3` but its working copy is usually `VULCAN-JAX`, so
 # a name-only lookup would drop it from every exported block. Every entry is
 # always reported, with an explicit status when absent or unversioned: an
 # omitted row reads as "nothing to record" rather than "not found".
 # vulcan-retrieval is a sibling application and the last two are reference
 # oracles; none of the three is a dependency.
 REPOSITORIES = {
-    "vulcan-jax": ("VULCAN-JAX", "jax-vulcan"),
+    "vulcan3": ("VULCAN-JAX", "VULCAN3", "jax-vulcan"),
     "vulcan-forward": ("vulcan-forward",),
     "jwst-transit-authority": ("jwst-transit-authority", "vulcan-jwst-tool"),
     "vulcan-retrieval": ("vulcan-retrieval",),
@@ -73,7 +73,7 @@ def _repo_identity(workspace: Path, directories: tuple) -> dict:
 
 def _versions() -> dict:
     out = {}
-    for name in ("jwst-transit-authority", "vulcan-forward", "vulcan-jax",
+    for name in ("jwst-transit-authority", "vulcan-forward", "vulcan3",
                  "exojax", "jax", "numpy"):
         try:
             out[name] = metadata.version(name)
@@ -218,7 +218,7 @@ def _ktables() -> dict:
 
 
 # The three code repos a cached result was SOLVED by, in report order.
-PRODUCER_REPOS = ("jwst-transit-authority", "vulcan-forward", "vulcan-jax")
+PRODUCER_REPOS = ("jwst-transit-authority", "vulcan-forward", "vulcan3")
 
 
 @lru_cache(maxsize=1)

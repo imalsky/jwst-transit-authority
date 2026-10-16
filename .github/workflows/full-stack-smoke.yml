@@ -7,11 +7,11 @@ name: full-stack-smoke
 # exercises the condensation path end-to-end:
 #
 #   fresh env
-#   -> install jax-vulcan HEAD (VULCAN-JAX)
+#   -> install VULCAN3 HEAD (VULCAN-JAX)
 #   -> install vulcan-forward HEAD (the shared chemistry+RT engine)
 #   -> install vulcan-retrieval HEAD
 #   -> install jwst-transit-authority HEAD
-#   -> assert vulcan_jax.conden exposes make_conden_spec + build_conden_profile
+#   -> assert vulcan3.conden exposes make_conden_spec + build_conden_profile
 #   -> build + solve a small live-T(P) S8 condensation model (isothermal AND
 #      Guillot) and assert finite output + nonzero S8 condensate
 #
@@ -38,12 +38,12 @@ jobs:
           path: jwst-transit-authority
 
       # Checked out under the workspace's directory name VULCAN-JAX (the
-      # GitHub repo is named jax-vulcan), the name vulcan-retrieval's
+      # GitHub repo is named VULCAN3), the name vulcan-retrieval's
       # validate_env expects.
-      - name: Checkout jax-vulcan HEAD (as VULCAN-JAX)
+      - name: Checkout VULCAN3 HEAD (as VULCAN-JAX)
         uses: actions/checkout@v4
         with:
-          repository: imalsky/jax-vulcan
+          repository: imalsky/VULCAN3
           path: VULCAN-JAX
 
       - name: Checkout vulcan-forward HEAD
@@ -67,7 +67,7 @@ jobs:
           python -m pip install --upgrade pip
           # numpy<2 holds jax at 0.7.1; exojax 2.6.0 alone would allow numpy 2.4 and jax 0.11
           pip install "jax>=0.6.2" "numpy>=1.26,<2" "scipy>=1.12" "exojax==2.6.0" pytest
-          # vulcan-jax's EQ seed imports exogibbs; its declared deps (pyfastchem...) are not needed
+          # vulcan3's EQ seed imports exogibbs; its declared deps (pyfastchem...) are not needed
           pip install --no-deps "exogibbs==0.6.0"
           pip install --no-deps -e ./VULCAN-JAX
           pip install --no-deps -e ./vulcan-forward
@@ -75,16 +75,16 @@ jobs:
           pip install --no-deps -e ./jwst-transit-authority
 
       - name: Capability probe -- the missing-builder guard
-        # Hard gate: a released/installed vulcan-jax that predates the on-graph
+        # Hard gate: a released/installed vulcan3 that predates the on-graph
         # condensation builder fails HERE, regardless of its version string.
         run: |
           python - <<'PY'
-          from vulcan_jax import conden
+          from vulcan3 import conden
           required = ("make_conden_spec", "build_conden_profile")
           missing = [n for n in required if not hasattr(conden, n)]
-          assert not missing, f"vulcan_jax.conden is missing {missing} -- live-T(P) condensation support absent"
-          import vulcan_jax
-          print(f"vulcan-jax {vulcan_jax.__version__}: conden API present ({', '.join(required)})")
+          assert not missing, f"vulcan3.conden is missing {missing} -- live-T(P) condensation support absent"
+          import vulcan3
+          print(f"vulcan3 {vulcan3.__version__}: conden API present ({', '.join(required)})")
           PY
 
       - name: Confirm jwst-tool imports against the installed retrieval

@@ -33,7 +33,7 @@ from packaging.requirements import Requirement
 # (streamlit/pandas) and the Space bootstrap's huggingface_hub. The trailing
 # entries are runtime imports that the roots' metadata does NOT declare; the
 # walker only fills in their versions.
-ROOTS = ["jwst-transit-authority", "vulcan-jax",
+ROOTS = ["jwst-transit-authority", "vulcan3",
          "streamlit", "pandas", "huggingface_hub", "matplotlib",
          "pooch", "sortedcontainers", "cloudpickle",
          "platformdirs", "setuptools", "threadpoolctl", "zstandard",
@@ -44,7 +44,7 @@ ROOTS = ["jwst-transit-authority", "vulcan-jax",
 # checkouts by the Dockerfile, never from PyPI. vulcan-forward MUST be here:
 # it is a hard dependency of jwst-transit-authority with no PyPI release, so pinning
 # it writes a line the --no-deps install cannot resolve and the image fails.
-LOCAL = {"jwst-transit-authority", "vulcan-jax", "vulcan-forward"}
+LOCAL = {"jwst-transit-authority", "vulcan3", "vulcan-forward"}
 # --env picaso: pin only what pip installed. The conda-installed rest is
 # walked, never pinned: a --no-deps pip install of conda's numpy or h5py would
 # replace its HDF5-linked builds.

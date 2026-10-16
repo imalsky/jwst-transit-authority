@@ -53,7 +53,7 @@ _ADJ_VERSION = 4          # bump to invalidate cached adjoint diagnostics
 # peak-VMR layer inside it keeps a deep quenched maximum from hijacking the loss.
 PHOTOSPHERE_P_BAR = (1.0e-5, 1.0e-1)
 
-# Upstream certification thresholds (vulcan_jax.steady_state_grad
+# Upstream certification thresholds (vulcan3.steady_state_grad
 # _ADJOINT_RESID_WARN and _SPREAD_WARN): above these the gradient is reported
 # as a RANKING, not trusted magnitudes.
 RESID_MEDIAN_TRUST = 0.2
@@ -215,8 +215,8 @@ def run_adjoint(params: dict, species: str, log=print) -> Path:
         return jnp.log10(y[Lz, sp] / jnp.sum(y[Lz]))
 
     # --- adjoint machinery (VULCAN-JAX) --------------------------------------
-    from vulcan_jax import chem_funs
-    from vulcan_jax import steady_state_grad as ssg
+    from vulcan3 import chem_funs
+    from vulcan3 import steady_state_grad as ssg
 
     net = chem_funs._NET_JAX
     network = chem_funs._NETWORK
@@ -323,9 +323,9 @@ def run_adjoint(params: dict, species: str, log=print) -> Path:
     # --- dL/dT per layer (input sensitivity, chemistry path) -----------------
     log("[adj] PROG 0.80 per-layer temperature sensitivity dL/dT")
     t1 = time.time()
-    from vulcan_jax.gibbs import load_nasa9
-    from vulcan_jax import rates_jax
-    from vulcan_jax.phy_const import kb
+    from vulcan3.gibbs import load_nasa9
+    from vulcan3 import rates_jax
+    from vulcan3.phy_const import kb
 
     cfg = integ._cfg
     nasa9, _present = load_nasa9(network.species,

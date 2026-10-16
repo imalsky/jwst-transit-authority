@@ -18,8 +18,8 @@ if ("JWST_TOOL_OUTPUT_DIR" not in os.environ
     atexit.register(shutil.rmtree, os.environ["JWST_TOOL_OUTPUT_DIR"], True)
 
 # Import order is load-bearing (vulcan_forward.vulcan_chem freezes the
-# VULCAN_JAX_* env vars and jax x64 before vulcan_jax loads), and a unit test
-# may reach a helper that imports vulcan_jax on its own -- which then freezes
+# VULCAN3_* env vars and jax x64 before vulcan3 loads), and a unit test
+# may reach a helper that imports vulcan3 on its own -- which then freezes
 # the WRONG network for every engine test after it in the process. Take the
 # order here, once. Guarded: the light suite runs with no engine installed.
 try:

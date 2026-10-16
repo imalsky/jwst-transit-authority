@@ -15,7 +15,7 @@ name = "jwst-transit-authority"
 dynamic = ["version"]
 description = "JWST instrument selector: VULCAN-JAX chemistry -> ExoJAX transmission and emission spectra -> Pandeia ETC noise; conditional template S/N + Fisher forecasts (Streamlit GUI + programmatic API)"
 readme = "README.md"
-# 3.10 floor matches the sibling packages (vulcan-jax, vulcan-forward): the code
+# 3.10 floor matches the sibling packages (vulcan3, vulcan-forward): the code
 # is 3.10-clean and the deliberately-separate Pandeia env carries no constraint here.
 requires-python = ">=3.10"
 license = "GPL-3.0-only"
@@ -39,7 +39,7 @@ dependencies = [
     "stsynphot>=1.4",
     # Shared forward-model engine (this tool does not depend on the retrieval
     # application). The floor is load-bearing: it refuses unknown profile
-    # keys, starts every cold solve from the vulcan-jax equilibrium seed and
+    # keys, starts every cold solve from the vulcan3 equilibrium seed and
     # runs exojax 2.6.0. tests/unit/test_engine_api_contract.py checks the
     # tool's engine calls and profile keys against the installed engine.
     "vulcan-forward>=0.27.1",
@@ -48,7 +48,7 @@ dependencies = [
     # steady_state_grad, rates_jax, gibbs and phy_const (adjoint_diag). The
     # floor refuses removed config keys and seeds with the ExoGibbs
     # Gibbs-equilibrium solve.
-    "vulcan-jax>=0.17.0",
+    "vulcan3>=0.18.0",
 ]
 
 [project.urls]

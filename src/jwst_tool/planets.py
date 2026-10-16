@@ -80,7 +80,7 @@ SFLUX_SOURCES = {
 }
 SFLUX_SOURCES["sflux-GJ1214.txt"] = SFLUX_SOURCES["sflux-GJ436.txt"]
 
-# Per-planet MEASURED structure tables bundled with vulcan_jax (atm/).
+# Per-planet MEASURED structure tables bundled with vulcan3 (atm/).
 #
 # TWO SEPARATE FACTS, deliberately not conflated:
 #   tp_table          the table exists and is SELECTABLE for this planet
@@ -127,7 +127,7 @@ PLANETS = {
         sflux="Gueymard_solar.txt",
         tp_table=None, tp_table_default=False,
         tp_table_note=(
-            "vulcan_jax bundles atm_HD209_Kzz.txt, but it is a full "
+            "vulcan3 bundles atm_HD209_Kzz.txt, but it is a full "
             "thermosphere model: re-gridded onto the chemistry span it reaches "
             "2997 K at the grid top, above the tool's 2980 K temperature window. "
             "Out-of-window profiles are refused, never clipped, so this planet "
@@ -142,7 +142,7 @@ PLANETS = {
         orbit_au=0.0553, t14_hr=2.74,
         sflux="sflux-epseri.txt",
         tp_table=None, tp_table_default=False,
-        tp_table_note="vulcan_jax bundles no measured T-P/Kzz table for this planet.",
+        tp_table_note="vulcan3 bundles no measured T-P/Kzz table for this planet.",
         # Guillot T_int: Sing et al. 2024 (Nature 630, 831) retrieve
         # T_int = 460 +/- 40 K from the CH4 depletion; Welbanks et al. 2024
         # (Nature 630, 836) give > 345 K. The generic 100 K puts the quench

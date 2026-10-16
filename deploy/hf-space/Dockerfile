@@ -27,7 +27,7 @@ RUN conda create -y -n app python=3.12 \
     && conda clean -afy
 
 # Clone directories follow the workspace layout (VULCAN-JAX for the
-# jax-vulcan repository).
+# VULCAN3 repository).
 #
 # RESTART NONCE: 2. Any commit to the Space repo re-runs the platform init
 # steps -- the only restart path an `hf auth login` token has. Bump this
@@ -41,12 +41,12 @@ RUN conda create -y -n app python=3.12 \
 # Changing an ARG default busts the cache of the layers that use it, so the
 # pins are also the cache-bust. The build FAILS on a pin/rev-parse mismatch;
 # BUILD_INFO records the enforced pins.
-ARG VULCAN_JAX_SHA=b372e6510e5c60180e5d9a80fd2339837ef1d19b
+ARG VULCAN3_SHA=b372e6510e5c60180e5d9a80fd2339837ef1d19b
 ARG VULCAN_FORWARD_SHA=430732a8705afb738d180dfe4cd3d0e43e7a782b
 ARG JWST_TOOL_SHA=f153153e89f96e5883c056f2663359394a39be3b
 RUN set -e; \
     for spec in \
-      "VULCAN-JAX https://github.com/imalsky/jax-vulcan.git ${VULCAN_JAX_SHA}" \
+      "VULCAN-JAX https://github.com/imalsky/VULCAN3.git ${VULCAN3_SHA}" \
       "vulcan-forward https://github.com/imalsky/vulcan-forward.git ${VULCAN_FORWARD_SHA}" \
       "jwst-transit-authority https://github.com/imalsky/jwst-transit-authority.git ${JWST_TOOL_SHA}"; do \
       set -- $spec; \
@@ -95,7 +95,7 @@ assert numpy.__version__.startswith('2.'), numpy.__version__"
 COPY entrypoint.sh bootstrap_data.py /srv/app/
 # Spaces run the container as uid 1000; the base image may already ship a
 # UID-1000 user (miniforge does), so create one only if absent and chown
-# numerically. vulcan_jax writes its generated rate code under its package
+# numerically. vulcan3 writes its generated rate code under its package
 # __pycache__ at runtime, so the whole tree is chowned.
 RUN chmod +x /srv/app/entrypoint.sh \
     && (id -u 1000 >/dev/null 2>&1 || useradd -m -u 1000 user) \

@@ -27,7 +27,7 @@ pytestmark = pytest.mark.skipif(
     reason="two cold chemistry solves (~10 min): set JWST_TOOL_RUN_SLOW=1")
 
 if importlib.util.find_spec("exojax") is None or \
-        importlib.util.find_spec("vulcan_jax") is None:
+        importlib.util.find_spec("vulcan3") is None:
     pytest.skip("RT stack not installed", allow_module_level=True)
 
 CASE = Path(__file__).parent / "data" / "toi7169_co_case.json"
