@@ -41,8 +41,8 @@ RUN conda create -y -n app python=3.12 \
 # Changing an ARG default busts the cache of the layers that use it, so the
 # pins are also the cache-bust. The build FAILS on a pin/rev-parse mismatch;
 # BUILD_INFO records the enforced pins.
-ARG VULCAN3_SHA=b372e6510e5c60180e5d9a80fd2339837ef1d19b
-ARG VULCAN_FORWARD_SHA=430732a8705afb738d180dfe4cd3d0e43e7a782b
+ARG VULCAN3_SHA=7f0f00465b7caaf09195a924a8b7caa7813e9d46
+ARG VULCAN_FORWARD_SHA=801f7e7fa077cb0341abb39dbf6fad82904c3092
 ARG JWST_TOOL_SHA=f153153e89f96e5883c056f2663359394a39be3b
 RUN set -e; \
     for spec in \

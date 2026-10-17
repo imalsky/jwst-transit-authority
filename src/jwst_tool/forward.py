@@ -71,7 +71,7 @@ _S_MOLECULES = frozenset({"SO2", "H2S", "OCS", "SO", "SH", "CS", "NS"})
 # (correlated-k over the published tables is the only opacity path).
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
 DT_MAX_S = 1.0e13   # chemistry step-size cap (s); prevents the adaptive-dt balloon
-_VERSION = 59  # model_cache buster (identity = canonical params + this
+_VERSION = 60  # model_cache buster (identity = canonical params + this
                # number, never a content hash); bump on any physics or
                # canonical-key-set change.
 
@@ -2145,8 +2145,10 @@ def run_model(params: dict, log=print) -> Path:
 
         science_mode picks the observable behind the SAME signature:
         transmission -> transit depth (Rp(lambda)/Rstar)^2; emission ->
-        eclipse depth (Fp/Fs) * (Rp/Rs)^2 * e^{2 lnR0}. Every downstream
-        consumer is observable-agnostic through this function."""
+        eclipse depth (Fp/Fs) * (Rp/Rs)^2. In both, lnR0 is the engine's
+        radius change at fixed planet mass (radius e^lnR0, gravity
+        e^(-2 lnR0) at p_ref). Every downstream consumer is
+        observable-agnostic through this function."""
         to_art_b = interp_map.make_to_art(chem_b.p_bar, rt.p_art_bar)
         # a PICASO climate build carries its own T (a T_int stencil point
         # solves its own profile); every VULCAN file-mode build shares one
@@ -2188,10 +2190,10 @@ def run_model(params: dict, log=print) -> Path:
                         "removed-molecule spectra come from "
                         "emis.eclipse_flux_tau (run_model owns that call).")
                 fp, tau = emis.eclipse_flux_tau(
-                    vmr, vmr_h2, T_art, mmw_art, vmr_he=vmr_he, cloud=cl)
-                rp_em = emis.emission_radius(T_art, mmw_art)
-                dep = (fp / fs_j) * (rp_em ** 2 / _rstar_cm_sq) * jnp.exp(
-                    2.0 * jnp.asarray(lnR0))
+                    vmr, vmr_h2, T_art, mmw_art, vmr_he=vmr_he, cloud=cl,
+                    lnR0=lnR0)
+                rp_em = emis.emission_radius(T_art, mmw_art, lnR0=lnR0)
+                dep = (fp / fs_j) * (rp_em ** 2 / _rstar_cm_sq)
                 # Tau is gate evidence, not a differentiated observable.
                 return (dep, jax.lax.stop_gradient(tau)) if return_tau else dep
             if return_tau:
@@ -2399,8 +2401,7 @@ def run_model(params: dict, log=print) -> Path:
                 f"{100.0 * EMIS_THIN_FLUX_FRAC:g}% tolerance, so the run "
                 "proceeds; treat those wavelengths as unmodeled.")
 
-        # the stored depth via depth_fn's expression at lnR0 = 0 (bitwise: its
-        # exp(2 lnR0) factor is exactly 1)
+        # the stored depth via depth_fn's expression at lnR0 = 0
         _rp_em = emis.emission_radius(_prof0[2], _prof0[3])
 
         def _emis_depth(fp):
@@ -2751,11 +2752,16 @@ def run_model(params: dict, log=print) -> Path:
             fd_err.append(np.nan)
             row_method.append("ad-jvp")
         else:
-            # lnR0 scales the depth by exp(2 lnR0) and nothing else: Fp and
-            # the bottom tau are bitwise the gated baseline's
-            d_rp = np.asarray(depth_from_y(y_sol, th0, lnR0=+FD_LNR0_STEP))
-            d_rm = np.asarray(depth_from_y(y_sol, th0, lnR0=-FD_LNR0_STEP))
-            jac[-1] = (d_rp - d_rm) / (2.0 * FD_LNR0_STEP)
+            # lnR0 re-hangs the column at fixed planet mass (radius and
+            # gravity move together), so in emission the flux and the bottom
+            # optical depth move too: each point is gated like a deck row's.
+            def _d_r(step):
+                if emis is None:
+                    return np.asarray(depth_from_y(y_sol, th0, lnR0=step))
+                dep, tau = depth_from_y(y_sol, th0, lnR0=step, return_tau=True)
+                return np.asarray(_gate_emis(dep, tau, f"FD lnR0 {step:+g}"))
+            jac[-1] = ((_d_r(FD_LNR0_STEP) - _d_r(-FD_LNR0_STEP))
+                       / (2.0 * FD_LNR0_STEP))
             fd_h.append(FD_LNR0_STEP)
             fd_err.append(np.nan)   # single central diff: truncation unmeasured
             row_method.append("fd-rt")

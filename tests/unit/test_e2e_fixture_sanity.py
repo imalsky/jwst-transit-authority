@@ -26,7 +26,7 @@ _DATA = Path(__file__).parent.parent / "live" / "data"
 
 
 # the VULCAN default and the PICASO engine's default (climate T-P)
-@pytest.fixture(scope="module", params=["w39b_v59_reference.npz",
+@pytest.fixture(scope="module", params=["w39b_v60_reference.npz",
                                         "w39b_picaso_reference.npz"])
 def fixture(request):
     path = _DATA / request.param

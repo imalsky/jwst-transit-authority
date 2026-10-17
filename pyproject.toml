@@ -42,7 +42,7 @@ dependencies = [
     # keys, starts every cold solve from the vulcan3 equilibrium seed and
     # runs exojax 2.6.0. tests/unit/test_engine_api_contract.py checks the
     # tool's engine calls and profile keys against the installed engine.
-    "vulcan-forward>=0.27.1",
+    "vulcan-forward>=0.29.0",
     # Direct imports: load_config (the CFG_ABUNDANCES drift check),
     # atm_setup, network and runtime_validation (forward), and chem_funs,
     # steady_state_grad, rates_jax, gibbs and phy_const (adjoint_diag). The
