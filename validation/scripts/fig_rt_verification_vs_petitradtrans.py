@@ -1,9 +1,9 @@
 """Radiative transfer vs petitRADTRANS 3.4.0 on the engine's committed
 fixtures (isothermal H2O transmission, the WASP-39 b eight-species column,
 H2O emission) and a grey absorber vs the Lecavelier des Etangs et al. (2008)
-closed form. Inputs: validation/data/prt_ref/prt_ref_*.npz and
-wasp39b_10Xsolar_evening_vulcan.txt (vulcan-forward's own test fixtures) plus
-the installed ExoMolOP k-tables.
+closed form. Inputs: validation/data/prt_ref/prt_ref_*.npz (vulcan-forward's
+own test fixtures), the W39b column validation/data/ers2023/photochem/
+wasp39b_10Xsolar_evening_vulcan.txt, and the installed ExoMolOP k-tables.
 
     JAX_PLATFORM_NAME=cpu python validation/scripts/fig_rt_verification_vs_petitradtrans.py
 """
@@ -54,7 +54,8 @@ def w39b_8species():
     mols = ["H2O", "CH4", "CO", "CO2", "H2S", "SH", "SO", "SO2"]
     cols = ["P_dyn", "T", "z", "mu", "H2", "H2O", "CH4", "CO", "CO2", "H2S",
             "S", "S2", "SH", "SO", "SO2"]
-    raw = np.genfromtxt(DATA / "wasp39b_10Xsolar_evening_vulcan.txt", skip_header=2)
+    raw = np.genfromtxt(fs.DATA / "ers2023" / "photochem" / "wasp39b_10Xsolar_evening_vulcan.txt",
+                        skip_header=2)
     c = {k: raw[:, i] for i, k in enumerate(cols)}
     ps = c["P_dyn"] / 1e6
     order = np.argsort(ps)
@@ -135,14 +136,14 @@ for ax, (wl, ours, ref), ylabel in (
         (a, isothermal_h2o(), "transit radius (km)"),
         (b, w39b_8species(), "transit depth (ppm)"),
         (c, emission_h2o(), "$F_\\lambda$ (10$^{11}$ erg s$^{-1}$ cm$^{-2}$ cm$^{-1}$)")):
-    overlay2(ax, wl, ref, ours, ("petitRADTRANS 3.4.0", "VULCAN-JAX"))
+    overlay2(ax, wl, ref, ours, ("petitRADTRANS 3.4.0", "VULCAN3"))
     ax.set_xlabel(r"wavelength ($\mu$m)"); ax.set_ylabel(ylabel)
     print(f"  {ylabel}: max |delta| {100 * np.max(np.abs(ours / ref - 1)):.3f} %")
 legend(a)
 
 kap, h_eng, h_ana = grey_absorber()
 d.plot(kap, h_ana, color=INK, lw=1.5, label="Lecavelier des Etangs et al. 2008")
-d.plot(kap, h_eng, "o", ms=MS, color=RED, ls="", label="VULCAN-JAX")
+d.plot(kap, h_eng, "o", ms=MS, color=RED, ls="", label="VULCAN3")
 d.set_xscale("log")
 d.set_xlabel(r"grey opacity (cm$^2$ g$^{-1}$)")
 d.set_ylabel(r"transit height above $p_\mathrm{ref}$ ($H$)")

@@ -1,5 +1,5 @@
 """WASP-39 b on its default Guillot profile at one constant Kzz = 1e9 cm^2/s:
-VULCAN-JAX kinetics with photolysis off against PICASO's quench approximation
+VULCAN3 kinetics with photolysis off against PICASO's quench approximation
 (Zahnle & Marley 2014 timescales, kinetic CO2) and PICASO equilibrium --
 mixing ratios (left) and transmission spectra at R = 100 (right). Inputs:
 validation/data/picaso_spectra_*.npz (inputs/picaso_cases.py spectra_*).
@@ -37,7 +37,7 @@ fig, (ax, bx) = panels(1, 2)
 for s, c in zip(SPECIES, CYC):
     ax.plot(vul[f"y_{s}"], vul["p_bar"], color=pastel(c), lw=2.5, solid_capstyle="round", label=LABEL[s])
     ax.plot(q[f"y_{s}"], q["p_bar"], color=c, lw=1.2, **DASH_KW)
-ax.plot([], [], color=pastel(INK), lw=2.5, label="VULCAN-JAX kinetics")
+ax.plot([], [], color=pastel(INK), lw=2.5, label="VULCAN3 kinetics")
 ax.plot([], [], color=INK, lw=1.2, label="PICASO quench", **DASH_KW)
 ax.set_xscale("log"); ax.set_yscale("log")
 ax.set_ylim(vul["p_bar"].max(), vul["p_bar"].min())
@@ -47,7 +47,7 @@ top = max(np.max(z[f"y_{s}"]) for z in (vul, q) for s in SPECIES)
 ax.set_xlim(10.0 ** np.floor(np.log10(lo)), 10.0 ** np.ceil(np.log10(top)))
 ax.set_xlabel("volume mixing ratio"); ax.set_ylabel("pressure (bar)")
 w, dv = binned(vul); _, dq = binned(q); _, de = binned(eq)
-bx.plot(w, dv, color=pastel(INK), lw=2.5, solid_capstyle="round", label="VULCAN-JAX kinetics")
+bx.plot(w, dv, color=pastel(INK), lw=2.5, solid_capstyle="round", label="VULCAN3 kinetics")
 bx.plot(w, dq, color=INK, lw=1.2, label="PICASO quench", **DASH_KW)
 bx.plot(w, de, color=RED, lw=1.2, label="PICASO equilibrium", **DOT_KW)
 bx.set_xlim(w[0], w[-1]); bx.set_xlabel(r"wavelength ($\mu$m)"); bx.set_ylabel("transit depth (ppm)")

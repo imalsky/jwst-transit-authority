@@ -1,4 +1,4 @@
-"""WASP-39 b equilibrium chemistry on one column: VULCAN-JAX's ExoGibbs seed vs
+"""WASP-39 b equilibrium chemistry on one column: VULCAN3's ExoGibbs seed vs
 the PICASO engine (picaso 4.1 / photochem on-the-fly) at the same composition
 (left), and the PICASO engine with and without the Lodders 2020 metals, whose
 silicate condensates take oxygen (right). Shipped WASP-39 b table, 10x solar,
@@ -32,7 +32,7 @@ for s, c in zip(SPECIES, CYC):
     bx.plot(z[f"picaso_full_{s}"], p, color=c, lw=1.2, **DASH_KW)
     m = (p >= 1e-5) & (p <= 1.0) & (z[f"vulcan_{s}"] > 1e-8)
     worst[s] = float(np.abs(np.log10(z[f"picaso_cnos_{s}"][m] / z[f"vulcan_{s}"][m])).max())
-ax.plot([], [], color=pastel(INK), lw=2.5, label="VULCAN-JAX seed (ExoGibbs)")
+ax.plot([], [], color=pastel(INK), lw=2.5, label="VULCAN3 seed (ExoGibbs)")
 ax.plot([], [], color=INK, lw=1.2, label="PICASO (C, N, O, S)", **DASH_KW)
 bx.plot([], [], color=pastel(INK), lw=2.5, label="PICASO (C, N, O, S)")
 bx.plot([], [], color=INK, lw=1.2, label="PICASO (+ metals)", **DASH_KW)

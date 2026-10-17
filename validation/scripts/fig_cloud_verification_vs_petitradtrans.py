@@ -56,7 +56,7 @@ fig, ax = square()
 for tag, c in (("clear", CYC[0]), ("cloudy", CYC[1])):
     bj = binned(wl, ours[tag], edges)
     bp = binned(z[f"wl_um_{tag}"], z[f"depth_ppm_{tag}"], edges)
-    overlay(ax, cen, bp, bj, c, (f"petitRADTRANS, {tag}", f"VULCAN-JAX, {tag}"))
+    overlay(ax, cen, bp, bj, c, (f"petitRADTRANS, {tag}", f"VULCAN3, {tag}"))
     good = np.isfinite(bj) & np.isfinite(bp)
     print(f"{tag:6s} rms {np.sqrt(((bj[good] - bp[good]) ** 2).mean()):5.2f} ppm | "
           f"feature amplitude {np.nanmax(bj) - np.nanmin(bj):6.0f} ppm")
