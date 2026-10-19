@@ -180,6 +180,33 @@ assert not at.exception, [e.value for e in at.exception]
 PY
 echo "[entrypoint] warm-up (data report + one headless app pass) took $(( $(date +%s) - _t0 )) s"
 
+# Solve the default run of each engine (VULCAN, then PICASO with its climate
+# T-P) in the background, so a visitor who presses Run on the defaults gets a
+# cached result instead of a solve of tens of minutes (VULCAN) or hours
+# (PICASO). It drives the app as a visitor does (same parameters, so the same
+# cache key) and holds one run slot while it computes. The results land in
+# the bucket, so only the first boot after a cache key changes pays the
+# solves; later boots find them and only re-render.
+{ python - <<'PY' || echo "[entrypoint] WARNING: default-run warm-up crashed"
+import pathlib, time
+import matplotlib; matplotlib.use("Agg", force=True)
+from streamlit.testing.v1 import AppTest
+import jwst_tool
+for engine in ("vulcan", "picaso"):
+    t0 = time.time()
+    at = AppTest.from_file(str(pathlib.Path(jwst_tool.__file__).with_name("app.py")), default_timeout=600)
+    at.run()
+    at.selectbox(key="n0_provider").set_value(engine).run()
+    [run] = [b for b in at.button if b.label == "Run"]
+    run.click().run(timeout=12 * 3600)
+    problems = [e.value for e in at.exception] + [e.value for e in at.error]
+    if problems or "out" not in at.session_state:
+        print(f"[entrypoint] WARNING: default {engine} run failed: {problems}", flush=True)
+    else:
+        print(f"[entrypoint] default {engine} run cached ({time.time() - t0:.0f} s)", flush=True)
+PY
+} &
+
 # CORS/XSRF off: required for uploads (T-P tables, noise-floor tables) to
 # work behind the Spaces proxy. maxUploadSize caps every upload at 4 MB
 # (a real table is a few KB): the bytes land on the billed bucket and are
