@@ -6,7 +6,7 @@ vulcan_forward nor jwst_tool, so the k-table tree is read straight from the
 engine's data-root contract ($VULCAN_FORWARD_DATA, what
 vulcan_forward.paths.exomolop_dir() resolves):
 
-    ~/venvs/prt/bin/python validation/scripts/inputs/prt_reference.py validation/data/atmos_*.npz
+    ~/VULCAN_Project/.prt-env/bin/python validation/scripts/inputs/prt_reference.py validation/data/atmos_*.npz
 """
 import hashlib
 from importlib.metadata import version
