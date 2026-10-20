@@ -1918,13 +1918,6 @@ def _take_slot(slot: list) -> bool:
                 f"heavy calculations (it is shared, public hardware).{since} "
                 "A default run takes 20-30 min here, so please try again "
                 "later -- previously computed results stay instant.")
-            # a second copy of the tool that sleeps until sent traffic; unset
-            # on the overflow itself, so a full overflow refuses like this
-            overflow = os.environ.get("JWST_TOOL_OVERFLOW_URL")
-            if overflow:
-                st.link_button("Open the overflow instance", overflow,
-                               help="Download this configuration first and "
-                                    "load it there.")
             return False
         slot.append(s)
     return True

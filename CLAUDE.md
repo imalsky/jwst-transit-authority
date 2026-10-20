@@ -203,6 +203,6 @@ a dated entry.
 
 ## Deploy
 
-- Never deploy or touch the Spaces unasked. The runbook (pins, both Spaces, verification)
+- Never deploy or touch the Space unasked. The runbook (pins, the Space, verification)
   is in notes, Hugging Face Space. `test_deploy_pins.py` pins `deploy/pins.env` against
   the Dockerfile.

@@ -11,8 +11,8 @@ date next to a number names the code state it was measured on.
   PICASO the second.
 - Floors `vulcan-forward>=0.29.0`, `vulcan3>=0.18.0` (pyproject). `deploy/pins.env` and
   the Dockerfile pin vulcan3 92c3b1e and vulcan-forward 32adc85 (the 2026-10-20
-  cleanup); the Dockerfile pins the tool at cd67563. The running Spaces were last
-  deployed from the earlier pins (tool b23df79) and are unchanged until a redeploy.
+  cleanup); the Dockerfile pins the tool at cd67563. The running Space was last
+  deployed from the earlier pins (tool b23df79) and is unchanged until a redeploy.
 - Cache versions: `forward._VERSION` 60, `noise.WORKER_VERSION` 12,
   `adjoint_diag._ADJ_VERSION` 4, `picaso_engine.WORKER_VERSION` 3. Default keys:
   transmission `8c37a8320c19c75a` (test-pinned), emission `f4b94ee63633f386`.
@@ -27,9 +27,8 @@ date next to a number names the code state it was measured on.
   cores, tool 0.71.0): 345 passed in 4 h 07 min; longest: emission AD/FD closure 4310 s
   (config cadence) / 2551 s (cadence 1), TOI-7169 b escalation 3498 s, transmission
   closure 1933 / 1381 s, e2e 512 s per mode.
-- Spaces, last read from the Hub API on 2026-10-14: primary
-  `imalsky/jwst-transit-authority` RUNNING on cpu-basic (2 vCPU / 16 GB), sleep 48 h;
-  overflow `imalsky/jwst-transit-authority-overflow` PAUSED (todo). The four live checks
+- Space, last read from the Hub API on 2026-10-14: `imalsky/jwst-transit-authority`
+  RUNNING on cpu-basic (2 vCPU / 16 GB), sleep 48 h. The four live checks
   (cold transmission run, cold emission run, configuration export and reload,
   out-of-range metallicity refusal with its alert mail) last ran on the 0.67.0 deploy.
 - daw environment: the root uv env `VULCAN_Project/.venv` also carries pandeia.engine
@@ -562,12 +561,10 @@ metallicity capped at 10x; picaso 4.1 pinned; climate redistribution 0.5 / 1.0.
   entrypoint symlinks `exomolop` (never copies 4.3 GB), sets `HDF5_USE_FILE_LOCKING=FALSE`
   (the mount does not lock), and symlinks the PICASO CK tables. The base image is pinned
   by digest. BUILD_INFO confirms a deploy; the served HTML title does not.
-- Capacity is a second Space, not a replica: Spaces do not autoscale, and a replica is
-  awake whenever the primary is. The overflow Space is the same shim, pins, secrets and
-  mounts (same bucket, shared model cache) on a 30 min sleep timer; the primary sets
-  `JWST_TOOL_OVERFLOW_URL` and links there on a slot refusal. An in-app self-scaler and a
-  queue were rejected (a new instance never serves the visitor who triggered it; a queue
-  holds a session open for tens of minutes).
+- Capacity is one Space and its slot limit. Spaces do not autoscale, and a replica is
+  awake whenever the primary is. An in-app self-scaler and a queue were rejected (a new
+  instance never serves the visitor who triggered it; a queue holds a session open for
+  tens of minutes); a second overflow Space was removed (Superseded designs).
 - The run slot is taken at the first heavy launch, so a fully cached run renders on a
   booked instance. A refused visitor is told how long the oldest job has run, never a
   promised wait.
@@ -586,14 +583,13 @@ metallicity capped at 10x; picaso 4.1 pinned; climate redistribution 0.5 / 1.0.
 - Updating code: push the content commits; move `deploy/pins.env` and the three
   Dockerfile `ARG *_SHA` (`JWST_TOOL_SHA` = the green-CI content commit;
   `test_deploy_pins.py` checks the siblings and that `JWST_TOOL_SHA` is an ancestor of
-  HEAD); push the bump; then upload the Space files to BOTH Spaces:
+  HEAD); push the bump; then upload the Space files:
 
       uvx --from huggingface_hub python -c "
       from huggingface_hub import HfApi
-      for s in ('imalsky/jwst-transit-authority', 'imalsky/jwst-transit-authority-overflow'):
-          HfApi().upload_folder(repo_id=s, repo_type='space',
-              folder_path='deploy/hf-space', ignore_patterns=['__pycache__*'],
-              commit_message='Pin to <sha>')"
+      HfApi().upload_folder(repo_id='imalsky/jwst-transit-authority',
+          repo_type='space', folder_path='deploy/hf-space',
+          ignore_patterns=['__pycache__*'], commit_message='Pin to <sha>')"
 
   Verify: runtime stage exactly `RUNNING` (not `RUNNING_BUILDING`, while the old
   instance still answers health checks), the three SHAs in the build log, and
@@ -699,7 +695,6 @@ Real, small, and out of todo.md by decision; nothing here changes a shipped numb
 - A proposal-export mode with a read-only seed; a sensitivity display for the
   combined-mode systematic model; an SVD of the whitened design; marginalized forecast
   curves in a non-flat display parameterization.
-- A pre-warm HTTP ping from the primary to wake the overflow Space (untested).
 
 ## Superseded designs
 
@@ -727,6 +722,11 @@ Real, small, and out of todo.md by decision; nothing here changes a shipped numb
 - The per-mode operational-warning subsystem, "How the model works" and "Notes on N
   modes" (removed by the maintainer); `_leg_note` / `legend_title`, never drawn
   (eaaa50f).
+- The overflow Space (`imalsky/jwst-transit-authority-overflow`: the same shim, pins,
+  secrets and mounts on a 30 min sleep timer, linked from the primary on a slot refusal
+  through `JWST_TOOL_OVERFLOW_URL`). Removed 2026-10-20: it sat paused (Hub read
+  2026-10-14), so a refused visitor was sent to an instance that did not wake. A full
+  instance now refuses plainly; one Space plus the slot limit is the capacity model.
 
 ## Do not retry
 

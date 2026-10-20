@@ -6,8 +6,7 @@ section name.
 1. [stale] Raise the `vulcan-forward` floor at its next release: CI and the Dockerfile now pin `32adc85` (no warm-up solve), but pyproject still allows 0.29.0, where every chemistry build runs one extra solve.
 2. [bug?] Cache keys carry no installed engine version, and the Space keys the data revision to the remote dataset HEAD rather than to the mounted bytes, so a cached result can be served for an engine or data state it was not computed on.
 3. [science] Composition Fisher rows keep the baseline's radius/gravity anchor and Guillot T-P while T-P rows and a fresh run re-assemble them; measured negligible on one Guillot case and the TOI-7169 b transmission references, never on an eclipse case since lnR0 moves gravity.
-4. [decision] The overflow Space is paused, so a visitor refused on a full primary gets a link to a Space that does not wake: restart it or unset the primary's `JWST_TOOL_OVERFLOW_URL`.
-5. [low] The README forecast figure carries a "Model caveats" footnote inside the image; the figure rules put explanations outside a figure.
+4. [low] The README forecast figure carries a "Model caveats" footnote inside the image; the figure rules put explanations outside a figure.
 
 ## 1. Engine floor after the profile-key removal
 
@@ -66,17 +65,7 @@ section name.
 - Done: the eclipse numbers are in notes beside the existing ones, and the maintainer
   keeps the design or orders the rows re-anchored.
 
-## 4. Overflow Space paused
-
-- Evidence: notes, Current state (Hub read 2026-10-14: overflow PAUSED). On a slot
-  refusal `app._take_slot` shows "Open the overflow instance" whenever
-  `JWST_TOOL_OVERFLOW_URL` is set; it was set on the primary (not re-read since).
-- A paused Space stays down until restarted on its page.
-- Choices: restart the overflow, or unset the primary's variable so a full primary
-  refuses plainly.
-- Done: the maintainer picks one; the choice goes to notes, Hugging Face Space.
-
-## 5. Caveat footnote inside the README figure
+## 4. Caveat footnote inside the README figure
 
 `validation/scripts/fig_readme_example.py` exports the app's summary figure as the PNG
 download does, and that export draws the model caveats as text under the panels.
