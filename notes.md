@@ -427,12 +427,13 @@ its on-the-fly equilibrium chemistry the abundances (optional quench at one cons
 default off); spectrum, binning, noise and Fisher are the tool's. FD only; lnKzz refused;
 metallicity capped at 10x; picaso 4.1 pinned; climate redistribution 0.5 / 1.0.
 
-- Process split: picaso 4.1 needs numpy >= 2, the stack numpy < 2, so `picaso_worker.py`
-  runs in its own environment. `picaso_engine.py` caches certified results under
-  `output/picaso_cache` (key = sha1 of request + worker version + stack + data revision; T
-  and g rounded so CPU/GPU last bits cannot fragment it), locks per key in a
-  container-local temp directory, and hands `run_model` a VULCAN-shaped column. A cached
-  result that no longer certifies raises at load (the solve is bit-reproducible).
+- Process split: picaso 4.1 (with photochem 0.9.2, both pinned in the picaso locks) needs
+  numpy >= 2, the stack numpy < 2, so `picaso_worker.py` runs in its own environment.
+  `picaso_engine.py` caches certified results under `output/picaso_cache` (key = sha1 of
+  request + worker version + stack + data revision; T and g rounded so CPU/GPU last bits
+  cannot fragment it), locks per key in a container-local temp directory, and hands
+  `run_model` a VULCAN-shaped column. A cached result that no longer certifies raises at
+  load (the solve is bit-reproducible).
 - Composition is IMPOSED: a subclass of picaso's EquilibriumChemistry solves from the
   requested atom fractions and is injected through `inputs['climate']['chemeq_solver']`;
   tripwires assert C/O_rel 1 and mh = Z. picaso's own path scales a Lodders 2020
