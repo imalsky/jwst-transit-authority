@@ -41,7 +41,8 @@ for name, c, lab in (("fgk", CYC[0], "WASP-39 (G8)"), ("mdwarf", CYC[1], "3250 K
 bx.set_xlabel("temperature change, bin edges $-$ picaso 4.1 (K)")
 bx.set_ylim(s["P"].max(), s["P"].min())
 for a in (ax, bx):
-    a.set_yscale("log"); a.set_ylabel("pressure (bar)")
+    a.set_yscale("log")
+    a.set_ylabel("pressure (bar)")
     legend(a)
 m = (nb["P"] > 1e-4) & (nb["P"] < 10)
 for lab, z in (("picaso composition", nb), ("tool composition", tool)):

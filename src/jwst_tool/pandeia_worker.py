@@ -516,7 +516,7 @@ def main():
                 print(f"[pandeia] {key}: ngroup={out[key]['ngroup']} "
                       f"sat={out[key]['sat_frac']:.2f} npix={len(out[key]['wl'])}",
                       flush=True)
-        except Exception:
+        except Exception:   # one failed mode returns its traceback; the other modes still run
             out[key] = {"error": traceback.format_exc()}
             print(f"[pandeia] {key}: FAILED", flush=True)
 

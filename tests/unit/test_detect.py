@@ -277,8 +277,10 @@ def test_projected_score_uses_headline_nuisance_space():
     # the shipped defaults free lnZ and dlnCO and carry only the appended lnR0.
     assert detect.metric_label({"sigma_detect_proj": float("nan")}) \
         == "calibration profiled"
-    lab = lambda names: detect.metric_label(
-        {"sigma_detect_proj": 1.0, "jac_names": names})
+
+    def lab(names):
+        return detect.metric_label({"sigma_detect_proj": 1.0, "jac_names": names})
+
     assert lab(["lnZ", "dlnCO", "lnR0"]) == "calibration + R0 projected"
     assert lab(["Tirr", "log_kappa_cloud", "lnR0"]) == \
         "calibration + T-P + cloud + R0 projected"

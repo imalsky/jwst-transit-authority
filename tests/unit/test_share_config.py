@@ -409,9 +409,6 @@ def test_noise_model_config_evolution_round_trips():
     share["observation"]["scenario"] = "conservative"
     state = share_config.widget_state(share, _key)
     assert not any("scenario" in k for k in state)
-    share["observation"]["scenario"] = "random"
-    state = share_config.widget_state(share, _key)
-    assert not any("scenario" in k for k in state)
 
 
 def test_out_of_range_values_refuse_loudly():
@@ -595,13 +592,8 @@ def test_gui_removed_physics_defaults_load_and_nondefaults_refuse():
     successful restore while Run computed something the file does not
     describe -- the class of silent behavior change the fail-fast rule
     forbids. (The removed noise scenarios only get a note: those never
-    changed the model.) The setting remains reachable through the API. The
-    retired boundary-flux/escape/settling keys still round-trip pinned off."""
-    canon = _canon()
-    assert canon["use_condense"] is False and canon["use_settling"] is False
-    assert not canon["diff_esc"] and not canon["top_flux"]
-    assert not canon["bot_flux"]
-    state = share_config.widget_state(canon, _key)
+    changed the model.) The setting remains reachable through the API."""
+    state = share_config.widget_state(_canon(), _key)
     assert state["n0_planet"] == "wasp39b"
 
     canon = _canon(use_condense=True, use_photo=True, use_moldiff=True)

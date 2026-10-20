@@ -40,10 +40,9 @@ import numpy as np
 # instruments is import-light (stdlib + numpy, safe on the GUI's light path)
 # and owns the data/output root resolution (env-overridable, loud on failure)
 from jwst_tool import instruments as _ins
+from jwst_tool import planets   # installed package: works as module AND as a script
 
 MODEL_CACHE = _ins.MODEL_CACHE
-
-from jwst_tool import planets   # installed package: works as module AND as a script
 
 MOLECULES = ["H2O", "CO2", "CO", "CH4", "SO2"]   # always-on RT set
 # RT additions the network already solves; extra_mols exposes them to the RT.
@@ -1939,9 +1938,6 @@ def _assemble_chem(cp: dict, log):
             prof["cfg_overrides"] = {**prof["cfg_overrides"],
                                      "ini_update_photo_frq": photo_frq,
                                      "final_update_photo_frq": photo_frq}
-        # skip the engine's build-time warm-up SOLVE: this tool certifies its
-        # own solves and never reads baseline_conv_normal.
-        prof["skip_warmup"] = True
         t_b = time.time()
         chem_b = vulcan_chem.build_chem_model(prof, tp_eval=tp_eval,
                                               n_tp_params=n_tp)
@@ -2041,6 +2037,7 @@ def run_model(params: dict, log=print) -> Path:
     # heavy imports AFTER the assembler: vulcan_chem must init env/x64 first
     import jax
     import jax.numpy as jnp
+    from vulcan_forward import constants as _vfc
     from vulcan_forward import exojax_rt
     from vulcan_forward import interp_map
 
@@ -2363,7 +2360,7 @@ def run_model(params: dict, log=print) -> Path:
             / _rstar_cm_sq)
         log(f"[fwd] emission anchor: R_p = "
             f"{_depth_norm_em0 ** 0.5 * cp['rstar_rsun'] * planets.R_SUN_CM / planets.R_JUP_CM:.4f} "
-            f"R_Jup at {emis.p_ref_emission_bar:g} "
+            f"R_Jup at {_vfc.P_REF_EMISSION_BAR:g} "
             f"bar (catalogue transit radius {cp['rp_rjup']:.4f} R_Jup at "
             f"{cp['p_ref_bar']:g} bar)")
         # ONE optical-depth build feeds the flux, the tau-bottom gate, the

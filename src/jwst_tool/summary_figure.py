@@ -426,15 +426,15 @@ def _plot_spectrum(ax, spec: dict) -> None:
         # the grouping is lost.
         _h, _l = ax.get_legend_handles_labels()
         _mode_labels = {str(p["label"]) for p in spec["points"]}
-        _models = [(h, l) for h, l in zip(_h, _l) if l not in _mode_labels]
-        _modes = [(h, l) for h, l in zip(_h, _l) if l in _mode_labels]
+        _models = [(h, lab) for h, lab in zip(_h, _l) if lab not in _mode_labels]
+        _modes = [(h, lab) for h, lab in zip(_h, _l) if lab in _mode_labels]
         if _models and _modes:
             _rows = max(len(_models), len(_modes))
             _blank = Line2D([], [], linestyle="none", marker="none")
             _models += [(_blank, " ")] * (_rows - len(_models))
             _modes += [(_blank, " ")] * (_rows - len(_modes))
             _h = [h for h, _ in _models + _modes]
-            _l = [l for _, l in _models + _modes]
+            _l = [lab for _, lab in _models + _modes]
             _ncol = 2
         else:
             _ncol = 1

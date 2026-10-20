@@ -95,7 +95,8 @@ def spectrum(ax, wl, ours, ej, ek, ylabel, thin=False):
     ax.plot(wl, ej, color=INK, lw=w_top, label="ExoJAX", **DASH_KW)
     ax.plot(wl, ek, color=RED, lw=w_top, label="exo_k 1.3.1", **DOT_KW)
     ax.set_yscale("log")
-    ax.set_xlabel(r"wavelength ($\mu$m)"); ax.set_ylabel(ylabel)
+    ax.set_xlabel(r"wavelength ($\mu$m)")
+    ax.set_ylabel(ylabel)
     print(f"  {ylabel}: max |dsigma/sigma| ExoJAX {np.max(np.abs(ours / ej - 1)):.1e}, "
           f"exo_k {np.max(np.abs(ours / ek - 1)):.1e}")
 
@@ -114,9 +115,14 @@ spectrum(c, binned(wl), binned(ours), binned(ej), binned(ek),
          "H$_2$O cross section at $R$ = 100 (cm$^2$)")
 names = [SUB[m] for m in mols]
 lollipop(b, names, [w_ej_nat[m] for m in mols], [w_ek_nat[m] for m in mols], ("ExoJAX", "exo_k 1.3.1"), colors=(INK, RED))
-b.set_xlim(2e-15, 2e-13); b.set_xlabel(r"worst $|\Delta \log_{10} k|$ per g-point, $R$ = 1000")
+b.set_xlim(2e-15, 2e-13)
+b.set_xlabel(r"worst $|\Delta \log_{10} k|$ per g-point, $R$ = 1000")
 lollipop(d, names, [w_ej_bin[m] for m in mols], [w_ek_bin[m] for m in mols], ("ExoJAX", "exo_k 1.3.1"), colors=(INK, RED))
-lo = min(min(w_ej_bin.values()), min(w_ek_bin.values())); hi = max(max(w_ej_bin.values()), max(w_ek_bin.values()))
-d.set_xlim(lo / 3, hi * 3); d.set_xlabel(r"worst $|\Delta \log_{10} \bar{\sigma}|$ binned to $R$ = 100")
-legend(a); b.legend(loc="upper left"); d.legend(loc="upper left")
+lo = min(min(w_ej_bin.values()), min(w_ek_bin.values()))
+hi = max(max(w_ej_bin.values()), max(w_ek_bin.values()))
+d.set_xlim(lo / 3, hi * 3)
+d.set_xlabel(r"worst $|\Delta \log_{10} \bar{\sigma}|$ binned to $R$ = 100")
+legend(a)
+b.legend(loc="upper left")
+d.legend(loc="upper left")
 save(fig, "ckd_verification_vs_exojax_exok.png")

@@ -81,3 +81,13 @@ version = { attr = "jwst_tool._version.__version__" }
 
 [tool.ruff]
 line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+# Imports that must follow a statement: the GUI smoke test skips before
+# importing streamlit's test harness; the exo_k extractor enables jax x64
+# before importing jax.numpy.
+[tool.ruff.lint.per-file-ignores]
+"tests/unit/test_app_smoke.py" = ["E402"]
+"validation/scripts/inputs/exok_ckd_values.py" = ["E402"]

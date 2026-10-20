@@ -70,7 +70,7 @@ def main(name):
     if morning:
         ovr["atm_file"] = str(morning_tp_kzz())
     profile = dict(vulcan_cfg_name="W39b", use_photo=photo, yconv_cri=0.01,
-                   skip_warmup=True, cfg_overrides=ovr)
+                   cfg_overrides=ovr)
 
     t0 = time.time()
     model = vulcan_chem.build_chem_model(profile)

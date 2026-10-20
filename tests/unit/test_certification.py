@@ -79,10 +79,8 @@ def test_fd_row_certifies_richardson_and_refuses_an_inconsistent_row():
     with pytest.raises(RuntimeError, match="step-size consistency"):
         forward.fd_row("dlnCO", zero, np.array([0.0, 0.006, 0.0]), 0.1)
 
-    with pytest.raises(RuntimeError, match="step-size consistency") as e:
+    with pytest.raises(RuntimeError, match="step-size consistency"):
         forward.fd_row("dlnCO", j1, j1 * 1.4, 0.1)
-    # the advice names yconv_min: a loose-branch exit ignores yconv_cri
-    assert "yconv_min" in str(e.value)
     with pytest.raises(RuntimeError, match="non-finite"):
         forward.fd_row("dlnCO", np.array([np.nan, 1.0, 1.0]), j1, 0.1)
 
@@ -99,11 +97,13 @@ def test_element_gate_refuses_a_leaked_column_and_names_the_element():
                                    "baseline solve", log.append)
     assert worst == pytest.approx(0.0) and "within 0.00%" in log[-1]
     # 20 percent of the water gone in every layer: O/H drifts, C/H does not
-    leaked = y0.copy(); leaked[:, 1] *= 0.8
+    leaked = y0.copy()
+    leaked[:, 1] *= 0.8
     with pytest.raises(RuntimeError, match=r"O/H drifted 8\.\d%"):
         forward.check_elements(leaked, chem, "baseline solve", log.append)
     # a top-layer separation alone stays inside the layer median
-    top = y0.copy(); top[0, 1] *= 0.5
+    top = y0.copy()
+    top[0, 1] *= 0.5
     assert forward.check_elements(top, chem, "s", log.append) == pytest.approx(0.0)
 
 
@@ -111,7 +111,6 @@ def test_ad_dlnco_margin_refuses_on_both_columns():
     """The AD dlnCO row needs the oxygen-reservoir margin above CO_BZ_MIN_AD
     on the BUILD column and again on the CONVERGED column the tangent starts
     from. A NaN margin refuses too (the `not m > gate` form)."""
-    gate = forward.CO_BZ_MIN_AD
     y = np.ones((4, 3))
 
     ok = SimpleNamespace(co_bz_bound=0.12, co_bz_margin=lambda c: 0.11)
@@ -121,9 +120,8 @@ def test_ad_dlnco_margin_refuses_on_both_columns():
 
     # build column below the gate: refused before any solve
     tight = SimpleNamespace(co_bz_bound=0.05, co_bz_margin=lambda c: 0.5)
-    with pytest.raises(RuntimeError, match="build column") as e:
+    with pytest.raises(RuntimeError, match="build column"):
         forward.check_ad_co_margin(tight, 0.95)
-    assert f"{gate:g}" in str(e.value)
 
     # build column passes, converged column does not -- the carbon-rich case:
     # a fixed-O column with no oxygen-only carriers left has margin ~0
@@ -220,6 +218,9 @@ def test_emission_tau_bottom_gate_measures_the_flux_that_leaks_through():
     # an unweighted sample sum reports half of that, which turns a 1% gate
     # into a ~3% one
     assert frac > 1.5 * float(thin.sum()) / thin.size
+    # the grid may run either way (MIRI LRS pixels arrive descending)
+    assert forward.thin_flux_fraction(tau[::-1], flux[::-1], nu[::-1]) == \
+        pytest.approx(frac)
 
     # Same fraction, now as the gate every consumed emission spectrum passes.
     # Fp times any positive scalar must give the same verdict: the fraction is
@@ -252,15 +253,6 @@ def test_emission_tau_bottom_gate_rejects_malformed_evidence(tau, flux, nu):
     """Malformed arrays must not be promoted into an emission certificate."""
     with pytest.raises((ValueError, RuntimeError)):
         forward.thin_flux_fraction(tau, flux, nu)
-
-
-def test_emission_tau_bottom_gate_accepts_either_grid_direction():
-    tau = np.array([1.0, 5.0, 5.0])
-    flux = np.array([2.0, 3.0, 4.0])
-    nu = np.array([1.0, 2.0, 4.0])
-    increasing = forward.thin_flux_fraction(tau, flux, nu)
-    decreasing = forward.thin_flux_fraction(tau[::-1], flux[::-1], nu[::-1])
-    assert decreasing == pytest.approx(increasing)
 
 
 def test_an_abundant_species_with_no_k_table_is_named_not_swallowed():

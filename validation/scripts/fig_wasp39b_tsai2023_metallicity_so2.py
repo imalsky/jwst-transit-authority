@@ -70,10 +70,12 @@ for term, col in zip(TERM, CYC):
     d.plot(pb["so2"], pb["p"], color=pastel(col), lw=4, solid_capstyle="round",
            label=f"Tsai et al. 2023, {term}")
     d.plot(col_o["so2"], col_o["p"], color=col, lw=1.5, label=f"this work, {term}", **DASH_KW)
-d.set_xscale("log"); d.set_yscale("log")
+d.set_xscale("log")
+d.set_yscale("log")
 # The SO2 feature spans 4e-2 to 4e-6 bar in all four columns; the only other
 # SO2 above 1e-9 sits at the column edges (5e-9 bar top, 27-50 bar in Tsai's).
-d.set_xlim(1e-9, None); d.set_ylim(5e-2, 3e-6)
+d.set_xlim(1e-9, None)
+d.set_ylim(5e-2, 3e-6)
 d.set_xlabel("SO$_2$ volume mixing ratio at 10$\\times$ solar")
 d.set_ylabel("pressure (bar)")
 for ax in (a, b, c, d):

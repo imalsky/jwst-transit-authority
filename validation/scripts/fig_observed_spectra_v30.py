@@ -99,6 +99,7 @@ for ax, (key, (lo, hi, d, s), mod, fit_offset, dlabel, ylabel) in zip(axes, PANE
     ax.plot(wl_m[inside], y_b[inside] + off, color=CYC[0], lw=1.2,
             label="this work, fitted offset" if fit_offset else "this work")
     ax.set_xlim(lo.min(), hi.max())
-    ax.set_xlabel(r"wavelength ($\mu$m)"); ax.set_ylabel(ylabel)
+    ax.set_xlabel(r"wavelength ($\mu$m)")
+    ax.set_ylabel(ylabel)
     legend(ax)
 save(fig, "observed_spectra_v30.png")

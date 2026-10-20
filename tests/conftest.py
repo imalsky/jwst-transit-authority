@@ -5,6 +5,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+# CPU unless the caller chose: on a GPU host the CUDA plugin opens every
+# visible card in each test worker. Set before anything imports jax.
+os.environ.setdefault("JAX_PLATFORMS", "cpu")
+
 # run from a checkout without requiring the editable install
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 

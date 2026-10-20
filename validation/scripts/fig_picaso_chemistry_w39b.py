@@ -37,11 +37,14 @@ ax.plot([], [], color=INK, lw=1.2, label="PICASO (C, N, O, S)", **DASH_KW)
 bx.plot([], [], color=pastel(INK), lw=2.5, label="PICASO (C, N, O, S)")
 bx.plot([], [], color=INK, lw=1.2, label="PICASO (+ metals)", **DASH_KW)
 for a in (ax, bx):
-    a.set_xscale("log"); a.set_yscale("log")
-    a.set_ylim(p.max(), p.min()); a.set_ylabel("pressure (bar)")
+    a.set_xscale("log")
+    a.set_yscale("log")
+    a.set_ylim(p.max(), p.min())
+    a.set_ylabel("pressure (bar)")
     # the decade above the most abundant curve, so no curve runs along the frame
     top = max(np.max(z[k]) for k in z.files if k.endswith(tuple(SPECIES)))
-    a.set_xlim(FLOOR, 10.0 ** np.ceil(np.log10(top))); a.set_xlabel("volume mixing ratio")
+    a.set_xlim(FLOOR, 10.0 ** np.ceil(np.log10(top)))
+    a.set_xlabel("volume mixing ratio")
     legend(a, fontsize=8)
 save(fig, "picaso_chemistry_w39b.png")
 print("max |dlog10| PICASO(C,N,O,S) - seed over 1e-5..1 bar:",

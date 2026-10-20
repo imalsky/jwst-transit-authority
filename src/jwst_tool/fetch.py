@@ -280,7 +280,7 @@ def run_fetch(argv: list[str] = ()) -> int:
                 print(f"  already present: {f.label}")
                 continue
             _fetch_one(f)
-        except Exception as e:
+        except Exception as e:        # try every item; the exit code reports any failure
             failures.append((f, e))
             print(f"  FAILED: {f.label}: {e}", file=sys.stderr, flush=True)
     print()

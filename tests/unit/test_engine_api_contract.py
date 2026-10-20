@@ -50,8 +50,7 @@ EXPECTED = {
 RT_NAMESPACE = ["transmission_depth_r", "wl_um", "nu_grid", "p_art_bar",
                 "molecules", "art_ptop_bar", "art_pbtm_bar", "p_ref_bar",
                 "rt_integration", "opacity_mode"]
-EMIS_NAMESPACE = ["eclipse_flux_tau", "emission_radius", "art_pbtm_bar",
-                  "p_ref_emission_bar"]
+EMIS_NAMESPACE = ["eclipse_flux_tau", "emission_radius", "art_pbtm_bar"]
 
 
 def _skip_without_engine():
@@ -103,8 +102,7 @@ def test_the_profile_keys_the_tool_sets_are_ones_the_engine_reads():
     src = (Path(importlib.import_module("vulcan_forward.exojax_rt").__file__)
            .read_text())
     for key in ("art_ptop_bar", "art_pbtm_bar", "rt_integration",
-                "p_ref_bar", "p_ref_emission_bar", "opacity_mode",
-                "art_nlayer"):
+                "p_ref_bar", "opacity_mode", "art_nlayer"):
         assert f'"{key}"' in src, (
             f"the engine never reads profile[{key!r}], so the tool sets a knob "
             "that does nothing")

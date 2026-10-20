@@ -19,7 +19,7 @@ from jwst_tool import forward, planets
 from vulcan_forward import vulcan_chem  # noqa: F401  (env + jax x64; must precede exojax)
 from jwst_tool.stellar import phoenix_surface_flux
 import jax.numpy as jnp
-from vulcan_forward import exojax_rt, interp_map
+from vulcan_forward import constants, exojax_rt, interp_map
 
 OUT = Path(__file__).resolve().parents[2] / "data"
 WL_CMP = (3.03, 5.17)
@@ -98,8 +98,8 @@ else:
     f2 = np.asarray(emis2.emission_flux(vmr_j, z, J(T_art), J(mmw), vmr_he=z))
     r_em2, g_em = exojax_rt._radius_at(jnp.log(J(p_art)), J(T_art), J(mmw), profile["rp_cm"],
                                        profile["gs_cgs"], float(rt2.p_ref_bar),
-                                       float(emis2.p_ref_emission_bar))
+                                       constants.P_REF_EMISSION_BAR)
     out.update(wl_cmp=rt2.wl_um, flux_cmp=f2, g_em=float(g_em), r_em_cmp_cm=float(r_em2),
-               p_ref_emission_bar=float(emis2.p_ref_emission_bar))
+               p_ref_emission_bar=constants.P_REF_EMISSION_BAR)
 np.savez_compressed(OUT / f"atmos_{planet}_{mode}.npz", **out)
 print(f"[{planet} {mode}] wrote atmos_{planet}_{mode}.npz, {time.time() - t0:.0f} s")

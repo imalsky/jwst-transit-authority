@@ -26,10 +26,6 @@ data/cdbs/calspec/
 # too and never one `git add -A` away from the history.
 data/pandeia_data-*/
 data/pandeia_psfs-*/
-# Local working documents, not part of the package.
-CLAUDE.md
-/notes.md
-/todo.md
 
 # Machine-local PHOENIX stellar grid (~1.9 GB). Consumers obtain it via
 # `jwst-tool fetch`; `jwst-tool data` reports status.

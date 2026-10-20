@@ -41,8 +41,6 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-TOOL_DIR = Path(__file__).resolve().parent   # forward.py subprocess lives here
-
 from jwst_tool import datacheck, detect, \
     fisher as fisher_mod, forward
 from jwst_tool import archive
@@ -56,6 +54,8 @@ from jwst_tool import summary_figure
 from jwst_tool import instruments as ins
 from jwst_tool import planets
 from jwst_tool import runlimit
+
+TOOL_DIR = Path(__file__).resolve().parent   # forward.py subprocess lives here
 
 # House figure style: science.mplstyle (the validation figures use the same
 # file) plus summary_figure's white-face overrides, so a downloaded figure

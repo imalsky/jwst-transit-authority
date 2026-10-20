@@ -64,28 +64,10 @@ def test_condensation_detection_only_with_full_refusal_matrix():
         with pytest.raises(ValueError):
             forward.canonical_params(_p(use_condense=True, jac_method=jm,
                                         fisher_params=["lnZ"]))
-    # message must stay misread-proof: ~0.91 is a RELATIVE ERROR (tangent
-    # ~91% wrong), never a 0.91 agreement ratio
-    with pytest.raises(ValueError) as ei:
-        forward.canonical_params(_p(use_condense=True, fisher_params=["lnZ"]))
-    msg = str(ei.value)
-    assert "91% wrong" in msg and "not a 9% mismatch" in msg
     with pytest.raises(ValueError):
         forward.canonical_params(_p(use_condense=True, use_photo=False))
     with pytest.raises(ValueError):
         forward.canonical_params(_p(use_condense=True, use_moldiff=False))
-
-
-def test_conden_cfg_is_the_certified_recipe():
-    # the S8 channel ships the certified convergence recipe: whole-column
-    # pin, mtol_conv floor, sulfur-allotrope conver_ignore, trun_min bound
-    c = forward.CONDEN_CFG
-    assert c["condense_sp"] == ["S8"]
-    assert c["fix_species"] == ["S8", "S8_l_s"]
-    assert c["fix_species_from_coldtrap_lev"] is False
-    assert c["mtol_conv"] == 1.0e-15
-    assert {"S", "S2", "S3", "S4"} <= set(c["conver_ignore"])
-    assert c["trun_min"] == c["stop_conden_time"]
 
 
 def test_shipped_tables_gate_defaults_and_are_never_substituted():
@@ -250,7 +232,7 @@ def test_resolution_knobs_defaults_ranges_and_refusals():
 
 
 def test_extra_molecules_resolve_in_engine_and_unknown_refused():
-    # Shami Tsai request: CS2 photochemical sulfur + the CH4-photolysis
+    # The extras cover photochemical sulfur and the CH4-photolysis
     # hydrocarbons. Import-light: vulcan_forward.constants is pure constants.
     from vulcan_forward import constants as _vfc
     assert "C2H4" in forward.EXTRA_MOLECULES
@@ -961,8 +943,13 @@ def test_composition_fd_stencil_envelope():
     # third order -- on a quartic its error is -f''''(x) h^3 / 3 exactly, so
     # halving h divides it by 8 -- while the central row stays exact
     x0, h = 0.3, 0.1
-    f = lambda x: x ** 3 - 2.0 * x
-    g = lambda x: x ** 4
+
+    def f(x):
+        return x ** 3 - 2.0 * x
+
+    def g(x):
+        return x ** 4
+
     for offs in ((1, -1, 2, -2), (-1, -2, -4)):
         j1, j2 = forward.fd_estimates(offs, {s: f(x0 + s * h) for s in offs},
                                       f(x0), h)

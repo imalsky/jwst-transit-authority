@@ -129,7 +129,7 @@ commit = None
 try:
     raw = m.distribution("pandexo.engine").read_text("direct_url.json")
     commit = (json.loads(raw).get("vcs_info") or {}).get("commit_id") if raw else None
-except Exception: pass
+except Exception: pass  # no readable direct_url.json: the commit stays unknown
 print(json.dumps({"engine": out["pandeia.engine"],
                   "pandexo": out["pandexo.engine"],
                   "pandexo_commit": commit}))'''

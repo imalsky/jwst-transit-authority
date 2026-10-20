@@ -137,7 +137,8 @@ for ax, (wl, ours, ref), ylabel in (
         (b, w39b_8species(), "transit depth (ppm)"),
         (c, emission_h2o(), "$F_\\lambda$ (10$^{11}$ erg s$^{-1}$ cm$^{-2}$ cm$^{-1}$)")):
     overlay2(ax, wl, ref, ours, ("petitRADTRANS 3.4.0", "VULCAN3"))
-    ax.set_xlabel(r"wavelength ($\mu$m)"); ax.set_ylabel(ylabel)
+    ax.set_xlabel(r"wavelength ($\mu$m)")
+    ax.set_ylabel(ylabel)
     print(f"  {ylabel}: max |delta| {100 * np.max(np.abs(ours / ref - 1)):.3f} %")
 legend(a)
 

@@ -471,7 +471,8 @@ def _impulse_mode(key: str, cont_res: dict, line_res: dict, shared: dict) -> dic
     pred, pred_eff = predict(r_s), predict(r_eff)
     lines = {}
     for lam in IMPULSE_LINES_UM:
-        r_at = float(np.interp(lam, wl_s, r_s)); fw = lam / r_at
+        r_at = float(np.interp(lam, wl_s, r_s))
+        fw = lam / r_at
         if not (lo + 5 * fw < lam < hi - 5 * fw):
             continue
         win = np.abs(wl_s - lam) < 6.0 * fw
