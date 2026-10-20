@@ -50,7 +50,9 @@ a dated entry.
 - `forward._VERSION` busts model_cache: bump whenever the physics or the canonical key
   set changes. A bump is incomplete until both e2e fixtures are regenerated
   (`test_e2e_fixture_sanity` fails until they agree; never skip it). Changing
-  `forward.DT_MAX_S` needs a bump.
+  `forward.DT_MAX_S` needs a bump. Every engine pin bump (vulcan3 or vulcan-forward in
+  `deploy/pins.env`, the Dockerfile and CI) needs a bump too: the key carries no engine
+  version, so the Space would serve columns the old engine computed.
 - `noise.WORKER_VERSION` (+ the backend fingerprint) busts noise_cache: bump whenever
   `pandeia_worker.py` output changes. `adjoint_diag._ADJ_VERSION` keys its own cache.
   `picaso_engine.WORKER_VERSION` keys `output/picaso_cache`; PICASO payloads carry

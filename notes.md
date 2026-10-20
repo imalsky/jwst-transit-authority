@@ -316,7 +316,7 @@ gate 0.25.
   1560 at 10x (own vs frozen anchor): corr 0.999997, scale 1.000693, median 0.10% over
   the top-decile bins; ~0.5% at the top of the range. Measured before v60, science mode
   not recorded (the TOI-7169 b reference is transmission); not measured on an eclipse
-  case since lnR0 moves gravity (todo).
+  case since lnR0 moves gravity ("Known and deliberately untracked").
 - T-P rows are FD only (an AD Jacobian cache with a T-P row held a frozen-anchor
   derivative) and rebuild chemistry and T-P at each stencil point. The transmission Tirr
   FD/FD closure passes escalated: corr 0.996898 / scale 1.00571 against an independent 2
@@ -406,7 +406,10 @@ gate 0.25.
   <= 0.0065 ppm (vulcan3 0.10.1 at v57, 0.11.0 at v58). An engine exemption does NOT
   generalize: the engine can move a column (HD 209458 b 0.90 ppm on 0.10.0), and a column
   cached on the Space's persistent `model_cache` is not covered. The key carries no
-  engine version (todo).
+  engine version: accepted by the maintainer (2026-10-20), with every engine pin bump
+  bumping `_VERSION` (CLAUDE.md). The Space reads `data_revision` from the dataset's
+  remote HEAD at boot, so a run made while the mount still holds the old bytes is stored
+  under the new revision; accepted, the mount's update timing not measured.
 - `noise.WORKER_VERSION` (+ backend fingerprint) busts `noise_cache`; held at 12 through
   wording passes and the order-2 removal (no measured field moved).
 - `_PARAM_KEYS_ECHOED` holds the keys `canonical_params` emits but never reads (`version`,
@@ -548,7 +551,8 @@ metallicity capped at 10x; picaso 4.1 pinned; climate redistribution 0.5 / 1.0.
 - `data_revision`: nothing else tracks the science data. The k-tables are symlinked off a
   dataset mount that updates as commits land [I], while `$STATE` keeps `model_cache`
   across restarts. The entrypoint stamps the remote dataset HEAD
-  (`HfApi().dataset_info().sha`), which can differ from the mounted bytes (todo). The
+  (`HfApi().dataset_info().sha`), which can differ from the mounted bytes (accepted,
+  "Cache keys and version history"). The
   dataset repo is private, so the revision needs a read token as the Space's `HF_TOKEN`;
   without one the boot log says "dataset revision unavailable". Read the container log in
   the browser: the `/logs/container` API path is 404.
@@ -684,6 +688,13 @@ Real, small, and out of todo.md by decision; nothing here changes a shipped numb
   keeps a numpy 1/2 `trapz` shim; `planets.py`/`stellar.py` restate constants
   `vulcan_forward.constants` owns; `app._LN10` duplicates `fisher._LN10`;
   `upload_data.sh` stages k-tables from the `vulcan-retrieval` checkout.
+- pyproject's `vulcan-forward` floor still allows 0.29.0, which runs one extra warm-up
+  solve per chemistry build (about 2x chemistry time [E]); CI, the Dockerfile and
+  `deploy/pins.env` pin `32adc85`. Raise the floor at the next vulcan-forward release.
+- Composition FD rows keep the baseline's radius anchor and T-P ("Jacobians and
+  Fisher"); the own-vs-frozen check was never run on an eclipse case.
+- The README forecast figure (`assets/w39b_so2_forecast.png`) carries the model caveats
+  as text under the panels; moving them out is an app change (`summary_figure`).
 - The raw logs and scripts behind several records here (`validation/co_stall/`,
   `validation/co_limits/`, untracked) were deleted 2026-10-20; the numbers in these
   notes are the record.
