@@ -3,7 +3,7 @@
 Open, owed or waiting on a decision, in priority order. Evidence is in notes.md, by
 section name.
 
-1. [blocker] Move the vulcan-forward floor and pins to the release that drops the `skip_warmup` profile key before the next tool release or Space pin bump: on the pinned 0.29.0 every chemistry build now runs the engine's warm-up solve.
+1. [stale] Raise the `vulcan-forward` floor at its next release: CI and the Dockerfile now pin `32adc85` (no warm-up solve), but pyproject still allows 0.29.0, where every chemistry build runs one extra solve.
 2. [bug?] Cache keys carry no installed engine version, and the Space keys the data revision to the remote dataset HEAD rather than to the mounted bytes, so a cached result can be served for an engine or data state it was not computed on.
 3. [science] Composition Fisher rows keep the baseline's radius/gravity anchor and Guillot T-P while T-P rows and a fresh run re-assemble them; measured negligible on one Guillot case and the TOI-7169 b transmission references, never on an eclipse case since lnR0 moves gravity.
 4. [decision] The overflow Space is paused, so a visitor refused on a full primary gets a link to a Space that does not wake: restart it or unset the primary's `JWST_TOOL_OVERFLOW_URL`.
@@ -11,20 +11,17 @@ section name.
 
 ## 1. Engine floor after the profile-key removal
 
-- Evidence: the tool no longer sets `profile["skip_warmup"]` (`forward._assemble_chem`,
-  `_build_chem`) and reads the emission anchor from `vulcan_forward.constants.
-  P_REF_EMISSION_BAR` instead of the engine's echo, because vulcan-forward is removing
-  both profile keys and its build-time warm-up solve. On the pinned 0.29.0 the key still
-  exists with default False, so each
-  `_build_chem` call (geometry probe, baseline, every FD stencil point, AD builds) runs
-  one extra full solve: roughly double the chemistry time of a run [E, from the call
-  count; not measured]. The unit suite does not see it (it builds no chemistry); the
-  slow tier would.
-- Files: `pyproject.toml` (`vulcan-forward>=`), `deploy/pins.env`, the Dockerfile ARGs,
-  `.github/workflows/tests.yml` (installs at the pins).
-- Done: the floor and both pins name a vulcan-forward commit without the warm-up solve;
-  `test_engine_api_contract` and `test_deploy_pins` pass; one cold default run shows no
-  "warming up runner" line in its log.
+- Evidence: the tool no longer sets `profile["skip_warmup"]` and reads the emission
+  anchor from `vulcan_forward.constants.P_REF_EMISSION_BAR`; vulcan-forward `32adc85`
+  removed both profile keys and the build-time warm-up solve. `deploy/pins.env`, the
+  Dockerfile ARGs and CI now pin vulcan3 `92c3b1e` / vulcan-forward `32adc85` (the
+  Dockerfile pins the tool at `cd67563`). An install that resolves vulcan-forward 0.29.0
+  runs one extra full solve per `_build_chem` call (geometry probe, baseline, each FD
+  stencil point, AD builds): roughly double the chemistry time [E, from the call count].
+- Files: `pyproject.toml` (`vulcan-forward>=`), after a vulcan-forward release with a new
+  version.
+- Done: the floor names that release; one cold default run shows no "warming up
+  runner" line in its log.
 
 ## 2. Cache identity: engine version and data revision
 

@@ -7,11 +7,12 @@ date next to a number names the code state it was measured on.
 
 ## Current state
 
-- Tool 0.72.0, main = origin/main at 78e7fd4. VULCAN is the default chemistry engine,
+- Tool 0.72.0 on main after the 2026-10-20 cleanup. VULCAN is the default chemistry engine,
   PICASO the second.
 - Floors `vulcan-forward>=0.29.0`, `vulcan3>=0.18.0` (pyproject). `deploy/pins.env` and
-  the Dockerfile pin vulcan3 7f0f004 (0.18.0) and vulcan-forward 801f7e7 (0.29.0); the
-  Dockerfile pins the tool at b23df79.
+  the Dockerfile pin vulcan3 92c3b1e and vulcan-forward 32adc85 (the 2026-10-20
+  cleanup); the Dockerfile pins the tool at cd67563. The running Spaces were last
+  deployed from the earlier pins (tool b23df79) and are unchanged until a redeploy.
 - Cache versions: `forward._VERSION` 60, `noise.WORKER_VERSION` 12,
   `adjoint_diag._ADJ_VERSION` 4, `picaso_engine.WORKER_VERSION` 3. Default keys:
   transmission `8c37a8320c19c75a` (test-pinned), emission `f4b94ee63633f386`.
