@@ -32,14 +32,13 @@ SPECIES = ["N2O", "C", "S4"]
 
 
 def test_certificate_records_every_field_and_a_failure_names_them():
-    """A passing stage returns the CONV_FIELDS record and logs the branch,
+    """A passing stage returns its seven-field record and logs the branch,
     longdydt, aflux_change and the controlling species@z cell; a failure
     raises naming all of them. Certification is the runner's canonical gate
     (conv_normal AND longdy < yconv_min) -- never loosened here."""
     lines = []
     rec = forward.check_converged(_diag(), "baseline solve", SPECIES,
                                   _chem(), lines.append)
-    assert len(rec) == len(forward.CONV_FIELDS)
     stage, accept, longdy, longdydt, branch, flux, cell = rec
     assert (stage, accept, branch, cell) == ("baseline solve", 1400, 2, "N2O@z42")
     assert (longdy, longdydt, flux) == (0.05, 1e-11, 0.004)

@@ -46,7 +46,7 @@ date next to a number names the code state it was measured on.
   that anchor on carbon (petitRADTRANS chemistry, ATMO, Goyal et al. 2018) differ first
   order in ln(C/O): at C/O 0.7 both C and O differ by ~28%. Abundances are Lodders 2020
   Table 8 present-day (log eps C 8.47, N 7.85, O 8.73, S 7.15, He 10.924), what upstream
-  calls "Lodders 2019". `CO_BASELINE` 0.549 is the cfg's C_H/O_H; `CO_DEFAULT` 0.55.
+  calls "Lodders 2019". The cfg's C_H/O_H is 0.549; `CO_DEFAULT` 0.55.
 - `co_bounds(network, use_photo)`: photolysis on, `CO_MAX` = sncho 0.99, sncho2025 10,
   ncho 10; photolysis off, 10 for all three. `CO_MIN` 0.1 was measured on the three
   photolysis-on rows; the photolysis-off floor is carried over. The permissive bounds are

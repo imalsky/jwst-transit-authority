@@ -267,15 +267,11 @@ def test_vm_mol_pinned_explicitly_and_zeroed_without_moldiff():
 
 
 def test_composition_structural_path_baseline_and_ranges():
-    # CO_BASELINE must be the network cfg's C_H/O_H (~0.549), never the
-    # equilibrium seed's own ratio, which only seeds the initial guess;
-    # run_model additionally cross-checks the live cfg
-    assert abs(forward.CO_BASELINE - 0.549) < 1e-3
     # Composition is ONE structural path -- co_ratio (absolute N_C/N_O)
     # and met_x_solar go straight into the cfg elemental abundances; there
     # are no differential composition knobs in the canonical params
-    # The DEFAULT co_ratio is CO_DEFAULT (the baseline rounded onto the
-    # widgets' 0.05 grid); CO_BASELINE stays the display baseline + cross-check
+    # The DEFAULT co_ratio is CO_DEFAULT (the cfg's C_H/O_H, 0.549, rounded
+    # onto the widgets' 0.05 grid)
     cp = forward.canonical_params(_p())
     assert cp["co_ratio"] == forward.CO_DEFAULT == 0.55
     assert "dco" not in cp and "co_baseline" not in cp

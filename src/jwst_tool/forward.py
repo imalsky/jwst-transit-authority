@@ -82,10 +82,9 @@ _VERSION = 60  # model_cache buster (identity = canonical params + this
 # files, display).
 CFG_ABUNDANCES = {"O_H": 0.00537, "C_H": 0.00295,
                   "N_H": 0.000708, "S_H": 0.000141}
-# Baseline C/O: the number ratio N_C/N_O (not [C/H]/[O/H], not a log) on that
-# set, the ONLY valid basis. Display value only.
-CO_BASELINE = CFG_ABUNDANCES["C_H"] / CFG_ABUNDANCES["O_H"]   # = 0.54935
-# GUI/API default co_ratio: the baseline rounded onto the widgets' 0.05 grid.
+# GUI/API default co_ratio: the baseline C/O, the number ratio N_C/N_O on that
+# set (C_H / O_H = 0.54935; not [C/H]/[O/H], not a log), rounded onto the
+# widgets' 0.05 grid.
 CO_DEFAULT = 0.55
 
 
@@ -250,8 +249,6 @@ def fd_row(name, j1, j2, h):
     return (4.0 * j1 - j2) / 3.0, err   # Richardson: O(h^4) central, O(h^3) one-sided
 
 
-# One record per certified stage; the order the conv_* npz arrays are written in.
-CONV_FIELDS = ("stage", "accept", "longdy", "longdydt", "branch", "flux", "cell")
 # ConvDiag.conv_branch legend (0 = not certified).
 CONV_BRANCH = {1: "tight (yconv_cri)", 2: "loose (yconv_min)"}
 

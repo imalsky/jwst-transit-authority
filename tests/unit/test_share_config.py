@@ -472,68 +472,6 @@ def test_noise_star_round_trips_and_legacy_files_get_a_note():
     assert state["n0_wasp39b_teff"] == 5485.0
 
 
-def test_restore_bounds_match_the_widgets():
-    """The range tables mirror app.py's widget bounds; this AST check pins
-    the mirror so a widget-range edit cannot silently diverge from the
-    restore path. Bounds shared through a constant (forward.*_RANGE,
-    planets.CUSTOM_FIELD_RANGES) cannot drift and are excluded."""
-    import ast
-    import importlib.util
-    from pathlib import Path
-
-    from jwst_tool import planets
-
-    src = Path(importlib.util.find_spec("jwst_tool.app").origin).read_text()
-
-    def _const(node):
-        if isinstance(node, ast.Constant) and isinstance(node.value,
-                                                         (int, float)):
-            return float(node.value)
-        if (isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub)
-                and isinstance(node.operand, ast.Constant)):
-            return -float(node.operand.value)
-        return None
-
-    found: dict = {}
-    for node in ast.walk(ast.parse(src)):
-        if not (isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "number_input"):
-            continue
-        key_arg = next((kw.value for kw in node.keywords
-                        if kw.arg == "key"), None)
-        if not (isinstance(key_arg, ast.Call) and key_arg.args):
-            continue
-        ka = key_arg.args[0]
-        if isinstance(ka, ast.Constant):
-            suffix = str(ka.value)
-        elif (isinstance(ka, ast.JoinedStr) and ka.values
-                and isinstance(ka.values[0], ast.Constant)):
-            suffix = str(ka.values[0].value) + "*"       # dynamic family
-        else:
-            continue
-        if len(node.args) >= 3:
-            lo, hi = _const(node.args[1]), _const(node.args[2])
-            if lo is not None and hi is not None:
-                found.setdefault(suffix, set()).add((lo, hi))
-
-    shared = {"nz"} | set(planets.CUSTOM_FIELD_RANGES)
-    for table in (share_config._GLOBAL_BOUNDS, share_config._PLANET_BOUNDS):
-        for widget, (lo, hi) in table.items():
-            if widget in shared:
-                continue
-            assert widget in found, (
-                f"share_config restores widget {widget!r} but app.py has no "
-                "number_input with that key and literal bounds")
-            assert (float(lo), float(hi)) in found[widget], (
-                f"bounds for {widget!r} differ: share_config has "
-                f"({lo}, {hi}), app.py has {found[widget]}")
-    assert found.get("floor_*") == {share_config._FLOOR_BOUNDS}
-    assert found.get("infl_*") == {share_config._INFL_BOUNDS}
-    assert found.get("tgt_*") == {share_config._TGT_BOUNDS_K,
-                                  share_config._TGT_BOUNDS}
-
-
 def test_provenance_snapshot_records_the_ktables(tmp_path, monkeypatch):
     """The exported provenance names the k-tables a run actually reads
     (dataset, isotopologue, file, curated + header DOI per species),

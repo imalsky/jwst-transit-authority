@@ -50,34 +50,37 @@ def reserved_combo_names() -> set:
     return {ALL_USABLE} | {m["label"] for m in ins.MODES.values()}
 
 
-# Widget ranges mirrored from app.py, cross-checked by
-# tests/unit/test_share_config.py so they cannot drift. Session-global keys.
-# Values canonical_params range-checks itself (nz, p_btm_bar, rfacv, C/O,
-# metallicity) are refused there, before this check runs.
-_GLOBAL_BOUNDS = {
-    "sza": (0.0, 89.0), "fdiur": (0.1, 1.0),
-    "yconv": (1.0e-4, 1.0e-2), "yconvmin": (1.0e-4, 0.1),
-    "ck": (-7.0, 2.0), "ca": (0.0, 4.0), "cpt": (-6.0, 1.0),
-    "rtptop": (1.0e-9, 1.0e-6),
-    "pref": (1.0e-6, 7.0),
-    "tsig": (1.0, 10.0),
-    "ntr": (1, 10), "sat": (0.5, 0.95), "rbin": (25, 500),
-    "seed": (0, 9999), "noisescale": (0.5, 3.0),
-}
-# Per-planet keys (app.py's _k). The system/star fields share
-# planets.CUSTOM_FIELD_RANGES with the widgets; the rest are widget literals.
-_PLANET_BOUNDS = {
+# Every number-input widget's range, keyed by its widget-key suffix: the
+# widgets in app.py and the restore check below both read it, so they cannot
+# drift. An entry is (min, max, default) where the widget is given a fixed
+# default, else (min, max): its default is computed, or its key is always
+# pre-set in session state and takes none. Per-planet widgets (app._k) and
+# session-global ones (app.K) share it; a name is only ever written under one
+# of the two. Values canonical_params range-checks itself (nz, p_btm_bar,
+# rfacv, C/O, metallicity) are refused there, before this check runs, and are
+# not listed.
+WIDGET_RANGES = {
     **planets.CUSTOM_FIELD_RANGES,
     "tbase": (0.5, 20.0),
-    "tirr": (800.0, 2500.0), "tint": (50.0, 500.0),
-    "lk": (-4.0, 0.0), "lg": (-2.0, 0.3),
-    "kzz": (6.0, 12.0), "kzkmax": (4.0, 11.0), "kzplev": (-5.0, 2.0),
-    "kzkdeep": (4.0, 11.0), "kzzx": (-1.0, 1.0),
+    "tirr": (800.0, 2500.0), "tint": forward.TINT_RANGE,
+    "lk": (-4.0, 0.0), "lg": (-2.0, 0.3), "kzz": (6.0, 12.0),
+    "kzkmax": (4.0, 11.0, 5.0), "kzplev": (-5.0, 2.0, -1.0),
+    "kzkdeep": (4.0, 11.0, 5.0), "kzzx": (-1.0, 1.0, 0.0),
+    "sza": (0.0, 89.0, 83.0), "fdiur": (0.1, 1.0, 1.0),
+    "yconv": (*forward.YCONV_RANGE, forward.YCONV_DEFAULT),
+    "yconvmin": (*forward.YCONV_MIN_RANGE, forward.YCONV_MIN_DEFAULT),
+    "ck": (-7.0, 2.0, -1.0), "ca": (0.0, 4.0, 0.0),
+    "cpt": (-6.0, 1.0, -3.0),
+    "rtptop": (1.0e-9, 1.0e-6, forward.RT_PTOP_DEFAULT),
+    "pref": (1.0e-6, 7.0, 1.0e-3),
+    "tsig": (1.0, 10.0),
+    "ntr": (1, 10, 1), "sat": (0.5, 0.95, 0.80), "rbin": (25, 500, 100),
+    "seed": (0, 9999, 0), "noisescale": (0.5, 3.0, 1.0),
+    # per-mode and per-parameter families; the target-uncertainty range
+    # depends on the parameter's unit
+    "floor": (0.0, 200.0), "infl": (1.0, 3.0, 1.0),
+    "tgt_K": (5.0, 500.0), "tgt": (0.01, 3.0),
 }
-_FLOOR_BOUNDS = (0.0, 200.0)
-_INFL_BOUNDS = (1.0, 3.0)
-_TGT_BOUNDS_K = (5.0, 500.0)      # target-uncertainty widget, Kelvin params
-_TGT_BOUNDS = (0.01, 3.0)         # target-uncertainty widget, dex/ratio params
 
 
 def _check_widget_ranges(state: dict, key, pk) -> None:
@@ -86,17 +89,19 @@ def _check_widget_ranges(state: dict, key, pk) -> None:
     Streamlit does not reject an out-of-range session-state value: it
     silently discards it and the widget falls back to its default, which
     would run a different model than the file describes."""
-    checks = {key(w): (w, b) for w, b in _GLOBAL_BOUNDS.items()}
-    checks.update({pk(w): (w, b) for w, b in _PLANET_BOUNDS.items()})
+    checks = {}
+    for w, b in WIDGET_RANGES.items():
+        checks[key(w)] = checks[pk(w)] = (w, b)
     for m in ins.MODES:
-        checks[key(f"floor_{m}")] = (f"floor for {m}", _FLOOR_BOUNDS)
-        checks[key(f"infl_{m}")] = (f"noise multiplier for {m}", _INFL_BOUNDS)
+        checks[key(f"floor_{m}")] = (f"floor for {m}", WIDGET_RANGES["floor"])
+        checks[key(f"infl_{m}")] = (f"noise multiplier for {m}",
+                                    WIDGET_RANGES["infl"])
     for p, unit in fisher.PARAM_UNITS.items():
         checks[key(f"tgt_{p}")] = (
             f"target uncertainty for {p}",
-            _TGT_BOUNDS_K if unit == "K" else _TGT_BOUNDS)
+            WIDGET_RANGES["tgt_K" if unit == "K" else "tgt"])
     bad = []
-    for k, (name, (lo, hi)) in checks.items():
+    for k, (name, (lo, hi, *_)) in checks.items():
         if k in state and not lo <= float(state[k]) <= hi:
             bad.append(f"{name}={float(state[k]):g} outside [{lo:g}, {hi:g}]")
     if bad:
@@ -243,17 +248,10 @@ def _resolve_embedded_tp(cp: dict, cfg: dict):
 
 def _restore_goal(state: dict, cp: dict, goal: dict, key,
                   tp_mode: str, cloud_mode: str = "haze") -> None:
-    cloud_i = (0 if not cp["cloud_on"]
-               else (2 if cloud_mode == "gray" else 1))
     pic = _is_picaso(cp)
-    suffix = f"{'picaso' if pic else 'vulcan'}_{tp_mode}_{cloud_i}"
-    # PICASO offers no lnKzz row (canonical_params refuses it)
-    avail = [p for p in forward.CHEM_PARAM_NAMES
-             if not (pic and p == "lnKzz")] \
-        + list(forward.TP_PARAM_NAMES[tp_mode])
-    if cp["cloud_on"]:
-        avail += [p for p in forward.CLOUD_FISHER_PARAMS
-                  if cloud_mode != "gray" or p != "alpha_cloud"]
+    network = str(cp["network"])
+    suffix = goal_suffix(pic, tp_mode, cp["cloud_on"], cloud_mode)
+    avail = free_parameters(pic, tp_mode, cp["cloud_on"], cloud_mode)
     fisher = [str(p) for p in (goal.get("fisher_params")
                                or cp["fisher_params"])]
     selected_goal = str(goal.get("goal") or "")
@@ -272,14 +270,12 @@ def _restore_goal(state: dict, cp: dict, goal: dict, key,
     if method in ("fd", "ad") and not pic:
         state[key("jacm")] = method
     if selected_goal == "detect":
-        extras = state[key(_xmols_key(cp))]
+        extras = state[key(xmols_key(pic, network))]
         target = goal.get("target_mol")
         if target is not None:
             _offered("detection target", [target], forward.active_molecules(
-                {"network": str(cp["network"]), "extra_mols": extras}))
-            state[key(("mol_picaso_" if pic
-                       else f"mol_vulcan{_network_suffix(cp)}_")
-                      + "_".join(sorted(extras)))] = target
+                {"network": network, "extra_mols": extras}))
+            state[key(target_mol_key(pic, network, extras))] = target
         state[key("dofish")] = bool(goal.get("do_fisher", bool(fisher)))
         if fisher:
             state[key(f"fp_{suffix}")] = fisher
@@ -431,22 +427,53 @@ def _reject_removed_physics(cp: dict) -> None:
             "would change the atmosphere.")
 
 
-def _network_suffix(cp: dict) -> str:
-    """Widget-key suffix for a non-default kinetics network: the sncho keys
-    carry no suffix (shipped key contract), ncho and sncho2025 widgets get
-    their own keys (same pattern as the provider-suffixed molecule keys)."""
-    net = str(cp["network"])
-    return "" if net == "sncho" else f"_{net}"
-
-
 def _is_picaso(cp: dict) -> bool:
     return cp["chem_provider"] == "picaso"
 
 
-def _xmols_key(cp: dict) -> str:
+# Widget-key and menu helpers shared with app.py, so the keys the restore
+# writes are the keys the widgets read.
+def network_suffix(network: str) -> str:
+    """Widget-key suffix for a non-default kinetics network: the sncho keys
+    carry no suffix (shipped key contract), ncho and sncho2025 widgets get
+    their own keys (same pattern as the provider-suffixed molecule keys)."""
+    return "" if network == "sncho" else f"_{network}"
+
+
+def xmols_key(pic: bool, network: str) -> str:
     """The extra-molecule widget key: PICASO's own, else per network."""
-    return ("xmols_picaso" if _is_picaso(cp)
-            else f"xmols_vulcan{_network_suffix(cp)}")
+    return "xmols_picaso" if pic else f"xmols_vulcan{network_suffix(network)}"
+
+
+def target_mol_key(pic: bool, network: str, extras) -> str:
+    """The detection-target widget key; its options follow the extra
+    molecules, so the key does too."""
+    return (("mol_picaso_" if pic else f"mol_vulcan{network_suffix(network)}_")
+            + "_".join(sorted(extras)))
+
+
+def goal_suffix(pic: bool, tp_mode: str, cloud_on: bool,
+                cloud_mode: str) -> str:
+    """Key suffix of the free-parameter widgets: each engine, T-P mode and
+    cloud setting (off 0, haze 1, gray 2) keeps its own selections. ONE key
+    axis with three cloud values, not a second boolean gate; haze is the
+    default so stored keys keep meaning."""
+    cloud = 0 if not cloud_on else (2 if cloud_mode == "gray" else 1)
+    return f"{'picaso' if pic else 'vulcan'}_{tp_mode}_{cloud}"
+
+
+def free_parameters(pic: bool, tp_mode: str, cloud_on: bool,
+                    cloud_mode: str) -> list:
+    """The free-parameter menu. PICASO offers no lnKzz row (its quench levels
+    make the abundances a staircase in Kzz; canonical_params refuses the
+    row); a gray cloud has no spectral-slope row."""
+    avail = [p for p in forward.CHEM_PARAM_NAMES
+             if not (pic and p == "lnKzz")] \
+        + list(forward.TP_PARAM_NAMES[tp_mode])
+    if cloud_on:
+        avail += [p for p in forward.CLOUD_FISHER_PARAMS
+                  if cloud_mode != "gray" or p != "alpha_cloud"]
+    return avail
 
 
 def _restore_picaso_physics(state: dict, cp: dict, key, pk) -> None:
@@ -493,7 +520,7 @@ def _restore_rt_state(state: dict, cp: dict, key,
         else:
             state[key("ck")] = float(cp["log_kappa_cloud"])
             state[key("ca")] = float(cp["alpha_cloud"])
-    state[key(_xmols_key(cp))] = list(cp["extra_mols"])
+    state[key(xmols_key(_is_picaso(cp), cp["network"]))] = list(cp["extra_mols"])
     state.update({
         key("nz"): int(cp["nz"]),
         key("rtptop"): float(cp["rt_ptop_bar"]),

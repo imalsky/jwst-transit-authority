@@ -616,6 +616,9 @@ def K(name: str) -> str:
     return f"n{_NONCE}_{name}"
 
 
+_W = share_config.WIDGET_RANGES    # widget ranges (and fixed defaults), shared
+
+
 def _axis_range(container, label: str, key: str, warn, *, unit: str = "",
                 positive: bool = False,
                 positive_reason: str = "it is drawn on a log axis",
@@ -978,7 +981,7 @@ with st.sidebar:
         if tp_mode == "picaso_climate":
             # T_int shares its key with Guillot: the same physics and default
             tp_kwargs["Tint"] = st.number_input(
-                "T_int (K)", 50.0, 500.0, step=25.0, key=_k("tint"))
+                "T_int (K)", *_W["tint"], step=25.0, key=_k("tint"))
             _rf_key = K(f"rfacv_picaso_{science_mode}")
             if _rf_key not in st.session_state:
                 st.session_state[_rf_key] = forward.RFACV_DEFAULT[science_mode]
@@ -1007,14 +1010,14 @@ with st.sidebar:
             if _k("tirr") not in st.session_state:
                 st.session_state[_k("tirr")] = tirr0
             tp_kwargs["Tirr"] = st.number_input(
-                "T_irr (K)", 800.0, 2500.0, step=20.0, key=_k("tirr"))
+                "T_irr (K)", *_W["tirr"], step=20.0, key=_k("tirr"))
             tp_kwargs["Tint"] = st.number_input(
-                "T_int (K)", 50.0, 500.0, step=25.0, key=_k("tint"))
+                "T_int (K)", *_W["tint"], step=25.0, key=_k("tint"))
             # default 0.01 cm^2/g, Guillot (2010)'s canonical thermal opacity
             tp_kwargs["log_kappa"] = st.number_input(
-                "log10 kappa_IR (cm^2/g)", -4.0, 0.0, step=0.1, key=_k("lk"))
+                "log10 kappa_IR (cm^2/g)", *_W["lk"], step=0.1, key=_k("lk"))
             tp_kwargs["log_gamma"] = st.number_input(
-                "log10 gamma (kappa_vis/kappa_IR)", -2.0, 0.3, step=0.05,
+                "log10 gamma (kappa_vis/kappa_IR)", *_W["lg"], step=0.05,
                 key=_k("lg"))
         elif tp_mode == "file":
             # the shipped table is PER-PLANET; a planet without one may only
@@ -1106,11 +1109,11 @@ with st.sidebar:
     with st.expander("Pressure limits & reference radius"):
         rt_ptop_bar = st.number_input(
             "Model top pressure (bar)",
-            1.0e-9, 1.0e-6, forward.RT_PTOP_DEFAULT, 1.0e-9,
+            *_W["rtptop"], 1.0e-9,
             format="%.1e", key=K("rtptop"))
         p_ref_bar = st.number_input(
             "Reference pressure for the planet radius (bar)",
-            1.0e-6, 7.0, 1.0e-3, format="%.1e", key=K("pref"))
+            *_W["pref"], format="%.1e", key=K("pref"))
         # keyed PER GEOMETRY (shipped key contract). The DEFAULT follows the
         # structure mode -- a measured T-P table caps the honest column at its
         # own bottom (7.6 bar for the shipped tables), parametric profiles get
@@ -1166,7 +1169,7 @@ with st.sidebar:
                 "Quench (constant Kzz)", value=False, key=K("quench_picaso"))
             if picaso_quench:
                 kzz_const = 10.0 ** st.number_input(
-                    "log10 Kzz (cm^2 s^-1)", 6.0, 12.0, step=0.25,
+                    "log10 Kzz (cm^2 s^-1)", *_W["kzz"], step=0.25,
                     key=_k("kzz"))
         else:
             _kzz_opts = ["const", "Pfunc", "JM16"]
@@ -1193,23 +1196,23 @@ with st.sidebar:
             kzz_x = 1.0
             if kzz_mode == "const":
                 log_kzz = st.number_input(
-                    "log10 Kzz (cm^2 s^-1)", 6.0, 12.0, step=0.25,
+                    "log10 Kzz (cm^2 s^-1)", *_W["kzz"], step=0.25,
                     key=_k("kzz"))
                 kzz_const = 10.0 ** log_kzz
             elif kzz_mode == "Pfunc":
                 kzz_kmax = 10.0 ** st.number_input(
-                    "log10 deep Kzz (cm^2 s^-1)", 4.0, 11.0, 5.0, 0.25,
+                    "log10 deep Kzz (cm^2 s^-1)", *_W["kzkmax"], 0.25,
                     key=_k("kzkmax"))
                 kzz_plev = 10.0 ** st.number_input(
-                    "log10 transition level (bar)", -5.0, 2.0, -1.0, 0.25,
+                    "log10 transition level (bar)", *_W["kzplev"], 0.25,
                     key=_k("kzplev"))
             elif kzz_mode == "JM16":
                 kzz_kdeep = 10.0 ** st.number_input(
-                    "log10 deep-floor Kzz (cm^2 s^-1)", 4.0, 11.0, 5.0, 0.25,
+                    "log10 deep-floor Kzz (cm^2 s^-1)", *_W["kzkdeep"], 0.25,
                     key=_k("kzkdeep"))
             if kzz_mode != "const":
                 kzz_x = 10.0 ** st.number_input(
-                    "Kzz profile multiplier, log10(f)", -1.0, 1.0, 0.0, 0.05,
+                    "Kzz profile multiplier, log10(f)", *_W["kzzx"], 0.05,
                     key=_k("kzzx"))
 
     if _pic:   # VULCAN-JAX settings; none of them is sent under PICASO
@@ -1234,10 +1237,10 @@ with st.sidebar:
             # default 83 deg = the zenith angle of vulcan3's WASP-39 b
             # config (configs/W39b.yaml); upstream's dayside average is 58 deg
             sl_angle_deg = st.number_input(
-                "Photolysis zenith angle (degrees)", 0.0, 89.0, 83.0, 1.0,
+                "Photolysis zenith angle (degrees)", *_W["sza"], 1.0,
                 key=K("sza"), disabled=not use_photo)
             f_diurnal = st.number_input(
-                "Diurnal photolysis factor", 0.1, 1.0, 1.0, 0.05,
+                "Diurnal photolysis factor", *_W["fdiur"], 0.05,
                 key=K("fdiur"), disabled=not use_photo)
             use_moldiff = st.checkbox(
                 "Molecular diffusion", value=True, key=K("moldiff"))
@@ -1253,7 +1256,6 @@ with st.sidebar:
         # non-default network's widgets get their own keys (same pattern as
         # the provider switch) so a selection from one network never strands
         # in another's options.
-        _net_sfx = "" if network == "sncho" else f"_{network}"
         if network == "ncho":
             _base_set = [m for m in _base_set
                          if m not in forward._S_MOLECULES]
@@ -1282,7 +1284,7 @@ with st.sidebar:
             "Extra opacity molecules", list(_extra_set),
             default=[m for m in _extra_set
                      if m in forward.EXTRA_MOLECULES_DEFAULT],
-            key=K("xmols_picaso" if _pic else f"xmols_vulcan{_net_sfx}"))
+            key=K(share_config.xmols_key(_pic, network)))
 
     with st.expander("Clouds & scattering (ExoJAX)"):
         if K("rayl") not in st.session_state:
@@ -1322,7 +1324,7 @@ with st.sidebar:
             # (planets.gray_cloud_log_kappa), so the Fisher width in dex is
             # the same number for either coordinate.
             log_p_top = st.number_input(
-                "log10 cloud top pressure (bar)", -6.0, 1.0, -3.0, 0.25,
+                "log10 cloud top pressure (bar)", *_W["cpt"], 0.25,
                 key=K("cpt"))
             cloud_top_bar = 10.0 ** log_p_top
             log_kappa_cloud = planets.gray_cloud_log_kappa(
@@ -1330,31 +1332,21 @@ with st.sidebar:
             alpha_cloud = 0.0
         elif cloud_on:
             log_kappa_cloud = st.number_input(
-                "log10 kappa_cloud (cm^2/g at 3.5 µm)", -7.0, 2.0, -1.0, 0.1,
+                "log10 kappa_cloud (cm^2/g at 3.5 µm)", *_W["ck"], 0.1,
                 key=K("ck"))
             alpha_cloud = st.number_input(
                 "Cloud spectral slope alpha (kappa ∝ nu^alpha)",
-                0.0, 4.0, 0.0, 0.25, key=K("ca"))
+                *_W["ca"], 0.25, key=K("ca"))
         else:
             log_kappa_cloud, alpha_cloud = -1.0, 0.0
-    # off -> 0, haze -> 1, gray -> 2. ONE key axis with three values, not a
-    # second boolean gate; haze is the default so stored keys keep meaning.
-    cloud_sfx = 0 if not cloud_on else (2 if cloud_mode == "gray" else 1)
 
     # Step 3: Science goal (only the controls the selected goal needs)
     st.divider()
     st.markdown("### 3 · Science goal")
-    # PICASO has no lnKzz row: its quench levels make the abundances a
-    # staircase in Kzz, so canonical_params refuses the row
-    avail_free = ([p for p in forward.CHEM_PARAM_NAMES if p != "lnKzz"] if _pic
-                  else list(forward.CHEM_PARAM_NAMES)) \
-        + forward.TP_PARAM_NAMES[tp_mode]
-    # widget-key infix: each engine keeps its own goal selections
-    _eng = "picaso" if _pic else "vulcan"
-    if cloud_on:
-        avail_free = avail_free + [
-            p for p in forward.CLOUD_FISHER_PARAMS
-            if cloud_mode != "gray" or p != "alpha_cloud"]
+    avail_free = share_config.free_parameters(_pic, tp_mode, cloud_on,
+                                              cloud_mode)
+    # widget-key suffix: each engine keeps its own goal selections
+    _goal_sfx = share_config.goal_suffix(_pic, tp_mode, cloud_on, cloud_mode)
     mol_options = forward.active_molecules(
         {"network": network, "extra_mols": extra_mols})
 
@@ -1380,10 +1372,9 @@ with st.sidebar:
             target_mol = st.selectbox(
                 "Molecule to detect", mol_options,
                 index=mol_options.index(_mol_default),
-                key=K(("mol_picaso_" if _pic else f"mol_vulcan{_net_sfx}_")
-                      + "_".join(sorted(extra_mols))))
+                key=K(share_config.target_mol_key(_pic, network, extra_mols)))
             target_sig = st.number_input(
-                "Target significance (σ)", 1.0, 10.0, step=0.5,
+                "Target significance (σ)", *_W["tsig"], step=0.5,
                 key=K("tsig"))
             do_fisher = st.checkbox(
                 "Also calculate parameter constraints", key=K("dofish"))
@@ -1391,7 +1382,7 @@ with st.sidebar:
             target_mol = None
             goal_param = st.selectbox(
                 "Parameter to constrain", avail_free,
-                key=K(f"gp_{_eng}_{tp_mode}_{cloud_sfx}"),
+                key=K(f"gp_{_goal_sfx}"),
                 format_func=lambda n: fisher_mod.PARAM_LABELS[n])
             marginalize = st.checkbox(
                 "Marginalize over the other parameters", value=True,
@@ -1403,15 +1394,15 @@ with st.sidebar:
                         f"Target uncertainty "
                         f"(±{fisher_mod.PARAM_SYMBOLS[goal_param]})")
             if unit == "K":
-                target_prec = st.number_input(_tgt_lbl, 5.0, 500.0,
+                target_prec = st.number_input(_tgt_lbl, *_W["tgt_K"],
                                               _TARGET_DEFAULT[goal_param], 5.0,
                                               key=K(f"tgt_{goal_param}"))
             else:
-                target_prec = st.number_input(_tgt_lbl, 0.01, 3.0,
+                target_prec = st.number_input(_tgt_lbl, *_W["tgt"],
                                               _TARGET_DEFAULT[goal_param], 0.01,
                                               key=K(f"tgt_{goal_param}"))
             target_sig = st.number_input(
-                "Report Fisher half-width at Nσ", 1.0, 10.0, step=0.5,
+                "Report Fisher half-width at Nσ", *_W["tsig"], step=0.5,
                 key=K("tsig"))
 
     # Free-parameter settings render only when the run computes derivatives.
@@ -1431,7 +1422,7 @@ with st.sidebar:
                     # sigmas toward the conditional bound.
                     default=[p for p in ("lnZ", "dlnCO")
                              if p in avail_free],
-                    key=K(f"fx_{_eng}_{tp_mode}_{cloud_sfx}"),
+                    key=K(f"fx_{_goal_sfx}"),
                     format_func=lambda n: fisher_mod.PARAM_LABELS[n])
                 fisher_params = sorted(set(fisher_extra) | {goal_param})
             elif goal == "constrain":
@@ -1439,7 +1430,7 @@ with st.sidebar:
             else:
                 fisher_params = st.multiselect(
                     "Free parameters", avail_free,
-                    key=K(f"fp_{_eng}_{tp_mode}_{cloud_sfx}"),
+                    key=K(f"fp_{_goal_sfx}"),
                     default=[p for p in ("lnZ", "dlnCO")
                              if p in avail_free],
                     format_func=lambda n: fisher_mod.PARAM_LABELS[n])
@@ -1490,7 +1481,7 @@ with st.sidebar:
         # "per mode" is load-bearing: every selected mode is evaluated at this
         # count, and a combined forecast sums their information at the same
         # count, so K modes cost K x this many events.
-        n_transits = st.number_input(f"Number of {_evw}s per mode", 1, 10, 1, 1,
+        n_transits = st.number_input(f"Number of {_evw}s per mode", *_W["ntr"], 1,
                                      key=K("ntr"))
 
     # Mock-observation layer: generated AFTER the forward model and the
@@ -1503,7 +1494,7 @@ with st.sidebar:
         show_noise = st.checkbox(
             "Mock noise draw", value=True, key=K("shownoise"))
         seed = st.number_input(
-            "Seed", 0, 9999, 0, key=K("seed"), disabled=not show_noise)
+            "Seed", *_W["seed"], key=K("seed"), disabled=not show_noise)
         # ONE knob for "more jitter". It scales the
         # NOISE MODEL, not the draw: posteriors.mock_realization deliberately
         # refuses a draw-only scale factor, because a 2x draw beside 1x error
@@ -1515,7 +1506,7 @@ with st.sidebar:
         # (multiplies) the per-mode multipliers in the Noise model expander,
         # which stay for mode-specific tuning.
         noise_scale = st.number_input(
-            "Global noise multiplier", 0.5, 3.0, 1.0, 0.05,
+            "Global noise multiplier", *_W["noisescale"], 0.05,
             key=K("noisescale"))
 
     with st.expander("Timing, saturation & binning (Pandeia)"):
@@ -1535,14 +1526,14 @@ with st.sidebar:
         t_base = st.number_input(
             # max 20 h, not 10: t14 itself spans 0.5-10 h, so a 10 h cap
             # would make a 2 x T14 baseline unreachable above T14 = 5 h.
-            f"Out-of-{_evw} baseline (hours)", 0.5, 20.0,
+            f"Out-of-{_evw} baseline (hours)", *_W["tbase"],
             step=0.1, key=_k("tbase"),
             help="Total out-of-event time per visit. Default T14 (PandExo).")
         sat_limit = st.number_input(
             "Saturation limit (fraction of Pandeia's saturation level)",
-            0.5, 0.95, 0.80, 0.05, key=K("sat"))
+            *_W["sat"], 0.05, key=K("sat"))
         r_bin = st.number_input(
-            "Analysis resolving power, R", 25, 500, 100, 25, key=K("rbin"))
+            "Analysis resolving power, R", *_W["rbin"], 25, key=K("rbin"))
 
     with st.expander("Noise model (Pandeia)"):
         st.markdown("**Minimum noise floor** (PandExo convention)")
@@ -1560,7 +1551,7 @@ with st.sidebar:
         floors = {k: None for k in mode_keys}
         if floor_mode == "constant":
             floors = {k: st.number_input(
-                f"{ins.MODES[k]['label']} minimum floor (ppm)", 0.0, 200.0,
+                f"{ins.MODES[k]['label']} minimum floor (ppm)", *_W["floor"],
                 ins.MODES[k]["floor_ppm_suggested"], 5.0, key=K(f"floor_{k}"))
                 for k in mode_keys}
         elif floor_mode == "file":
@@ -1606,8 +1597,8 @@ with st.sidebar:
         # per-mode multipliers; the "Global noise multiplier" above scales all
         # of them (composed below, so neither control is a hidden override)
         _infl_mode = {k: st.number_input(
-            f"{ins.MODES[k]['label']} random-noise multiplier", 1.0, 3.0,
-            1.0, 0.05, key=K(f"infl_{k}"))
+            f"{ins.MODES[k]['label']} random-noise multiplier", *_W["infl"],
+            0.05, key=K(f"infl_{k}"))
             for k in mode_keys}
         infl = {k: float(noise_scale) * float(_infl_mode[k])
                 for k in mode_keys}
@@ -1628,12 +1619,10 @@ with st.sidebar:
         yconv_cri, yconv_min = forward.YCONV_DEFAULT, forward.YCONV_MIN_DEFAULT
         if not _pic:
             yconv_cri = st.number_input(
-                "Solver convergence tolerance", 1.0e-4, 1.0e-2,
-                forward.YCONV_DEFAULT, 1.0e-4,
+                "Solver convergence tolerance", *_W["yconv"], 1.0e-4,
                 format="%.1e", key=K("yconv"))
             yconv_min = st.number_input(
-                "Loose-branch convergence gate", 1.0e-4, 0.1,
-                forward.YCONV_MIN_DEFAULT, 1.0e-4,
+                "Loose-branch convergence gate", *_W["yconvmin"], 1.0e-4,
                 format="%.1e", key=K("yconvmin"))
 
     # Condensation is API-only: the GUI never sends the key, and
