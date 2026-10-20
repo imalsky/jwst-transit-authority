@@ -58,7 +58,7 @@ date next to a number names the code state it was measured on.
   The AD margin (gate 0.1) is 0.0476 at 0.95: AD is refused from ~0.90. The band-median
   depth turns over near C/O 1.00. Decision: 0.99 stays; a raise unlocks spectra with no
   certifiable C/O sensitivity and moves the default network into the carbon-rich regime.
-- CLI survey (untracked `validation/co_limits/`, 92 rows; nz 100, cadence 5, cap 5000):
+- CLI survey (92 rows; raw outputs deleted 2026-10-20; nz 100, cadence 5, cap 5000):
   every ceiling is a LOWER bound. sncho converges <= 1.02 and fails 1.03-4 (also at 30k
   steps). sncho2025 fails at 1.03 only, a notch that moves with temperature and nz. ncho
   converges 1.03-10. Photolysis off, every network reaches 10 in 121-229 steps. 54 of 58
@@ -687,9 +687,9 @@ Real, small, and out of todo.md by decision; nothing here changes a shipped numb
   keeps a numpy 1/2 `trapz` shim; `planets.py`/`stellar.py` restate constants
   `vulcan_forward.constants` owns; `app._LN10` duplicates `fisher._LN10`;
   `upload_data.sh` stages k-tables from the `vulcan-retrieval` checkout.
-- The untracked `validation/co_stall/_build/` and `validation/co_limits/` hold the raw
-  logs and scripts behind several records here; some subdirectory names carry personal
-  names.
+- The raw logs and scripts behind several records here (`validation/co_stall/`,
+  `validation/co_limits/`, untracked) were deleted 2026-10-20; the numbers in these
+  notes are the record.
 
 ## Ideas not adopted
 
