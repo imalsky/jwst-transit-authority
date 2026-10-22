@@ -38,3 +38,9 @@ validation/co_stall/
 
 # PICASO reference tree + climate correlated-k tables (~2.3 GB); `jwst-tool fetch --picaso`
 data/picaso_refdata-*/
+
+# One-off scripts, tests and figures made on top of the code: never tracked.
+/scratch/
+
+# vulcan3 figures (plot_dir): never tracked.
+/plot/

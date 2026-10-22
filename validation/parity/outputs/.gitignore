@@ -1,6 +1,6 @@
-# Regenerable raw PandExo/tool run JSON (written by scripts/run_parity.py).
-# Committed here: parity_summary.json and REPORT.md.
-*_ours.json
-*_pandexo.json
-*_pandexo_job.json
-*_pandexo_result.json
+# Regenerable raw PandExo/tool run outputs (written by scripts/run_parity.py):
+# everything here is ignored except the committed record.
+*
+!.gitignore
+!REPORT.md
+!parity_summary.json

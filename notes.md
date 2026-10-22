@@ -1,18 +1,18 @@
 # JWST Transit Authority notes
 
-The evidence behind each rule in CLAUDE.md, the design records that still govern the
-code, the accepted limitations and the do-not-retry register. Open work is in todo.md.
-Numbers are measured [M] unless tagged [E] (estimated) or [I] (inferred). A version or
-date next to a number names the code state it was measured on.
+The results of previous experiments and the ideas already tried, by topic: the evidence
+behind each rule in CLAUDE.md, the decision records that govern the code, the accepted
+limitations and the do-not-retry register. Open work is in todo.md. Numbers are measured
+[M] unless tagged [E] (estimated) or [I] (inferred). A version or commit next to a number
+names the code state it was measured on.
 
 ## Current state
 
-- Tool 0.72.0 on main after the 2026-10-20 cleanup. VULCAN is the default chemistry engine,
-  PICASO the second.
+- Tool 0.72.0 on main. VULCAN is the default chemistry engine, PICASO the second.
 - Floors `vulcan-forward>=0.29.0`, `vulcan3>=0.18.0` (pyproject). `deploy/pins.env` and
-  the Dockerfile pin vulcan3 92c3b1e and vulcan-forward 32adc85 (the 2026-10-20
-  cleanup); the Dockerfile pins the tool at cd67563. The running Space was last
-  deployed from the earlier pins (tool b23df79) and is unchanged until a redeploy.
+  the Dockerfile pin vulcan3 92c3b1e and vulcan-forward 32adc85; the Dockerfile pins the
+  tool at cd67563. The running Space was last deployed from the earlier pins (tool
+  b23df79) and is unchanged until a redeploy.
 - Cache versions: `forward._VERSION` 60, `noise.WORKER_VERSION` 12,
   `adjoint_diag._ADJ_VERSION` 4, `picaso_engine.WORKER_VERSION` 3. Default keys:
   transmission `8c37a8320c19c75a` (test-pinned), emission `f4b94ee63633f386`.
@@ -21,16 +21,16 @@ date next to a number names the code state it was measured on.
   42.8 min on daw).
 - Tests. Normal suite `python -m pytest tests -q -n 6`; `tests/conftest.py` defaults
   `JAX_PLATFORMS=cpu` and points an unset `JWST_TOOL_OUTPUT_DIR` at a throwaway
-  directory. `tests/unit` on daw (6 pinned cores, 2026-10-19): 405 passed, 4 skipped in
-  35-38 s. CI runs the unit suite on Python 3.10-3.12 plus a GUI-smoke job;
-  `full-stack-smoke.yml` runs by hand. Slow tier (`JWST_TOOL_RUN_SLOW=1`, serial, 8
-  cores, tool 0.71.0): 345 passed in 4 h 07 min; longest: emission AD/FD closure 4310 s
-  (config cadence) / 2551 s (cadence 1), TOI-7169 b escalation 3498 s, transmission
-  closure 1933 / 1381 s, e2e 512 s per mode.
-- Space, last read from the Hub API on 2026-10-14: `imalsky/jwst-transit-authority`
-  RUNNING on cpu-basic (2 vCPU / 16 GB), sleep 48 h. The four live checks
-  (cold transmission run, cold emission run, configuration export and reload,
-  out-of-range metallicity refusal with its alert mail) last ran on the 0.67.0 deploy.
+  directory. `tests/unit` on daw (6 pinned cores): 405 passed, 4 skipped in 35-38 s. CI
+  runs the unit suite on Python 3.10-3.12 plus a GUI-smoke job; `full-stack-smoke.yml`
+  runs by hand. Slow tier (`JWST_TOOL_RUN_SLOW=1`, serial, 8 cores, tool 0.71.0): 345
+  passed in 4 h 07 min; longest: emission AD/FD closure 4310 s (config cadence) / 2551 s
+  (cadence 1), TOI-7169 b escalation 3498 s, transmission closure 1933 / 1381 s, e2e
+  512 s per mode.
+- Space, at the last Hub API read: `imalsky/jwst-transit-authority` RUNNING on cpu-basic
+  (2 vCPU / 16 GB), sleep 48 h. The four live checks (cold transmission run, cold
+  emission run, configuration export and reload, out-of-range metallicity refusal with
+  its alert mail) last ran on the 0.67.0 deploy.
 - daw environment: the root uv env `VULCAN_Project/.venv` also carries pandeia.engine
   2026.7, so `JWST_TOOL_PANDEIA_PYTHON` is that interpreter. Rebuild the editable
   metadata after a version bump (`uv pip install --no-deps -e vulcan-jwst-tool`):
@@ -51,19 +51,19 @@ date next to a number names the code state it was measured on.
   ncho 10; photolysis off, 10 for all three. `CO_MIN` 0.1 was measured on the three
   photolysis-on rows; the photolysis-off floor is carried over. The permissive bounds are
   the highest value SAMPLED, not a measured ceiling.
-- The sncho photolysis-on ceiling is set by the DERIVATIVE. Default W39b, FD `dlnCO`,
-  `CO_MAX` patched: the column certifies at 0.99-1.02 (loose, element budget within
-  0.01%) and at 1.03 only after escalation. The one-sided row (h 0.05) against its 0.25
-  h-vs-2h gate: 0.032 at 0.55, 0.210 at 0.95, 0.269 at 0.97 (first FAIL), 0.414 at 1.03.
-  The AD margin (gate 0.1) is 0.0476 at 0.95: AD is refused from ~0.90. The band-median
-  depth turns over near C/O 1.00. Decision: 0.99 stays; a raise unlocks spectra with no
-  certifiable C/O sensitivity and moves the default network into the carbon-rich regime.
-- CLI survey (92 rows; raw outputs deleted 2026-10-20; nz 100, cadence 5, cap 5000):
-  every ceiling is a LOWER bound. sncho converges <= 1.02 and fails 1.03-4 (also at 30k
-  steps). sncho2025 fails at 1.03 only, a notch that moves with temperature and nz. ncho
-  converges 1.03-10. Photolysis off, every network reaches 10 in 121-229 steps. 54 of 58
-  converged rows exit loose (median longdy 0.0988). No published VULCAN WASP-39 b run
-  reaches C/O >= 1 photolysis-on; upstream exoclime@80f75b9 fails C/O 1.087 at its cap.
+- The sncho photolysis-on ceiling is set by the DERIVATIVE (Decision records). Default
+  W39b, FD `dlnCO`, `CO_MAX` patched: the column certifies at 0.99-1.02 (loose, element
+  budget within 0.01%) and at 1.03 only after escalation. The one-sided row (h 0.05)
+  against its 0.25 h-vs-2h gate: 0.032 at 0.55, 0.210 at 0.95, 0.269 at 0.97 (first
+  FAIL), 0.414 at 1.03. The AD margin (gate 0.1) is 0.0476 at 0.95: AD is refused from
+  ~0.90. The band-median depth turns over near C/O 1.00.
+- CLI survey (92 rows; nz 100, cadence 5, cap 5000; the raw outputs are deleted, these
+  numbers are the record): every ceiling is a LOWER bound. sncho converges <= 1.02 and
+  fails 1.03-4 (also at 30k steps). sncho2025 fails at 1.03 only, a notch that moves with
+  temperature and nz. ncho converges 1.03-10. Photolysis off, every network reaches 10
+  in 121-229 steps. 54 of 58 converged rows exit loose (median longdy 0.0988). No
+  published VULCAN WASP-39 b run reaches C/O >= 1 photolysis-on; upstream
+  exoclime@80f75b9 fails C/O 1.087 at its cap.
 - sncho2025 converges where sncho does not because of its H2CS/CS2 sulfur block (alone it
   converges at C/O 1.087 in 2448 steps); the C3 species hold 2.5e-7 of the carbon:
   network-sensitive numerics. At C/O 1.03 its failure is a localized sulfur-cell
@@ -71,15 +71,15 @@ date next to a number names the code state it was measured on.
 - Temperature and Kzz are NOT gate axes: +400 K, +800 K and -200 K all rescue C/O 1.087,
   and Kzz 1e10 and 5e10 do where 1e9 does not. vulcan3 forces `atm_type="file"` whenever
   Kzz is tabulated, so the survey's synthetic T-P tables kept the shipped Kzz.
-- `MET_RANGE` (0.1, 100), a maintainer decision. Cold `certified_solve`, sncho,
-  photolysis on, C/O 0.55, cap 30000 (vulcan3 0.11.0): W39b default certifies every point
-  40x-300x (100x 7808 steps; steps climb because the loose slope gate scales with dt).
-  W39b Guillot at Tirr 1640: 30x FAILS (a top-of-column photolysis stall), 50x
-  certifies, 100x fails. HD 209458 b: 50x and 150x fail at both cadences (photolysis off
-  certifies 50x in 452 steps). Cool planets show no ceiling to 1000x. The lnZ stencil
-  solves at met x exp(+-0.2), so the range check caps a lnZ FD centre at 81.87x; 100x
-  keeps every stencil point under the certified 150x. The run-time certificate, not the
-  range, refuses an uncertified column. Cost accepted: ~3.5x the default's steps at 100x.
+- `MET_RANGE` (0.1, 100) (Decision records). Cold `certified_solve`, sncho, photolysis
+  on, C/O 0.55, cap 30000 (vulcan3 0.11.0): W39b default certifies every point 40x-300x
+  (100x 7808 steps; steps climb because the loose slope gate scales with dt). W39b
+  Guillot at Tirr 1640: 30x FAILS (a top-of-column photolysis stall), 50x certifies,
+  100x fails. HD 209458 b: 50x and 150x fail at both cadences (photolysis off certifies
+  50x in 452 steps). Cool planets show no ceiling to 1000x. The lnZ stencil solves at
+  met x exp(+-0.2), so the range check caps a lnZ FD centre at 81.87x; 100x keeps every
+  stencil point under the certified 150x. The run-time certificate, not the range,
+  refuses an uncertified column. Cost: ~3.5x the default's steps at 100x.
 - Between 81.87x and 100x the lnZ row is AD-only. On an external user's case (LP 714-47
   b custom: Guillot 1020 K, const Kzz 1e9, 100x) the AD lnZ tangent certifies at 20900
   steps at both cadences; the 6000-step cap reads 0.105. Central FD with the range lifted
@@ -107,12 +107,11 @@ date next to a number names the code state it was measured on.
 - Leave-one-out at C/O 10: CH4 1449 ppm, C2H4 1087, C2H2 504, CO 64. C2H2 at 1.6e-4 is
   worth 504 ppm, so a table-less absorber in the 1e-4..1e-3 band can be worth hundreds of
   ppm: a warning, not a licence.
-- Decision (0.68.0): the advertised C/O top stays 10; `ELEMENT_TOL` 1.5% so the C/O 10
-  column passes; an absorber with no table above `UNMODELED_VMR_REFUSE` 1e-3 is refused
-  after the baseline solve, and above `UNMODELED_VMR_WARN` 1e-4 it warns. A 1e-4 refusal
-  cut the path off near C/O 1.3, judged too restrictive; 1e-3 keeps sncho2025 to about
-  C/O 5. The shipped default warns about nothing (HSO at 3.0e-5). The mode stays
-  EXPERIMENTAL: no benzene line list exists.
+- Gates set from this ladder (0.68.0): `ELEMENT_TOL` 1.5%, so the C/O 10 column (drift
+  1.30%) passes; `UNMODELED_VMR_REFUSE` 1e-3, refusing an absorber with no table after the
+  baseline solve (a 1e-4 refusal cuts the path off near C/O 1.3, too restrictive; 1e-3
+  keeps sncho2025 to about C/O 5); `UNMODELED_VMR_WARN` 1e-4. The shipped default warns
+  about nothing (HSO at 3.0e-5).
 - C2H4: the table spans 100-3400 K and 0.3-50 um, but ExoMol's `.def.json` gives 700 K
   and 1.408 um and its kcoeff is zero shortward of 1.427 um: interpolation, not
   completeness.
@@ -123,7 +122,7 @@ date next to a number names the code state it was measured on.
   194 of 513 thermal rows outside their range in >= 1 layer, SNCHO_2025 200 of 532, NCHO
   130 of 390. `run_model` stores the counts and the app states them.
 - `_assemble_chem` sets `VULCAN3_NETWORK` and the cfg `network`/`atom_list` for EVERY
-  network: skipping the default let a sncho request after a sncho2025 run in one process
+  network: skipping the default lets a sncho request after a sncho2025 run in one process
   be served by sncho2025.
 - Networks: sncho (default) is the Tsai et al. 2023 89-species file with
   post-publication rate updates (never "exactly the published network"); ncho 69 species
@@ -164,9 +163,10 @@ date next to a number names the code state it was measured on.
 
   The 1e11 column certified having lost 46% of its oxygen and 98% of its sulfur. The
   engine fix is VULCAN-JAX's Ros2 stage repair; with it the column drifts 0.00%.
-- `check_elements`: layer-median X/H against the build column, `ELEMENT_TOL` 1.5% (the C/O
-  10 top drifts 1.30%); cached presets sit at 0.006-0.008%. It runs on every certified
-  column: baseline, chem-cache hit, each FD stencil point, each AD warm re-converge.
+- `check_elements`: layer-median X/H against the build column, `ELEMENT_TOL` 1.5% (set by
+  the carbon-rich ladder, "Composition, C/O bounds and networks"); cached presets sit at
+  0.006-0.008%. It runs on every certified column: baseline, chem-cache hit, each FD
+  stencil point, each AD warm re-converge.
 
 ## Structure: T-P, Kzz, gravity anchor, model top
 
@@ -177,15 +177,15 @@ date next to a number names the code state it was measured on.
   sigma against the published 4.5-4.8. HD 189733 b's table does not certify at defaults;
   HD 209458 b's is refused (2997 K, above the 2980 K opacity ceiling).
 - Guillot `kappa_IR` -2.0; `T_irr` defaults per planet from the registry's star and
-  orbit; emission uses the DAYSIDE T_irr (x 2^0.25): planet-average T_irr put the HD
+  orbit; emission uses the DAYSIDE T_irr (x 2^0.25): planet-average T_irr puts the HD
   189733 b eclipse 28-49% low (chi2/N 934 -> 31 against Inglis et al. 2024). `Tint`:
   WASP-107 b 460 K (Sing et al. 2024), others `TINT_DEFAULT_K` 100.
 - One gravity per run: the catalogue (Rp, g) pair is converted to the chemistry's anchor
   pressure before it reaches VULCAN (`_assemble_chem`; vulcan3 anchors g near 1 bar). On
   W39b (anchor 0.923 bar) R -6.7%, g +14.9%. mu comes from one probe build (2.30 is 0.62%
   off); the Guillot/gravity iteration converges in two passes. Handing VULCAN the
-  catalogue pair put the radius ~7% high and every gravity ~13% low. `p_ref_bar` is 1
-  mbar, deliberately not tuned to the data (7.8% low against the white-light depth).
+  catalogue pair puts the radius ~7% high and every gravity ~13% low. `p_ref_bar` is 1
+  mbar, not tuned to the data (7.8% low against the white-light depth; Decision records).
 - Transmission dtau uses inverse-square g(r) (exojax's own profile: -51 ppm at W39b
   against +1.5 ppm); emission takes the same g(r) from v59.
 - Model top `rt_ptop_bar` 1e-7 bar (chemistry and RT; range [1e-9, 1e-6]; upstream 1e-8):
@@ -206,8 +206,8 @@ date next to a number names the code state it was measured on.
   47.7, SH 8.2, CN 6.8. HD 189733 b: H2O 613, CO2 457, SO2 201, CO 144, CH4 121, H2S 85,
   NH3 81, SO 23.5, OCS 18.4. SO and SH default on; CN off. Each default-on molecule costs
   one leave-one-out fold (12.9 s). Not measured for carbon-rich columns (C/O 2: C2H2
-  1434, C2H4 949, CH3 88, CS 25 ppm) or WASP-107 b (NO 14 ppm). Decision:
-  `EXTRA_MOLECULES_DEFAULT` stays; a user adds CH3/CS per run.
+  1434, C2H4 949, CH3 88, CS 25 ppm) or WASP-107 b (NO 14 ppm) (`EXTRA_MOLECULES_DEFAULT`:
+  Decision records).
 - Against petitRADTRANS 3.4.0 on the same k-tables: engine fixtures rms 0.0013% /
   0.096% / 0.021% (isothermal H2O radius, W39b depth, H2O emission flux). The six
   `validation/data/atmos_*.npz` (tool 0.72.0, cadence 5), fitted offset at R = 100:
@@ -243,42 +243,40 @@ date next to a number names the code state it was measured on.
 - Solver `ibased_linsap`, never `ibased` (it drops the bottom boundary, 12-52% of the
   flux). `p_btm_bar` is canonical: 7.6 bar in file mode, 10 bar for parametric profiles.
 - The thin-bottom gate is FLUX-WEIGHTED (`thin_flux_fraction`, `EMIS_THIN_FLUX_FRAC` 1%):
-  a min() over the band let a 60 nm notch veto HD 189733 b, and an unweighted sum
-  under-reported the short-edge share 2.9x. It gates every FD stencil point and AD primal,
+  a min() over the band lets a 60 nm notch veto HD 189733 b, and an unweighted sum
+  under-reports the short-edge share 2.9x. It gates every FD stencil point and AD primal,
   and runs per mode (`detect._certify_emission_band`). On the e2e emission reference the
   minimum bottom tau is 73.6 against tau = 3, and stencil points move tau <= 26%.
   Removed-H2O on W39b sits at 1.73% band-global and is refused. Re-measure before
   shipping a shallower `p_btm_bar`.
 - Eclipse depths use the tau = 2/3 photospheric radius per k-ordinate
-  (`eclipse_flux_tau`): W39b depth ratio photospheric/single median 1.070; the CO2
-  feature contrast had been 9% low. `emission_radius` stays the (R_em/R_star)^2 factor.
+  (`eclipse_flux_tau`): W39b depth ratio photospheric/single median 1.070; a single
+  radius reads the CO2 feature contrast 9% low. `emission_radius` stays the
+  (R_em/R_star)^2 factor.
 - HD 189733 b MIRI LRS vs Inglis et al. 2024 (v60): chi2/N 67.6, 26.85 with a fitted
   -132 ppm offset, under the dayside f = 1/2 Guillot default.
-- lnR0 is a radius change at fixed planet mass in both modes (maintainer decision with
-  vulcan-forward 0.29.0). Before, emission multiplied the depth by e^(2 lnR0) at fixed g.
-  Default W39b eclipse: AD and FD lnR0 rows agree to corr 0.99999997; the new row over
-  the old is 0.992 at the median, 0.78-1.04 per bin. Emission lnR0 FD points are
-  tau-gated.
+- lnR0 (a radius change at fixed planet mass in both modes, v60; Decision records):
+  default W39b eclipse AD and FD lnR0 rows agree to corr 0.99999997. Emission lnR0 FD
+  points are tau-gated.
 
 ## Measurement operator, LSF, noise, ramps, registry
 
 - ONE operator (`binning.py`) for noise, model and every Jacobian row; exact sub-cell
-  integration (`_pl_antideriv`; the cumulative trapezoid was 1-2 ppm off);
+  integration (`_pl_antideriv`; a cumulative trapezoid is 1-2 ppm off);
   degenerate-wavelength pixels masked (a G395H pileup made one bin's sigma 2.7x too
   small); per-segment offsets including segment 0.
-- Segment label of a bin: the count-majority segment. No WASP-39 b G395H bin straddles
-  the gap at R >= 50; at R = 25 one can (minority weight up to 43%). Decision: majority
-  kept, no fractional row.
+- Segment label of a bin: the count-majority segment (Decision records). No WASP-39 b
+  G395H bin straddles the gap at R >= 50; at R = 25 one can (minority weight up to 43%).
 - LSF: a Gaussian of width R_refdata / LSF_WIDTH, weighted per d ln lambda (per d lambda
-  was 4.3 ppm off). Widths fitted to a Pandeia impulse (`run_parity.py --impulse`, ~70
+  is 4.3 ppm off). Widths fitted to a Pandeia impulse (`run_parity.py --impulse`, ~70
   min): NIRSpec 0.94-1.02 (left at 1), SOSS 1.39-1.58, NIRCam 1.37-1.46, MIRI LRS
-  1.49-1.59. A retracted first fit had two traps: an impulse SED not dense far beyond
-  +-8 sigma (Pandeia interpolates back onto the input grid: 25-150% spurious flux) and a
-  half-maximum estimator on 2-3-pixel profiles. The blur is a no-op on the gratings and
-  NIRCam grisms. MIRI LRS pixels arrive DESCENDING and `np.interp` does not raise on
-  unsorted xp (binned depth off up to 328 ppm); `smooth_to_native_r` validates.
+  1.49-1.59. Two traps in the fit: an impulse SED not dense far beyond +-8 sigma (Pandeia
+  interpolates back onto the input grid: 25-150% spurious flux) and a half-maximum
+  estimator on 2-3-pixel profiles. The blur is a no-op on the gratings and NIRCam grisms.
+  MIRI LRS pixels arrive DESCENDING and `np.interp` does not raise on unsorted xp (binned
+  depth off up to 328 ppm); `smooth_to_native_r` validates.
 - Noise: the star is normalized by band-integrated 2MASS Ks (the monochromatic shortcut
-  was up to 3.1% off). Pandeia's extracted noise includes the quantum-yield excess.
+  is up to 3.1% off). Pandeia's extracted noise includes the quantum-yield excess.
   Fisher inversion whitens to correlation form (a pure rescaling flipped rank 1 -> 2).
 - Floors: exact PandExo semantics, `sigma = max(sigma_random, floor)` on final bins. The
   transit counters evaluate the floor-only limit only when every floor is positive; a
@@ -290,7 +288,7 @@ date next to a number names the code state it was measured on.
 - Ramps: floors are pandeia `mingroups` (NIR 1, MIRI 2); saturation is the MEASURED probe
   against `sat_limit` x the per-mode `saturation_fullwell`; the bracket search returns
   the largest measured-safe count and proves maximality; NIRCam capped at 100 groups,
-  SOSS at 30. A predicted search under-selected (1 group at a 7.08x sigma ratio). MIRI
+  SOSS at 30. A predicted search under-selects (1 group at a 7.08x sigma ratio). MIRI
   `t_cycle_s` includes the FASTR1 reset. Saturation advice is REPORTED, never applied.
 - Registry: band edges cite a source (`_BAND_SOURCES`; NIRSpec from Birkmann et al.
   2022); native R from the 2026.7 dispersion files (PRISM ~110, G395H 2700, SOSS 970,
@@ -314,16 +312,16 @@ gate 0.25.
   `lnR0` and segment offsets, absorbing an anchor shift to leading order, and
   re-anchored independent references agree to corr 0.9991 / 0.9996. W39b Guillot Tirr
   1560 at 10x (own vs frozen anchor): corr 0.999997, scale 1.000693, median 0.10% over
-  the top-decile bins; ~0.5% at the top of the range. Measured before v60, science mode
-  not recorded (the TOI-7169 b reference is transmission); not measured on an eclipse
-  case since lnR0 moves gravity ("Known and deliberately untracked").
+  the top-decile bins; ~0.5% at the top of the range. Measured before v60; the mode was
+  not recorded (the TOI-7169 b reference is transmission), and no eclipse case, where
+  lnR0 moves gravity, is measured ("Known and deliberately untracked").
 - T-P rows are FD only (an AD Jacobian cache with a T-P row held a frozen-anchor
   derivative) and rebuild chemistry and T-P at each stencil point. The transmission Tirr
   FD/FD closure passes escalated: corr 0.996898 / scale 1.00571 against an independent 2
   K central difference, the noisiest usable step (per-solve error grows as 1/h^2).
 - Eclipse AD rows need the step cap. Uncapped, the warm map never certifies within 6000
   steps (the tangent reaches 1e9-1e31); every certified column there is a snapshot of a
-  photolysis sawtooth. A plain `jax.jvp` read at the column's certificate closed at corr
+  photolysis sawtooth. A plain `jax.jvp` read at the column's certificate closes at corr
   0.3319. The timestep stop-gradient closes (0.997647) but breaks the independent Kzz
   derivative. Capping `dt_max` on the AD build alone closes the rows (lnZ corr 0.997635,
   dlnCO 0.998119), the same over a 300x range of caps.
@@ -353,8 +351,8 @@ gate 0.25.
   escalated 0.083839, AD capped at config cadence 0.085336. The method spread on the C/O
   width is about 6%: quote 0.037 +- 0.002 across methods or FD's 0.039 as the
   conservative number; never present an AD figure as agreeing with FD better than that.
-- Tighter references were attempted (yconv 1e-3, rtol 0.02, 30000 steps) and none
-  certified, so none bounds the cadence-1 reference error.
+- No tighter reference certifies (yconv 1e-3, rtol 0.02, 30000 steps), so none bounds
+  the cadence-1 reference error.
 - Photolysis off, every FD chemistry row on the shipped W39b column misses its gate by
   23-400x (dlnCO 6.9, lnZ 5.7, lnKzz 99.9) because neighbouring compositions stop at
   non-comparable states (145 vs 17074 steps). An FD row self-checks and an AD row cannot,
@@ -372,6 +370,24 @@ gate 0.25.
   cadence-1 AD retry: every measured column certifies at the config cadence under the
   cap; the retry is measured end to end on TOI-7169 b only.
 
+## Statistics: what is forecast and what is refused
+
+- Posterior curves are Fisher-Gaussian (Laplace) from the same nuisance-augmented
+  matrices as the table, never sampled. Single-realization retrieval as a precision
+  estimator is rejected (realization bias, Feng et al. 2018); the mock is one seeded
+  draw per bin and never enters scores or caches.
+- `sigma_detect` is a conditional matched-template S/N; the label names the rows
+  actually projected. Fisher numbers are local Cramer-Rao bounds, disclosed everywhere.
+  The C/O row within one stencil of C/O = 1 is an oxygen-rich-side local derivative.
+- Binned scores on the high-R gratings are sound: every analysis bin (R <= 500) is wider
+  than the R = 1000 bands; a caption fires at r_bin >= 250 when a mode outresolves the
+  model.
+- Saturated modes are excluded from the ranking and the combined row and named.
+- Complementary rank-deficient modes can leave the joint Fisher full rank: the page
+  reports the combined width; only a non-finite combined width stops it.
+- Analysis R is neither the instrument's resolving power nor a display setting; the
+  plotted model is display-smoothed to max(300, 3 x R), untouched by any score.
+
 ## Performance and run limits
 
 - Default W39b transmission cold run (nz 100): RT build 7 s, chemistry ~40-80 s, one
@@ -382,9 +398,8 @@ gate 0.25.
 - The Space is ~4.5x slower than a 10-core laptop on RT and ~1.2x on chemistry; never
   read Space wall times as engine cost.
 - The ETC computes only selected modes, one worker for all misses. Per-mode CPU on
-  WASP-39 b: prism 11.4 s, miri_lrs 11.1, nircam_f322w2 21.3, g395h 55.0, niriss_soss 597.
-  A spawn pool would gain 1.3x on the default trio (nothing with SOSS) for more CPU, ~0.8
-  GB more RSS and children that survive a cancelled run: not adopted.
+  WASP-39 b: prism 11.4 s, miri_lrs 11.1, nircam_f322w2 21.3, g395h 55.0, niriss_soss 597 s
+  (a spawn pool: "Ideas not adopted").
 - `runlimit.MAX_CONCURRENT` 3: one cold default worker averages 1.75 cores and peaks at
   6.34 GiB; on cpu-upgrade (29.8 GiB, idle 4.58) three slots want 23.6 GiB and four
   reach the ceiling, where an OOM takes every session. `noise.PANDEIA_WALL_CAP_S` 3600 s
@@ -395,21 +410,23 @@ gate 0.25.
 ## Cache keys and version history
 
 - `forward._VERSION` busts `model_cache`; every bump is in git (`git log
-  -S"_VERSION = " -- src/jwst_tool/forward.py`). Default transmission / emission keys:
-  v58 `fec633bfcd1095f7` / `de561305d715a10b`; v59 (ExoGibbs seed, emission g(r), exojax
-  2.6.0) `21996e68a45060c0` / `a9ea64d452f0dee1`, transmission max |d| 0.128 ppm,
-  emission -1.92% to +0.20%; v60 (lnR0 at fixed mass) `8c37a8320c19c75a` /
-  `f4b94ee63633f386`, transmission 2.2e-6 ppm, emission 0.0049 ppm, PICASO fixture bitwise
+  -S"_VERSION = " -- src/jwst_tool/forward.py`). Default transmission / emission keys by
+  version: v58 `fec633bfcd1095f7` / `de561305d715a10b`; v59 (ExoGibbs seed, emission
+  g(r), exojax 2.6.0) `21996e68a45060c0` / `a9ea64d452f0dee1`, transmission max |d| 0.128
+  ppm, emission -1.92% to +0.20%; v60 (lnR0 at fixed mass) the current keys ("Current
+  state"), transmission 2.2e-6 ppm, emission 0.0049 ppm, PICASO fixture bitwise
   unchanged.
 - No-bump exemptions: `data_revision` (omitted while the variable is unset, so local
-  payloads are byte-identical, test-pinned); engine moves that reproduced the fixture to
+  payloads are byte-identical, test-pinned); engine moves that reproduce the fixture to
   <= 0.0065 ppm (vulcan3 0.10.1 at v57, 0.11.0 at v58). An engine exemption does NOT
-  generalize: the engine can move a column (HD 209458 b 0.90 ppm on 0.10.0), and a column
-  cached on the Space's persistent `model_cache` is not covered. The key carries no
-  engine version: accepted by the maintainer (2026-10-20), with every engine pin bump
-  bumping `_VERSION` (CLAUDE.md). The Space reads `data_revision` from the dataset's
-  remote HEAD at boot, so a run made while the mount still holds the old bytes is stored
-  under the new revision; accepted, the mount's update timing not measured.
+  generalize: the engine can move a column (HD 209458 b 0.90 ppm on 0.10.0), and a
+  column cached on the Space's persistent `model_cache` is not covered. The key carries
+  no engine version (Decision records).
+- `$JWST_TOOL_DATA_REVISION` keys `model_cache` to the science data, which no parameter
+  and no `_VERSION` tracks. The Space's entrypoint stamps the remote dataset HEAD
+  (`HfApi().dataset_info().sha`) at boot, which can differ from the mounted bytes: a run
+  made while the mount still holds the old bytes is stored under the new revision
+  (accepted, Decision records; the mount's update timing not measured).
 - `noise.WORKER_VERSION` (+ backend fingerprint) busts `noise_cache`; held at 12 through
   wording passes and the order-2 removal (no measured field moved).
 - `_PARAM_KEYS_ECHOED` holds the keys `canonical_params` emits but never reads (`version`,
@@ -421,11 +438,11 @@ gate 0.25.
 
 ## PICASO engine
 
-A second, selectable engine (maintainer decision); VULCAN stays the default and its keys
-and fixture never move for it. PICASO's climate solver (or Guillot / a table) gives T(P),
-its on-the-fly equilibrium chemistry the abundances (optional quench at one constant Kzz,
-default off); spectrum, binning, noise and Fisher are the tool's. FD only; lnKzz refused;
-metallicity capped at 10x; picaso 4.1 pinned; climate redistribution 0.5 / 1.0.
+The second engine (Decision records). PICASO's climate solver (or Guillot / a table)
+gives T(P), its on-the-fly equilibrium chemistry the abundances (optional quench at one
+constant Kzz, default off); spectrum, binning, noise and Fisher are the tool's. FD only;
+lnKzz refused; metallicity capped at 10x; picaso 4.1 pinned; climate redistribution
+0.5 / 1.0.
 
 - Process split: picaso 4.1 (with photochem 0.9.2, both pinned in the picaso locks) needs
   numpy >= 2, the stack numpy < 2, so `picaso_worker.py` runs in its own environment.
@@ -440,7 +457,7 @@ metallicity capped at 10x; picaso 4.1 pinned; climate redistribution 0.5 / 1.0.
   PROTOSOLAR table (+0.089 dex in C, N, O, S) and moves C and O at fixed C+O. With
   C/N/O/S/He only, picaso and the ExoGibbs seed agree to < 0.01 dex over 1e-5-1 bar at
   1x-100x (slow test).
-- Metals kept (maintainer decision): MgO/SiO2 condense locally and take oxygen: H2O
+- Metals kept (Decision records): MgO/SiO2 condense locally and take oxygen: H2O
   -0.09 to -0.22 dex at C/O 0.3-0.55, about -2 dex near 0.9; -138 ppm mean in
   transmission (shape ~25 ppm). Against FastChem 4.0.3 the sink is the same 18.2% of the
   oxygen (analytic ceiling 0.182); pinned by
@@ -485,34 +502,13 @@ metallicity capped at 10x; picaso 4.1 pinned; climate redistribution 0.5 / 1.0.
   `tests/live/test_picaso_published.py` (60 ppm).
 - Runs on daw: default climate transmission 1198 s, emission 1029 s; one climate worker
   peaks at 3.27 GiB. On the Space (cpu-basic) one climate solve takes 914-1020 s; a
-  default climate run with rows is estimated at 2.5-3 h [E] and did not finish inside a
-  110 min watch. Kept as is (maintainer decision): no runtime limit, three slots.
-- GUI: the "Chemistry engine" selector opens Step 2; PICASO widgets carry a `picaso` key
-  infix; under PICASO the method is a disabled FD-only widget on its own key.
-
-## Statistics: what is forecast and what is refused
-
-- Posterior curves are Fisher-Gaussian (Laplace) from the same nuisance-augmented
-  matrices as the table, never sampled. Single-realization retrieval as a precision
-  estimator was rejected (realization bias, Feng et al. 2018); the mock is one seeded
-  draw per bin and never enters scores or caches.
-- `sigma_detect` is a conditional matched-template S/N; the label names the rows
-  actually projected. Fisher numbers are local Cramer-Rao bounds, disclosed everywhere.
-  The C/O row within one stencil of C/O = 1 is an oxygen-rich-side local derivative.
-- Binned scores on the high-R gratings are sound: every analysis bin (R <= 500) is wider
-  than the R = 1000 bands; a caption fires at r_bin >= 250 when a mode outresolves the
-  model.
-- Saturated modes are excluded from the ranking and the combined row and named.
-- Complementary rank-deficient modes can leave the joint Fisher full rank: the page
-  reports the combined width; only a non-finite combined width stops it.
-- Analysis R is neither the instrument's resolving power nor a display setting; the
-  plotted model is display-smoothed to max(300, 3 x R), untouched by any score.
+  default climate run with rows did not finish inside a 110 min watch, estimate 2.5-3 h
+  [E] (slots and runtime limit: Decision records).
 
 ## GUI, figures and copy
 
-- The audience is an exoplanet proposer: precise terms stay, explaining prose goes (a
-  lay-paraphrase sweep was reverted in full by the maintainer). Verdict first, caveats
-  beside it; the Data expander is one fully-cited sources table.
+- Verdict first, caveats beside it; the Data expander is one fully-cited sources table
+  (audience and register: Decision records).
 - Figures are pure builders under `plotting.render_lock`: matplotlib 3.10's
   `tight_layout`/`savefig` measure mathtext through a process-global parser (without the
   lock 7 of 8 threads crashed).
@@ -523,11 +519,13 @@ metallicity capped at 10x; picaso 4.1 pinned; climate redistribution 0.5 / 1.0.
 - Restore reads `canonical_params`' OUTPUT and refuses by name, never drops. Files that
   enable condensation or boundary terms, or gray + emission, are refused: pinning them
   off would show a successful restore of a different atmosphere.
+- The "Chemistry engine" selector opens Step 2; PICASO widgets carry a `picaso` key
+  infix; under PICASO the method is a disabled FD-only widget on its own key.
 - CSVs start with one `# provenance:` line and carry the page's caveats as `# caveat:`
   comments; a rendered-app regression checks the actual download bytes.
 - Constraint-table rows use `fisher.param_axis` labels except "log10 C/O": a bare
-  "Metallicity" row read as the x-solar input, a decade off. The C/O panel ordinate has
-  no " per d ln(C/O)" qualifier (removed in 312af43).
+  "Metallicity" row reads as the x-solar input, a decade off. The C/O panel ordinate has
+  no " per d ln(C/O)" qualifier (312af43).
 - `plotting.draw_caveats` draws ONE footnote line in a strip added below the panels,
   re-seating every axes at `get_position(original=True)`; panel boxes do not change.
 - `initial_sidebar_state="expanded"`: "auto" starts the sidebar collapsed in the narrow
@@ -549,14 +547,6 @@ metallicity capped at 10x; picaso 4.1 pinned; climate redistribution 0.5 / 1.0.
   v4.1 `reference/`, GPL-3.0, plus 36 correlated-k tables, Zenodo
   10.5281/zenodo.18644980, CC-BY-4.0, 2.2 GB). Engine data lives behind
   `$VULCAN_FORWARD_DATA`.
-- `data_revision`: nothing else tracks the science data. The k-tables are symlinked off a
-  dataset mount that updates as commits land [I], while `$STATE` keeps `model_cache`
-  across restarts. The entrypoint stamps the remote dataset HEAD
-  (`HfApi().dataset_info().sha`), which can differ from the mounted bytes (accepted,
-  "Cache keys and version history"). The
-  dataset repo is private, so the revision needs a read token as the Space's `HF_TOKEN`;
-  without one the boot log says "dataset revision unavailable". Read the container log in
-  the browser: the `/logs/container` API path is 404.
 - `noise.backend_fingerprint` keeps the "unavailable" placeholder only for a MISSING
   backend; one that exists but cannot be probed raises.
 
@@ -566,10 +556,13 @@ metallicity capped at 10x; picaso 4.1 pinned; climate redistribution 0.5 / 1.0.
   entrypoint symlinks `exomolop` (never copies 4.3 GB), sets `HDF5_USE_FILE_LOCKING=FALSE`
   (the mount does not lock), and symlinks the PICASO CK tables. The base image is pinned
   by digest. BUILD_INFO confirms a deploy; the served HTML title does not.
-- Capacity is one Space and its slot limit. Spaces do not autoscale, and a replica is
-  awake whenever the primary is. An in-app self-scaler and a queue were rejected (a new
-  instance never serves the visitor who triggered it; a queue holds a session open for
-  tens of minutes); a second overflow Space was removed (Superseded designs).
+- Science data and `data_revision`: the k-tables are symlinked off a dataset mount that
+  updates as commits land [I], while `$STATE` keeps `model_cache` across restarts. The
+  dataset repo is private, so the revision stamp needs a read token as the Space's
+  `HF_TOKEN`; without one the boot log says "dataset revision unavailable". Read the
+  container log in the browser: the `/logs/container` API path is 404.
+- Spaces do not autoscale, and a replica is awake whenever the primary is (capacity
+  model: Decision records).
 - The run slot is taken at the first heavy launch, so a fully cached run renders on a
   booked instance. A refused visitor is told how long the oldest job has run, never a
   promised wait.
@@ -627,6 +620,38 @@ drops the `lsf_impulse` block, so a matrix re-run must be followed by `--impulse
 (not installed here: reuse with `PARITY_REUSE_PANDEXO=1` after rewriting the stored
 `*_pandexo_job.json` paths), the 2026.7 trees and a synphot CDBS.
 
+## Decision records
+
+Standing maintainer decisions; the measurements sit in the section named.
+
+- sncho photolysis-on `CO_MAX` 0.99: a raise unlocks spectra with no certifiable C/O
+  sensitivity and moves the default network into the carbon-rich regime; raising it is a
+  science decision ("Composition, C/O bounds and networks").
+- `MET_RANGE` (0.1, 100): 100x keeps every lnZ stencil point under the certified 150x
+  (same section).
+- The advertised C/O top is 10 and sncho2025 is EXPERIMENTAL (0.68.0): no benzene line
+  list exists; the element and unmodeled-absorber gates pass the C/O 10 column and warn
+  or refuse on what the tables cannot model (same section).
+- `EXTRA_MOLECULES_DEFAULT` is as measured on WASP-39 b and HD 189733 b (SO, SH on; CN
+  off); carbon-rich columns and WASP-107 b are uncovered, a user adds CH3/CS per run
+  ("Opacity and radiative transfer").
+- `p_ref_bar` 1 mbar is not tuned to the data; `rt_ptop_bar` 1e-7 bar keeps the
+  published convention ("Structure: T-P, Kzz, gravity anchor, model top").
+- lnR0 is a radius change at fixed planet mass in both modes, as in vulcan-forward
+  0.29.0 ("Emission", "Superseded designs").
+- A bin's segment is the count-majority segment, no fractional row ("Measurement
+  operator, LSF, noise, ramps, registry").
+- PICASO is a second, selectable engine; VULCAN stays the default and its payloads, keys
+  and fixture never move for it. Metals stay in the PICASO composition. PICASO on the
+  Space keeps no runtime limit and the three slots ("PICASO engine").
+- The cache key carries no engine version: every engine pin bump bumps
+  `forward._VERSION`. The Space's `data_revision` stamp is the remote dataset HEAD at
+  boot, which may differ from the mounted bytes ("Cache keys and version history").
+- GUI copy is for an exoplanet proposer: precise terms stay, explaining prose goes,
+  caveats live in README or notes ("GUI, figures and copy", "Do not retry").
+- Capacity is one Space and its slot limit: no self-scaler, queue or overflow Space
+  ("Hugging Face Space", "Ideas not adopted", "Superseded designs").
+
 ## Accepted limitations
 
 None changes a shipped number.
@@ -650,8 +675,8 @@ None changes a shipped number.
   (picaso's kinetic CO2 included); a quenched run's T is the equilibrium climate's; the
   deep column fixed by the seed; constant-g climate; the climate top at 1e-6 bar; issue
   #413 binning; no Na/K silicate, FeS, Al, Ca or Ni condensates; metal atoms exempt from
-  the unmodeled-absorber gate; no climate T_int row; an estimated 2.5-3 h default climate
-  run on the Space.
+  the unmodeled-absorber gate; no climate T_int row; the default climate run time on the
+  Space ("PICASO engine").
 
 ## Known and deliberately untracked
 
@@ -671,16 +696,16 @@ Real, small, and out of todo.md by decision; nothing here changes a shipped numb
   unknown); the C2H4 table is incomplete where used.
 - The sncho photolysis-off C/O 10 column changed from C6H6 6.9e-12 (v42) to 3.31e-3
   (v58); never bisected.
-- A stalling FD stencil point pays its whole step budget before the cadence-1 retry (~52
-  of 72 min on TOI-7169 b); `ConvDiag.count_since_new_min` does not separate the stalling
-  column, so no early predicate exists.
+- A stalling FD stencil point pays its whole step budget before the cadence-1 retry (the
+  TOI-7169 b case, "Jacobians and Fisher"); `ConvDiag.count_since_new_min` does not
+  separate the stalling column, so no early predicate exists.
 - On sncho photolysis-on a C/O row requested between 0.97 and 0.99 raises after its four
   solves (FD) or at build (AD).
 - The `check_unmodeled` refusal returns as a forward-subprocess failure: no
   `refusals.log` line and no alert mail, unlike `canonical_params` refusals.
-- NIRISS SOSS costs 597 s of ETC CPU and sets the wall floor of any selection with it [I:
-  suspected cause, the ngroup bracket search re-running a full calculation per
-  candidate].
+- NIRISS SOSS sets the ETC wall floor of any selection with it (its CPU cost:
+  "Performance and run limits") [I: suspected cause, the ngroup bracket search
+  re-running a full calculation per candidate].
 - No test solves with condensation enabled; the one measured run sits 0.2% inside its
   gate.
 - Code hygiene, no behavior change: `instruments.JWST_TOOL_BACKEND = "current"` rides
@@ -696,17 +721,10 @@ Real, small, and out of todo.md by decision; nothing here changes a shipped numb
   Fisher"); the own-vs-frozen check was never run on an eclipse case.
 - The README forecast figure (`assets/w39b_so2_forecast.png`) carries the model caveats
   as text under the panels; moving them out is an app change (`summary_figure`).
-- The raw logs and scripts behind several records here (`validation/co_stall/`,
-  `validation/co_limits/`, untracked) were deleted 2026-10-20; the numbers in these
-  notes are the record.
-
-## Ideas not adopted
-
-- A live TAP lookup beside the archive snapshot; archive-fill depth (per-field
-  references, uncertainties, gravity propagation).
-- A proposal-export mode with a read-only seed; a sensitivity display for the
-  combined-mode systematic model; an SVD of the whitened design; marginalized forecast
-  curves in a non-flat display parameterization.
+- The scripts and remaining logs behind the C/O survey records (`validation/co_stall/`,
+  `validation/co_limits/`) are gitignored and exist only on the maintainer's laptop
+  (32 MB); the survey's raw outputs are deleted. The numbers in these notes are the
+  record.
 
 ## Superseded designs
 
@@ -731,14 +749,27 @@ Real, small, and out of todo.md by decision; nothing here changes a shipped numb
   C/O display. Removed in 0.56.0 (8a850b2).
 - The 2000-step AD floor (0.63.0, corr 0.99746 / scale 1.0657, a lucky stop). Removed in
   0.64.0 (a1f3c44).
+- Emission lnR0 as a depth factor e^(2 lnR0) at fixed g (through v59): the fixed-mass row
+  over it is 0.992 at the median, 0.78-1.04 per bin on the default W39b eclipse.
 - The per-mode operational-warning subsystem, "How the model works" and "Notes on N
   modes" (removed by the maintainer); `_leg_note` / `legend_title`, never drawn
   (eaaa50f).
 - The overflow Space (`imalsky/jwst-transit-authority-overflow`: the same shim, pins,
   secrets and mounts on a 30 min sleep timer, linked from the primary on a slot refusal
-  through `JWST_TOOL_OVERFLOW_URL`). Removed 2026-10-20: it sat paused (Hub read
-  2026-10-14), so a refused visitor was sent to an instance that did not wake. A full
-  instance now refuses plainly; one Space plus the slot limit is the capacity model.
+  through `JWST_TOOL_OVERFLOW_URL`): it sat paused, so a refused visitor was sent to an
+  instance that did not wake. A full instance now refuses plainly.
+
+## Ideas not adopted
+
+- A live TAP lookup beside the archive snapshot; archive-fill depth (per-field
+  references, uncertainties, gravity propagation).
+- A proposal-export mode with a read-only seed; a sensitivity display for the
+  combined-mode systematic model; an SVD of the whitened design; marginalized forecast
+  curves in a non-flat display parameterization.
+- A spawn pool for the ETC: 1.3x on the default trio (nothing with SOSS) for more CPU,
+  ~0.8 GB more RSS and children that survive a cancelled run.
+- An in-app Space self-scaler (a new instance never serves the visitor who triggered it)
+  and a run queue (it holds a session open for tens of minutes).
 
 ## Do not retry
 
@@ -789,4 +820,4 @@ Real, small, and out of todo.md by decision; nothing here changes a shipped numb
 - Normalizing the PICASO TOA flux gate by the stellar flux so the quench-in-the-loop climate passes: the gate would pass any climate.
 - The timestep stop-gradient as the eclipse AD repair: it breaks the independent full-integration Kzz derivative.
 - A step floor on the AD warm map: a lucky stop, withdrawn as a magic number.
-- Treating the composition FD frozen anchor as a bug from the code shape alone: settle it by measurement (Jacobians and Fisher).
+- Treating the composition FD frozen anchor as a bug from the code shape alone: settle it by measurement ("Jacobians and Fisher").
