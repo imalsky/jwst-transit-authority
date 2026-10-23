@@ -721,10 +721,9 @@ Real, small, and out of todo.md by decision; nothing here changes a shipped numb
   Fisher"); the own-vs-frozen check was never run on an eclipse case.
 - The README forecast figure (`assets/w39b_so2_forecast.png`) carries the model caveats
   as text under the panels; moving them out is an app change (`summary_figure`).
-- The scripts and remaining logs behind the C/O survey records (`validation/co_stall/`,
-  `validation/co_limits/`) are gitignored and exist only on the maintainer's laptop
-  (32 MB); the survey's raw outputs are deleted. The numbers in these notes are the
-  record.
+- The scripts and remaining logs behind the C/O survey records are kept outside the
+  repo, on the maintainer's laptop (32 MB); the survey's raw outputs are deleted. The
+  numbers in these notes are the record.
 
 ## Superseded designs
 
