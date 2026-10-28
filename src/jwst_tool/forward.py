@@ -2122,12 +2122,13 @@ def run_model(params: dict, log=print) -> Path:
                  if cp["cloud_on"] else None)
 
     def _gas_mask(chem_b):
-        # GAS-phase normalization: the network's *_l_s columns are particles,
+        # GAS-phase normalization: the network's condensate columns (*_l_s,
+        # *_l, *_s: vulcan3's conden.GAS_TO_CONDENSATE) are particles,
         # not gas -- counting them dilutes every gas VMR and inflates the RT
         # mean molecular weight. Aerosol OPACITY stays excluded (cloud deck).
         mask = np.ones(int(np.asarray(chem_b.species_masses).size))
         for _s, _i in chem_b.sidx.items():
-            if _s.endswith("_l_s"):
+            if _s.endswith(("_l_s", "_l", "_s")):
                 mask[int(_i)] = 0.0
         return mask
 
@@ -2767,7 +2768,7 @@ def run_model(params: dict, log=print) -> Path:
     out = cache_path(params)
     # lazy: provenance imports this module
     from jwst_tool import provenance as _prov
-    # npz ymix must use the SAME gas normalization the RT applies (*_l_s
+    # npz ymix must use the SAME gas normalization the RT applies (condensate
     # columns excluded), or the saved ymix disagrees with the spectra.
     _y_gas_np = y_np * _gas_mask(chem)[None, :]
     ymix_np = _y_gas_np / _y_gas_np.sum(axis=1, keepdims=True)

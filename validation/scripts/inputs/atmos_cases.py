@@ -38,7 +38,7 @@ assert bool(diag.conv_normal) and float(diag.longdy) < chem.yconv_min, \
 y = np.asarray(y, dtype=np.float64)
 gas = np.ones(y.shape[1])
 for s, i in chem.sidx.items():
-    if s.endswith("_l_s"):
+    if s.endswith(("_l_s", "_l", "_s")):
         gas[int(i)] = 0.0
 ymix = y * gas / (y * gas).sum(axis=1, keepdims=True)
 mmw_chem = ymix @ np.asarray(chem.species_masses)
