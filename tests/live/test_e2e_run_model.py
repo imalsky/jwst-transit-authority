@@ -39,7 +39,7 @@ if importlib.util.find_spec("exojax") is None or \
         importlib.util.find_spec("vulcan3") is None:
     pytest.skip("RT stack not installed", allow_module_level=True)
 
-FIXTURES = {"vulcan": Path(__file__).parent / "data" / "w39b_v60_reference.npz",
+FIXTURES = {"vulcan": Path(__file__).parent / "data" / "w39b_v61_reference.npz",
             # the PICASO engine: climate T-P + equilibrium chemistry, same RT
             "picaso": Path(__file__).parent / "data" / "w39b_picaso_reference.npz"}
 

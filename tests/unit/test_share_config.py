@@ -53,7 +53,7 @@ def test_round_trip_restores_the_full_run():
     assert state["n0_wasp39b_tirr"] == canon["Tirr"]
     assert state["n0_met"] == 7.0 and state["n0_co"] == 0.6
     assert state["n0_wasp39b_kzz"] == pytest.approx(9.0)   # log10(kzz_const)
-    assert state["n0_xmols_vulcan"] == ["HCN", "NH3"]
+    assert state["n0_xmols_vulcan_sncho2025"] == ["HCN", "NH3"]   # the default network
     assert state["n0_cloud"] is True and state["n0_ck"] == -2.0
     # science goal (dynamic widget-key suffixes)
     assert state["n0_goal"] == "constrain"
@@ -76,7 +76,7 @@ def test_round_trip_restores_the_full_run():
         observation=dict(modes=["nirspec_prism"], n_transits=1,
                          star_teff=5485.0, star_logg=4.47, star_feh=0.0))
     state = share_config.widget_state(share, _key)
-    assert state["n0_mol_vulcan_C2H2_HCN"] == "SO2"
+    assert state["n0_mol_vulcan_sncho2025_C2H2_HCN"] == "SO2"
     assert state["n0_dofish"] is False
 
     # a bare canonical dict is accepted
@@ -534,7 +534,7 @@ def test_gui_removed_physics_defaults_load_and_nondefaults_refuse():
     state = share_config.widget_state(_canon(), _key)
     assert state["n0_planet"] == "wasp39b"
 
-    canon = _canon(use_condense=True, use_photo=True, use_moldiff=True)
+    canon = _canon(use_condense=True, network="sncho", use_photo=True, use_moldiff=True)
     with pytest.raises(ValueError, match="condensation"):
         share_config.widget_state(canon, _key)
     # a saved configuration carrying the deleted Mie deck / line-by-line

@@ -434,9 +434,10 @@ def _is_picaso(cp: dict) -> bool:
 # Widget-key and menu helpers shared with app.py, so the keys the restore
 # writes are the keys the widgets read.
 def network_suffix(network: str) -> str:
-    """Widget-key suffix for a non-default kinetics network: the sncho keys
-    carry no suffix (shipped key contract), ncho and sncho2025 widgets get
-    their own keys (same pattern as the provider-suffixed molecule keys)."""
+    """Widget-key suffix per kinetics network: the sncho keys carry no
+    suffix (shipped key contract, from when sncho was the default), ncho and
+    sncho2025 widgets get their own keys (same pattern as the
+    provider-suffixed molecule keys)."""
     return "" if network == "sncho" else f"_{network}"
 
 

@@ -741,7 +741,7 @@ def test_emission_mode_archive_fill_skips_transit_duration():
     # carries the default extra set (jwst_tool.app: K("mol_<provider>_<mols>"));
     # CS2/C2H6 are out of the default (no ExoMolOP table); SH+SO are in
     # (measured 10.0 and 48.1 ppm on W39b -- forward.EXTRA_MOLECULES_DEFAULT)
-    [("n0_mol_vulcan_C2H2_C2H4_H2S_HCN_NH3_OCS_SH_SO", "CO2",
+    [("n0_mol_vulcan_sncho2025_C2H2_C2H4_H2S_HCN_NH3_OCS_SH_SO", "CO2",
       "target_mol"),                                # not a canonical param
      ("n0_noisescale", 2.0, "noise_scale"),         # an observation-block field
      ("n0_provider", "picaso", "chem_provider"),    # the chemistry engine

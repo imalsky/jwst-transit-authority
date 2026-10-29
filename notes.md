@@ -10,23 +10,24 @@ names the code state it was measured on.
 
 - Tool 0.72.0 on main. VULCAN is the default chemistry engine, PICASO the second.
 - Floors `vulcan-forward>=0.29.0`, `vulcan3>=0.18.0` (pyproject). `deploy/pins.env` and
-  the Dockerfile pin vulcan3 92c3b1e and vulcan-forward 32adc85; the Dockerfile pins the
+  the Dockerfile pin vulcan3 2441e6c and vulcan-forward 0accd36; the Dockerfile pins the
   tool at cd67563. The running Space was last deployed from the earlier pins (tool
   b23df79) and is unchanged until a redeploy.
-- Cache versions: `forward._VERSION` 60, `noise.WORKER_VERSION` 12,
+- Cache versions: `forward._VERSION` 61, `noise.WORKER_VERSION` 12,
   `adjoint_diag._ADJ_VERSION` 4, `picaso_engine.WORKER_VERSION` 3. Default keys:
-  transmission `8c37a8320c19c75a` (test-pinned), emission `f4b94ee63633f386`.
-- Fixtures `tests/live/data/w39b_v60_reference.npz` and `w39b_picaso_reference.npz`
-  (cold WASP-39 b, both modes; jax 0.6.2, vulcan3 0.18.0, vulcan-forward 0.29.0; 12.6 and
-  42.8 min on daw).
+  transmission `58d1754cf09089de` (test-pinned), emission `8fea31aae9546b2a`.
+- Fixtures `tests/live/data/w39b_v61_reference.npz` and `w39b_picaso_reference.npz`
+  (cold WASP-39 b, both modes; jax 0.6.2, vulcan3 0.18.0, vulcan-forward 0.30.0; 10 and
+  42 min on daw).
 - Tests. Normal suite `python -m pytest tests -q -n 6`; `tests/conftest.py` defaults
   `JAX_PLATFORMS=cpu` and points an unset `JWST_TOOL_OUTPUT_DIR` at a throwaway
   directory. `tests/unit` on daw (6 pinned cores): 405 passed, 4 skipped in 35-38 s. CI
   runs the unit suite on Python 3.10-3.12 plus a GUI-smoke job; `full-stack-smoke.yml`
-  runs by hand. Slow tier (`JWST_TOOL_RUN_SLOW=1`, serial, 8 cores, tool 0.71.0): 345
-  passed in 4 h 07 min; longest: emission AD/FD closure 4310 s (config cadence) / 2551 s
-  (cadence 1), TOI-7169 b escalation 3498 s, transmission closure 1933 / 1381 s, e2e
-  512 s per mode.
+  runs by hand. Slow tier (`JWST_TOOL_RUN_SLOW=1`, serial, 8 cores, v61): 419 passed in
+  3 h 21 min plus the TOI-7169 b test's 48 min re-run (it now solves in a child process:
+  its case is on sncho, the suite's process freezes sncho2025). At tool 0.71.0: 345 in
+  4 h 07 min; longest: emission AD/FD closure 4310 s (config cadence) / 2551 s (cadence
+  1), TOI-7169 b escalation 3498 s, transmission closure 1933 / 1381 s, e2e 512 s per mode.
 - Space, at the last Hub API read: `imalsky/jwst-transit-authority` RUNNING on cpu-basic
   (2 vCPU / 16 GB), sleep 48 h. The four live checks (cold transmission run, cold
   emission run, configuration export and reload, out-of-range metallicity refusal with
@@ -124,10 +125,14 @@ names the code state it was measured on.
 - `_assemble_chem` sets `VULCAN3_NETWORK` and the cfg `network`/`atom_list` for EVERY
   network: skipping the default lets a sncho request after a sncho2025 run in one process
   be served by sncho2025.
-- Networks: sncho (default) is the Tsai et al. 2023 89-species file with
-  post-publication rate updates (never "exactly the published network"); ncho 69 species
-  (sulfur refused, never dropped); sncho2025 93 (experimental, hash-pinned in VULCAN-JAX
-  `tests/science_sources.yaml`). The network says COS where the opacity side says OCS.
+- Default WASP-39 b SO2, one transit, calibration + R0 projected (v61) [M]: PRISM 2.64,
+  G395H 4.23, MIRI LRS 3.11 sigma on sncho2025 and on sncho alike (to 0.01 sigma); the
+  published G395H detections (Alderson et al. 2023, Tsai et al. 2023) are 4.5-4.8 sigma.
+- Networks: sncho2025 (default, `forward.DEFAULT_NETWORK`) is upstream's 93-species
+  file at a68d715, hash-pinned in VULCAN-JAX `tests/science_sources.yaml`; sncho is the
+  Tsai et al. 2023 89-species file with post-publication rate updates (never "exactly
+  the published network"), kept for condensation; ncho 69 species (sulfur refused,
+  never dropped). The network says COS where the opacity side says OCS.
 - `CO_BZ_MIN_AD` 0.1 (TOI-7169 b-like case): AD dlnCO vs one-sided FD at margin 0.12
   corr 0.9904, scale 1.022; at margin 0.05 scale 1.116, a uniform 11-12% AD excess. Two
   points, one planet.
@@ -210,9 +215,10 @@ names the code state it was measured on.
   Decision records).
 - Against petitRADTRANS 3.4.0 on the same k-tables: engine fixtures rms 0.0013% /
   0.096% / 0.021% (isothermal H2O radius, W39b depth, H2O emission flux). The six
-  `validation/data/atmos_*.npz` (tool 0.72.0, cadence 5), fitted offset at R = 100:
-  transmission residual std WASP-39 b 17.46 ppm, HD 189733 b 4.31, WASP-107 b 48.39, HD
-  209458 b 4.72; emission relative RMS 0.307% / 0.256%. An isothermal column emits
+  `validation/data/atmos_*.npz` (v61, sncho2025, cadence 5), fitted offset at R = 100:
+  transmission residual std WASP-39 b 17.65 ppm, HD 189733 b 4.23, WASP-107 b 49.02, HD
+  209458 b 4.75; emission relative RMS 0.306% / 0.249% (on sncho, v60: 17.46, 4.31,
+  48.39, 4.72; 0.307% / 0.256%). An isothermal column emits
   pi*B(T) to 6.7e-16. The figure script refuses mixed cadences and a stale pRT reference.
   After a `_VERSION` bump that moves a spectrum, regenerate the npz (`atmos_cases.py` x 6,
   ~15 min), `prt_reference.py` and the figures (`make_figures.py`); nothing tests that.
@@ -253,8 +259,8 @@ names the code state it was measured on.
   (`eclipse_flux_tau`): W39b depth ratio photospheric/single median 1.070; a single
   radius reads the CO2 feature contrast 9% low. `emission_radius` stays the
   (R_em/R_star)^2 factor.
-- HD 189733 b MIRI LRS vs Inglis et al. 2024 (v60): chi2/N 67.6, 26.85 with a fitted
-  -132 ppm offset, under the dayside f = 1/2 Guillot default.
+- HD 189733 b MIRI LRS vs Inglis et al. 2024 (v61): chi2/N 67.7, 26.87 with a fitted
+  -132 ppm offset, under the dayside f = 1/2 Guillot default (v60, sncho: 67.6, 26.85).
 - lnR0 (a radius change at fixed planet mass in both modes, v60; Decision records):
   default W39b eclipse AD and FD lnR0 rows agree to corr 0.99999997. Emission lnR0 FD
   points are tau-gated.
@@ -363,8 +369,8 @@ gate 0.25.
   `app._UNCONSTRAINED_ABOVE` (1e4). `ln_gaussian_curve` clips its grid to the solvable
   C/O range (exp(+-5 sigma) overflows at sigma_ln 142). Mock recovery is the linearized
   identity delta = F^+ J^T Sigma^-1 n, labelled "not a retrieval result".
-- README figure (`fig_readme_example.py`, v46, GUI defaults): PRISM S/N 2.6, G395H 4.2,
-  MIRI LRS 3.1 sigma; log10(C/O) all modes -0.278 +/- 0.028. The published G395H
+- README figure (`fig_readme_example.py`, v61, GUI defaults): PRISM S/N 2.6, G395H 4.2,
+  MIRI LRS 3.1 sigma; log10(C/O) all modes -0.279 +/- 0.028 (v46: -0.278). The published G395H
   detections are 4.5-4.8 sigma.
 - The slow closure tests pass cold: 5 passed in 57 min on 4 cores. No test exercises the
   cadence-1 AD retry: every measured column certifies at the config cadence under the
@@ -413,9 +419,11 @@ gate 0.25.
   -S"_VERSION = " -- src/jwst_tool/forward.py`). Default transmission / emission keys by
   version: v58 `fec633bfcd1095f7` / `de561305d715a10b`; v59 (ExoGibbs seed, emission
   g(r), exojax 2.6.0) `21996e68a45060c0` / `a9ea64d452f0dee1`, transmission max |d| 0.128
-  ppm, emission -1.92% to +0.20%; v60 (lnR0 at fixed mass) the current keys ("Current
-  state"), transmission 2.2e-6 ppm, emission 0.0049 ppm, PICASO fixture bitwise
-  unchanged.
+  ppm, emission -1.92% to +0.20%; v60 (lnR0 at fixed mass) `8c37a8320c19c75a` /
+  `f4b94ee63633f386`, transmission 2.2e-6 ppm, emission 0.0049 ppm, PICASO fixture
+  bitwise unchanged; v61 (sncho2025 the default network, a68d715 file) the current keys
+  ("Current state"), transmission max |d| 68.8 ppm at 3.34 um (9 of 164 R = 100 bins over
+  10 ppm, all in 3.3-3.6 um), SO2 band 3.95-4.15 um -0.8 ppm, emission max |d| 0.48 ppm.
 - No-bump exemptions: `data_revision` (omitted while the variable is unset, so local
   payloads are byte-identical, test-pinned); engine moves that reproduce the fixture to
   <= 0.0065 ppm (vulcan3 0.10.1 at v57, 0.11.0 at v58). An engine exemption does NOT
@@ -629,9 +637,11 @@ Standing maintainer decisions; the measurements sit in the section named.
   science decision ("Composition, C/O bounds and networks").
 - `MET_RANGE` (0.1, 100): 100x keeps every lnZ stencil point under the certified 150x
   (same section).
-- The advertised C/O top is 10 and sncho2025 is EXPERIMENTAL (0.68.0): no benzene line
-  list exists; the element and unmodeled-absorber gates pass the C/O 10 column and warn
-  or refuse on what the tables cannot model (same section).
+- The advertised C/O top is 10 (0.68.0): no benzene line list exists; the element and
+  unmodeled-absorber gates pass the C/O 10 column and warn or refuse on what the tables
+  cannot model (same section).
+- sncho2025 is the default network (v61); sncho and ncho stay selectable (its SO2
+  check: "Composition, C/O bounds and networks").
 - `EXTRA_MOLECULES_DEFAULT` is as measured on WASP-39 b and HD 189733 b (SO, SH on; CN
   off); carbon-rich columns and WASP-107 b are uncovered, a user adds CH3/CS per run
   ("Opacity and radiative transfer").
@@ -716,7 +726,7 @@ Real, small, and out of todo.md by decision; nothing here changes a shipped numb
   `upload_data.sh` stages k-tables from the `vulcan-retrieval` checkout.
 - pyproject's `vulcan-forward` floor still allows 0.29.0, which runs one extra warm-up
   solve per chemistry build (about 2x chemistry time [E]); CI, the Dockerfile and
-  `deploy/pins.env` pin `32adc85`. Raise the floor at the next vulcan-forward release.
+  `deploy/pins.env` pin `0accd36`. Raise the floor at the next vulcan-forward release.
 - Composition FD rows keep the baseline's radius anchor and T-P ("Jacobians and
   Fisher"); the own-vs-frozen check was never run on an eclipse case.
 - The README forecast figure (`assets/w39b_so2_forecast.png`) carries the model caveats

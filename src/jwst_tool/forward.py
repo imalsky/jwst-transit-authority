@@ -54,15 +54,17 @@ EXTRA_MOLECULES = ["C2", "C2H2", "C2H4", "CH", "CH3", "CN", "CS",
 EXTRA_MOLECULES_DEFAULT = ["C2H2", "C2H4", "H2S", "HCN", "NH3", "OCS",
                            "SH", "SO"]
 # Kinetics networks -> the engine's import-frozen (VULCAN3_NETWORK,
-# VULCAN3_ATOM_LIST) pair. "sncho" (89 species) is the Tsai 2023 WASP-39 b
-# network and the default; "ncho" drops sulfur (69 species); "sncho2025" (93)
-# is what current upstream cfg_wasp39b.py ships -- the same lineage plus C3
-# isomers, C3H5 and H2CS. Only "sncho" is science-validated here.
+# VULCAN3_ATOM_LIST) pair. "sncho2025" (93 species) is the default: what
+# upstream cfg_wasp39b.py ships, the Tsai 2023 lineage plus C3 isomers, C3H5
+# and H2CS. "sncho" (89) is the 2021 file the Tsai 2023 WASP-39 b work used,
+# kept for condensation; "ncho" drops sulfur (69 species). The first entry is
+# the GUI's default selection.
 NETWORKS = {
+    "sncho2025": ("thermo/SNCHO_photo_network_2025.txt", "H,O,C,N,S"),
     "sncho": ("thermo/SNCHO_photo_network.txt", "H,O,C,N,S"),
     "ncho": ("thermo/NCHO_photo_network.txt", "H,O,C,N"),
-    "sncho2025": ("thermo/SNCHO_photo_network_2025.txt", "H,O,C,N,S"),
 }
+DEFAULT_NETWORK = "sncho2025"
 # Every S-bearing member of the lists above; network="ncho" REFUSES these
 # rather than dropping them silently.
 _S_MOLECULES = frozenset({"SO2", "H2S", "OCS", "SO", "SH", "CS", "NS"})
@@ -70,7 +72,7 @@ _S_MOLECULES = frozenset({"SO2", "H2S", "OCS", "SO", "SH", "CS", "NS"})
 # (correlated-k over the published tables is the only opacity path).
 _NO_EXOMOLOP_TABLE = frozenset({"CS2", "C2H6"})
 DT_MAX_S = 1.0e13   # chemistry step-size cap (s); prevents the adaptive-dt balloon
-_VERSION = 60  # model_cache buster (identity = canonical params + this
+_VERSION = 61  # model_cache buster (identity = canonical params + this
                # number, never a content hash); bump on any physics or
                # canonical-key-set change.
 
@@ -706,7 +708,7 @@ def default_tirr(planet: str, system: dict | None = None,
 def active_molecules(cp: dict) -> list[str]:
     """RT molecule set for canonical params: base set + selected extras."""
     base, extras = MOLECULES, EXTRA_MOLECULES
-    if cp.get("network", "sncho") == "ncho":
+    if cp.get("network", DEFAULT_NETWORK) == "ncho":
         base = [m for m in base if m not in _S_MOLECULES]
         extras = [m for m in extras if m not in _S_MOLECULES]
     return base + [m for m in extras if m in cp["extra_mols"]]
@@ -1075,15 +1077,14 @@ def canonical_params(params: dict) -> dict:
         raise ValueError(
             "rfacv and picaso_quench are PICASO settings; set "
             "chem_provider='picaso' or drop them.")
-    network = "" if pic else str(params.get("network", "sncho"))
+    network = "" if pic else str(params.get("network", DEFAULT_NETWORK))
     if not pic and network not in NETWORKS:
         raise ValueError(
             f"unknown network {network!r}: choose from {list(NETWORKS)} "
-            "('sncho' = the shipped S-N-C-H-O kinetics network, the default "
-            "and the only science-validated one; 'ncho' = the sulfur-free "
-            "N-C-H-O network, a cheaper solve with no SO2/H2S/CS2/OCS; "
-            "'sncho2025' = current upstream's S-N-C-H-O file, EXPERIMENTAL, "
-            "the carbon-rich path).")
+            "('sncho2025' = current upstream's S-N-C-H-O network, the "
+            "default; 'sncho' = the 2021 S-N-C-H-O file, needed for "
+            "condensation; 'ncho' = the sulfur-free N-C-H-O network, a "
+            "cheaper solve with no SO2/H2S/CS2/OCS).")
     # tp_mode="file": resolve + validate the table NOW (numpy parse + hash, no
     # engine imports) so a bad upload fails at the API and the cache key is
     # content-addressed, never path-addressed.
@@ -1311,7 +1312,7 @@ def canonical_params(params: dict) -> dict:
         if _s_req:
             raise ValueError(
                 f"extra_mols {_s_req} are sulfur species and do not exist in "
-                "the ncho network. Drop them, or keep network='sncho'. "
+                "the ncho network. Drop them, or use network='sncho2025'. "
                 "(Sulfur species are refused rather than dropped, so the "
                 "model computed is always the model asked for.)")
     # --- leave-one-out spectrum set -----------------------------------------
@@ -1432,7 +1433,7 @@ def canonical_params(params: dict) -> dict:
                 "certified recipe condenses S8, which does not exist in the "
                 "sulfur-free ncho network, and its conver_ignore list was "
                 "tuned on the 89-species file, not on sncho2025's added C3 "
-                "and H2CS species. Keep the sncho network or turn "
+                "and H2CS species. Select network='sncho' or turn "
                 "condensation off.")
         if cp["fisher_params"]:
             raise ValueError(

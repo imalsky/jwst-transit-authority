@@ -56,18 +56,21 @@ def test_condensation_detection_only_with_full_refusal_matrix():
     # reservoir is not a reproducible function of the parameters, so
     # condensation + Fisher refuses under EVERY jac_method (FD included);
     # photo-off has no certifiable steady state; the growth term IS the
-    # molecular-diffusion coefficient, so moldiff-off refuses too.
+    # molecular-diffusion coefficient, so moldiff-off refuses too. Condensation
+    # runs on sncho only (test_network_semantics), so every case names it.
     assert forward.canonical_params(_p())["use_condense"] is False
     assert forward.canonical_params(
-        _p(use_condense=True))["use_condense"] is True
+        _p(use_condense=True, network="sncho"))["use_condense"] is True
     for jm in ("fd", "ad"):
         with pytest.raises(ValueError):
-            forward.canonical_params(_p(use_condense=True, jac_method=jm,
-                                        fisher_params=["lnZ"]))
+            forward.canonical_params(_p(use_condense=True, network="sncho",
+                                        jac_method=jm, fisher_params=["lnZ"]))
     with pytest.raises(ValueError):
-        forward.canonical_params(_p(use_condense=True, use_photo=False))
+        forward.canonical_params(_p(use_condense=True, network="sncho",
+                                    use_photo=False))
     with pytest.raises(ValueError):
-        forward.canonical_params(_p(use_condense=True, use_moldiff=False))
+        forward.canonical_params(_p(use_condense=True, network="sncho",
+                                    use_moldiff=False))
 
 
 def test_shipped_tables_gate_defaults_and_are_never_substituted():
@@ -281,8 +284,9 @@ def test_composition_structural_path_baseline_and_ranges():
     cp = forward.canonical_params(_p(co_ratio=0.8, met_x_solar=24.0,
                                      fisher_params=["lnZ", "dlnCO"]))
     assert cp["co_ratio"] == 0.8 and cp["met_x_solar"] == 24.0
-    for bad in (dict(co_ratio=0.05), dict(co_ratio=2.5),
-                dict(met_x_solar=0.05), dict(met_x_solar=150.0)):
+    for bad in (dict(co_ratio=0.05), dict(co_ratio=2.5, network="sncho"),
+                dict(co_ratio=12.0), dict(met_x_solar=0.05),
+                dict(met_x_solar=150.0)):
         with pytest.raises(ValueError):
             forward.canonical_params(_p(**bad))
 
@@ -483,6 +487,7 @@ W39B_REFERENCE = {
     "sl_angle_deg": 83.0,                   # Tsai+2023 terminator slant
     "use_vm_mol": False,                    # the validated baseline chemistry
     "nz": 100,
+    "network": "sncho2025",                 # G395H SO2 4.23 sigma, as on sncho (v61)
 }
 
 
@@ -501,7 +506,7 @@ def test_wasp39b_reference_state_is_the_literature_validated_one():
 def test_network_semantics():
     """The kinetics-network contract, at the numpy level.
 
-    (a) default sncho, carried in the canonical dict; unknown value refused.
+    (a) default sncho2025, carried in the canonical dict; unknown value refused.
     (b) ncho removes exactly the sulfur species from the RT sets: SO2 from
         the base set, H2S/CS2/OCS from the extras; an explicit sulfur extra
         or wo entry is refused, never dropped.
@@ -511,7 +516,7 @@ def test_network_semantics():
     """
     # (a)
     cp = forward.canonical_params(_p())
-    assert cp["network"] == "sncho"
+    assert cp["network"] == "sncho2025"
     with pytest.raises(ValueError):
         forward.canonical_params(_p(network="chon"))
     # (b)
@@ -538,7 +543,7 @@ def test_network_semantics():
             for n in forward.NETWORKS}
     assert len(set(keys.values())) == len(set(chem.values())) == len(forward.NETWORKS)
     # (e) sncho2025 keeps sulfur, so it offers the same molecules as sncho
-    assert (forward.active_molecules(forward.canonical_params(_p(network="sncho2025")))
+    assert (forward.active_molecules(forward.canonical_params(_p(network="sncho")))
             == forward.active_molecules(cp))
 
 
@@ -720,14 +725,13 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # Re-pinning it follows a _VERSION bump (the version is a canonical key):
     # record what moved the spectrum, and whether the canonical
     # parameter SET moved with it.
-    # The default-geometry median depth and the G395H SO2 significance behind
-    # this configuration have NOT been re-measured since v27-v31 and must be
-    # before the key is quoted as a science result.
+    # The G395H SO2 significance behind this configuration was re-measured at
+    # v61 (notes "Composition, C/O bounds and networks").
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b", tp_mode="file"))) == "8c37a8320c19c75a"
+        dict(planet="wasp39b", tp_mode="file"))) == "58d1754cf09089de"
     # ... and the bare DEFAULT run is that same atmosphere
     assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "8c37a8320c19c75a"
+        dict(planet="wasp39b"))) == "58d1754cf09089de"
     # the sha1 pin is only meaningful re-derived from the file the run
     # actually reads -- this catches the table itself being swapped
     path = forward._shipped_tp_file("wasp39b")

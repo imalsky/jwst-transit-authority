@@ -1223,9 +1223,9 @@ with st.sidebar:
             network = st.selectbox(
                 "Chemical network", list(forward.NETWORKS),
                 key=K("network"),
-                format_func={"sncho": "S-N-C-H-O (full, default)",
-                             "ncho": "N-C-H-O (no sulfur, faster)",
-                             "sncho2025": "S-N-C-H-O 2025 (experimental)"}.get)
+                format_func={"sncho2025": "S-N-C-H-O 2025 (default)",
+                             "sncho": "S-N-C-H-O 2021",
+                             "ncho": "N-C-H-O (no sulfur, faster)"}.get)
             if K("photo") not in st.session_state:
                 st.session_state[K("photo")] = True
             # key always seeded above, so no value= default. AD needs

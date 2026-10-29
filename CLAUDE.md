@@ -99,7 +99,8 @@ fact goes: the `doc-upkeep` skill.
   never call the permissive bounds a ceiling, and never raise the sncho photolysis-on
   0.99 without a science decision (notes "Composition, C/O bounds and networks"). A
   refusal must cost no solve.
-- `sncho2025` is EXPERIMENTAL and not the default.
+- `sncho2025` is the default network (`forward.DEFAULT_NETWORK`); `sncho` (the 2021
+  file) and `ncho` stay selectable.
 - Condensation requires `sncho`. It is detection-only and API-only (the GUI pins it off;
   `share_config` refuses files that enable it), refused with any Jacobian, photolysis off
   or moldiff off. Settling, escape and boundary fluxes are removed: their four keys stay

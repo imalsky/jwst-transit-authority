@@ -69,5 +69,5 @@ def test_run_adjoint_refuses_condensing_states():
     import pytest
 
     with pytest.raises(RuntimeError, match="condensing state"):
-        adjoint_diag.run_adjoint(_p(use_condense=True), "SO2",
+        adjoint_diag.run_adjoint(_p(use_condense=True, network="sncho"), "SO2",
                                  log=lambda *a: None)
