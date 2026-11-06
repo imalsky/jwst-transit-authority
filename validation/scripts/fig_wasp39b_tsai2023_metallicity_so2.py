@@ -1,27 +1,28 @@
-"""WASP-39 b vs Tsai et al. 2023 (gCMCRT spectra, Zenodo 7542781):
-terminator-averaged, cloud-free, their radius anchor, 5/10/20x solar, plus the
-SO2 contribution and the SO2 column at 10x solar. Our chemistry is
-validation/data/case_tsai_*.npz (inputs/chem_cases.py); their spectra and
-columns are validation/data/tsai2023/ and ers2023/photochem/; both
-SO2-contribution curves use our RT.
+"""WASP-39 b vs Tsai et al. 2023 (gCMCRT spectra, Zenodo 7542781).
+
+Terminator-averaged, cloud-free, their radius anchor, 5/10/20x solar, plus the SO2 contribution and the SO2 column at
+10x solar. Our chemistry is validation/data/case_tsai_*.npz (inputs/chem_cases.py); their spectra and columns are
+validation/data/tsai2023/ and ers2023/photochem/; both SO2-contribution curves use our RT.
 
     JAX_PLATFORM_NAME=cpu python validation/scripts/fig_wasp39b_tsai2023_metallicity_so2.py
 """
+
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent            # validation/scripts
-sys.path.insert(0, str(HERE.parent))              # figstyle
-sys.path.insert(0, str(HERE))                     # rtcase
-import numpy as np                                # noqa: E402
-import figstyle as fs                             # noqa: E402
-from figstyle import CYC, DASH_KW, pastel, panels, overlay, legend, save  # noqa: E402
+HERE = Path(__file__).resolve().parent  # validation/scripts
+sys.path.insert(0, str(HERE.parent))  # figstyle
+sys.path.insert(0, str(HERE))  # rtcase
+import numpy as np
+import figstyle as fs
+from figstyle import CYC, DASH_KW, pastel, panels, overlay, legend, save
+
 fs.use()
 
-import rtcase as rc                               # noqa: E402
+import rtcase as rc
 
 MET = (5, 10, 20)
-TERM = {"evening": "east", "morning": "west"}   # ours -> their file naming
+TERM = {"evening": "east", "morning": "west"}  # ours -> their file naming
 CASE = {"evening": "e", "morning": "m"}
 
 trt = rc.build_trt(2.95, 5.05)
@@ -29,10 +30,10 @@ grid = rc.r100_grid()
 
 ours, theirs = {}, {}
 for met in MET:
-    ours[met] = np.mean([rc.bin_to(*rc.depth_ppm(trt, rc.case_column(f"tsai_{CASE[t]}{met}")), grid)
-                         for t in TERM], axis=0)
-    theirs[met] = np.mean([rc.bin_to(*rc.gcmcrt_depth_ppm(met, t), grid)
-                           for t in TERM.values()], axis=0)
+    ours[met] = np.mean(
+        [rc.bin_to(*rc.depth_ppm(trt, rc.case_column(f"tsai_{CASE[t]}{met}")), grid) for t in TERM], axis=0
+    )
+    theirs[met] = np.mean([rc.bin_to(*rc.gcmcrt_depth_ppm(met, t), grid) for t in TERM.values()], axis=0)
 
 pub, pub_wo, ours10_wo = [], [], []
 for term in TERM:
@@ -47,8 +48,14 @@ so2_ours = np.mean(ours10_wo, axis=0)
 
 fig, ((a, b), (c, d)) = panels(2, 2)
 for met, col in zip(MET, CYC):
-    overlay(a, grid, theirs[met], ours[met], col,
-            (f"Tsai et al. 2023, {met}$\\times$ solar", f"this work, {met}$\\times$ solar"))
+    overlay(
+        a,
+        grid,
+        theirs[met],
+        ours[met],
+        col,
+        (f"Tsai et al. 2023, {met}$\\times$ solar", f"this work, {met}$\\times$ solar"),
+    )
     r = ours[met] - theirs[met]
     b.plot(grid, r, color=col, lw=1.5, label=f"{met}$\\times$ solar")
     print(f"{met}x: mean diff {np.mean(r):+.0f} ppm, rms about mean {np.std(r - np.mean(r)):.0f} ppm")
@@ -67,8 +74,7 @@ for ax in (a, b, c):
 for term, col in zip(TERM, CYC):
     col_o = rc.case_column(f"tsai_{CASE[term]}10")
     pb = rc.published_column(term)
-    d.plot(pb["so2"], pb["p"], color=pastel(col), lw=4, solid_capstyle="round",
-           label=f"Tsai et al. 2023, {term}")
+    d.plot(pb["so2"], pb["p"], color=pastel(col), lw=4, solid_capstyle="round", label=f"Tsai et al. 2023, {term}")
     d.plot(col_o["so2"], col_o["p"], color=col, lw=1.5, label=f"this work, {term}", **DASH_KW)
 d.set_xscale("log")
 d.set_yscale("log")

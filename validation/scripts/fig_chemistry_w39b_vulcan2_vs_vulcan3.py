@@ -1,30 +1,31 @@
-"""WASP-39 b chemistry: VULCAN 2.0 vs VULCAN 3.0 (JAX) on identical inputs --
-six species' volume mixing ratios against pressure, and their relative
-difference. Input: validation/data/chemistry_w39b_vulcan2_vs_vulcan3.npz
-(extracted by inputs/extract_vul_columns.py from the W39b pair that
-VULCAN-JAX/tools/bench_table1.sh writes: upstream with the declared oracle
-deltas applied, and the port). numpy + matplotlib only.
+"""WASP-39 b chemistry: VULCAN 2.0 vs VULCAN 3.0 (JAX) on identical inputs.
+
+Six species' volume mixing ratios against pressure, and their relative difference. Input:
+validation/data/chemistry_w39b_vulcan2_vs_vulcan3.npz (extracted by inputs/extract_vul_columns.py from the W39b pair
+that VULCAN-JAX/tools/bench_table1.sh writes: upstream with the declared oracle deltas applied, and the port). numpy +
+matplotlib only.
 
     python validation/scripts/fig_chemistry_w39b_vulcan2_vs_vulcan3.py
 """
+
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent            # validation/scripts
-sys.path.insert(0, str(HERE.parent))              # figstyle
-import numpy as np                                # noqa: E402
-import figstyle as fs                             # noqa: E402
-from figstyle import CYC, INK, DASH_KW, pastel, panels, legend, save  # noqa: E402
+HERE = Path(__file__).resolve().parent  # validation/scripts
+sys.path.insert(0, str(HERE.parent))  # figstyle
+import numpy as np
+import figstyle as fs
+from figstyle import CYC, INK, DASH_KW, pastel, panels, legend, save
+
 fs.use()
 DATA = fs.DATA
 
 SPECIES = ["H2O", "CO", "CO2", "CH4", "SO2", "H2S"]
-LABEL = {"H2O": "H$_2$O", "CO": "CO", "CO2": "CO$_2$", "CH4": "CH$_4$",
-         "SO2": "SO$_2$", "H2S": "H$_2$S"}
+LABEL = {"H2O": "H$_2$O", "CO": "CO", "CO2": "CO$_2$", "CH4": "CH$_4$", "SO2": "SO$_2$", "H2S": "H$_2$S"}
 FLOOR = 1e-12
 
 z = np.load(DATA / "chemistry_w39b_vulcan2_vs_vulcan3.npz")
-p2 = p3 = z["p_bar"]      # extract_vul_columns.py asserted the two grids are equal
+p2 = p3 = z["p_bar"]  # extract_vul_columns.py asserted the two grids are equal
 y2 = {s: z[f"vulcan2_{s}"] for s in SPECIES}
 y3 = {s: z[f"vulcan3_{s}"] for s in SPECIES}
 

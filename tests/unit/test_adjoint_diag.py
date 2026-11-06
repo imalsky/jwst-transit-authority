@@ -1,6 +1,8 @@
 """Pure-Python tests of adjoint_diag's light path (no JAX / no chemistry):
 the cache-key semantics and the detailed-balance pairing rules the reaction
-table is built from (the validated jax_paper pairing logic, inlined)."""
+table is built from (the validated jax_paper pairing logic, inlined).
+"""
+
 from types import SimpleNamespace
 
 import numpy as np
@@ -9,8 +11,7 @@ from jwst_tool import adjoint_diag
 
 
 def _p(**kw):
-    base = dict(planet="wasp39b", tp_mode="guillot",
-                kzz_mode="const", kzz_const=1.0e9)
+    base = dict(planet="wasp39b", tp_mode="guillot", kzz_mode="const", kzz_const=1.0e9)
     base.update(kw)
     return base
 
@@ -21,9 +22,12 @@ def _fake_network():
     is_photo = np.zeros(nr + 1, dtype=bool)
     is_photo[5] = True
     return SimpleNamespace(
-        is_photo=is_photo, is_ion=np.zeros(nr + 1, dtype=bool),
-        stop_rev_indx=5, conden_indx=7,
-        Rf={1: "A + B -> C + D", 3: "E + F -> G", 5: "X -> Y + Z"})
+        is_photo=is_photo,
+        is_ion=np.zeros(nr + 1, dtype=bool),
+        stop_rev_indx=5,
+        conden_indx=7,
+        Rf={1: "A + B -> C + D", 3: "E + F -> G", 5: "X -> Y + Z"},
+    )
 
 
 def test_pairing_sums_reversible_and_keeps_photo_single():
@@ -45,10 +49,12 @@ def test_adjoint_key_ignores_rt_only_knobs():
     # the adjoint runs on the chemistry state alone: spectra-only settings
     # must not fragment the cache
     k0 = adjoint_diag.adjoint_key(_p(), "SO2")
-    assert adjoint_diag.adjoint_key(
-        _p(cloud_on=True,
-           extra_mols=["HCN"], fisher_params=["lnZ"], jac_method="ad",
-           use_photo=True), "SO2") == k0
+    assert (
+        adjoint_diag.adjoint_key(
+            _p(cloud_on=True, extra_mols=["HCN"], fisher_params=["lnZ"], jac_method="ad", use_photo=True), "SO2"
+        )
+        == k0
+    )
     # RT-only knobs are stripped too; rt_ptop_bar is NOT one of them: the
     # chemistry top follows it, so the adjoint state depends on it
     assert adjoint_diag.adjoint_key(_p(rt_integration="trapezoid"), "SO2") == k0
@@ -69,5 +75,4 @@ def test_run_adjoint_refuses_condensing_states():
     import pytest
 
     with pytest.raises(RuntimeError, match="condensing state"):
-        adjoint_diag.run_adjoint(_p(use_condense=True, network="sncho"), "SO2",
-                                 log=lambda *a: None)
+        adjoint_diag.run_adjoint(_p(use_condense=True, network="sncho"), "SO2", log=lambda *a: None)

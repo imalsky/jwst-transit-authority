@@ -1,41 +1,49 @@
-"""This work vs petitRADTRANS 3.4.0 on JWST Transit Authority's own converged
-atmospheres: four planets in transmission, two in emission, identical
-P/T/mmw/VMRs/geometry and k-table files, lines only, 3.03-5.17 um. Inputs:
-validation/data/atmos_*.npz (inputs/atmos_cases.py) and prt_*.npz
-(inputs/prt_reference.py). numpy + matplotlib only.
+"""This work vs petitRADTRANS 3.4.0 on JWST Transit Authority's own converged atmospheres.
+
+Four planets in transmission, two in emission, identical P/T/mmw/VMRs/geometry and k-table files, lines only, 3.03-5.17
+um. Inputs: validation/data/atmos_*.npz (inputs/atmos_cases.py) and prt_*.npz (inputs/prt_reference.py). numpy +
+matplotlib only.
 
     python validation/scripts/fig_rt_verification_six_atmospheres.py
 """
+
 import hashlib
 from io import BytesIO
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent            # validation/scripts
-sys.path.insert(0, str(HERE.parent))              # figstyle
-import numpy as np                                # noqa: E402
-import figstyle as fs                             # noqa: E402
-from figstyle import CYC, INK, RED, panels, legend, save  # noqa: E402
-from jwst_tool.binning import _pl_antideriv, _pl_cumint  # noqa: E402
+HERE = Path(__file__).resolve().parent  # validation/scripts
+sys.path.insert(0, str(HERE.parent))  # figstyle
+import numpy as np
+import figstyle as fs
+from figstyle import CYC, INK, RED, panels, legend, save
+from jwst_tool.binning import _pl_antideriv, _pl_cumint
+
 fs.use()
 DATA = fs.DATA
 
-CASES = {"transmission": ["wasp39b", "hd189733b", "wasp107b", "hd209458b"],
-         "emission": ["wasp39b", "hd189733b"]}
+CASES = {"transmission": ["wasp39b", "hd189733b", "wasp107b", "hd209458b"], "emission": ["wasp39b", "hd189733b"]}
 KEY = {"transmission": "depth_cmp_ppm", "emission": "flux_cmp"}
 PKEY = {"transmission": "depth_ppm", "emission": "flux_per_cm1"}
+
 
 def load_pair(planet, mode):
     atmosphere = DATA / f"atmos_{planet}_{mode}.npz"
     reference = DATA / f"prt_{planet}_{mode}.npz"
     source = atmosphere.read_bytes()
     with np.load(reference) as b:
-        if ("source_atmosphere_sha256" not in b
-                or b["source_atmosphere_sha256"].shape != ()
-                or str(b["source_atmosphere_sha256"]) != hashlib.sha256(source).hexdigest()):
-            raise ValueError(f"{reference.name}: stale or mismatched atmosphere; regenerate with inputs/prt_reference.py")
+        if (
+            "source_atmosphere_sha256" not in b
+            or b["source_atmosphere_sha256"].shape != ()
+            or str(b["source_atmosphere_sha256"]) != hashlib.sha256(source).hexdigest()
+        ):
+            raise ValueError(
+                f"{reference.name}: stale or mismatched atmosphere; regenerate with inputs/prt_reference.py"
+            )
         if "prt_version" not in b or b["prt_version"].shape != () or not str(b["prt_version"]).strip():
-            raise ValueError(f"{reference.name}: missing pRT version provenance; regenerate with inputs/prt_reference.py")
+            raise ValueError(
+                f"{reference.name}: missing pRT version provenance; regenerate with inputs/prt_reference.py"
+            )
         ref = dict(b)
     with np.load(BytesIO(source)) as a:
         return dict(a), ref
@@ -60,11 +68,14 @@ PAIRS = {(p, m): load_pair(p, m) for m, planets in CASES.items() for p in planet
 # with a config-cadence one moves a spectrum by up to 3.8 ppm and is invisible in
 # the residuals. atmos_cases.py writes the cadence keys into every file.
 CADENCE_KEYS = ("ini_update_photo_frq", "final_update_photo_frq", "photo_escalated")
-CADENCES = {f"{planet} {mode}": tuple(atmos[k].item() for k in CADENCE_KEYS)
-            for (planet, mode), (atmos, _) in PAIRS.items()}
+CADENCES = {
+    f"{planet} {mode}": tuple(atmos[k].item() for k in CADENCE_KEYS) for (planet, mode), (atmos, _) in PAIRS.items()
+}
 if len(set(CADENCES.values())) > 1:
-    raise ValueError(f"atmos_*.npz mix photolysis cadences {CADENCE_KEYS} = {CADENCES}; "
-                     "regenerate them on one tree with inputs/atmos_cases.py")
+    raise ValueError(
+        f"atmos_*.npz mix photolysis cadences {CADENCE_KEYS} = {CADENCES}; "
+        "regenerate them on one tree with inputs/atmos_cases.py"
+    )
 
 fig, axes = panels(1, 2)
 for ax, (mode, plist) in zip(axes, CASES.items()):
@@ -79,16 +90,23 @@ for ax, (mode, plist) in zip(axes, CASES.items()):
             diff = binned(wl, ours) - binned(b["wl_um"], b[PKEY[mode]])
             residual = diff - diff.mean()
             ax.plot(np.sqrt(EDGES[:-1] * EDGES[1:]), residual, color=col, lw=1.2, label=label)
-            print(f"{mode:12s} {str(a['label']):12s} R=100 offset {diff.mean():.2f} ppm  "
-                  f"residual std {diff.std():.2f} ppm  max |residual| {np.max(np.abs(residual)):.2f} ppm  "
-                  f"pRT {b['prt_version']}")
+            print(
+                f"{mode:12s} {str(a['label']):12s} R=100 offset {diff.mean():.2f} ppm  "
+                f"residual std {diff.std():.2f} ppm  max |residual| {np.max(np.abs(residual)):.2f} ppm  "
+                f"pRT {b['prt_version']}"
+            )
         else:
             r = ours[m] / np.interp(wl[m], b["wl_um"], b[PKEY[mode]])
             ax.plot(wl[m], 100 * (r - 1), color=col, lw=1.2, label=label)
-            print(f"{mode:12s} {str(a['label']):12s} mean ratio {r.mean():.4f}  rms {100 * np.std(r):.3f} %  "
-                  f"max |dev| {100 * np.max(np.abs(r - 1)):.3f} %  pRT {b['prt_version']}")
+            print(
+                f"{mode:12s} {str(a['label']):12s} mean ratio {r.mean():.4f}  rms {100 * np.std(r):.3f} %  "
+                f"max |dev| {100 * np.max(np.abs(r - 1)):.3f} %  pRT {b['prt_version']}"
+            )
     ax.set_xlabel(r"wavelength ($\mu$m)")
-    ax.set_ylabel("transmission residual, offset removed (ppm)" if mode == "transmission"
-                  else "emission: this work / petitRADTRANS $-$ 1 (%)")
+    ax.set_ylabel(
+        "transmission residual, offset removed (ppm)"
+        if mode == "transmission"
+        else "emission: this work / petitRADTRANS $-$ 1 (%)"
+    )
     legend(ax)
 save(fig, "rt_verification_six_atmospheres.png")

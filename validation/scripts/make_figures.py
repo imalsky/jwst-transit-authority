@@ -1,8 +1,11 @@
-"""Regenerate every committed validation figure. fig_readme_example.py is left
-out: it runs the whole app, so run that one directly.
+"""Regenerate every committed validation figure.
+
+fig_readme_example.py is left out: it runs the whole app, so run that one directly.
 
     python validation/scripts/make_figures.py            # all fig_*.py in this directory
-    python validation/scripts/make_figures.py rt_verification_six_atmospheres   # one, by PNG stem"""
+    python validation/scripts/make_figures.py rt_verification_six_atmospheres   # one, by PNG stem
+"""
+
 import subprocess
 import sys
 from pathlib import Path

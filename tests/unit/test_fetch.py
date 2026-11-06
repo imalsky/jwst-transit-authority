@@ -1,5 +1,7 @@
 """jwst-tool fetch: spec sanity plus the download/extract mechanics,
-exercised without any network (urlopen is monkeypatched)."""
+exercised without any network (urlopen is monkeypatched).
+"""
+
 import dataclasses
 import hashlib
 import io
@@ -10,8 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from jwst_tool import datacheck, fetch
-from jwst_tool import instruments as ins
+from jwst_tool import datacheck, fetch, instruments as ins
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -24,22 +25,21 @@ def test_fetch_specs_are_well_formed():
         assert f.url.startswith("https://")
         assert f.size
         assert callable(f.dest)
-        assert bool(f.tar_subtree) == bool(f.marker)   # tarballs need a marker
+        assert bool(f.tar_subtree) == bool(f.marker)  # tarballs need a marker
     # the one default tarball spec is the PHOENIX subtree
-    assert [f.tar_subtree for f in fetch.FETCHES if f.tar_subtree] == \
-        ["grp/redcat/trds/grid/phoenix"]
+    assert [f.tar_subtree for f in fetch.FETCHES if f.tar_subtree] == ["grp/redcat/trds/grid/phoenix"]
     # --picaso: the tag's reference/ tree, then every pinned table, each
     # under the reference root and verified by its own pinned md5
     tree, *tables = fetch.PICASO_FETCHES
     assert tree.tar_subtree == "picaso-4.1/reference" and not tree.md5
     assert tree.check is fetch._picaso_tree_problem
     ck = Path(ins.PICASO_REFDATA) / datacheck.PICASO_CK_DIR
-    assert {f.dest(): f.md5 for f in tables} == {
-        ck / n: m for n, m in datacheck.PICASO_CK_MD5.items()}
+    assert {f.dest(): f.md5 for f in tables} == {ck / n: m for n, m in datacheck.PICASO_CK_MD5.items()}
     assert len(tables) == 36
     assert any(f.url.endswith("/H3%2B_1460.hdf5?download=1") for f in tables)
     # the env the recipe's two lock files build is the one the worker requires
     from jwst_tool.picaso_engine import PICASO_VERSIONS
+
     recipe = datacheck.PICASO_ENV_RECIPE
     assert "--no-deps" in recipe
     conda = (REPO / "deploy" / "picaso-conda-lock.txt").read_text()
@@ -52,7 +52,8 @@ def test_fetch_specs_are_well_formed():
 
 def test_fetch_flags_and_picaso_opt_in(monkeypatch, capsys):
     from jwst_tool import cli
-    monkeypatch.setattr(fetch, "_present", lambda f: True)     # no network
+
+    monkeypatch.setattr(fetch, "_present", lambda f: True)  # no network
     monkeypatch.setattr(sys, "argv", ["jwst-tool", "fetch", "--bogus"])
     assert cli.main() == 2
     assert "--bogus" in capsys.readouterr().err
@@ -77,12 +78,11 @@ def test_manual_block_names_pieces_and_renders():
     assert "MATCHED TRIPLE" in txt
     assert "{release}" in txt and "{env_suffix}" in txt
     rel = ins.BACKEND_RELEASE
-    rendered = fetch.MANUAL.format(refdata="/ref", psf="/psf", release=rel,
-                                   env_suffix=rel.replace(".", "_"))
+    rendered = fetch.MANUAL.format(refdata="/ref", psf="/psf", release=rel, env_suffix=rel.replace(".", "_"))
     assert f"pandeia_data-{rel}-jwst" in rendered
     assert f"pandeia_psfs-{rel}-jwst" in rendered
     assert f"pandeia.engine=={rel}" in rendered
-    assert "{" not in rendered.replace("%2B", "")   # every field substituted
+    assert "{" not in rendered.replace("%2B", "")  # every field substituted
 
 
 class _FakeResponse(io.BytesIO):
@@ -97,12 +97,10 @@ class _FakeResponse(io.BytesIO):
         return False
 
 
-def test_download_replaces_atomically_and_refuses_truncation(tmp_path,
-                                                             monkeypatch):
+def test_download_replaces_atomically_and_refuses_truncation(tmp_path, monkeypatch):
     # full payload: streamed to <name>.part, atomically replaced
     payload = b"x" * 5000
-    monkeypatch.setattr(fetch.urllib.request, "urlopen",
-                        lambda req: _FakeResponse(payload))
+    monkeypatch.setattr(fetch.urllib.request, "urlopen", lambda req: _FakeResponse(payload))
     out = tmp_path / "sub" / "file.bin"
     fetch._download("https://example.invalid/f", out, "test")
     assert out.read_bytes() == payload
@@ -121,37 +119,34 @@ def test_download_replaces_atomically_and_refuses_truncation(tmp_path,
 def test_pinned_md5_gates_download_and_presence(tmp_path, monkeypatch):
     payload = b"y" * 3000
     good = hashlib.md5(payload).hexdigest()
-    monkeypatch.setattr(fetch.urllib.request, "urlopen",
-                        lambda req: _FakeResponse(payload))
+    monkeypatch.setattr(fetch.urllib.request, "urlopen", lambda req: _FakeResponse(payload))
     out = tmp_path / "t.hdf5"
     with pytest.raises(RuntimeError, match="md5 mismatch"):
         fetch._download("https://example.invalid/t", out, "t", "0" * 32)
-    assert not list(tmp_path.iterdir())            # no file, no .part left
+    assert not list(tmp_path.iterdir())  # no file, no .part left
     fetch._download("https://example.invalid/t", out, "t", good)
-    spec = fetch.Fetch("t", "https://example.invalid/t", lambda: out, "3 KB",
-                       md5=good)
+    spec = fetch.Fetch("t", "https://example.invalid/t", lambda: out, "3 KB", md5=good)
     assert fetch._present(spec)
     # a file on disk with another digest is not "present": it is re-fetched
     assert not fetch._present(dataclasses.replace(spec, md5="0" * 32))
 
 
-def test_extract_subtree_strips_prefix_and_requires_a_match(tmp_path,
-                                                            monkeypatch):
+def test_extract_subtree_strips_prefix_and_requires_a_match(tmp_path, monkeypatch):
     tar_path = tmp_path / "a.tar"
     with tarfile.open(tar_path, "w") as tf:
-        for name, data in (("grp/redcat/trds/grid/phoenix/cat.fits", b"A"),
-                           ("grp/redcat/trds/grid/phoenix/sub/m.fits", b"B"),
-                           ("grp/other/junk.txt", b"C")):
+        for name, data in (
+            ("grp/redcat/trds/grid/phoenix/cat.fits", b"A"),
+            ("grp/redcat/trds/grid/phoenix/sub/m.fits", b"B"),
+            ("grp/other/junk.txt", b"C"),
+        ):
             info = tarfile.TarInfo(name)
             info.size = len(data)
             tf.addfile(info, io.BytesIO(data))
     dest = tmp_path / "phoenix"
     written = []
     copy = fetch.shutil.copyfileobj
-    monkeypatch.setattr(fetch.shutil, "copyfileobj", lambda src, w: (
-        written.append(Path(w.name).name), copy(src, w)))
-    n = fetch._extract_subtree(tar_path, "grp/redcat/trds/grid/phoenix", dest,
-                               marker="cat.fits")
+    monkeypatch.setattr(fetch.shutil, "copyfileobj", lambda src, w: (written.append(Path(w.name).name), copy(src, w)))
+    n = fetch._extract_subtree(tar_path, "grp/redcat/trds/grid/phoenix", dest, marker="cat.fits")
     # the marker is written last, each member to a temp file renamed into
     # place, so a killed extraction never reads complete
     assert written == ["m.fits.part", "cat.fits.part"]
@@ -170,17 +165,18 @@ def test_extract_subtree_strips_prefix_and_requires_a_match(tmp_path,
         if Path(w.name).name == "cat.fits.part":
             raise KeyboardInterrupt
         copy(src, w)
+
     monkeypatch.setattr(fetch.shutil, "copyfileobj", die_on_marker)
     with pytest.raises(KeyboardInterrupt):
-        fetch._extract_subtree(tar_path, "grp/redcat/trds/grid/phoenix",
-                               tmp_path / "d3", marker="cat.fits")
+        fetch._extract_subtree(tar_path, "grp/redcat/trds/grid/phoenix", tmp_path / "d3", marker="cat.fits")
     assert (tmp_path / "d3" / "sub" / "m.fits").is_file()
     assert not (tmp_path / "d3" / "cat.fits").exists()
 
 
 def test_extract_subtree_refuses_a_member_escaping_the_destination(tmp_path):
     """The tarball is a remote file: a member whose path climbs out of the
-    subtree must never be written outside ``dest``."""
+    subtree must never be written outside ``dest``.
+    """
     tar_path = tmp_path / "evil.tar"
     with tarfile.open(tar_path, "w") as tf:
         for name, data in (("pre/good.fits", b"A"), ("pre/../escape", b"B")):
@@ -193,17 +189,17 @@ def test_extract_subtree_refuses_a_member_escaping_the_destination(tmp_path):
 
 
 @pytest.mark.parametrize("case", ["complete", "wrong_version", "tampered"])
-def test_picaso_tree_counts_only_when_datacheck_and_md5_pass(
-        tmp_path, monkeypatch, case):
+def test_picaso_tree_counts_only_when_datacheck_and_md5_pass(tmp_path, monkeypatch, case):
     """The reference tree is present only when datacheck's version-and-files
     check passes AND each file matches its pinned md5; a fetched tree that
-    fails either is refused and stays "missing", so the next run re-fetches."""
+    fails either is refused and stays "missing", so the next run re-fetches.
+    """
     files = {rel: rel.encode() for rel in datacheck.PICASO_REFDATA_MD5}
-    files["config.json"] = json.dumps(
-        {"version": "4.0" if case == "wrong_version" else "4.1"}).encode()
+    files["config.json"] = json.dumps({"version": "4.0" if case == "wrong_version" else "4.1"}).encode()
     # pins match the payload, so wrong_version is refused by datacheck alone
-    monkeypatch.setattr(datacheck, "PICASO_REFDATA_MD5", {
-        rel: hashlib.md5(data).hexdigest() for rel, data in files.items()})
+    monkeypatch.setattr(
+        datacheck, "PICASO_REFDATA_MD5", {rel: hashlib.md5(data).hexdigest() for rel, data in files.items()}
+    )
     if case == "tampered":
         files["climate_INPUTS/ck_cx_cont_opacities_661.db"] = b"tampered"
     buf = io.BytesIO()
@@ -212,8 +208,7 @@ def test_picaso_tree_counts_only_when_datacheck_and_md5_pass(
             info = tarfile.TarInfo(f"picaso-4.1/reference/{rel}")
             info.size = len(data)
             tf.addfile(info, io.BytesIO(data))
-    monkeypatch.setattr(fetch.urllib.request, "urlopen",
-                        lambda req: _FakeResponse(buf.getvalue()))
+    monkeypatch.setattr(fetch.urllib.request, "urlopen", lambda req: _FakeResponse(buf.getvalue()))
     ref = tmp_path / "ref"
     tree = dataclasses.replace(fetch.PICASO_FETCHES[0], dest=lambda: ref)
     assert not fetch._present(tree)
@@ -221,8 +216,9 @@ def test_picaso_tree_counts_only_when_datacheck_and_md5_pass(
         fetch._fetch_one(tree)
         assert fetch._present(tree)
         return
-    with pytest.raises(RuntimeError, match={
-            "wrong_version": "version 4.0, need 4.1",
-            "tampered": "md5 mismatch: climate_INPUTS/ck_cx"}[case]):
+    with pytest.raises(
+        RuntimeError,
+        match={"wrong_version": "version 4.0, need 4.1", "tampered": "md5 mismatch: climate_INPUTS/ck_cx"}[case],
+    ):
         fetch._fetch_one(tree)
     assert (ref / "config.json").is_file() and not fetch._present(tree)

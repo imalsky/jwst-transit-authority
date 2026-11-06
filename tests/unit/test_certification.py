@@ -4,28 +4,48 @@ FD h-vs-2h consistency gate, and the AD dlnCO oxygen-reservoir refusal.
 All three are module-level so they can be reached without a full solve; the
 stubs here stand in for the engine's ConvDiag and chem model.
 """
+
 import re
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-from jwst_tool import forward
+from jwst_tool import certify, jacobian
 
 
-def _diag(*, longdy=0.05, longdydt=1e-11, branch=2, conv_normal=True,
-          accept=1400, aflux=0.004, species=0, layer=42, vmr=6.1e-18,
-          t=4.1e8, dt=5.3e5):
+def _diag(
+    *,
+    longdy=0.05,
+    longdydt=1e-11,
+    branch=2,
+    conv_normal=True,
+    accept=1400,
+    aflux=0.004,
+    species=0,
+    layer=42,
+    vmr=6.1e-18,
+    t=4.1e8,
+    dt=5.3e5,
+):
     return SimpleNamespace(
-        accept_count=accept, longdy=longdy, longdydt=longdydt,
-        conv_branch=branch, conv_normal=conv_normal, aflux_change=aflux,
-        cell_species=species, cell_layer=layer, cell_vmr=vmr, t=t, dt=dt,
-        tangent_longdy=np.nan)
+        accept_count=accept,
+        longdy=longdy,
+        longdydt=longdydt,
+        conv_branch=branch,
+        conv_normal=conv_normal,
+        aflux_change=aflux,
+        cell_species=species,
+        cell_layer=layer,
+        cell_vmr=vmr,
+        t=t,
+        dt=dt,
+        tangent_longdy=np.nan,
+    )
 
 
 def _chem(yconv_min=0.1, count_max=30000, nz=100):
-    return SimpleNamespace(yconv_min=yconv_min, count_max=count_max,
-                           p_bar=np.logspace(-7, 0.88, nz))
+    return SimpleNamespace(yconv_min=yconv_min, count_max=count_max, p_bar=np.logspace(-7, 0.88, nz))
 
 
 SPECIES = ["N2O", "C", "S4"]
@@ -35,10 +55,10 @@ def test_certificate_records_every_field_and_a_failure_names_them():
     """A passing stage returns its seven-field record and logs the branch,
     longdydt, aflux_change and the controlling species@z cell; a failure
     raises naming all of them. Certification is the runner's canonical gate
-    (conv_normal AND longdy < yconv_min) -- never loosened here."""
+    (conv_normal AND longdy < yconv_min) -- never loosened here.
+    """
     lines = []
-    rec = forward.check_converged(_diag(), "baseline solve", SPECIES,
-                                  _chem(), lines.append)
+    rec = certify.check_converged(_diag(), "baseline solve", SPECIES, _chem(), lines.append)
     stage, accept, longdy, longdydt, branch, flux, cell = rec
     assert (stage, accept, branch, cell) == ("baseline solve", 1400, 2, "N2O@z42")
     assert (longdy, longdydt, flux) == (0.05, 1e-11, 0.004)
@@ -46,119 +66,129 @@ def test_certificate_records_every_field_and_a_failure_names_them():
 
     # conv_normal False -> refuse, and say which cell and how it exited
     with pytest.raises(RuntimeError) as e:
-        forward.check_converged(_diag(conv_normal=False, longdy=2.73,
-                                      longdydt=5.9e-6, branch=0, aflux=341.0,
-                                      accept=30001, species=1, layer=47),
-                                "baseline solve", SPECIES, _chem())
+        certify.check_converged(
+            _diag(
+                conv_normal=False,
+                longdy=2.73,
+                longdydt=5.9e-6,
+                branch=0,
+                aflux=341.0,
+                accept=30001,
+                species=1,
+                layer=47,
+            ),
+            "baseline solve",
+            SPECIES,
+            _chem(),
+        )
     msg = str(e.value)
-    for needle in ("longdy=2.73", "longdydt=5.9e-06", "aflux_change=341",
-                   "branch none", "C@z47", "count_max=30000"):
+    for needle in ("longdy=2.73", "longdydt=5.9e-06", "aflux_change=341", "branch none", "C@z47", "count_max=30000"):
         assert needle in msg, needle
 
     # certified by the runner but over the tool's own gate -> still refused,
     # and the wording distinguishes a stall from the step cap
     with pytest.raises(RuntimeError, match="without the runner's canonical"):
-        forward.check_converged(_diag(longdy=0.5, accept=900), "FD dlnCO -1h",
-                                SPECIES, _chem())
+        certify.check_converged(_diag(longdy=0.5, accept=900), "FD dlnCO -1h", SPECIES, _chem())
 
 
 def test_fd_row_certifies_richardson_and_refuses_an_inconsistent_row():
     """The h-vs-2h gate is the certification half of the FD contract (the
     Richardson algebra is pinned in test_forward_params). A row with no
-    spectral response is an exact zero, not a division by zero."""
+    spectral response is an exact zero, not a division by zero.
+    """
     j1 = np.array([100.0, -50.0, 25.0])
-    row, err = forward.fd_row("dlnCO", j1, j1 * 1.05, 0.1)
-    assert err == pytest.approx(0.05) and err < forward.FD_CONSISTENCY_TOL
+    row, err = jacobian.fd_row("dlnCO", j1, j1 * 1.05, 0.1)
+    assert err == pytest.approx(0.05) and err < jacobian.FD_CONSISTENCY_TOL
     assert row == pytest.approx((4.0 * j1 - j1 * 1.05) / 3.0)
 
     zero = np.zeros(3)
-    assert forward.fd_row("dlnCO", zero, zero, 0.1) == (pytest.approx(zero), 0.0)
+    assert jacobian.fd_row("dlnCO", zero, zero, 0.1) == (pytest.approx(zero), 0.0)
     # ... but only when BOTH estimates vanish: J(h) == 0 with J(2h) != 0 is
     # contradictory evidence, not an insensitive parameter.
     with pytest.raises(RuntimeError, match="step-size consistency"):
-        forward.fd_row("dlnCO", zero, np.array([0.0, 0.006, 0.0]), 0.1)
+        jacobian.fd_row("dlnCO", zero, np.array([0.0, 0.006, 0.0]), 0.1)
 
     with pytest.raises(RuntimeError, match="step-size consistency"):
-        forward.fd_row("dlnCO", j1, j1 * 1.4, 0.1)
+        jacobian.fd_row("dlnCO", j1, j1 * 1.4, 0.1)
     with pytest.raises(RuntimeError, match="non-finite"):
-        forward.fd_row("dlnCO", np.array([np.nan, 1.0, 1.0]), j1, 0.1)
+        jacobian.fd_row("dlnCO", np.array([np.nan, 1.0, 1.0]), j1, 0.1)
 
 
 def test_element_gate_refuses_a_leaked_column_and_names_the_element():
     """The convergence certificate cannot see a slow uniform leak; the element
-    gate compares each certified column's X/H with the build column's."""
+    gate compares each certified column's X/H with the build column's.
+    """
     # species H2, H2O, CO, CO2 over atoms (H, O, C); 3 layers
     compo = np.array([[2, 0, 0], [2, 1, 0], [0, 1, 1], [0, 2, 1]], float)
     y0 = np.array([[1.0, 4e-3, 5e-3, 1e-5]] * 3)
     chem = SimpleNamespace(compo_array=compo, y0=y0, atom_list=("H", "O", "C"))
     log = []
-    worst = forward.check_elements(y0 * np.array([[1.0], [2.0], [0.5]]), chem,
-                                   "baseline solve", log.append)
+    worst = certify.check_elements(y0 * np.array([[1.0], [2.0], [0.5]]), chem, "baseline solve", log.append)
     assert worst == pytest.approx(0.0) and "within 0.00%" in log[-1]
     # 20 percent of the water gone in every layer: O/H drifts, C/H does not
     leaked = y0.copy()
     leaked[:, 1] *= 0.8
     with pytest.raises(RuntimeError, match=r"O/H drifted 8\.\d%"):
-        forward.check_elements(leaked, chem, "baseline solve", log.append)
+        certify.check_elements(leaked, chem, "baseline solve", log.append)
     # a top-layer separation alone stays inside the layer median
     top = y0.copy()
     top[0, 1] *= 0.5
-    assert forward.check_elements(top, chem, "s", log.append) == pytest.approx(0.0)
+    assert certify.check_elements(top, chem, "s", log.append) == pytest.approx(0.0)
 
 
 def test_ad_dlnco_margin_refuses_on_both_columns():
     """The AD dlnCO row needs the oxygen-reservoir margin above CO_BZ_MIN_AD
     on the BUILD column and again on the CONVERGED column the tangent starts
-    from. A NaN margin refuses too (the `not m > gate` form)."""
+    from. A NaN margin refuses too (the `not m > gate` form).
+    """
     y = np.ones((4, 3))
 
     ok = SimpleNamespace(co_bz_bound=0.12, co_bz_margin=lambda c: 0.11)
-    assert forward.check_ad_co_margin(ok, 0.89) == pytest.approx(0.12)
-    assert forward.check_ad_co_margin(ok, 0.89, y=y, build_margin=0.12,
-                                      log=lambda _: None) == pytest.approx(0.11)
+    assert certify.check_ad_co_margin(ok, 0.89) == pytest.approx(0.12)
+    assert certify.check_ad_co_margin(ok, 0.89, y=y, build_margin=0.12, log=lambda _: None) == pytest.approx(0.11)
 
     # build column below the gate: refused before any solve
     tight = SimpleNamespace(co_bz_bound=0.05, co_bz_margin=lambda c: 0.5)
     with pytest.raises(RuntimeError, match="build column"):
-        forward.check_ad_co_margin(tight, 0.95)
+        certify.check_ad_co_margin(tight, 0.95)
 
     # build column passes, converged column does not -- the carbon-rich case:
     # a fixed-O column with no oxygen-only carriers left has margin ~0
     drifted = SimpleNamespace(co_bz_bound=0.5, co_bz_margin=lambda c: 0.0)
     with pytest.raises(RuntimeError, match="converged column"):
-        forward.check_ad_co_margin(drifted, 2.0, y=y, build_margin=0.5,
-                                   log=lambda _: None)
+        certify.check_ad_co_margin(drifted, 2.0, y=y, build_margin=0.5, log=lambda _: None)
 
-    nan = SimpleNamespace(co_bz_bound=float("nan"),
-                          co_bz_margin=lambda c: float("nan"))
+    nan = SimpleNamespace(co_bz_bound=float("nan"), co_bz_margin=lambda c: float("nan"))
     with pytest.raises(RuntimeError, match="oxygen-reservoir margin"):
-        forward.check_ad_co_margin(nan, 0.55)
+        certify.check_ad_co_margin(nan, 0.55)
 
 
 def test_ad_chemistry_rows_are_never_vmapped_over_tangent_directions():
     """Batched tangent rows differ from the per-row ones by up to 3% per bin.
-    Structural guard, like the ones in test_posteriors / test_plotting."""
+    Structural guard, like the ones in test_posteriors / test_plotting.
+    """
     import ast
     import importlib.util
     from pathlib import Path
 
-    src = Path(importlib.util.find_spec("jwst_tool.forward").origin).read_text()
-    calls = [ast.unparse(n.func) for n in ast.walk(ast.parse(src))
-             if isinstance(n, ast.Call)]
+    src = Path(importlib.util.find_spec("jwst_tool.jacobian").origin).read_text()
+    calls = [ast.unparse(n.func) for n in ast.walk(ast.parse(src)) if isinstance(n, ast.Call)]
     assert not [c for c in calls if c.endswith("vmap")], (
-        "forward.py must take one plain jvp per chemistry Jacobian row")
+        "jacobian.py must take one plain jvp per chemistry Jacobian row"
+    )
     assert "jax.jvp(" in src
 
 
 def test_picaso_lives_only_in_its_own_environment():
-    """picaso 4.1 needs numpy >= 2 and the tool's stack pins numpy < 2, so
+    """Picaso 4.1 needs numpy >= 2 and the tool's stack pins numpy < 2, so
     PICASO runs only in picaso_worker.py inside its own environment: no other
     module imports it, the worker imports nothing from the tool, and the app's
     deploy lock carries no picaso, virga or photochem pin. The picaso env's
     own locks split by installer: conda (md5-pinned) owns the compiled stack
     and pip pins only the rest. make_app_lock.py's dist-info ownership test
     keeps a conda build out of the pip lock; comparing the two locks by name
-    cannot (conda's astropy is astropy-base)."""
+    cannot (conda's astropy is astropy-base).
+    """
     import ast
     from pathlib import Path
 
@@ -175,19 +205,19 @@ def test_picaso_lives_only_in_its_own_environment():
             assert "jwst_tool" not in mods and {"picaso", "astropy"} <= mods, mods
         else:
             assert not mods & heavy, (f.name, mods & heavy)
-    banned = re.compile(r"^\s*(picaso|virga|virga-exo|photochem|pysynphot)\b",
-                        re.IGNORECASE | re.MULTILINE)
+    banned = re.compile(r"^\s*(picaso|virga|virga-exo|photochem|pysynphot)\b", re.IGNORECASE | re.MULTILINE)
     for name in ("requirements-app-lock.txt", "requirements-pandeia.txt"):
         assert not banned.search((root / "deploy" / name).read_text()), name
 
     conda = (root / "deploy" / "picaso-conda-lock.txt").read_text()
     urls = [u for u in conda.splitlines() if u.startswith("https://")]
     assert "@EXPLICIT" in conda and all(re.search(r"#[0-9a-f]{32}$", u) for u in urls)
-    conda_names = {u.rsplit("/", 1)[1].rsplit("-", 2)[0].lower().replace("_", "-")
-                   for u in urls}
-    pip_pins = dict(line.split("==") for line in
-                    (root / "deploy" / "requirements-picaso-lock.txt").read_text().splitlines()
-                    if "==" in line)
+    conda_names = {u.rsplit("/", 1)[1].rsplit("-", 2)[0].lower().replace("_", "-") for u in urls}
+    pip_pins = dict(
+        line.split("==")
+        for line in (root / "deploy" / "requirements-picaso-lock.txt").read_text().splitlines()
+        if "==" in line
+    )
     assert pip_pins["picaso"] == "4.1"
     assert {"photochem", "numpy", "numba", "pip"} <= conda_names
     assert any("/photochem-0.9.2-" in u for u in urls)
@@ -197,7 +227,8 @@ def test_picaso_lives_only_in_its_own_environment():
 def test_emission_tau_bottom_gate_measures_the_flux_that_leaks_through():
     """The emission bottom-boundary certification: the fix for a thin bottom
     is a deeper column, never a wider tolerance, so the gate has to be a
-    flux-weighted fraction and its report has to say WHERE."""
+    flux-weighted fraction and its report has to say WHERE.
+    """
     # Constant-R band grid, the shape the ExoMolOP tables impose (dnu ~ nu).
     # Flux density is per WAVENUMBER, so the energy each sample carries is
     # F * dnu -- a flat F over 1-15 um puts 54% of the energy shortward of
@@ -205,53 +236,53 @@ def test_emission_tau_bottom_gate_measures_the_flux_that_leaks_through():
     nu = 1.0e4 / np.geomspace(15.0, 1.0, 400)
     wl = 1.0e4 / nu
     flux = np.ones_like(nu)
-    assert forward.thin_flux_fraction(np.full(nu.size, 50.0), flux, nu) == 0.0
+    assert certify.thin_flux_fraction(np.full(nu.size, 50.0), flux, nu) == 0.0
 
-    thin = wl < 2.0                                 # only the short edge leaks
+    thin = wl < 2.0  # only the short edge leaks
     tau = np.where(thin, 0.5, 50.0)
-    frac = forward.thin_flux_fraction(tau, flux, nu)
+    frac = certify.thin_flux_fraction(tau, flux, nu)
     # flat F_nu: the energy share is the WAVENUMBER span, derived here
     # independently of the implementation
-    assert frac == pytest.approx(
-        (nu.max() - 1.0e4 / 2.0) / (nu.max() - nu.min()), rel=0.01)
+    assert frac == pytest.approx((nu.max() - 1.0e4 / 2.0) / (nu.max() - nu.min()), rel=0.01)
     # an unweighted sample sum reports half of that, which turns a 1% gate
     # into a ~3% one
     assert frac > 1.5 * float(thin.sum()) / thin.size
     # the grid may run either way (MIRI LRS pixels arrive descending)
-    assert forward.thin_flux_fraction(tau[::-1], flux[::-1], nu[::-1]) == \
-        pytest.approx(frac)
+    assert certify.thin_flux_fraction(tau[::-1], flux[::-1], nu[::-1]) == pytest.approx(frac)
 
     # Same fraction, now as the gate every consumed emission spectrum passes.
     # Fp times any positive scalar must give the same verdict: the fraction is
     # a ratio, which is what lets the callers hand it depth * F_star.
     with pytest.raises(RuntimeError, match="FD lnZ [+]2h"):
-        forward.check_emission_thin(tau, flux, nu, "FD lnZ +2h")
+        certify.check_emission_thin(tau, flux, nu, "FD lnZ +2h")
     with pytest.raises(RuntimeError, match="emission unreliable"):
-        forward.check_emission_thin(tau, 3.7e8 * flux, nu, "baseline")
-    assert forward.check_emission_thin(
-        np.full(nu.size, 50.0), flux, nu, "baseline") == 0.0
+        certify.check_emission_thin(tau, 3.7e8 * flux, nu, "baseline")
+    assert certify.check_emission_thin(np.full(nu.size, 50.0), flux, nu, "baseline") == 0.0
 
-    report = forward._tau_bottom_breakdown(wl, tau, flux)
+    report = certify.tau_bottom_breakdown(wl, tau, flux)
     assert "1.0-2.0 um (no modeled continuum)" in report
     assert "12-15 um" in report
 
 
 # one case per raise site: shape/ndim, alignment, size, tau, flux, grid,
 # monotonicity
-@pytest.mark.parametrize("tau, flux, nu", [
-    ([[1.0, 2.0]], [1.0, 1.0], [1.0, 2.0]),
-    ([1.0, 2.0, 3.0], [1.0, 1.0], [1.0, 2.0]),
-    ([1.0], [1.0], [1.0]),
-    ([np.nan, 2.0], [1.0, 1.0], [1.0, 2.0]),
-    ([-1.0, 2.0], [1.0, 1.0], [1.0, 2.0]),
-    ([1.0, 2.0], [np.inf, 1.0], [1.0, 2.0]),
-    ([1.0, 2.0], [1.0, 1.0], [0.0, 2.0]),
-    ([1.0, 2.0, 3.0], [1.0, 1.0, 1.0], [1.0, 3.0, 2.0]),
-])
+@pytest.mark.parametrize(
+    ("tau", "flux", "nu"),
+    [
+        ([[1.0, 2.0]], [1.0, 1.0], [1.0, 2.0]),
+        ([1.0, 2.0, 3.0], [1.0, 1.0], [1.0, 2.0]),
+        ([1.0], [1.0], [1.0]),
+        ([np.nan, 2.0], [1.0, 1.0], [1.0, 2.0]),
+        ([-1.0, 2.0], [1.0, 1.0], [1.0, 2.0]),
+        ([1.0, 2.0], [np.inf, 1.0], [1.0, 2.0]),
+        ([1.0, 2.0], [1.0, 1.0], [0.0, 2.0]),
+        ([1.0, 2.0, 3.0], [1.0, 1.0, 1.0], [1.0, 3.0, 2.0]),
+    ],
+)
 def test_emission_tau_bottom_gate_rejects_malformed_evidence(tau, flux, nu):
     """Malformed arrays must not be promoted into an emission certificate."""
     with pytest.raises((ValueError, RuntimeError)):
-        forward.thin_flux_fraction(tau, flux, nu)
+        certify.thin_flux_fraction(tau, flux, nu)
 
 
 def test_an_abundant_species_with_no_k_table_is_named_not_swallowed():
@@ -260,14 +291,15 @@ def test_an_abundant_species_with_no_k_table_is_named_not_swallowed():
     reaches 3.6e-3 over the transmission photosphere -- comparable to CO --
     and ExoMolOP publishes no benzene table, so the spectrum is a lower bound
     on the true contrast.
-    The run has to say so."""
+    The run has to say so.
+    """
     sp = ["H2O", "CO", "C6H6", "C2H2", "H2", "H"]
     # two layers inside the photosphere band, one far below it
     p = np.array([1.0e-3, 1.0e-4, 5.0])
     y = np.array([[1.0, 1.0e-2, 3.6e-3, 1.0e-6, 0.77, 1.2e-2]] * 3)
     tables = {"H2O", "CO", "C2H2"}
 
-    found = forward.unmodeled_absorbers(sp, y, p, tables)
+    found = certify.unmodeled_absorbers(sp, y, p, tables)
     assert [n for n, _ in found] == ["C6H6"]
     assert found[0][1] == pytest.approx(3.6e-3 / y[0].sum(), rel=1e-6)
 
@@ -276,15 +308,14 @@ def test_an_abundant_species_with_no_k_table_is_named_not_swallowed():
     # however abundant -- they dominate this column
     assert "H2" not in dict(found) and "H" not in dict(found)
     # a species the RT DOES carry is never flagged, however abundant
-    assert forward.unmodeled_absorbers(sp, y, p, tables | {"C6H6"}) == []
+    assert certify.unmodeled_absorbers(sp, y, p, tables | {"C6H6"}) == []
     # and neither is one below the threshold
     y_low = y.copy()
-    y_low[:, 2] = forward.UNMODELED_VMR_WARN * y[0].sum() * 0.5
-    assert forward.unmodeled_absorbers(sp, y_low, p, tables) == []
+    y_low[:, 2] = certify.UNMODELED_VMR_WARN * y[0].sum() * 0.5
+    assert certify.unmodeled_absorbers(sp, y_low, p, tables) == []
     # most abundant first
     y2 = np.array([[1.0, 1.0e-2, 3.6e-3, 1.0e-2, 0.77, 1.2e-2]] * 3)
-    assert [n for n, _ in forward.unmodeled_absorbers(sp, y2, p, {"H2O", "CO"})] \
-        == ["C2H2", "C6H6"]
+    assert [n for n, _ in certify.unmodeled_absorbers(sp, y2, p, {"H2O", "CO"})] == ["C2H2", "C6H6"]
 
 
 def test_a_bulk_absorber_with_no_k_table_refuses_the_run():
@@ -294,33 +325,34 @@ def test_a_bulk_absorber_with_no_k_table_refuses_the_run():
     table exists anywhere.
     Above UNMODELED_VMR_REFUSE the run stops and names the species; between it
     and UNMODELED_VMR_WARN the column is modelable and the run proceeds with a
-    caveat; below the warning floor it is reported nowhere."""
+    caveat; below the warning floor it is reported nowhere.
+    """
     sp = ["H2O", "CO", "C6H6", "H2"]
-    p = np.array([1.0e-3, 1.0e-4, 5.0])   # two layers in the photosphere band
+    p = np.array([1.0e-3, 1.0e-4, 5.0])  # two layers in the photosphere band
     tables = {"H2O", "CO"}
     log = []
 
-    def _col(x_c6h6):                     # rows sum to 1
+    def _col(x_c6h6):  # rows sum to 1
         row = [1.0e-3, 1.0e-2, x_c6h6, 0.0]
         row[3] = 1.0 - sum(row)
         return np.array([row] * 3)
 
     y = _col(2.0e-3)
     with pytest.raises(RuntimeError, match="C6H6 at VMR 2.00e-03") as e:
-        forward.check_unmodeled(sp, y, p, tables, "baseline solve", log.append)
+        certify.check_unmodeled(sp, y, p, tables, "baseline solve", log.append)
     assert "1e-03" in str(e.value) and "Lower C/O" in str(e.value)
     # the element gate's failure path, NOT a stall: nothing may retry this
-    assert not isinstance(e.value, forward.NotCertified)
+    assert not isinstance(e.value, certify.NotCertified)
 
     # the warn band: modelable, so the run proceeds, but the caveat names it
     y = _col(2.0e-4)
-    assert forward.check_unmodeled(sp, y, p, tables, "baseline", log.append) is None
-    assert [n for n, _ in forward.unmodeled_absorbers(sp, y, p, tables)] == ["C6H6"]
+    assert certify.check_unmodeled(sp, y, p, tables, "baseline", log.append) is None
+    assert [n for n, _ in certify.unmodeled_absorbers(sp, y, p, tables)] == ["C6H6"]
 
     # below the warning floor this column is reported nowhere
     y = _col(5.0e-5)
-    assert forward.check_unmodeled(sp, y, p, tables, "baseline", log.append) is None
-    assert forward.unmodeled_absorbers(sp, y, p, tables) == []
+    assert certify.check_unmodeled(sp, y, p, tables, "baseline", log.append) is None
+    assert certify.unmodeled_absorbers(sp, y, p, tables) == []
 
 
 def test_a_stalled_column_escalates_once_and_a_certified_one_never_does():
@@ -328,7 +360,9 @@ def test_a_stalled_column_escalates_once_and_a_certified_one_never_does():
     and returns the model that produced the column it hands back; with no
     rebuild it still raises, and a column that certifies is never re-solved.
     A failure of the SOLVE itself is not a stall: only the certificate's
-    RuntimeError may escalate."""
+    RuntimeError may escalate.
+    """
+
     def _model(diag):
         m = _chem()
         m.sidx = {s: i for i, s in enumerate(SPECIES)}
@@ -339,34 +373,36 @@ def test_a_stalled_column_escalates_once_and_a_certified_one_never_does():
     fixed = _model(_diag())
     builds = []
 
-    y, chem, cert, escalated = forward.certified_solve(
-        stalled, np.zeros(3), "FD dlnCO +1h",
-        rebuild=lambda: (builds.append(1), fixed)[1], log=lambda _m: None)
+    y, chem, cert, escalated = certify.certified_solve(
+        stalled, np.zeros(3), "FD dlnCO +1h", rebuild=lambda: (builds.append(1), fixed)[1], log=lambda _m: None
+    )
     assert escalated and builds == [1]
     assert chem is fixed and np.all(np.asarray(y) == 7.0)
     assert cert[0] == "FD dlnCO +1h [photo cadence 1]"
 
     # no rebuild offered -> the refusal stands
     with pytest.raises(RuntimeError, match="did NOT converge"):
-        forward.certified_solve(stalled, np.zeros(3), "baseline solve")
+        certify.certified_solve(stalled, np.zeros(3), "baseline solve")
 
     # a column that certifies is never rebuilt
     builds.clear()
-    _y, chem2, _c, esc2 = forward.certified_solve(
-        fixed, np.zeros(3), "baseline solve",
-        rebuild=lambda: (builds.append(1), fixed)[1], log=lambda _m: None)
+    _y, chem2, _c, esc2 = certify.certified_solve(
+        fixed, np.zeros(3), "baseline solve", rebuild=lambda: (builds.append(1), fixed)[1], log=lambda _m: None
+    )
     assert not esc2 and builds == [] and chem2 is fixed
 
     # a BACKEND failure is a RuntimeError too (XLA raises RESOURCE_EXHAUSTED as
     # one): it must propagate, never be re-solved and flagged as an escalation
     broken = _model(_diag())
+
     def _boom(th, return_conv_diag):
         raise RuntimeError("backend: RESOURCE_EXHAUSTED")
+
     broken.converged_y = _boom
     with pytest.raises(RuntimeError, match="RESOURCE_EXHAUSTED"):
-        forward.certified_solve(
-            broken, np.zeros(3), "baseline solve",
-            rebuild=lambda: (builds.append(1), fixed)[1], log=lambda _m: None)
+        certify.certified_solve(
+            broken, np.zeros(3), "baseline solve", rebuild=lambda: (builds.append(1), fixed)[1], log=lambda _m: None
+        )
     assert builds == []
 
 
@@ -378,7 +414,8 @@ def test_only_the_certificate_escalates_an_fd_row():
     those pays a second full stencil and blames photolysis for a failure that
     is not one. So the certificate raises its own type and the row catches THAT
     (the row sits inside run_model's closure, unreachable without a full solve,
-    so its handler is pinned by source like the vmap guard above)."""
+    so its handler is pinned by source like the vmap guard above).
+    """
     import ast
     import importlib.util
     from pathlib import Path
@@ -397,10 +434,8 @@ def test_only_the_certificate_escalates_an_fd_row():
     def _boom(th, return_conv_diag):
         raise RuntimeError("backend: RESOURCE_EXHAUSTED")
 
-    stalled = _model(lambda th, return_conv_diag: (
-        np.full((3, 3), 7.0), _diag(conv_normal=False, longdy=2.7)))
-    assert isinstance(_raised(forward.certified_solve, stalled, np.zeros(3),
-                              "FD dlnCO +1h"), forward.NotCertified)
+    stalled = _model(lambda th, return_conv_diag: (np.full((3, 3), 7.0), _diag(conv_normal=False, longdy=2.7)))
+    assert isinstance(_raised(certify.certified_solve, stalled, np.zeros(3), "FD dlnCO +1h"), certify.NotCertified)
 
     compo = np.array([[2, 0, 0], [2, 1, 0], [0, 1, 1], [0, 2, 1]], float)
     y0 = np.array([[1.0, 4e-3, 5e-3, 1e-5]] * 3)
@@ -408,23 +443,26 @@ def test_only_the_certificate_escalates_an_fd_row():
     leaked[:, 1] *= 0.8
     nu = 1.0e4 / np.geomspace(15.0, 1.0, 400)
     for exc in (
-        _raised(forward.certified_solve, _model(_boom), np.zeros(3), "FD lnZ -1h"),
-        _raised(forward.check_elements, leaked,
-                SimpleNamespace(compo_array=compo, y0=y0,
-                                atom_list=("H", "O", "C")),
-                "FD lnZ -1h", lambda _m: None),
-        _raised(forward.check_emission_thin,
-                np.where(1.0e4 / nu < 2.0, 0.5, 50.0), np.ones_like(nu), nu,
-                "FD lnZ -1h"),
-        _raised(forward._check_t_window, None, np.zeros(7),
-                np.logspace(-7, 0, 3), lambda _m: None,
-                T_base=np.full(3, 4.0e3)),
+        _raised(certify.certified_solve, _model(_boom), np.zeros(3), "FD lnZ -1h"),
+        _raised(
+            certify.check_elements,
+            leaked,
+            SimpleNamespace(compo_array=compo, y0=y0, atom_list=("H", "O", "C")),
+            "FD lnZ -1h",
+            lambda _m: None,
+        ),
+        _raised(certify.check_emission_thin, np.where(1.0e4 / nu < 2.0, 0.5, 50.0), np.ones_like(nu), nu, "FD lnZ -1h"),
+        _raised(
+            certify.check_t_window, None, np.zeros(7), np.logspace(-7, 0, 3), lambda _m: None, T_base=np.full(3, 4.0e3)
+        ),
     ):
-        assert not isinstance(exc, forward.NotCertified), exc
+        assert not isinstance(exc, certify.NotCertified), exc
 
-    src = Path(importlib.util.find_spec("jwst_tool.forward").origin).read_text()
-    rows = [t for t in ast.walk(ast.parse(src)) if isinstance(t, ast.Try)
-            and any("_row_points(_run_frq)" in ast.unparse(n) for n in t.body)]
+    src = Path(importlib.util.find_spec("jwst_tool.jacobian").origin).read_text()
+    rows = [
+        t
+        for t in ast.walk(ast.parse(src))
+        if isinstance(t, ast.Try) and any("_row_points(run_frq)" in ast.unparse(n) for n in t.body)
+    ]
     assert rows, "the FD row's stencil try moved: re-pin it"
-    assert [ast.unparse(h.type) for t in rows for h in t.handlers] \
-        == ["NotCertified"]
+    assert [ast.unparse(h.type) for t in rows for h in t.handlers] == ["NotCertified"]

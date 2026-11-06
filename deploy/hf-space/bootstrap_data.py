@@ -11,6 +11,7 @@ PICASO files are absent, a failed download only warns; a PICASO file still
 missing afterwards only warns too. VULCAN then boots without PICASO, and
 every PICASO run stops with an error.
 """
+
 import os
 import sys
 from pathlib import Path
@@ -50,26 +51,32 @@ def ktable_markers() -> list[Path]:
     boot instead.
     """
     from jwst_tool import forward
-    return [DATA / "retrieval-data" / "exomolop" / f"{m}.ktable.h5"
-            for m in forward.MOLECULES + forward.EXTRA_MOLECULES
-            if m not in forward._NO_EXOMOLOP_TABLE]
+
+    return [
+        DATA / "retrieval-data" / "exomolop" / f"{m}.ktable.h5"
+        for m in forward.MOLECULES + forward.EXTRA_MOLECULES
+        if m not in forward._NO_EXOMOLOP_TABLE
+    ]
 
 
 def picaso_markers() -> list[Path]:
-    """One marker per PICASO reference file and correlated-k table, read from
-    the installed tool's datacheck, so the list moves with the pinned code
-    like ktable_markers()."""
+    """Return one marker per PICASO reference file and correlated-k table.
+
+    Read from the installed tool's datacheck, so the list moves with the pinned code like ktable_markers().
+    """
     from jwst_tool import datacheck as dc
+
     root = DATA / "jwst-data" / f"picaso_refdata-{dc.PICASO_RELEASE}"
-    return ([root / f for f in dc.PICASO_REFDATA_FILES]
-            + [root / dc.PICASO_CK_DIR / n for n in dc.PICASO_CK_MD5])
+    return [root / f for f in dc.PICASO_REFDATA_FILES] + [root / dc.PICASO_CK_DIR / n for n in dc.PICASO_CK_MD5]
 
 
 def missing(markers: list[Path]) -> list[Path]:
+    """Return the markers not present yet."""
     return [m for m in markers if not m.exists()]
 
 
 def main() -> int:
+    """Seed the data volume; return the exit code."""
     required = MARKERS + ktable_markers()
     picaso = picaso_markers()
     gone = missing(required + picaso)
@@ -77,24 +84,25 @@ def main() -> int:
         print("[bootstrap] /data already seeded, skipping download")
         return 0
 
-    print(f"[bootstrap] seeding /data from {DATASET_REPO} "
-          f"({len(gone)}/{len(required) + len(picaso)} markers absent) ...")
+    print(
+        f"[bootstrap] seeding /data from {DATASET_REPO} ({len(gone)}/{len(required) + len(picaso)} markers absent) ..."
+    )
     token = os.environ.get("HF_TOKEN")
     if not token:
-        print("[bootstrap] WARNING: no HF_TOKEN secret set -- this only "
-              "works if the dataset repo is public", file=sys.stderr)
+        print(
+            "[bootstrap] WARNING: no HF_TOKEN secret set -- this only works if the dataset repo is public",
+            file=sys.stderr,
+        )
 
     from huggingface_hub import snapshot_download
+
     try:
-        snapshot_download(
-            repo_id=DATASET_REPO, repo_type="dataset",
-            token=token, local_dir=str(DATA))
-    except Exception as e:                                   # noqa: BLE001
+        snapshot_download(repo_id=DATASET_REPO, repo_type="dataset", token=token, local_dir=str(DATA))
+    except Exception as e:
         if missing(required):
             raise
         # only PICASO files were absent: VULCAN still boots offline
-        print(f"[bootstrap] WARNING: dataset download failed ({e!r}); "
-              "booting without the PICASO data", file=sys.stderr)
+        print(f"[bootstrap] WARNING: dataset download failed ({e!r}); booting without the PICASO data", file=sys.stderr)
 
     gone = missing(required)
     if gone:
@@ -103,13 +111,17 @@ def main() -> int:
             "dataset seed finished but these required paths are still "
             f"absent:\n  {lines}\nThe dataset repo layout must be "
             "jwst-data/... + retrieval-data/... at the repo root -- "
-            "re-run deploy/hf-space/upload_data.sh from the Mac.")
+            "re-run deploy/hf-space/upload_data.sh from the Mac."
+        )
     gone = missing(picaso)
     if gone:
-        print(f"[bootstrap] WARNING: {len(gone)}/{len(picaso)} PICASO files "
-              f"absent (first: {gone[0]}) -- VULCAN is unaffected, every "
-              "PICASO run will stop with an error (upload them: "
-              "deploy/hf-space/upload_data.sh)", file=sys.stderr)
+        print(
+            f"[bootstrap] WARNING: {len(gone)}/{len(picaso)} PICASO files "
+            f"absent (first: {gone[0]}) -- VULCAN is unaffected, every "
+            "PICASO run will stop with an error (upload them: "
+            "deploy/hf-space/upload_data.sh)",
+            file=sys.stderr,
+        )
     print("[bootstrap] /data seeded and verified")
     return 0
 

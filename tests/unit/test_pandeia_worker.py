@@ -4,19 +4,20 @@ pandeia imports are function-local, so the module imports with numpy alone).
 The release-match gate compares leading numeric release segments: 3.0 +
 3.0rc3 passes; a mixed engine/refdata pair is refused BEFORE a deep error.
 """
+
 import pytest
 
-from jwst_tool import instruments as ins
-from jwst_tool import pandeia_worker as pw
-
+from jwst_tool import instruments as ins, pandeia_worker as pw
 
 # --- native-R dispersion lookup ----------------------------------------------
+
 
 def test_native_r_finds_the_tokenless_nircam_grism_file(tmp_path):
     """The NIRCam LW grism dispersion file carries NO disperser token in its
     name (jwst_nircam_disp_*.fits), so the *grismr* token pattern matches
     nothing. The lookup must pick that file and never the alphabetically-
-    earlier short-wave dhs0-ord* files."""
+    earlier short-wave dhs0-ord* files.
+    """
     fits = pytest.importorskip("astropy.io.fits")
     import numpy as np
 
@@ -24,14 +25,13 @@ def test_native_r_finds_the_tokenless_nircam_grism_file(tmp_path):
     ddir.mkdir(parents=True)
 
     def _disp_fits(path, r_value):
-        cols = fits.ColDefs([
-            fits.Column(name="WAVELENGTH", format="D",
-                        array=np.array([2.4, 5.0])),
-            fits.Column(name="R", format="D",
-                        array=np.array([r_value, r_value], float)),
-        ])
-        fits.HDUList([fits.PrimaryHDU(),
-                      fits.BinTableHDU.from_columns(cols)]).writeto(path)
+        cols = fits.ColDefs(
+            [
+                fits.Column(name="WAVELENGTH", format="D", array=np.array([2.4, 5.0])),
+                fits.Column(name="R", format="D", array=np.array([r_value, r_value], float)),
+            ]
+        )
+        fits.HDUList([fits.PrimaryHDU(), fits.BinTableHDU.from_columns(cols)]).writeto(path)
 
     # decoy sorts BEFORE the grism file; a bare *disp*.fits glob would pick it
     _disp_fits(ddir / "jwst_nircam_dhs0-ord1_disp_20240607150902.fits", 300.0)
@@ -45,36 +45,43 @@ def test_native_r_finds_the_tokenless_nircam_grism_file(tmp_path):
 
 def test_missing_dispersion_file_raises(tmp_path):
     """No dispersion file must never become a silent no-blur on the host."""
-    m = {"instrument": "nirspec", "mode": "bots",
-         "config": {"instrument": {"disperser": "g395h"}}, "strategy": {}}
+    m = {"instrument": "nirspec", "mode": "bots", "config": {"instrument": {"disperser": "g395h"}}, "strategy": {}}
     with pytest.raises(RuntimeError, match="dispersion"):
         pw._native_r(str(tmp_path), m, [3.0, 4.0, 5.0])
 
 
 def test_release_segment():
     """Leading numeric release segment; rc/dev suffixes drop, non-numeric
-    strings read None."""
-    for raw, expected in (("3.0", "3.0"), ("3.0rc3", "3.0"),
-                          ("2026.2.dev1", "2026.2"), ("  4.1 \n", "4.1"),
-                          ("rc3", None), ("", None)):
+    strings read None.
+    """
+    for raw, expected in (
+        ("3.0", "3.0"),
+        ("3.0rc3", "3.0"),
+        ("2026.2.dev1", "2026.2"),
+        ("  4.1 \n", "4.1"),
+        ("rc3", None),
+        ("", None),
+    ):
         assert pw._release(raw) == expected, raw
 
 
 # --- version files ------------------------------------------------------------
 
+
 def test_refdata_version_sources(tmp_path):
     """Refdata is identified by VERSION_DATA only: a misplaced VERSION_PSF
-    or the pandeia_data-<ver> directory name never authenticates it."""
+    or the pandeia_data-<ver> directory name never authenticates it.
+    """
     tree = tmp_path / "pandeia_data-2026.7-jwst"
     tree.mkdir()
     (tree / "VERSION_PSF").write_text("2026.7\n\nPSF provenance text\n")
     assert pw._version_file(str(tree), "VERSION_DATA")[0] is None
     (tree / "VERSION_DATA").write_text("2026.7\nextra\n")
-    assert pw._version_file(str(tree), "VERSION_DATA") == ("2026.7",
-                                                           "VERSION_DATA")
+    assert pw._version_file(str(tree), "VERSION_DATA") == ("2026.7", "VERSION_DATA")
 
 
 # --- matched engine/refdata/PSF triple ---------------------------------------
+
 
 def _triple(tmp_path, data_ver, psf_ver):
     """Build (refdata, psf_dir) version-file stubs at the requested releases."""
@@ -89,7 +96,8 @@ def _triple(tmp_path, data_ver, psf_ver):
 
 def test_matched_triple_and_psf_identity(tmp_path):
     """A matched triple passes and records all three versions; PSF identity
-    comes from VERSION_PSF, and an unidentifiable PSF tree is refused."""
+    comes from VERSION_PSF, and an unidentifiable PSF tree is refused.
+    """
     ref, psf = _triple(tmp_path, "2026.7", "2026.7")
     prov = pw._check_backend_match("2026.7", ref, psf)
     assert prov["refdata_version"] == "2026.7"
@@ -104,12 +112,14 @@ def test_matched_triple_and_psf_identity(tmp_path):
 
 def test_any_component_out_of_step_is_refused(tmp_path):
     """Any component out of step must fail BEFORE a calculation, the PSF
-    release included. Unidentifiable refdata is refused too."""
+    release included. Unidentifiable refdata is refused too.
+    """
     for engine, data_ver, psf_ver, offender in (
-            ("2026.2", "2026.7", "2026.7", "does not match pandeia_data"),
-            ("2026.7", "2026.2", "2026.7", "does not match pandeia_data"),
-            ("2026.7", "2026.7", "2026.2", "PSF library release"),
-            ("2026.2", "2026.2", "2026.7", "PSF library release")):
+        ("2026.2", "2026.7", "2026.7", "does not match pandeia_data"),
+        ("2026.7", "2026.2", "2026.7", "does not match pandeia_data"),
+        ("2026.7", "2026.7", "2026.2", "PSF library release"),
+        ("2026.2", "2026.2", "2026.7", "PSF library release"),
+    ):
         sub = tmp_path / f"{engine}-{data_ver}-{psf_ver}"
         sub.mkdir()
         ref, psf = _triple(sub, data_ver, psf_ver)
@@ -125,7 +135,8 @@ def test_any_component_out_of_step_is_refused(tmp_path):
 def test_missing_psf_tree_is_refused(tmp_path):
     """Every backend uses the split-PSF layout: a missing PSF dir is always
     an error, and the split 2026+ layout must never masquerade as
-    embedded-PSF data."""
+    embedded-PSF data.
+    """
     ref, _ = _triple(tmp_path, "2026.7", "2026.7")
     for psf_dir in (None, ""):
         with pytest.raises(RuntimeError, match="requires a separate PSF"):
@@ -135,13 +146,16 @@ def test_missing_psf_tree_is_refused(tmp_path):
 def test_no_backend_carries_a_personal_absolute_path():
     """No checked-in SOURCE literal may point into one person's home (checks
     source text, not resolved values: refdata/psf legitimately resolve under
-    a developer's home in an editable checkout)."""
+    a developer's home in an editable checkout).
+    """
     import pathlib
 
-    offenders = [f"{f.name}: {ln.strip()}"
-                 for f in sorted(pathlib.Path(ins.__file__).parent.glob("*.py"))
-                 for ln in f.read_text().splitlines()
-                 if "/Users/" in ln and not ln.strip().startswith("#")]
+    offenders = [
+        f"{f.name}: {ln.strip()}"
+        for f in sorted(pathlib.Path(ins.__file__).parent.glob("*.py"))
+        for ln in f.read_text().splitlines()
+        if "/Users/" in ln and not ln.strip().startswith("#")
+    ]
     assert not offenders, offenders
 
 
@@ -155,12 +169,11 @@ def test_missing_backend_python_gives_one_actionable_error(monkeypatch):
 
 # --- native-grid saturation census -------------------------------------------
 
-def _stub_report(sat_frac, wl, flux, noise, n_full, n_part, t_exp=100.0,
-                 sat_ngroups=50.0):
+
+def _stub_report(sat_frac, wl, flux, noise, n_full, n_part, t_exp=100.0, sat_ngroups=50.0):
     """Minimal pandeia report shaped the way `_one_mode` reads it."""
     return {
-        "scalar": {"fraction_saturation": sat_frac, "sat_ngroups": sat_ngroups,
-                   "total_exposure_time": t_exp},
+        "scalar": {"fraction_saturation": sat_frac, "sat_ngroups": sat_ngroups, "total_exposure_time": t_exp},
         "1d": {
             "sn": (list(wl), [0.0] * len(wl)),
             "extracted_flux": (list(wl), list(flux)),
@@ -172,25 +185,42 @@ def _stub_report(sat_frac, wl, flux, noise, n_full, n_part, t_exp=100.0,
     }
 
 
-def _run_one_mode(wl, flux, noise, n_full, n_part, sat_frac=0.5,
-                  sat_by_ngroup=None, sat_ngroups=50.0,
-                  ngroup_min=2, ngroup_max=10, call_log=None):
+def _run_one_mode(
+    wl,
+    flux,
+    noise,
+    n_full,
+    n_part,
+    sat_frac=0.5,
+    sat_by_ngroup=None,
+    sat_ngroups=50.0,
+    ngroup_min=2,
+    ngroup_max=10,
+    call_log=None,
+):
     """Drive `_one_mode` with stub pandeia callables (no engine involved).
 
     ``sat_by_ngroup`` (ngroup -> measured saturation fraction) makes
     saturation depend on the requested ramp, which the group-search
     regression tests need; the default constant ``sat_frac`` keeps the
     older census tests unchanged. ``call_log`` collects the ngroup of every
-    nint=1 stub calculation, in order."""
-    mode = {"key": "stub", "instrument": "nirspec", "mode": "prism",
-            "config": {}, "strategy": {}, "background": "minzodi",
-            "background_level": "medium",
-            "ngroup_min": ngroup_min, "ngroup_max": ngroup_max}
+    nint=1 stub calculation, in order.
+    """
+    mode = {
+        "key": "stub",
+        "instrument": "nirspec",
+        "mode": "prism",
+        "config": {},
+        "strategy": {},
+        "background": "minzodi",
+        "background_level": "medium",
+        "ngroup_min": ngroup_min,
+        "ngroup_max": ngroup_max,
+    }
     star = {"teff": 5400.0, "log_g": 4.45, "metallicity": 0.0, "ks_mag": 10.0}
 
     def build_default_calc(_tel, _inst, _mode):
-        return {"configuration": {"detector": {}}, "strategy": {},
-                "scene": [{"spectrum": {}}]}
+        return {"configuration": {"detector": {}}, "strategy": {}, "scene": [{"spectrum": {}}]}
 
     calls = {"n": 0}
 
@@ -203,17 +233,22 @@ def _run_one_mode(wl, flux, noise, n_full, n_part, sat_frac=0.5,
         if call_log is not None and det.get("nint", 1) == 1:
             call_log.append(ng)
         t = 100.0 + 10.0 * (det.get("nint", 1) - 1)
-        return _stub_report(frac, wl, flux, noise, n_full, n_part, t_exp=t,
-                            sat_ngroups=sat_ngroups)
+        return _stub_report(frac, wl, flux, noise, n_full, n_part, t_exp=t, sat_ngroups=sat_ngroups)
 
     # _native_r reads refdata dispersion files (and raises without them);
     # stub it so this stays a saturation/census test with no 20 MiB tree.
     real_native_r = pw._native_r
     pw._native_r = lambda _refdata, _m, w: ([400.0] * len(w), "stub")
     try:
-        return pw._one_mode(build_default_calc, perform_calculation, mode, star,
-                            sat_limit=0.80, refdata="/nonexistent-refdata",
-                            engine_version="2026.7")
+        return pw._one_mode(
+            build_default_calc,
+            perform_calculation,
+            mode,
+            star,
+            sat_limit=0.80,
+            refdata="/nonexistent-refdata",
+            engine_version="2026.7",
+        )
     finally:
         pw._native_r = real_native_r
 
@@ -227,14 +262,14 @@ def test_full_saturation_is_counted_before_the_good_filter():
     out = _run_one_mode(
         wl=[1.0, 2.0],
         flux=[1.0e6, 5.0e5],
-        noise=[1.0e3, float("nan")],       # saturated channel -> non-finite
-        n_full=[0.0, 3.0],                 # ...and it is the saturated one
+        noise=[1.0e3, float("nan")],  # saturated channel -> non-finite
+        n_full=[0.0, 3.0],  # ...and it is the saturated one
         n_part=[0.0, 3.0],
     )
     assert out.get("unusable") is not True
-    assert len(out["wl"]) == 1                      # one-pixel science grid
+    assert len(out["wl"]) == 1  # one-pixel science grid
     assert out["wl"] == [1.0]
-    assert out["n_full_sat"] == [0.0]               # filtered curve sees none
+    assert out["n_full_sat"] == [0.0]  # filtered curve sees none
 
     assert out["n_pix_native"] == 2
     assert out["n_pix_unusable_dropped"] == 1
@@ -250,7 +285,7 @@ def test_native_census_survives_an_all_unusable_mode():
         noise=[float("nan"), float("nan")],
         n_full=[2.0, 3.0],
         n_part=[2.0, 3.0],
-        sat_frac=7.31,                     # the real bright_hot PRISM value
+        sat_frac=7.31,  # the real bright_hot PRISM value
     )
     assert out["unusable"] is True
     assert out["n_pix_native"] == 2
@@ -260,11 +295,13 @@ def test_native_census_survives_an_all_unusable_mode():
 
 def test_sat_curve_is_loud_on_missing_or_misaligned_keys():
     """The saturation curves are load-bearing: a missing/renamed report key or
-    a grid-length mismatch raises, never a silent all-zeros fallback."""
+    a grid-length mismatch raises, never a silent all-zeros fallback.
+    """
     import numpy as np
+
     rpt = {"1d": {"n_full_saturated": [[1.0, 2.0, 3.0], [0.0, 1.0, np.nan]]}}
     curve = pw._sat_curve(rpt, "n_full_saturated", 3)
-    assert curve.tolist() == [0.0, 1.0, 0.0]        # NaN -> 0, values kept
+    assert curve.tolist() == [0.0, 1.0, 0.0]  # NaN -> 0, values kept
     with pytest.raises(RuntimeError, match="renamed"):
         pw._sat_curve(rpt, "n_partial_saturated", 3)
     with pytest.raises(RuntimeError, match="misaligned"):
@@ -273,8 +310,7 @@ def test_sat_curve_is_loud_on_missing_or_misaligned_keys():
 
 # --- group search selects the largest MEASURED-safe ramp ---------------------
 
-_CLEAN = dict(wl=[1.0, 2.0], flux=[1.0e6, 5.0e5], noise=[1.0e3, 2.0e3],
-              n_full=[0.0, 0.0], n_part=[0.0, 0.0])
+_CLEAN = dict(wl=[1.0, 2.0], flux=[1.0e6, 5.0e5], noise=[1.0e3, 2.0e3], n_full=[0.0, 0.0], n_part=[0.0, 0.0])
 
 # One case per group-search invariant; each is a synthetic saturation curve.
 # Fields: sat_by_ngroup, sat_ngroups, expected (ngroup, saturated,
@@ -285,54 +321,50 @@ _GROUP_SEARCH_CASES = {
     # count (2, PandExo's choice), not the conservative predictor seed (1)
     "soss_two_groups": (lambda ng: 0.392 * ng, 2.04, (2, False, None), [2]),
     # a predictor below the floor does not prove the floor saturated
-    "predictor_below_safe_floor": (lambda ng: 0.79 * ng, 0.9,
-                                   (1, False, None), []),
+    "predictor_below_safe_floor": (lambda ng: 0.79 * ng, 0.9, (1, False, None), []),
     # nonlinear curve: an overshooting seed comes back down to the largest
     # measured-safe count
-    "overshoot_converges": (lambda ng: {1: 0.10, 7: 0.79}.get(ng, 0.90),
-                            None, (7, False, None), []),
+    "overshoot_converges": (lambda ng: {1: 0.10, 7: 0.79}.get(ng, 0.90), None, (7, False, None), []),
     # everything above the floor unsafe -> the measured-safe floor, never a
     # saturation flag
-    "bracket_collapse": (lambda ng: 0.40 if ng == 1 else 0.90, None,
-                         (1, False, None), []),
+    "bracket_collapse": (lambda ng: 0.40 if ng == 1 else 0.90, None, (1, False, None), []),
     # saturation is a MEASUREMENT of the shortest permitted ramp
     "saturated_floor": (lambda ng: 0.85 * ng, None, (1, True, None), []),
     # the upward search stops at the APT/PandExo cap
     "cap_respected": (lambda ng: 0.005 * ng, None, (30, False, None), []),
     # counterexample f(n)=0.1n+0.1: a predictor stalls at 6; the bracket
     # search must PROVE 7 by measuring 8 unsafe
-    "affine_offset_maximum": (lambda ng: 0.1 * ng + 0.1, None,
-                              (7, False, True), []),
+    "affine_offset_maximum": (lambda ng: 0.1 * ng + 0.1, None, (7, False, True), []),
     # completeness = the boundary neighbor was measured (3 in the call log)
     "maximality_proven": (lambda ng: 0.392 * ng, 2.04, (2, False, True), [3]),
 }
 
 
-@pytest.mark.parametrize("case", list(_GROUP_SEARCH_CASES),
-                         ids=list(_GROUP_SEARCH_CASES))
+@pytest.mark.parametrize("case", list(_GROUP_SEARCH_CASES), ids=list(_GROUP_SEARCH_CASES))
 def test_group_search_selects_largest_measured_safe(case):
     sat_by_ngroup, sat_ngroups, want, in_log = _GROUP_SEARCH_CASES[case]
     log = []
-    out = _run_one_mode(**_CLEAN, sat_by_ngroup=sat_by_ngroup,
-                        sat_ngroups=sat_ngroups, ngroup_min=1,
-                        ngroup_max=30, call_log=log)
+    out = _run_one_mode(
+        **_CLEAN, sat_by_ngroup=sat_by_ngroup, sat_ngroups=sat_ngroups, ngroup_min=1, ngroup_max=30, call_log=log
+    )
     ngroup, saturated, complete = want
     assert out["ngroup"] == ngroup
     assert out["saturated"] is saturated
     if complete is not None:
         assert out["ramp_search_complete"] is complete
     for ng in in_log:
-        assert ng in log            # the choice/disproof was MEASURED
+        assert ng in log  # the choice/disproof was MEASURED
     assert not log or max(log) <= 30
 
 
 def test_budget_exhaustion_is_reported_not_hidden():
     """f(n) = 0.8*n/(n+1) climbs one group per iteration forever; the
     budget runs out with no unsafe neighbor measured, so the result is the
-    measured-safe best WITH ramp_search_complete=False."""
-    out = _run_one_mode(**_CLEAN,
-                        sat_by_ngroup=lambda ng: 0.8 * ng / (ng + 1.0),
-                        sat_ngroups=None, ngroup_min=1, ngroup_max=10_000)
+    measured-safe best WITH ramp_search_complete=False.
+    """
+    out = _run_one_mode(
+        **_CLEAN, sat_by_ngroup=lambda ng: 0.8 * ng / (ng + 1.0), sat_ngroups=None, ngroup_min=1, ngroup_max=10_000
+    )
     assert out["saturated"] is False
     assert out["ramp_search_complete"] is False
-    assert out["ngroup"] >= 10          # it climbed, measured-safe
+    assert out["ngroup"] >= 10  # it climbed, measured-safe

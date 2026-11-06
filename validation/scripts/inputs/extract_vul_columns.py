@@ -1,12 +1,15 @@
-"""P and volume mixing ratios of six species from the two VULCAN outputs behind
-the chemistry validation figure (VULCAN 2.0 vs VULCAN 3.0 on identical inputs).
+"""P and volume mixing ratios of six species from the two VULCAN outputs behind the chemistry validation figure.
+
+(VULCAN 2.0 vs VULCAN 3.0 on identical inputs).
 
     python validation/scripts/inputs/extract_vul_columns.py <master.vul> <jax.vul>
 
 Sources: the W39b pair that `VULCAN-JAX/tools/bench_table1.sh W39b` writes
 (master_W39b/output/W39b.vul, upstream with the declared oracle deltas applied,
 and jax_W39b/output/W39b.vul; 28 MB of solver pickles, not committed).
-Writes validation/data/chemistry_w39b_vulcan2_vs_vulcan3.npz."""
+Writes validation/data/chemistry_w39b_vulcan2_vs_vulcan3.npz.
+"""
+
 import pickle
 import sys
 from pathlib import Path
@@ -18,6 +21,7 @@ OUT = Path(__file__).resolve().parents[2] / "data" / "chemistry_w39b_vulcan2_vs_
 
 
 def columns(path):
+    """Return the column names and data of a VULCAN output table."""
     with open(path, "rb") as f:
         d = pickle.load(f)
     sp = list(d["variable"]["species"])
@@ -28,8 +32,13 @@ def columns(path):
 p2, y2 = columns(sys.argv[1])
 p3, y3 = columns(sys.argv[2])
 assert np.array_equal(p2, p3)
-np.savez(OUT, p_bar=p2, species=np.array(SPECIES),
-         **{f"vulcan2_{s}": y2[s] for s in SPECIES}, **{f"vulcan3_{s}": y3[s] for s in SPECIES},
-         source=np.array([Path(sys.argv[1]).name, Path(sys.argv[2]).name]),
-         generator=np.array(Path(__file__).read_text()))
+np.savez(
+    OUT,
+    p_bar=p2,
+    species=np.array(SPECIES),
+    **{f"vulcan2_{s}": y2[s] for s in SPECIES},
+    **{f"vulcan3_{s}": y3[s] for s in SPECIES},
+    source=np.array([Path(sys.argv[1]).name, Path(sys.argv[2]).name]),
+    generator=np.array(Path(__file__).read_text()),
+)
 print("wrote", OUT)

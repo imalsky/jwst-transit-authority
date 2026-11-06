@@ -5,112 +5,19 @@ gui-smoke lane runs it. Uses Streamlit's AppTest; no forward-model run is
 launched. AppTest boots are the expensive part, so every assertion that
 examines the same booted app lives in one test.
 """
+
 from __future__ import annotations
 
 import re
-from pathlib import Path
-
-import numpy as np
 
 import pytest
 
+from jwst_tool import model_defs
+
 st = pytest.importorskip("streamlit")
 pytest.importorskip("pandas")
+from app_helpers import APP, GUI_SOURCES, run_app
 from streamlit.testing.v1 import AppTest
-
-APP = Path(__file__).resolve().parents[2] / "src" / "jwst_tool" / "app.py"
-
-
-def _run_app():
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.run()
-    return at
-
-
-def _synthetic_out(science_mode="transmission", saturated=False,
-                   sigma_detect=0.0, n_transits=1, with_jac=False):
-    """Minimal cached-result pair (out, out_meta) for post-run rendering.
-
-    sigma_detect must stay 0 or above target so the render never calls
-    detect.transits_to_target, which needs the full evaluate_mode payload.
-    ``with_jac=True`` adds a two-parameter Jacobian (lnZ, dlnCO + lnR0) and a
-    SECOND mode, so the Fisher table, combo builder, forecast posteriors and
-    summary figure all render. ymix is the FULL network state, wider than the
-    RT molecule list and in a different order -- the shape that catches a
-    positional mixing-ratio mislabelling; it also drives the one log-x panel.
-    """
-    import json
-
-    n = 40
-    wl = np.linspace(1.0, 5.0, n)
-    model = {
-        "wl_um": wl,
-        "depth": np.full(n, 0.021) + 1e-4 * np.sin(wl),
-        "mols": np.array(["H2O", "CO2", "CO", "CH4", "SO2"], dtype="U8"),
-        # depth_wo rows align with wo_mols, not mols
-        "wo_mols": np.array(["H2O", "CO2", "CO", "CH4", "SO2"], dtype="U8"),
-        "depth_wo": np.tile(np.full(n, 0.0208), (5, 1)),
-        "T": np.full(30, 1100.0),
-        "p_bar": np.logspace(-7, 0.8, 30),
-        "ymix": np.tile(np.array([0.85, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 0.14]),
-                        (30, 1)),
-        "ymix_species": np.array(["H2", "CO", "H2O", "CH4", "CO2", "SO2", "He"],
-                                 dtype="U16"),
-        "science_mode": science_mode,
-        "params_json": json.dumps({"co_ratio": 0.549348,
-                                   "tp_mode": "guillot",
-                                   "met_x_solar": 10.0,
-                                   "science_mode": science_mode}),
-        # every cached result carries the caveat fields (forward.py writes
-        # them unconditionally); empty = nothing to report
-        "unmodeled": np.array([], dtype="U32"),
-        "photo_escalated": np.array([], dtype="U48"),
-        "rate_rows_outside": np.array([0]), "rate_rows_total": np.array([0]),
-    }
-    nb = 12
-    rng = np.random.default_rng(0)
-
-    def _mode(key, label, wl_lo, wl_hi):
-        return {
-            "mode_key": key, "label": label,
-            "saturated": saturated, "sat_frac": 0.97,
-            "sigma_detect": sigma_detect,
-            "sigma_detect_proj": float("nan"),
-            "wl": np.linspace(wl_lo, wl_hi, nb),
-            "wl_eff": np.linspace(wl_lo, wl_hi, nb),
-            "depth": np.full(nb, 0.021), "sigma": np.full(nb, 1.5e-4),
-            "floor": np.zeros(nb), "seg": np.zeros(nb, int),
-            "median_sigma_ppm": 150.0, "n_bins": nb, "ngroup": 12,
-            "t_cycle_s": 11.0,
-            "jac_bins": (rng.standard_normal((3, nb)) * 1e-4
-                         if with_jac else None),
-        }
-
-    results = [_mode("nirspec_g395h", "NIRSpec G395H", 2.9, 5.1)]
-    if with_jac:
-        results.append(_mode("nirspec_prism", "NIRSpec PRISM", 0.7, 5.2))
-        model["jac"] = np.zeros((3, n))
-        model["jac_names"] = np.array(["lnZ", "dlnCO", "lnR0"], dtype="U8")
-    out = dict(model=model, results=results, failed=[], unusable=[])
-    # run_sig left empty: every non-canonical field reads as changed
-    out_meta = dict(
-        goal="detect", target="SO2", goal_param=None, target_prec=None,
-        target_sig=3.0, n_transits=n_transits, r_bin=100,
-        planet="WASP-39 b", sat_limit=0.8,
-        run_sig=dict(goal={}, observation={}))
-    return out, out_meta
-
-
-def _run_with_result(out, out_meta, **state):
-    """AppTest primed with a cached result (plus optional session state), run
-    once. Post-run rendering only; no forward model is launched."""
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.session_state["out"] = out
-    at.session_state["out_meta"] = out_meta
-    for key, val in state.items():
-        at.session_state[key] = val
-    at.run()
-    return at
 
 
 def test_fresh_boot_pre_run_contract():
@@ -118,39 +25,39 @@ def test_fresh_boot_pre_run_contract():
     computes only the selected modes), the "Data" panel with its opacity
     sources, noise multiplier at 1.0, and the mock controls -- the seed
     field keeps a realization reproducible; widget keys are the shipped
-    contract, so share_config round-trips."""
+    contract, so share_config round-trips.
+    """
     from jwst_tool import instruments as ins
 
-    at = _run_app()
+    at = run_app()
     assert not at.exception, at.exception
     assert at.selectbox(key="n0_planet").value is not None
     assert not [b for b in at.button if "I understand" in (b.label or "")]
     assert set(at.multiselect(key="n0_modes").value) == set(ins.DEFAULT_MODES)
-    assert set(ins.DEFAULT_MODES) == {"nirspec_prism", "nirspec_g395h",
-                                      "miri_lrs"}
+    assert set(ins.DEFAULT_MODES) == {"nirspec_prism", "nirspec_g395h", "miri_lrs"}
     labels = [e.label for e in at.expander]
-    assert any(label == "Data" or label.startswith("Data (")
-               for label in labels)
-    ms =[w for w in at.multiselect if w.label == "Extra opacity molecules"]
+    assert any(label == "Data" or label.startswith("Data (") for label in labels)
+    ms = [w for w in at.multiselect if w.label == "Extra opacity molecules"]
     assert ms, "extra-molecule multiselect missing"
     # Opacity data: exactly one of {the sources table, a loud provenance
     # warning} exists, depending on whether the fetcher's record is
     # installed; the picker's values and options are bare species tokens and
     # the Data table names the dataset behind each one.
     from jwst_tool import datacheck, forward, planets
+
     pp = datacheck.exomolop_provenance_path()
     have = bool(pp and pp.is_file())
-    srcs = [d for d in at.dataframe if "component" in list(d.value.columns)
-            and "used in this setup" in list(d.value.columns)]
-    warns = [w for w in at.warning
-             if w.value.startswith("Opacity sources unavailable: ")]
-    assert (len(srcs) == 1) == have and bool(warns) == (not have), \
-        (have, len(srcs), [w.value for w in warns])
+    srcs = [
+        d
+        for d in at.dataframe
+        if "component" in list(d.value.columns) and "used in this setup" in list(d.value.columns)
+    ]
+    warns = [w for w in at.warning if w.value.startswith("Opacity sources unavailable: ")]
+    assert (len(srcs) == 1) == have and bool(warns) == (not have), (have, len(srcs), [w.value for w in warns])
     assert set(ms[0].value) == set(forward.EXTRA_MOLECULES_DEFAULT)
     if have:
         df = srcs[0].value
-        offered = (set(forward.MOLECULES)
-                   | (set(forward.EXTRA_MOLECULES) - forward._NO_EXOMOLOP_TABLE))
+        offered = set(forward.MOLECULES) | (set(forward.EXTRA_MOLECULES) - forward._NO_EXOMOLOP_TABLE)
         assert offered <= set(df["component"])
         assert (df.loc[df["component"].isin(offered), "data set"] != "").all()
         # The picker shows the bare formula; the line list, isotopologue, DOI
@@ -161,18 +68,18 @@ def test_fresh_boot_pre_run_contract():
         # the four ExoMolOP placeholder headers -- note the LOWERCASE x in
         # 'x.xxxx/yyyyy' and 'xxxxxxx/xxxxxxxxx/xxxxxx', which a "10.xxxx"
         # filter would miss. This is the whole no-blank-cells contract.
-        bad = [(c, d, u) for c, d, u in
-               zip(df["component"], df["source DOI"], df["source page"])
-               if not re.fullmatch(r"10\.\d{4,9}/\S+", str(d))
-               or not str(u).startswith("http")]
+        bad = [
+            (c, d, u)
+            for c, d, u in zip(df["component"], df["source DOI"], df["source page"], strict=True)
+            if not re.fullmatch(r"10\.\d{4,9}/\S+", str(d)) or not str(u).startswith("http")
+        ]
         assert not bad, bad
         # A new shipped UV spectrum must bring its citation with it, or the
         # table would KeyError in front of a user.
         assert set(planets.SFLUX_SOURCES) == set(planets.SFLUX_CHOICES)
     sld = at.number_input(key="n0_noisescale")
-    assert sld.value == 1.0 and sld.label == "Global noise multiplier", \
-        (sld.label, sld.value)
-    assert at.checkbox(key="n0_shownoise").value is True   # ON by default
+    assert sld.value == 1.0 and sld.label == "Global noise multiplier", (sld.label, sld.value)
+    assert at.checkbox(key="n0_shownoise").value is True  # ON by default
     assert at.number_input(key="n0_seed").value == 0
     # editing the seed still redraws without recomputing
     at.number_input(key="n0_seed").set_value(7).run()
@@ -186,7 +93,7 @@ def test_gui_structure_defaults_match_canonical_params():
     """
     from jwst_tool import forward, planets
 
-    at = _run_app()
+    at = run_app()
     assert not at.exception, at.exception
     for key in planets.PLANETS:
         at.selectbox(key="n0_planet").set_value(key).run()
@@ -194,14 +101,12 @@ def test_gui_structure_defaults_match_canonical_params():
         cp = forward.canonical_params(dict(planet=key))
         assert at.selectbox(key=f"n0_{key}_tp").value == cp["tp_mode"], key
         if cp["tp_mode"] == "file":
-            assert at.selectbox(key=f"n0_{key}_kzzmode").value == \
-                cp["kzz_mode"] == "file", key
+            assert at.selectbox(key=f"n0_{key}_kzzmode").value == cp["kzz_mode"] == "file", key
         # Force Guillot so the T_irr widget renders; compare against
         # canonical_params, never the helper the widget itself calls.
         at.selectbox(key=f"n0_{key}_tp").set_value("guillot").run()
         assert not at.exception, (key, at.exception)
-        api_tirr = forward.canonical_params(
-            dict(planet=key, tp_mode="guillot"))["Tirr"]
+        api_tirr = forward.canonical_params(dict(planet=key, tp_mode="guillot"))["Tirr"]
         assert at.number_input(key=f"n0_{key}_tirr").value == api_tirr, key
         at.selectbox(key=f"n0_{key}_tp").set_value(cp["tp_mode"]).run()
 
@@ -212,14 +117,15 @@ def test_every_download_button_is_plain_and_click_safe():
     on_click="ignore" is what keeps the buttons live during a run instead of
     dead stand-ins, so EVERY download button must carry it (AppTest cannot
     click one, hence the source count). Both pre-run downloads are plain,
-    always-live download buttons."""
-    src = APP.read_text()
-    assert src.count("download_button(") == src.count('on_click="ignore"'), \
+    always-live download buttons.
+    """
+    src = "".join(path.read_text() for path in GUI_SOURCES)
+    assert src.count("download_button(") == src.count('on_click="ignore"'), (
         "a download button without on_click=ignore cancels a run in flight"
-    at = _run_app()
+    )
+    at = run_app()
     assert not at.exception, at.exception
-    assert "Download configuration (JSON)" in {b.label
-                                               for b in at.get("download_button")}
+    assert "Download configuration (JSON)" in {b.label for b in at.get("download_button")}
     # The upload applies only through the Populate button (a callback), and
     # the button waits for a file.
     _pop = [b for b in at.button if b.key == "n0_cfg_populate"]
@@ -227,13 +133,13 @@ def test_every_download_button_is_plain_and_click_safe():
 
     at2 = AppTest.from_file(str(APP), default_timeout=60)
     at2.session_state["n0_wasp39b_tp"] = "file"
-    at2.session_state["n0_wasp39b_tpsrc"] = "upload"   # forward.TP_FILE_UPLOAD
+    at2.session_state["n0_wasp39b_tpsrc"] = "upload"  # model_defs.TP_FILE_UPLOAD
     at2.run()
     assert not at2.exception, at2.exception
-    assert "Download this example" in \
-        {b.label for b in at2.get("download_button")}
+    assert "Download this example" in {b.label for b in at2.get("download_button")}
 
 
+# size-limit-ok: AppTest boots are the expensive part, so one booted app carries the whole story
 def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
     """One fresh boot, three gating behaviors.
 
@@ -250,20 +156,16 @@ def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
        explicit choice; "Wavelength table" with no upload is the one state
        that BLOCKS the run.
     """
-    from jwst_tool import forward
 
-    at = _run_app()
+    at = run_app()
     assert not at.exception, at.exception
     # 1. per-geometry column bottoms, structure-aware defaults
-    assert at.number_input(key="n0_pbtm_transmission").value == \
-        forward.P_BTM_FILE_BAR
+    assert at.number_input(key="n0_pbtm_transmission").value == model_defs.P_BTM_FILE_BAR
     at.radio(key="n0_scimode").set_value("emission").run()
     assert not at.exception, at.exception
-    assert at.number_input(key="n0_pbtm_emission").value == \
-        forward.P_BTM_PARAMETRIC_BAR
+    assert at.number_input(key="n0_pbtm_emission").value == model_defs.P_BTM_PARAMETRIC_BAR
     at.radio(key="n0_scimode").set_value("transmission").run()
-    assert at.number_input(key="n0_pbtm_transmission").value == \
-        forward.P_BTM_FILE_BAR
+    assert at.number_input(key="n0_pbtm_transmission").value == model_defs.P_BTM_FILE_BAR
 
     # 2. photochemistry stays settable, and AD photo-off is refused loudly
     at.radio(key="n0_goal").set_value("constrain").run()
@@ -279,11 +181,10 @@ def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
     assert not at.exception, at.exception
     # the value STICKS across reruns (nothing overwrites it) ...
     assert at.checkbox(key="n0_photo").value is False
-    at.radio(key="n0_scimode").set_value("transmission").run()   # plain rerun
+    at.radio(key="n0_scimode").set_value("transmission").run()  # plain rerun
     assert at.checkbox(key="n0_photo").value is False
     # ... and the run is blocked with one sentence naming the fix
-    assert any("no self-check" in (e.value or "") for e in at.error), \
-        [e.value for e in at.error]
+    assert any("no self-check" in (e.value or "") for e in at.error), [e.value for e in at.error]
     # ... but the refusal covers CHEMISTRY rows only: an all-RT-only request
     # (a cloud-deck row, plus the auto-appended lnR0) carries no through-solver
     # tangent, so it must stay RUNNABLE with photolysis off and AD on. Assert
@@ -293,8 +194,7 @@ def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
     at.checkbox(key="n0_marg").set_value(False).run()
     at.selectbox(key="n0_gp_vulcan_file_1").set_value("log_kappa_cloud").run()
     assert not at.exception, at.exception
-    assert {e.value for e in at.error} == allowed_errors, \
-        [e.value for e in at.error]
+    assert {e.value for e in at.error} == allowed_errors, [e.value for e in at.error]
     at.checkbox(key="n0_cloud").set_value(False).run()
     at.checkbox(key="n0_marg").set_value(True).run()
     at.checkbox(key="n0_photo").set_value(True).run()
@@ -303,13 +203,11 @@ def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
 
     # 3. noise-floor gate
     def _floor_error(app):
-        return [e.value for e in app.error
-                if "minimum noise floor" in (e.value or "").lower()]
+        return [e.value for e in app.error if "minimum noise floor" in (e.value or "").lower()]
 
     assert at.radio(key="n0_floormode").value == "constant"
     assert not _floor_error(at), [e.value for e in at.error]
-    assert any((w.key or "").startswith("n0_floor_")
-               for w in at.get("number_input")), "per-mode floor inputs gone"
+    assert any((w.key or "").startswith("n0_floor_") for w in at.get("number_input")), "per-mode floor inputs gone"
     at.radio(key="n0_floormode").set_value("none").run()
     assert not at.exception, at.exception
     assert not _floor_error(at)
@@ -328,6 +226,7 @@ def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
     assert at.number_input(key="n0_wasp39b_tbase").value == 5.0
 
 
+# size-limit-ok: one round trip across the engine switch, in order
 def test_engine_switch_keeps_each_engines_settings(monkeypatch):
     """PICASO is the second engine beside VULCAN (the default). Switching
     shows PICASO's own widgets (climate T-P with heat redistribution, a
@@ -338,62 +237,81 @@ def test_engine_switch_keeps_each_engines_settings(monkeypatch):
     is never written by PICASO's FD-only widget. That includes the goal
     selections (each engine's own keys) and the Guillot boxes PICASO's climate
     profile hides. A missing PICASO setup blocks a PICASO Run with one
-    sentence and leaves VULCAN alone."""
+    sentence and leaves VULCAN alone.
+    """
     from jwst_tool import datacheck, fisher, forward
-    monkeypatch.setattr(datacheck, "picaso_missing", lambda: [
-        datacheck.Item(key="picaso:python", label="PICASO python",
-                       status=datacheck.MISSING, required=False,
-                       detail="JWST_TOOL_PICASO_PYTHON not set")])
+
+    monkeypatch.setattr(
+        datacheck,
+        "picaso_missing",
+        lambda: [
+            datacheck.Item(
+                key="picaso:python",
+                label="PICASO python",
+                status=datacheck.MISSING,
+                required=False,
+                detail="JWST_TOOL_PICASO_PYTHON not set",
+            )
+        ],
+    )
 
     def _pic_error(app):
         return [e.value for e in app.error if "PICASO engine" in e.value]
 
-    at = _run_app()
-    for widget, key, value in (("selectbox", "n0_network", "ncho"),
-                               ("number_input", "n0_sza", 60.0),
-                               ("selectbox", "n0_wasp39b_tp", "guillot"),
-                               ("selectbox", "n0_wasp39b_kzzmode", "const"),
-                               ("number_input", "n0_wasp39b_kzz", 10.0),
-                               ("number_input", "n0_wasp39b_tirr", 1500.0),
-                               ("number_input", "n0_wasp39b_lk", -1.5),
-                               ("multiselect", "n0_fp_vulcan_guillot_0",
-                                ["lnZ", "Tirr"])):
+    at = run_app()
+    for widget, key, value in (
+        ("selectbox", "n0_network", "ncho"),
+        ("number_input", "n0_sza", 60.0),
+        ("selectbox", "n0_wasp39b_tp", "guillot"),
+        ("selectbox", "n0_wasp39b_kzzmode", "const"),
+        ("number_input", "n0_wasp39b_kzz", 10.0),
+        ("number_input", "n0_wasp39b_tirr", 1500.0),
+        ("number_input", "n0_wasp39b_lk", -1.5),
+        ("multiselect", "n0_fp_vulcan_guillot_0", ["lnZ", "Tirr"]),
+    ):
         getattr(at, widget)(key=key).set_value(value).run()
-    mol_key = next(w.key for w in at.selectbox
-                   if w.key.startswith("n0_mol_vulcan_ncho_"))
+    mol_key = next(w.key for w in at.selectbox if w.key.startswith("n0_mol_vulcan_ncho_"))
     at.selectbox(key=mol_key).set_value("CO2").run()
     assert not at.exception, at.exception
-    vulcan = {k: at.session_state[k] for k in (
-        "n0_network", "n0_sza", "n0_wasp39b_tp", "n0_wasp39b_kzz", "n0_jacm",
-        "n0_wasp39b_tirr", "n0_wasp39b_lk", "n0_fp_vulcan_guillot_0",
-        mol_key)}
+    vulcan = {
+        k: at.session_state[k]
+        for k in (
+            "n0_network",
+            "n0_sza",
+            "n0_wasp39b_tp",
+            "n0_wasp39b_kzz",
+            "n0_jacm",
+            "n0_wasp39b_tirr",
+            "n0_wasp39b_lk",
+            "n0_fp_vulcan_guillot_0",
+            mol_key,
+        )
+    }
     assert vulcan["n0_jacm"] == "ad" and not _pic_error(at)
 
     at.selectbox(key="n0_provider").set_value("picaso").run()
     assert not at.exception, at.exception
     assert "Photochemistry & transport" not in [e.label for e in at.expander]
-    assert at.selectbox(key="n0_wasp39b_tp_picaso").value == \
-        forward.canonical_params(dict(planet="wasp39b",
-                                      chem_provider="picaso"))["tp_mode"]
+    assert (
+        at.selectbox(key="n0_wasp39b_tp_picaso").value
+        == forward.canonical_params(dict(planet="wasp39b", chem_provider="picaso"))["tp_mode"]
+    )
     assert at.number_input(key="n0_rfacv_picaso_transmission").value == 0.5
     jm = at.selectbox(key="n0_jacm_picaso")
     assert jm.disabled and jm.options == ["Finite differences"]
     assert at.selectbox(key="n0_wasp39b_sflux").disabled
     assert "N2O" not in at.multiselect(key="n0_xmols_picaso").options
-    assert at.selectbox(key="n0_mol_picaso_C2H2_C2H4_H2S_HCN_NH3_OCS_SH_SO"
-                        ).value == "H2O"
+    assert at.selectbox(key="n0_mol_picaso_C2H2_C2H4_H2S_HCN_NH3_OCS_SH_SO").value == "H2O"
     assert _pic_error(at) and "PICASO python" not in _pic_error(at)[0]
     assert next(b for b in at.button if b.label == "Run").proto.disabled
     assert not [w for w in at.number_input if w.key == "n0_wasp39b_kzz"]
     for quench in (False, True):
         at.checkbox(key="n0_quench_picaso").set_value(quench).run()
         assert not at.exception, at.exception
-        assert fisher.PARAM_LABELS["lnKzz"] not in at.multiselect(
-            key="n0_fp_picaso_picaso_climate_0").options
-    assert at.number_input(key="n0_wasp39b_kzz").value == 10.0   # shared box
+        assert fisher.PARAM_LABELS["lnKzz"] not in at.multiselect(key="n0_fp_picaso_picaso_climate_0").options
+    assert at.number_input(key="n0_wasp39b_kzz").value == 10.0  # shared box
     at.number_input(key="n0_rfacv_picaso_transmission").set_value(0.7).run()
-    at.multiselect(key="n0_fp_picaso_picaso_climate_0").set_value(
-        ["lnZ", "dlnCO"]).run()
+    at.multiselect(key="n0_fp_picaso_picaso_climate_0").set_value(["lnZ", "dlnCO"]).run()
     at.radio(key="n0_scimode").set_value("emission").run()
     assert at.number_input(key="n0_rfacv_picaso_emission").value == 1.0
     at.radio(key="n0_scimode").set_value("transmission").run()
@@ -406,16 +324,15 @@ def test_engine_switch_keeps_each_engines_settings(monkeypatch):
     at.selectbox(key="n0_provider").set_value("picaso").run()
     assert at.number_input(key="n0_rfacv_picaso_transmission").value == 0.7
     assert at.checkbox(key="n0_quench_picaso").value is True
-    assert at.multiselect(key="n0_fp_picaso_picaso_climate_0").value == \
-        ["lnZ", "dlnCO"]
+    assert at.multiselect(key="n0_fp_picaso_picaso_climate_0").value == ["lnZ", "dlnCO"]
     # an uploaded-table choice survives a detour, never the shipped table instead
     at.selectbox(key="n0_provider").set_value("vulcan").run()
     at.selectbox(key="n0_wasp39b_tp").set_value("file").run()
-    at.radio(key="n0_wasp39b_tpsrc").set_value(forward.TP_FILE_UPLOAD).run()
+    at.radio(key="n0_wasp39b_tpsrc").set_value(model_defs.TP_FILE_UPLOAD).run()
     for engine in ("picaso", "vulcan"):
         at.selectbox(key="n0_provider").set_value(engine).run()
     assert not at.exception, at.exception
-    assert at.session_state["n0_wasp39b_tpsrc"] == forward.TP_FILE_UPLOAD
+    assert at.session_state["n0_wasp39b_tpsrc"] == model_defs.TP_FILE_UPLOAD
 
 
 def test_source_pins_fig_width_fisher_table_and_noise_recording():
@@ -427,608 +344,23 @@ def test_source_pins_fig_width_fisher_table_and_noise_recording():
     and "stretch" makes the figure wiggle on resize); (3) the Fisher
     table is st.table, never st.dataframe -- its mode column is BLANKED on
     repeat rows, so a header-click re-sort would attribute numbers to the
-    wrong instrument, while the CSV is built from the UNBLANKED rows."""
-    src = APP.read_text()
-    assert "infl = {k: float(noise_scale) * float(_infl_mode[k])" in src, \
-        "the global multiplier no longer composes with the per-mode ones"
-    assert "noise_infl={k: float(_infl_mode[k]) for k in mode_keys}" in src, \
-        "noise_infl must record the PER-MODE widget values, not the product"
-    assert "noise_scale=float(noise_scale)," in src, \
-        "the global scale is not recorded, so a run cannot be reproduced"
-    assert "width=_FIG_DISPLAY_PX" in src.split("def _show_fig")[1], \
-        "_show_fig no longer pins the display width"
-    assert ("_show_fig(fig3, _struct_png)" in src
-            and "_show_fig(fig_sum, _sum_png)" in src), \
-        "a figure must display the PNG its download button rasterized"
-    assert "st.pyplot(" not in src, "st.pyplot hardcodes dpi 200"
-    i = src.index('with st.expander("Parameter constraint forecast (local Fisher)")')
-    j = src.index('st.download_button("Constraint forecast (CSV)"', i)
-    block = src[i:j]
-    assert "st.table(" in block and "st.dataframe(" not in block, \
-        "the Fisher table must stay a static st.table (blanked mode names)"
-    assert '_r2["mode"] = ""' in block, \
-        "mode names are no longer blanked; re-check whether st.table is needed"
-    assert "_csv_bytes(pd.DataFrame(frows), _model_caveats)" in src, \
-        "the Fisher CSV is no longer built from the unblanked rows"
-
-
-def test_results_render_and_below_target_is_warning_not_error(monkeypatch):
-    """Full post-Run render path on a synthetic result: every figure and
-    table offers a download, and a run that works but finds no signal is a
-    scientific outcome, not a software failure -- a warning, never an
-    error.
-
-    A download leaves the page behind, so the run caveats must ride the
-    bytes: the CSVs carry the full text in their header and every result
-    FIGURE carries the short form as a footnote in its own bottom strip --
-    a pasted PNG has neither the st.warning nor the CSV header.
-
-    The mixing-ratio panel selects species by NAME: ymix is the FULL network
-    state, model["mols"] the short RT list, and zipping them positionally
-    labels H2 (0.847 at 1 bar on Tsai et al. 2023's W39b run) as CO2.
+    wrong instrument, while the CSV is built from the UNBLANKED rows.
     """
-    from streamlit.delta_generator import DeltaGenerator
-    from jwst_tool import plotting, summary_figure as _sf
-    downloads = {}
-    original = DeltaGenerator.download_button
-
-    def capture(self, label, data, *args, **kwargs):
-        if isinstance(data, bytes) and "CSV" in label:
-            downloads[label] = data.decode()
-        return original(self, label, data, *args, **kwargs)
-
-    monkeypatch.setattr(DeltaGenerator, "download_button", capture)
-    monkeypatch.setattr(st, "download_button",
-                        capture.__get__(st.download_button.__self__))
-
-    # The app closes every Figure it builds, so record what each builder
-    # DREW and whether it landed on a panel.
-    drawn, columns = {}, []
-
-    def _spy(name, real):
-        def _f(*a, **kw):
-            if name == "structure":              # (p_bar, T_K, columns, ...)
-                columns.extend(a[2])
-            fig = real(*a, **kw)
-            with plotting.render_lock:
-                fig.canvas.draw()
-                r = fig.canvas.get_renderer()
-                boxes = [ax.get_window_extent() for ax in fig.axes]
-                drawn[name] = [(t.get_text(),
-                                any(t.get_window_extent(r).overlaps(b)
-                                    for b in boxes))
-                               for t in fig.texts]
-            return fig
-        return _f
-
-    monkeypatch.setattr(_sf, "compose_summary_figure",
-                        _spy("summary", _sf.compose_summary_figure))
-    monkeypatch.setattr(plotting, "build_structure_figure",
-                        _spy("structure", plotting.build_structure_figure))
-    out, out_meta = _synthetic_out(with_jac=True)  # sigma_detect=0.0
-    # an escalated column must SAY so on the page: the flag is in the artifact
-    # precisely because a cache hit never solves and never logs (forward.py)
-    out["model"]["photo_escalated"] = np.array(["FD dlnCO row"], dtype="U48")
-    out["model"]["unmodeled"] = np.array(["C6H6|1e-5"])
-    at = _run_with_result(out, out_meta)
-    assert not at.exception, at.exception
-    assert any("FD dlnCO row" in w.value for w in at.warning), \
-        "the photolysis-cadence escalation reached no user-facing surface"
-    dl_labels = {b.label for b in at.get("download_button")}
-    assert {"Figure (PDF, vector)", "Figure (PNG)", "Binned points (CSV)",
-            "Native model (CSV)", "T-P values (CSV)",
-            "Mixing ratios (CSV)", "Mock observation (CSV)"} <= dl_labels
-    assert any("No signal" in w.value for w in at.warning)
-    assert not any("Best mode" in e.value for e in at.error)
-    assert "Constraint forecast (CSV)" in downloads
-    for label, payload in downloads.items():
-        assert "FD dlnCO row" in payload, label
-        assert "refreshed every accepted step" in payload, label
-        assert "No opacity table for C6H6" in payload, label
-    for name in ("summary", "structure"):
-        assert len(drawn[name]) == 1, (name, drawn[name])
-        text, on_a_panel = drawn[name][0]
-        assert "No opacity table for C6H6" in text, (name, text)
-        assert "FD dlnCO row" in text, (name, text)
-        assert not on_a_panel, f"the {name} caveat footnote covers a panel"
-    # the fixture puts H2 (not an RT molecule) first at 0.85; by NAME, not
-    # by position
-    got = {n: float(np.asarray(y)[0]) for n, y in columns}
-    assert set(got) == {"H2O", "CO2", "CO", "CH4", "SO2"}, got
-    assert (got["CO"], got["H2O"], got["CO2"]) == pytest.approx((1e-3, 1e-4, 1e-6))
-
-
-def test_emission_results_use_eclipse_terms():
-    """An emission run says "eclipse" throughout, never "transit"; an
-    above-target result renders NO verdict line and NO banner (maintainer:
-    the figure and table carry the number)."""
-    out, out_meta = _synthetic_out(science_mode="emission",
-                                   sigma_detect=8.0, n_transits=3)
-    at = _run_with_result(out, out_meta)
-    assert not at.exception, at.exception
-    assert not at.success, \
-        f"an above-target result must render no banner: {[s.value for s in at.success]}"
-    assert not [m.value for m in at.markdown if "template S/N 8.0" in m.value]
-    # the figure section is an EXPANDER, not a subheader
-    _exps = [e.label for e in at.get("expander")]
-    assert any("eclipse emission spectrum" in e for e in _exps), _exps
-    assert not any(e == "Proposal summary figure" for e in _exps)
-    # scope to the RESULTS text: the sidebar/intro copy legitimately says
-    # "transit" for the general case
-    results = " ".join(
-        [w.value for w in at.warning] + [e.value for e in at.error]
-        + [c.value for c in at.get("caption") if "eclipse" in c.value.lower()
-           or "transit" in c.value.lower()]
-        + [s.value for s in at.subheader] + _exps)
-    assert "eclipse" in results.lower(), results[:300]
-    assert not re.search(r"\b\d+ transits?\b", results), results[:300]
-
-
-def test_all_saturated_run_has_no_best_mode_score_or_points():
-    """All modes saturated: no "best" mode, no error alert for a valid
-    calculation -- and no detection score or simulated points in the figure,
-    matching the exclusion every ranking, combination and forecast already
-    applies. Saturation shows as the absence of a ranked mode; the page says
-    nothing about it."""
-    import jwst_tool.summary_figure as sf
-
-    seen = {}
-    _real = sf.compose_summary_figure
-
-    def _spy(spectrum, **kw):
-        seen["labels"] = [p["label"] for p in (spectrum.get("points") or [])]
-        return _real(spectrum, **kw)
-
-    out, out_meta = _synthetic_out(saturated=True, sigma_detect=5.0)
-    sf.compose_summary_figure = _spy
-    try:
-        at = _run_with_result(out, out_meta)
-    finally:
-        sf.compose_summary_figure = _real
-    assert not at.exception, at.exception
-    warns = [w.value for w in at.warning]
-    assert not at.success
-    assert not any("Best mode" in w for w in warns)
-    assert not any("Best mode" in e.value for e in at.error)
-    # no plotted series at all, in particular no "<mode>: 5.0σ" legend entry
-    assert seen.get("labels") == [], seen
-
-
-def test_custom_archive_fill_and_uv_menu_never_moves():
-    """Custom planet, one boot: a typed Teff never moves the UV MENU, and
-    the archive Fill button writes the
-    snapshot row into the form (pending-then-apply path) -- still without
-    touching the UV menu (no substitute spectra, standing maintainer
-    rule)."""
-    at = _run_app()
-    at.selectbox(key="n0_planet").set_value("custom").run()
-    assert not at.exception, at.exception
-    at.number_input(key="n0_custom_teff").set_value(3100.0).run()
-    assert not at.exception, at.exception
-    assert at.selectbox(key="n0_custom_sflux").value == \
-        "sflux-W39b_Tsai2023.txt"
-
-    at.selectbox(key="n0_custom_arch_name").set_value("HD 189733 b").run()
-    at.button(key="n0_custom_arch_fill").click().run()
-    assert not at.exception, at.exception
-    from jwst_tool import archive
-    values = archive.custom_fill(archive.lookup("HD 189733 b"))
-    assert at.number_input(key="n0_custom_teff").value == values["teff"]
-    assert at.number_input(key="n0_custom_g").value == \
-        pytest.approx(values["g"])
-    # the UV menu is NEVER written by the fill
-    assert at.selectbox(key="n0_custom_sflux").value == \
-        "sflux-W39b_Tsai2023.txt"
-
-
-def test_combo_builder_fisher_table_naming_and_reset():
-    """One booted app with Jacobians carries the whole combo story: every
-    results section is an expander (renames pinned); a primed
-    combination LEADS the STATIC constraint table under the user's own name
-    ('All usable modes', no 'COMBO: ' prefix; st.table so a header click
-    cannot detach the blanked mode names); the builder adds and removes
-    combos; the confirm-step reset clears the combo/posterior session keys
-    (nonce-namespaced keys + un-namespaced pending notes)."""
-    import pandas as pd
-
-    primed = dict(name="My set", modes=["nirspec_g395h", "nirspec_prism"])
-    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    at = _run_with_result(out, out_meta, n0_combos=[dict(primed)])
-    assert not at.exception, at.exception
-    subs = [s.value for s in at.subheader]
-    exps = [e.label for e in at.get("expander")]
-    # the combo builder and the marginalized-forecast control live in the
-    # constraint-forecast panel; neither is a section of its own
-    assert "Add a custom mode set" not in exps, exps
-    assert "Mode combinations" not in exps, exps
-    assert "Marginalized Fisher forecasts" not in exps, exps
-    assert "Marginalized Fisher forecasts" not in subs, subs
-    assert "Mode details" not in exps, exps
-    assert "Run summary & configuration" not in exps, exps
-    assert "Parameter constraint forecast (local Fisher)" in exps, exps
-    assert "Physical structure (T-P profile, mixing ratios)" in exps, exps
-    assert any("forecast summary" in e for e in exps), exps
-    assert not any("forecast summary" in s for s in subs), subs
-    assert "Figure (PDF, vector)" in {b.label
-                                      for b in at.get("download_button")}
-
-    # identify the CONSTRAINT table by its parameter column
-    tables = [t.value for t in at.table
-              if "mode" in getattr(t.value, "columns", [])
-              and "parameter" in getattr(t.value, "columns", [])]
-    assert tables, "no constraint-forecast table rendered"
-    assert not [df.value for df in at.dataframe
-                if "parameter" in getattr(df.value, "columns", [])], \
-        "the constraint forecast is an interactive dataframe again"
-    modes = [str(v) for v in tables[0]["mode"]]
-    assert not any("ALL USABLE" in m for m in modes), modes[:8]
-    assert not any(m.startswith("COMBO:") for m in modes), modes[:8]
-    assert any("All usable modes" == m for m in modes), modes[:8]
-    first = next(m for m in modes if m.strip())
-    assert "My set" in first, f"combos should lead the table, got {first!r}"
-    # C/O is reported in log10(C/O), the coordinate the Fisher Gaussian is
-    # symmetric in: the row names it and each marginalized cell is the value
-    # and its error there (a 3-sigma cell in linear C/O can cross zero)
-    df = tables[0]
-    col = next(c for c in df.columns if str(c).startswith("marginalized"))
-    cells = [str(r[col]).strip() for _, r in df.iterrows()
-             if str(r["parameter"]) == "log10 C/O"]
-    cells = [c for c in cells if c not in ("unconstrained", "")]
-    assert cells, "no constrained C/O row to check"
-    for cell in cells:
-        assert "log10" not in cell and "(C/O" not in cell, cell
-        centre, width = cell.split("±")
-        assert float(centre) == pytest.approx(np.log10(0.55), abs=5e-3), cell
-        assert float(width) > 0.0, cell
-
-    # add a named combination through the builder widgets
-    at.text_input(key="n0_cb_name").set_value("PRISM + G395H")
-    at.multiselect(key="n0_cb_modes").set_value(
-        ["nirspec_prism", "nirspec_g395h"])
-    at.button(key="n0_cb_add").click().run()
-    assert not at.exception, at.exception
-    added = dict(name="PRISM + G395H", modes=["nirspec_prism", "nirspec_g395h"])
-    combos = at.session_state["n0_combos"]
-    assert added in combos and primed in combos and len(combos) == 2, combos
-    assert "PRISM + G395H" in " ".join(m.value for m in at.markdown)
-    tables = [pd.DataFrame(d.value)
-              for d in list(at.get("table")) + list(at.get("dataframe"))]
-    assert any(t.astype(str)
-               .apply(lambda c: c.str.contains("PRISM \\+ G395H"))
-               .any().any() for t in tables), \
-        "combo rows missing from the Fisher table"
-    # a name that would replace another series is refused
-    at.text_input(key="n0_cb_name").set_value("All usable modes")
-    at.button(key="n0_cb_add").click().run()
-    assert at.session_state["n0_combos"] == combos
-    assert any("already taken" in e.value for e in at.error)
-    # remove works (index 0 = the first listed combo)
-    removed_first = combos[0]
-    at.button(key="n0_cb_rm_0").click().run()
-    assert not at.exception, at.exception
-    assert at.session_state["n0_combos"] == \
-        [c for c in combos if c != removed_first]
-
-    # confirm-step reset (labels, not keys: the reset buttons are keyless)
-    [b for b in at.button if (b.label or "") == "Reset all settings"][0] \
-        .click().run()
-    [b for b in at.button if (b.label or "") == "Confirm reset"][0] \
-        .click().run()
-    assert not at.exception, at.exception
-    assert "n0_combos" not in at.session_state
-    assert "_combo_note" not in at.session_state
-
-
-def test_emission_mode_archive_fill_skips_transit_duration():
-    """The archive duration is the PRIMARY-TRANSIT duration; in emission
-    mode the fill leaves the event-duration widget alone, silently."""
-    at = _run_app()
-    at.selectbox(key="n0_planet").set_value("custom").run()
-    at.radio(key="n0_scimode").set_value("emission").run()
-    t14_before = at.number_input(key="n0_custom_t14").value
-    at.selectbox(key="n0_custom_arch_name").set_value("HD 189733 b").run()
-    at.button(key="n0_custom_arch_fill").click().run()
-    assert not at.exception, at.exception
-    from jwst_tool import archive
-    values = archive.custom_fill(archive.lookup("HD 189733 b"))
-    assert at.number_input(key="n0_custom_t14").value == t14_before
-    assert at.number_input(key="n0_custom_teff").value == values["teff"]
-
-
-@pytest.mark.parametrize(
-    "widget,value,field",
-    # the molecule selectbox keys on the extra-molecule selection, so the key
-    # carries the default extra set (jwst_tool.app: K("mol_<provider>_<mols>"));
-    # CS2/C2H6 are out of the default (no ExoMolOP table); SH+SO are in
-    # (measured 10.0 and 48.1 ppm on W39b -- forward.EXTRA_MOLECULES_DEFAULT)
-    [("n0_mol_vulcan_sncho2025_C2H2_C2H4_H2S_HCN_NH3_OCS_SH_SO", "CO2",
-      "target_mol"),                                # not a canonical param
-     ("n0_noisescale", 2.0, "noise_scale"),         # an observation-block field
-     ("n0_provider", "picaso", "chem_provider"),    # the chemistry engine
-     # DISPLAY-ONLY: the seed redraws the mock from the cached run and
-     # recomputes nothing, so it must never read as stale (field=None)
-     ("n0_seed", 7, None)])
-def test_changing_any_run_input_marks_the_result_stale(widget, value, field,
-                                                       monkeypatch):
-    """The staleness guard compares the WHOLE non-canonical input set minus
-    the display-only fields, not a hand-picked subset. The detection target
-    is absent from the canonical model params, so without the guard switching
-    SO2 to CO2 without pressing Run leaves the curve, legend and CSV on the
-    previous target with no notice. The noise scale represents the
-    observation block because a subset guard misses the next such field; the
-    seed represents the display-only fields, which change nothing that was
-    computed."""
-    from jwst_tool import share_config as _sc
-    seen = {}
-    _real = _sc.build_share
-
-    def _spy(*, canon, goal, observation, **kw):
-        # the app hands the same two blocks to the shareable config and to the
-        # staleness guard, minus the display-only observation fields (app.py
-        # _DISPLAY_ONLY), which the guard never compares
-        seen["run_sig"] = dict(
-            goal=goal,
-            observation={k: v for k, v in observation.items()
-                         if k not in ("show_noise", "seed", "combos")})
-        seen["canon"] = canon
-        return _real(canon=canon, goal=goal, observation=observation, **kw)
-
-    monkeypatch.setattr(_sc, "build_share", _spy)
-    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    at = _run_with_result(out, out_meta)
-    assert not at.exception, at.exception
-    # Adopt the page's OWN canonical params and run signature as the cached
-    # run's, so the ONLY difference below is the widget under test.
-    import json as _json
-    at.session_state["out"] = dict(
-        out, model=dict(out["model"],
-                        params_json=_json.dumps(seen["canon"], default=str)))
-    at.session_state["out_meta"] = dict(out_meta, run_sig=seen["run_sig"])
-    at.run()
-
-    def _named():
-        return [w.value for w in at.warning if "previous run" in w.value]
-
-    assert not _named(), \
-        f"an unchanged sidebar must not read as stale: {_named()}"
-    at.session_state[widget] = value
-    at.run()
-    assert not at.exception, at.exception
-    if field is None:
-        assert not _named(), \
-            f"a display-only input must not mark the run stale: {_named()}"
-    else:
-        assert _named() and field in _named()[0], _named()
-
-
-def test_a_run_that_produces_nothing_clears_the_previous_result(monkeypatch):
-    """A refused or failed Run must not leave the previous run's verdict and
-    figures on screen under a stale banner: the page shows only the error.
-    Exercised through the one refusal that keeps the Run button enabled (a
-    cache MISS with no free concurrency slot); the forward-model failure
-    branch pops the same keys."""
-    from jwst_tool import forward as _fwd, runlimit as _rl
-
-    monkeypatch.setattr(_rl, "acquire", lambda *_a, **_k: None)
-    # the miss is pinned here: only a heavy launch is declined now, so the
-    # refusal must not depend on what this machine happens to have cached
-    monkeypatch.setattr(_fwd, "load_result", lambda *_a, **_k: None)
-    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    at = _run_with_result(out, out_meta)
-    assert not at.exception, at.exception
-    next(b for b in at.button if b.label == "Run").click()
-    at.run()
-    assert not at.exception, at.exception
-    assert "out" not in at.session_state
-    assert any("already running" in e.value for e in at.error), [e.value for e in at.error]
-    assert not [w.value for w in at.warning if "previous run" in w.value or "reach it" in w.value]
-
-
-def test_a_fully_cached_run_renders_while_every_slot_is_busy(monkeypatch):
-    """The refusal promises previously computed results stay instant, so a
-    Run whose model AND ETC entries are all cached -- it starts no
-    subprocess -- must render with every heavy slot held. The slot is taken
-    at the launch, not at the click, and the second half pins the other side:
-    a cache MISS on the same busy instance is still refused, so the limiter
-    (never the cache) gates every heavy call."""
-    from jwst_tool import detect as _detect, forward as _fwd
-    from jwst_tool import noise as _noise, runlimit as _rl
-
-    out, _ = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    by_mode = {r["mode_key"]: r for r in out["results"]}
-    monkeypatch.setattr(_rl, "acquire", lambda *_a, **_k: None)   # slots held
-    monkeypatch.setattr(_fwd, "load_result", lambda *_a, **_k: out["model"])
-    monkeypatch.setattr(_noise, "missing_modes",
-                        lambda _star, keys, **_k: [k for k in keys
-                                                   if k not in by_mode])
-    monkeypatch.setattr(_noise, "run_modes", lambda _star, keys, **_k: {
-        **{k: {"wl": [1.0]} for k in keys}, "__provenance__": None})
-    monkeypatch.setattr(_detect, "evaluate_mode",
-                        lambda k, *_a, **_kw: by_mode[k])
-
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.run()
-    at.multiselect(key="n0_modes").set_value(list(by_mode)).run()
-    assert not at.exception, at.exception
-    next(b for b in at.button if b.label == "Run").click()
-    at.run()
-    assert not at.exception, at.exception
-    assert not [e.value for e in at.error if "already running" in e.value]
-    assert {r["mode_key"] for r in at.session_state["out"]["results"]} \
-        == set(by_mode)
-
-    monkeypatch.setattr(_fwd, "load_result", lambda *_a, **_k: None)
-    next(b for b in at.button if b.label == "Run").click()
-    at.run()
-    assert not at.exception, at.exception
-    assert any("already running" in e.value for e in at.error), \
-        [e.value for e in at.error]
-    assert "out" not in at.session_state
-
-    # an ETC entry that vanished between the cache probe and the read: the
-    # model is cached, missing_modes says nothing is missing, run_modes finds
-    # a miss -- still refused, never launched without a slot
-    monkeypatch.setattr(_fwd, "load_result", lambda *_a, **_k: out["model"])
-    monkeypatch.setattr(_noise, "run_modes",
-                        lambda _s, _keys, launch=True, **_k: None if not launch
-                        else {})
-    next(b for b in at.button if b.label == "Run").click()
-    at.run()
-    assert not at.exception, at.exception
-    assert any("already running" in e.value for e in at.error)
-    assert "out" not in at.session_state
-
-
-def test_a_nonpositive_bound_on_a_log_axis_warns_instead_of_killing_the_page():
-    """A min at or below zero has no logarithm on a log axis. The builders
-    raise on it -- right for an API backstop, but uncaught it takes the
-    ENTIRE results page down. A typed number is a user choice, not a defect:
-    warn, fall back to the automatic fit, keep the page alive.
-
-    Only the summary figure carries axis controls; the structure figure has
-    none (it draws at the module defaults), so there is no typed bound to
-    poison there."""
-    key, label = "n0_sum_x", "Wavelength"
-    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    at = _run_with_result(out, out_meta,
-                          **{f"{key}_min": 0.0, f"{key}_max": 5.0})
-    assert not at.exception, at.exception
-    assert any("log axis" in w.value and label in w.value for w in at.warning), \
-        [w.value for w in at.warning]
-
-
-def test_axis_bounds_refuse_one_sided_and_reach_the_figure(monkeypatch):
-    """One bound alone has no second edge: the page must SAY it fell back
-    rather than invent the other bound -- and a COMPLETE pair must actually
-    reach the figure (the reviewer's 3.0 to 5.5 um zoom), not merely be
-    accepted by the widget. The app closes every Figure it builds, so this
-    records the ARGUMENTS of the call the page makes."""
-    from jwst_tool import summary_figure as _sf
-    seen = {}
-    _real = _sf.compose_summary_figure
-
-    def _spy(spectrum, **kw):
-        seen["wl_range"] = spectrum.get("wl_range")
-        seen["depth_range"] = spectrum.get("depth_range")
-        seen["panel_xlims"] = kw.get("panel_xlims")
-        return _real(spectrum, **kw)
-
-    monkeypatch.setattr(_sf, "compose_summary_figure", _spy)
-    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    at = _run_with_result(out, out_meta,
-                          n0_sum_y_min=20500.0)     # max left blank
-    assert not at.exception, at.exception
-    # Axis-control contract (maintainer): every axis is a
-    # typed min/max number-box pair that STARTS blank, no sliders anywhere,
-    # no wavelength-range radio.
-    assert not [r for r in at.radio if r.key == "n0_sum_wlmode"]
-    assert not at.slider, [s.key for s in at.slider]
-    for _k in ("sum_x", "sum_post_lnZ"):
-        for _end in ("min", "max"):
-            assert at.number_input(key=f"n0_{_k}_{_end}").value is None, \
-                f"{_k}_{_end} should start blank"
-    assert any("both boxes" in w.value for w in at.warning), \
-        [w.value for w in at.warning]
-    # the COMPLETE pairs are accepted silently (so the warning above is a
-    # real refusal) and the typed windows reach the figure call
-    at.session_state["n0_sum_y_max"] = 21500.0
-    at.session_state["n0_sum_x_min"] = 3.0
-    at.session_state["n0_sum_x_max"] = 5.5
-    at.session_state["n0_sum_post_lnZ_min"] = -0.4
-    at.session_state["n0_sum_post_lnZ_max"] = 0.4
-    at.run()
-    assert not at.exception, at.exception
-    assert not [w for w in at.warning if "Depth range" in w.value], \
-        [w.value for w in at.warning]
-    assert seen["wl_range"] == pytest.approx((3.0, 5.5))
-    assert seen["depth_range"] == pytest.approx((20500.0, 21500.0))
-    assert seen["panel_xlims"][0] == pytest.approx((-0.4, 0.4))
-
-
-def _render_order(at):
-    """Main-area elements in render order (AppTest exposes children per
-    block, so the tree has to be flattened to compare positions)."""
-    def walk(node, out):
-        ch = getattr(node, "children", None)
-        for c in (ch.values() if isinstance(ch, dict) else (ch or [])):
-            out.append(c)
-            walk(c, out)
-        return out
-    return walk(at.main, [])
-
-
-def test_the_verdict_renders_above_the_explainers():
-    """The shortfall line is the ANSWER -- which mode, what significance,
-    against the target -- so it renders with the Run button that produced it,
-    not hundreds of lines down beside the figure it summarizes. Anything
-    below Validation is reference material the user reads once."""
-    at = _run_with_result(*_synthetic_out())
-    assert not at.exception, at.exception
-    order = _render_order(at)
-    verdict = next(i for i, e in enumerate(order)
-                   if type(e).__name__ == "Warning"
-                   and "template S/N" in str(getattr(e, "value", "")))
-    validation = next(i for i, e in enumerate(order)
-                      if type(e).__name__ == "Expander"
-                      and getattr(e, "label", "") == "Validation")
-    assert verdict < validation, (
-        f"the verdict renders at {verdict}, below Validation at {validation}")
-
-
-@pytest.mark.parametrize("case", ["all_unusable", "mixed", "saturated_only"])
-def test_exclusions_are_reported_once_even_without_usable_results(case):
-    from jwst_tool import instruments as ins
-
-    out, meta = _synthetic_out(saturated=case == "saturated_only")
-    if case != "saturated_only":
-        out["unusable"] = [("nirspec_prism", "no usable pixels")]
-    if case == "all_unusable":
-        out["results"] = []
-    if case == "saturated_only":
-        out["results"][0]["warnings"] = {"full_saturated": "duplicate risk note"}
-    at = _run_with_result(out, meta)
-    assert not at.exception, at.exception
-    excluded = [w.value for w in at.warning if "excluded from every ranking" in w.value]
-    assert len(excluded) == 1
-    key = "nirspec_g395h" if case == "saturated_only" else "nirspec_prism"
-    assert f"{ins.MODES[key]['label']} ({ins.config_label(key)})" in excluded[0]
-    assert ("saturated" if case == "saturated_only" else "no usable pixels") in excluded[0]
-    assert not any("duplicate risk note" in w.value for w in at.warning)
-    if case == "mixed":
-        assert any(b.label == "Binned points (CSV)" for b in at.get("download_button"))
-
-
-def test_combined_forecast_is_reported_when_no_single_mode_constrains():
-    """Complementary degeneracies: each mode alone puts the goal parameter on
-    a null direction (lnZ = +dlnCO in one, -dlnCO in the other), the two
-    jointly do not. The joint width IS the answer, so it is reported and the
-    page keeps rendering -- an empty per-mode set must not st.stop() and take
-    the structure panel, the constraint forecast and the figure with it. The
-    verdict is a SHORTFALL warning: it speaks for a joint width that misses
-    the target and stays silent for one that meets it."""
-    out, out_meta = _synthetic_out(sigma_detect=8.0, with_jac=True)
-    nb = out["results"][0]["jac_bins"].shape[1]
-    ramp = np.linspace(1.0, 2.0, nb)
-    quad = np.linspace(2.0, 1.0, nb) ** 2
-    r0 = np.cos(np.linspace(0.0, 2.0, nb))          # the shared lnR0 row
-    # amplitude scaled so the joint width lands at ~0.2 dex, i.e. WIDE of the
-    # 0.1 dex target below; the null directions are unchanged by a scale
-    out["results"][0]["jac_bins"] = np.vstack([ramp, ramp, r0]) * 1.0e-3
-    out["results"][1]["jac_bins"] = np.vstack([quad, -quad, r0]) * 1.0e-3
-    out_meta.update(goal="constrain", target=None, goal_param="lnZ",
-                    target_prec=0.1)
-    at = _run_with_result(out, out_meta)
-    assert not at.exception, at.exception
-    warns = [w.value for w in at.warning]
-    hit = [w for w in warns if "No single mode constrains" in w]
-    assert len(hit) == 1, warns
-    assert "Metallicity" in hit[0] and "Combined modes: ±" in hit[0], hit[0]
-    assert "dex at 3σ in 1 transit (target ±0.1 dex)" in hit[0], hit[0]
-    exps = [e.label for e in at.get("expander")]
-    assert "Parameter constraint forecast (local Fisher)" in exps, exps
-    assert "Physical structure (T-P profile, mixing ratios)" in exps, exps
-    # same run, a target the joint width meets: no shortfall, no warning
-    out_meta.update(target_prec=0.5)
-    at = _run_with_result(out, out_meta)
-    assert not at.exception, at.exception
-    assert not any("No single mode constrains" in w.value for w in at.warning)
+    src = "".join(path.read_text() for path in GUI_SOURCES)
+    assert "infl = {k: float(noise_scale) * float(infl_mode[k])" in src, (
+        "the global multiplier no longer composes with the per-mode ones"
+    )
+    assert "noise_infl={k: float(o.infl_mode[k]) for k in o.mode_keys}" in src, (
+        "noise_infl must record the PER-MODE widget values, not the product"
+    )
+    assert "noise_scale=float(o.noise_scale)," in src, "the global scale is not recorded, so a run cannot be reproduced"
+    assert "width=_FIG_DISPLAY_PX" in src.split("def show_fig")[1], "show_fig no longer pins the display width"
+    assert "show_fig(fig3, struct_png)" in src and "show_fig(fig_sum, sum_png)" in src, (
+        "a figure must display the PNG its download button rasterized"
+    )
+    assert "st.pyplot(" not in src, "st.pyplot hardcodes dpi 200"
+    block = (APP.parent / "gui_forecast.py").read_text()
+    assert "st.table(" in block, "the Fisher table must stay a static st.table (blanked mode names)"
+    assert "st.dataframe(" not in block, "the Fisher table must stay a static st.table (blanked mode names)"
+    assert 'r2["mode"] = ""' in block, "mode names are no longer blanked; re-check whether st.table is needed"
+    assert "view.csv(pd.DataFrame(frows))" in block, "the Fisher CSV is no longer built from the unblanked rows"

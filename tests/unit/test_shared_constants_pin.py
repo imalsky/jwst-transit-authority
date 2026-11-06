@@ -1,29 +1,8 @@
 """G, R_sun and AU are duplicated across repos; pin them.
 
-`forward._assemble_chem` converts this tool's surface-gravity input into the
-planet mass VULCAN-JAX wants:
-
-    Mp = gs_cgs * rp_cm**2 / planets.G_CGS
-
-and `vulcan3.atm_setup.surface_gravity` inverts it:
-
-    gs = phy_const.G_grav * Mp / Rp**2
-
-so `gs` round-trips ONLY because two independently-declared literals carry
-the same digits. A one-digit edit on either side would silently rescale every
-atmosphere this tool submits, with no error anywhere: the value stays
-physical, just wrong.
-
-The constants stay where they are: VULCAN-JAX sits BELOW vulcan-forward in the
-dependency DAG and must keep its own `phy_const`, so moving them into
-`vulcan_forward.constants` would leave the same two-copy coupling plus an
-extra import edge. A pin is the fix, in the style of vulcan-forward's
-`_assert_composition_tables`.
-
-VULCAN-JAX is read from SOURCE with `ast`, never imported: the pin needs
-only the literals, and importing `vulcan3` sets process-wide JAX config
-(x64) and loads its config module.
+Why, cost and tolerances: docs/validation.md, section `test_shared_constants_pin`.
 """
+
 from __future__ import annotations
 
 import ast
@@ -42,8 +21,9 @@ def _vulcan3_constant(name: str) -> float:
         pytest.skip(
             "vulcan3 is not installed, so the cross-repo constant pin "
             "cannot run. Install the sibling (deploy/pins.env names the "
-            "commit) to exercise it.")
-    path = Path(list(spec.submodule_search_locations)[0]) / "phy_const.py"
+            "commit) to exercise it."
+        )
+    path = Path(next(iter(spec.submodule_search_locations))) / "phy_const.py"
     assert path.is_file(), f"expected {path} to exist"
     tree = ast.parse(path.read_text(), str(path))
     for node in tree.body:
@@ -54,29 +34,34 @@ def _vulcan3_constant(name: str) -> float:
     raise AssertionError(
         f"vulcan3.phy_const no longer defines {name!r}. The gs <-> Mp "
         f"round-trip in forward.py depends on it; find where it moved and "
-        f"re-point this pin rather than deleting the check.")
+        f"re-point this pin rather than deleting the check."
+    )
 
 
-@pytest.mark.parametrize("name,ours,exact", [
-    # G must be bit-identical: forward.py divides by it and VULCAN-JAX
-    # multiplies by it, so any difference silently rescales every atmosphere.
-    ("G_grav", planets.G_CGS, True),
-    # R_sun converts rstar_rsun on both sides; same argument as G.
-    ("r_sun", planets.R_SUN_CM, True),
-    # AU differs at the 9th digit (IAU 2012 exact 1.495978707e13 here vs
-    # vulcan3's 1.49597871e13): it only converts orbit_au into local
-    # irradiation geometry and never crosses into the chemistry. The
-    # tolerance keeps that true.
-    ("au", planets.AU_CM, False),
-])
+@pytest.mark.parametrize(
+    ("name", "ours", "exact"),
+    [
+        # G must be bit-identical: forward.py divides by it and VULCAN-JAX
+        # multiplies by it, so any difference silently rescales every atmosphere.
+        ("G_grav", planets.G_CGS, True),
+        # R_sun converts rstar_rsun on both sides; same argument as G.
+        ("r_sun", planets.R_SUN_CM, True),
+        # AU differs at the 9th digit (IAU 2012 exact 1.495978707e13 here vs
+        # vulcan3's 1.49597871e13): it only converts orbit_au into local
+        # irradiation geometry and never crosses into the chemistry. The
+        # tolerance keeps that true.
+        ("au", planets.AU_CM, False),
+    ],
+)
 def test_constants_match_vulcan3(name, ours, exact):
     theirs = _vulcan3_constant(name)
     if exact:
         assert ours == theirs, (
-            f"{name}: {ours!r} here vs {theirs!r} in vulcan3.phy_const. "
-            "Change both together or not at all.")
+            f"{name}: {ours!r} here vs {theirs!r} in vulcan3.phy_const. Change both together or not at all."
+        )
     else:
         rel = abs(ours - theirs) / theirs
         assert rel < 2e-5, (
             f"{name}: {ours!r} vs {theirs!r}, relative difference {rel:.2e} "
-            "exceeds the documented 2e-5 rounding tolerance.")
+            "exceeds the documented 2e-5 rounding tolerance."
+        )

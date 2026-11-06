@@ -1,41 +1,17 @@
 """Pure figure builders + the process-wide render lock.
 
-Importable WITHOUT streamlit: every figure the GUI shows is built here from
-plain arrays, so the same code the app renders is the code the tests render.
-
-WHY THE LOCK (the ParseException crash on the Space)
-----------------------------------------------------
-Matplotlib's mathtext parser is process-global state. ``Figure.draw()``
-holds matplotlib's own ``Figure._render_lock``, but ``Figure.tight_layout()``
-runs the layout engine OUTSIDE it, and layout measures every tick label --
-mathtext on a log axis. Two Streamlit sessions (each its own script-runner
-thread) laying out figures at once can therefore be inside the shared parser
-concurrently; the loser raises ``ValueError: ParseException`` out of
-``tight_layout``. Bare ``Figure`` objects do NOT help -- the race is in the
-shared parser, not in pyplot's figure registry.
-
-RULE: every figure lifecycle -- construct, lay out, draw, export, close --
-happens inside ``render_lock``. Do not lay out, save, or draw a figure
-outside it, and do not narrow the span to just the export: the layout call is
-the one that crashed. ``build_*`` acquire it themselves (it is reentrant), so
-a caller that wraps a build + export in one ``with render_lock:`` block is
-correct and is the intended pattern. The lock is process-wide and
-in-process; it says nothing about other processes (the ETC/forward
-subprocesses render nothing).
-
-Pinned by tests/unit/test_plotting.py (a threaded check that every builder
-blocks while another thread holds the lock + a structural check that no
-unlocked layout/export call survives in app.py).
+Method and contract: docs/gui_and_sharing.md, section `plotting`.
 """
+
 from __future__ import annotations
 
 import itertools
 import threading
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.ticker import (LogLocator, MaxNLocator, NullFormatter,
-                               NullLocator)
+from matplotlib.ticker import LogLocator, MaxNLocator, NullFormatter, NullLocator
 
 # Reentrant so a build_* call nested inside a caller's `with render_lock:`
 # block does not deadlock.
@@ -50,7 +26,8 @@ MAX_LOG_TICKS = 7
 # matplotlib default. Cap the count and let the locator pick round values.
 MAX_LIN_TICKS = 5
 
-def display_smooth(wl_um, y_ppm, r_bin: int):
+
+def display_smooth(wl_um: np.ndarray, y_ppm: np.ndarray, r_bin: int) -> np.ndarray:
     """Convolve a native model curve to a constant DISPLAY resolving power.
 
     At the model's own resolving power (R = 1000 on the correlated-k band
@@ -63,15 +40,15 @@ def display_smooth(wl_um, y_ppm, r_bin: int):
     is never modified.
     """
     from . import binning
+
     wl_um = np.asarray(wl_um, float)
     r = float(max(300, 3 * int(r_bin)))
     return binning.smooth_to_native_r(
-        wl_um, y_ppm, np.array([wl_um[0], wl_um[-1]]), np.array([r, r]),
-        float(wl_um[0]), float(wl_um[-1]))
+        wl_um, y_ppm, np.array([wl_um[0], wl_um[-1]]), np.array([r, r]), float(wl_um[0]), float(wl_um[-1])
+    )
 
 
-
-def _thin_log_axis(ax, which: str) -> None:
+def _thin_log_axis(ax: Any, which: str) -> None:
     """Label at most ``MAX_LOG_TICKS`` decades on a log axis; no minor ticks.
 
     ``LogLocator(numticks=)`` picks the decade stride itself, so the labels
@@ -109,23 +86,24 @@ CAVEAT_MAX_CHARS = 180
 CAVEAT_STRIP_IN = 0.20
 
 
-def caveat_line(caveats) -> str:
-    """The footnote text: each caveat cut at its first sentence or first
-    colon, whichever comes first, then to its share of CAVEAT_MAX_CHARS, and
-    the pieces joined into one line."""
+def caveat_line(caveats: list) -> str:
+    """Return the footnote text.
+
+    Each caveat cut at its first sentence or first colon, whichever comes first, then to its share of
+    CAVEAT_MAX_CHARS, and the pieces joined into one line.
+    """
     caveats = list(caveats)
     budget = CAVEAT_MAX_CHARS // max(1, len(caveats))
     parts = []
     for c in caveats:
         s = " ".join(str(c).split())
         ends = [i for i in (s.find(". "), s.find(": ")) if i > 0]
-        s = s[:min(ends)] if ends else s.rstrip(".")
-        parts.append(s if len(s) <= budget
-                     else s[:budget - 3].rstrip() + "...")
+        s = s[: min(ends)] if ends else s.rstrip(".")
+        parts.append(s if len(s) <= budget else s[: budget - 3].rstrip() + "...")
     return "Model caveats: " + "; ".join(parts) + "."
 
 
-def draw_caveats(fig, caveats) -> None:
+def draw_caveats(fig: Any, caveats: list) -> None:
     """Footnote ``fig`` with the run's caveats; no-op when there are none.
 
     Grows the canvas by ``CAVEAT_STRIP_IN`` and re-seats every axes at the
@@ -144,10 +122,10 @@ def draw_caveats(fig, caveats) -> None:
             # box matplotlib squeezed into the cell, and writing that back
             # would make the next draw squeeze it a second time.
             p = ax.get_position(original=True)
-            ax.set_position([p.x0, (p.y0 * h + CAVEAT_STRIP_IN) / h2,
-                             p.width, p.height * h / h2])
-        fig.text(0.5, 0.5 * CAVEAT_STRIP_IN / h2, caveat_line(caveats),
-                 ha="center", va="center", fontsize=CAVEAT_FONTSIZE)
+            ax.set_position([p.x0, (p.y0 * h + CAVEAT_STRIP_IN) / h2, p.width, p.height * h / h2])
+        fig.text(
+            0.5, 0.5 * CAVEAT_STRIP_IN / h2, caveat_line(caveats), ha="center", va="center", fontsize=CAVEAT_FONTSIZE
+        )
 
 
 TP_XLIM_DEFAULT = (1.0, 3000.0)
@@ -156,7 +134,7 @@ VMR_XLIM_DEFAULT = (1e-12, 1.0)
 
 # Raster resolution for every PNG this app hands out or displays. Matplotlib
 # takes the dpi from the SAVE, not from the figure, so the figure-construction
-# value only matters for interactive backends -- app._fig_bytes is what
+# value only matters for interactive backends -- gui_common.fig_bytes is what
 # actually sets the resolution of the bytes a user gets.
 FIG_DPI = 300
 # Structure figure: ONE canvas, two square panels side by side plus the
@@ -164,8 +142,7 @@ FIG_DPI = 300
 # rect and set_box_aspect(1.0), so matplotlib squares them identically.
 STRUCT_FIG_W_IN = 11.0
 STRUCT_FIG_H_IN = 4.8
-STRUCT_AXES_RECT = dict(left=0.078, right=0.863, bottom=0.13, top=0.97,
-                        wspace=0.20)
+STRUCT_AXES_RECT = dict(left=0.078, right=0.863, bottom=0.13, top=0.97, wspace=0.20)
 # Profiles read at a glance rather than as hairlines.
 STRUCT_LW = 2.6
 # T-P profile in black; mixing ratios in Paul Tol's colour-blind-safe
@@ -173,14 +150,20 @@ STRUCT_LW = 2.6
 # model-structure figure (jwst_note/scripts/fig_model_structure.py), with
 # Tol "muted" colours for any further RT molecule. All distinct from black.
 TP_COLOR = "black"
-VMR_COLORS = {"H2O": "#0077BB", "CO": "#33BBEE", "CO2": "#009988",
-              "CH4": "#EE7733", "H2S": "#BBBBBB", "SO2": "#CC3311",
-              "NH3": "#EE3377"}
-VMR_EXTRA_COLORS = ("#332288", "#117733", "#882255", "#AA4499", "#999933",
-                    "#44AA99", "#DDCC77", "#661100")
+VMR_COLORS = {
+    "H2O": "#0077BB",
+    "CO": "#33BBEE",
+    "CO2": "#009988",
+    "CH4": "#EE7733",
+    "H2S": "#BBBBBB",
+    "SO2": "#CC3311",
+    "NH3": "#EE3377",
+}
+VMR_EXTRA_COLORS = ("#332288", "#117733", "#882255", "#AA4499", "#999933", "#44AA99", "#DDCC77", "#661100")
 
 
-def build_structure_figure(p_bar, T_K, columns, caveats=()):
+# size-limit-ok: one figure laid out top to bottom
+def build_structure_figure(p_bar: np.ndarray, T_K: np.ndarray, columns: Any, caveats: list = ()) -> Any:
     """T-P profile and mixing-ratio profiles as ONE two-panel figure.
 
     Left: pressure (log, inverted) vs temperature. Right: VMR (log) vs the
@@ -198,20 +181,19 @@ def build_structure_figure(p_bar, T_K, columns, caveats=()):
     p = np.asarray(p_bar, dtype=float)
     T = np.asarray(T_K, dtype=float)
     if p.ndim != 1 or p.shape != T.shape or p.size == 0:
-        raise ValueError(f"build_structure_figure: p_bar {p.shape} and T_K "
-                         f"{T.shape} must be matching non-empty 1-D arrays")
+        raise ValueError(
+            f"build_structure_figure: p_bar {p.shape} and T_K {T.shape} must be matching non-empty 1-D arrays"
+        )
     cols = [(m, np.asarray(y, dtype=float)) for m, y in columns]
     if not cols:
         raise ValueError("build_structure_figure: columns is empty")
-    for m, ya in cols:            # validated before any figure exists
+    for m, ya in cols:  # validated before any figure exists
         if ya.shape != p.shape:
             raise ValueError(
-                f"build_structure_figure: {m} column {ya.shape} does not "
-                f"match the pressure grid {p.shape}")
+                f"build_structure_figure: {m} column {ya.shape} does not match the pressure grid {p.shape}"
+            )
     with render_lock:
-        fig, (ax_t, ax_v) = plt.subplots(
-            1, 2, figsize=(STRUCT_FIG_W_IN, STRUCT_FIG_H_IN), dpi=FIG_DPI,
-            sharey=True)
+        fig, (ax_t, ax_v) = plt.subplots(1, 2, figsize=(STRUCT_FIG_W_IN, STRUCT_FIG_H_IN), dpi=FIG_DPI, sharey=True)
         fig.subplots_adjust(**STRUCT_AXES_RECT)
         for ax in (ax_t, ax_v):
             ax.set_box_aspect(1.0)
@@ -223,15 +205,15 @@ def build_structure_figure(p_bar, T_K, columns, caveats=()):
         ax_t.set_xlim(*TP_XLIM_DEFAULT)
         # 4-digit temperature labels collide on a small box at the default
         # locator; cap the count instead of rotating them
-        ax_t.xaxis.set_major_locator(MaxNLocator(nbins=MAX_LIN_TICKS,
-                                                 steps=[1, 2, 5, 10]))
+        ax_t.xaxis.set_major_locator(MaxNLocator(nbins=MAX_LIN_TICKS, steps=[1, 2, 5, 10]))
         ax_t.set_xlabel("temperature (K)")
         ax_t.set_ylabel("pressure (bar)")
 
         extra = itertools.cycle(VMR_EXTRA_COLORS)
         for m, ya in cols:
-            ax_v.plot(np.clip(ya, 1e-14, None), p, lw=STRUCT_LW, label=str(m),
-                      color=VMR_COLORS.get(str(m)) or next(extra))
+            ax_v.plot(
+                np.clip(ya, 1e-14, None), p, lw=STRUCT_LW, label=str(m), color=VMR_COLORS.get(str(m)) or next(extra)
+            )
         ax_v.set_xscale("log")
         ax_v.set_xlim(*VMR_XLIM_DEFAULT)
         _thin_log_axis(ax_v, "x")
@@ -252,8 +234,15 @@ def build_structure_figure(p_bar, T_K, columns, caveats=()):
         # Legend in the strip STRUCT_AXES_RECT leaves free to the RIGHT, so
         # it can never cover a profile and needs no y-limit padding. One
         # column preserves the caller's peak-abundance order.
-        ax_v.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0),
-                    frameon=False, fontsize=7, ncol=1,
-                    handletextpad=0.5, borderaxespad=0.0, labelspacing=0.35)
+        ax_v.legend(
+            loc="upper left",
+            bbox_to_anchor=(1.02, 1.0),
+            frameon=False,
+            fontsize=7,
+            ncol=1,
+            handletextpad=0.5,
+            borderaxespad=0.0,
+            labelspacing=0.35,
+        )
         draw_caveats(fig, caveats)
         return fig

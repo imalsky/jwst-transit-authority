@@ -1,18 +1,16 @@
 """Compact, path-free provenance for configurations and exported results."""
+
 from __future__ import annotations
 
+import contextlib
 import hashlib
-import importlib.metadata as metadata
 import json
 import subprocess
 from functools import lru_cache
+from importlib import metadata
 from pathlib import Path
 
-from jwst_tool import datacheck as dc
-from jwst_tool import forward
-from jwst_tool import instruments as ins
-from jwst_tool import noise
-
+from jwst_tool import datacheck as dc, instruments as ins, model_defs, noise
 
 # Repository identity -> the DIRECTORY names it may sit under; the solver's
 # GitHub repo is `VULCAN3` but its working copy is usually `VULCAN-JAX`, so
@@ -42,8 +40,8 @@ def _sha256(path: Path) -> str:
 def _git(repo: Path) -> dict:
     def run(*args: str) -> str:
         result = subprocess.run(
-            ["git", "-C", str(repo), *args], capture_output=True, text=True,
-            timeout=10, check=False)
+            ["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=10, check=False
+        )
         return result.stdout.strip() if result.returncode == 0 else ""
 
     sha = run("rev-parse", "HEAD")
@@ -65,16 +63,13 @@ def _repo_identity(workspace: Path, directories: tuple) -> dict:
         if path.exists():
             # Present but unversioned: its revision CANNOT be recorded, and a
             # comparison against it is not reproducible. Say so.
-            return {"commit": "unversioned", "branch": "unversioned",
-                    "dirty": None, "directory": name}
-    return {"commit": "absent", "branch": "absent", "dirty": None,
-            "directory": None}
+            return {"commit": "unversioned", "branch": "unversioned", "dirty": None, "directory": name}
+    return {"commit": "absent", "branch": "absent", "dirty": None, "directory": None}
 
 
 def _versions() -> dict:
     out = {}
-    for name in ("jwst-transit-authority", "vulcan-forward", "vulcan3",
-                 "exojax", "jax", "numpy"):
+    for name in ("jwst-transit-authority", "vulcan-forward", "vulcan3", "exojax", "jax", "numpy"):
         try:
             out[name] = metadata.version(name)
         except metadata.PackageNotFoundError:
@@ -102,17 +97,16 @@ def _file(path: Path) -> dict:
     }
 
 
-def _probe(python, code: str) -> dict | None:
-    """Run ``code`` in another interpreter; its last stdout line parsed as a
-    JSON object, or None when that fails in any way (no such file, not
-    executable, hung, bad output): an export records "unavailable" and never
-    fails because a side environment is broken."""
+def _probe(python: str | Path | None, code: str) -> dict | None:
+    """Run ``code`` in another interpreter.
+
+    Its last stdout line parsed as a JSON object, or None when that fails in any way (no such file, not executable,
+    hung, bad output): an export records "unavailable" and never fails because a side environment is broken.
+    """
     try:
         if not python or not Path(python).is_file():
             return None
-        result = subprocess.run(
-            [str(python), "-c", code], capture_output=True, text=True,
-            timeout=30, check=False)
+        result = subprocess.run([str(python), "-c", code], capture_output=True, text=True, timeout=30, check=False)
         out = json.loads(result.stdout.splitlines()[-1])
     except (OSError, subprocess.TimeoutExpired, IndexError, ValueError):
         return None
@@ -120,7 +114,7 @@ def _probe(python, code: str) -> dict | None:
 
 
 def _pandeia_python_identity() -> dict:
-    code = r'''import importlib.metadata as m, json
+    code = r"""import importlib.metadata as m, json
 out = {}
 for name in ("pandeia.engine", "pandexo.engine"):
     try: out[name] = m.version(name)
@@ -132,70 +126,78 @@ try:
 except Exception: pass  # no readable direct_url.json: the commit stays unknown
 print(json.dumps({"engine": out["pandeia.engine"],
                   "pandexo": out["pandexo.engine"],
-                  "pandexo_commit": commit}))'''
+                  "pandexo_commit": commit}))"""
     return _probe(ins.PANDEIA_PYTHON, code) or {
-        "engine": "unavailable", "pandexo": "unavailable",
-        "pandexo_commit": None}
+        "engine": "unavailable",
+        "pandexo": "unavailable",
+        "pandexo_commit": None,
+    }
 
 
 def _picaso_identity() -> dict:
-    """The PICASO env's stack (metadata only: importing picaso needs its data
-    paths), the reference tree's config.json release and the climate table
-    set. Never raises, like datacheck.check_picaso: PICASO is optional, so a
-    broken PICASO setup records "unavailable"/"unreadable" instead of
-    breaking a VULCAN export."""
-    code = r'''import importlib.metadata as m, json
+    """Return the PICASO env's stack, the reference tree's release and the climate table set.
+
+    Metadata only: importing picaso needs its data paths.
+    Never raises, like datacheck.check_picaso: PICASO is optional, so a broken PICASO setup records
+    "unavailable"/"unreadable" instead of breaking a VULCAN export.
+    """
+    code = r"""import importlib.metadata as m, json
 out = {}
 for name in ("picaso", "photochem", "numpy"):
     try: out[name] = m.version(name)
     except m.PackageNotFoundError: out[name] = "not installed"
-print(json.dumps(out))'''
+print(json.dumps(out))"""
     out = _probe(ins.PICASO_PYTHON, code) or {
-        "picaso": "unavailable", "photochem": "unavailable",
-        "numpy": "unavailable"}
+        "picaso": "unavailable",
+        "photochem": "unavailable",
+        "numpy": "unavailable",
+    }
     refdata = Path(ins.PICASO_REFDATA)
     config = refdata / "config.json"
-    out["refdata"] = {"name": config.name, "version": "missing",
-                      "sha256": None}
+    out["refdata"] = {"name": config.name, "version": "missing", "sha256": None}
     try:
         if config.is_file():
             out["refdata"]["version"] = "unreadable"
             out["refdata"]["sha256"] = _sha256(config)
-            out["refdata"]["version"] = str(
-                json.loads(config.read_text())["version"])
+            out["refdata"]["version"] = str(json.loads(config.read_text())["version"])
     except (OSError, ValueError, KeyError, TypeError):
         pass
     # the status is datacheck's (every pinned table present, right size)
-    out["climate_tables"] = {"zenodo_record": dc.PICASO_CK_RECORD,
-                             "count": len(dc.PICASO_CK_MD5),
-                             "status": "unreadable"}
-    try:
+    out["climate_tables"] = {
+        "zenodo_record": dc.PICASO_CK_RECORD,
+        "count": len(dc.PICASO_CK_MD5),
+        "status": "unreadable",
+    }
+    with contextlib.suppress(OSError):
         out["climate_tables"]["status"] = next(
-            it.status for it in dc.check_picaso(python="", refdata=refdata)
-            if it.key == "picaso:ck")
-    except OSError:
-        pass
+            it.status for it in dc.check_picaso(python="", refdata=refdata) if it.key == "picaso:ck"
+        )
     return out
 
 
 def ktable_sources() -> dict:
-    """{molecule: record} for every ExoMolOP k-table the engine's fetcher
-    recorded, merged with each table's own header. Path-free (exportable).
-    Raises the engine's own error when the data root or provenance.json is
-    absent -- callers decide how loud."""
+    """{molecule: record} for every ExoMolOP k-table the engine's fetcher recorded, merged with each table's own header.
+
+    Path-free (exportable). Raises the engine's own error when the data root or provenance.json is absent -- callers
+    decide how loud.
+    """
     from vulcan_forward import exomolop
+
     out = {}
     for mol, rec in sorted(exomolop.provenance().items()):
         info = exomolop.table_info(mol)
         out[mol] = {
-            "dataset": rec["dataset"], "iso": rec["iso"],
+            "dataset": rec["dataset"],
+            "iso": rec["iso"],
             "natural_abundance": bool(rec["natural_abundance"]),
-            "file": rec["file"], "url": rec["url"],
+            "file": rec["file"],
+            "url": rec["url"],
             # The fetcher's curated DOI wins where it exists: four ExoMolOP
             # headers ship a placeholder instead of one. The header value is
             # kept alongside, so nothing is silently substituted.
             "doi": rec.get("doi") or info.get("doi"),
-            "header_doi": info.get("doi"), "date_id": info.get("date_id"),
+            "header_doi": info.get("doi"),
+            "date_id": info.get("date_id"),
             "ngauss": int(info["ngauss"]),
             "t_range_K": [float(v) for v in info["t_range_k"]],
             "p_range_bar": [float(v) for v in info["p_range_bar"]],
@@ -212,9 +214,7 @@ def _ktables() -> dict:
     except (ImportError, RuntimeError, FileNotFoundError):
         # explicit absence, kept PATH-FREE: the engine's message names the
         # absolute data directory, which must never enter an export
-        return {"status": "absent",
-                "remedy": "python -m vulcan_forward.fetch_exomolop "
-                          "--molecules <species>"}
+        return {"status": "absent", "remedy": "python -m vulcan_forward.fetch_exomolop --molecules <species>"}
 
 
 # The three code repos a cached result was SOLVED by, in report order.
@@ -224,13 +224,11 @@ PRODUCER_REPOS = ("jwst-transit-authority", "vulcan-forward", "vulcan3")
 @lru_cache(maxsize=1)
 def _repos() -> dict:
     workspace = Path(__file__).resolve().parents[2].parent
-    return {name: _repo_identity(workspace, directories)
-            for name, directories in REPOSITORIES.items()}
+    return {name: _repo_identity(workspace, directories) for name, directories in REPOSITORIES.items()}
 
 
 def producer_commits() -> list:
-    """``["repo=commit12", ...]`` for PRODUCER_REPOS, "+dirty" on a checkout
-    with uncommitted changes.
+    """``["repo=commit12", ...]`` for PRODUCER_REPOS, "+dirty" on a checkout with uncommitted changes.
 
     Stamped into a model result at WRITE time: a cache hit can be many
     engine versions old, so an export must name the code that produced the
@@ -247,8 +245,7 @@ def producer_commits() -> list:
         repo = repos[name]
         if repo["commit"] in ("absent", "unversioned", "unknown"):
             continue
-        out.append(f"{name}={repo['commit'][:12]}"
-                   + ("+dirty" if repo["dirty"] else ""))
+        out.append(f"{name}={repo['commit'][:12]}" + ("+dirty" if repo["dirty"] else ""))
     return out
 
 
@@ -256,11 +253,13 @@ def producer_commits() -> list:
 def _base_snapshot() -> dict:
     repos = _repos()
     pandeia = _pandeia_python_identity()
-    pandeia.update({
-        "required_release": ins.BACKEND_RELEASE,
-        "refdata": _marker(Path(ins.PANDEIA_REFDATA) / "VERSION_DATA"),
-        "psf": _marker(Path(ins.PANDEIA_PSF_DIR) / "VERSION_PSF"),
-    })
+    pandeia.update(
+        {
+            "required_release": ins.BACKEND_RELEASE,
+            "refdata": _marker(Path(ins.PANDEIA_REFDATA) / "VERSION_DATA"),
+            "psf": _marker(Path(ins.PANDEIA_PSF_DIR) / "VERSION_PSF"),
+        }
+    )
     return {
         "schema": 1,
         "repositories": repos,
@@ -268,12 +267,11 @@ def _base_snapshot() -> dict:
         "pandeia_stack": pandeia,
         "picaso_env": _picaso_identity(),
         "datasets": {
-            "phoenix_catalog": _file(
-                Path(ins.PYSYN_CDBS) / "grid" / "phoenix" / "catalog.fits"),
+            "phoenix_catalog": _file(Path(ins.PYSYN_CDBS) / "grid" / "phoenix" / "catalog.fits"),
             "ktables": _ktables(),
         },
         "cache_schema": {
-            "model": forward._VERSION,
+            "model": model_defs._VERSION,
             "pandeia_worker": noise.WORKER_VERSION,
         },
     }

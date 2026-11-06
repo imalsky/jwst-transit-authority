@@ -10,6 +10,7 @@ own fetcher (``python -m vulcan_forward.fetch_exomolop``).
 reference tree and climate tables. Every failure is loud and the command is
 idempotent.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -21,19 +22,21 @@ import tempfile
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-from jwst_tool import datacheck as dc
-from jwst_tool import instruments as ins
+from jwst_tool import datacheck as dc, instruments as ins
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _UA = {"User-Agent": "jwst-transit-authority data fetcher"}
-_CHUNK = 1 << 20                       # 1 MiB read chunks
-_PROGRESS_EVERY = 100                  # progress line every N chunks
+_CHUNK = 1 << 20  # 1 MiB read chunks
+_PROGRESS_EVERY = 100  # progress line every N chunks
 
 
-def _engine_cfg():
-    """The engine-config view, with the engine's data layout CREATED first.
+def _engine_cfg() -> Any:
+    """Return the engine-config view, with the engine's data layout CREATED first.
 
     A setup command makes the directories it is about to download into
     (otherwise the CIA downloads fail on a correct first-run setup). The root
@@ -49,52 +52,67 @@ def _engine_cfg():
 
 @dataclass(frozen=True)
 class Fetch:
+    """One public dataset: its check, URL, checksum and install location."""
+
     label: str
     url: str
-    dest: Callable[[], Path]           # resolved lazily (env-dependent roots)
-    size: str                          # human download-size hint
-    tar_subtree: str = ""              # extract only this prefix into dest
-    marker: str = ""                   # tar_subtree's file written LAST
-    md5: str = ""                      # pinned digest of a single file
+    dest: Callable[[], Path]  # resolved lazily (env-dependent roots)
+    size: str  # human download-size hint
+    tar_subtree: str = ""  # extract only this prefix into dest
+    marker: str = ""  # tar_subtree's file written LAST
+    md5: str = ""  # pinned digest of a single file
     # a tree's own completeness test in place of the marker: what is wrong
     # with dest, "" when complete; also run after extraction
     check: Callable[[Path], str] | None = None
 
 
 FETCHES = (
-    Fetch("H2-H2 collision-induced absorption table",
-          "https://hitran.org/data/CIA/main/H2-H2_2011.cia",
-          lambda: Path(_engine_cfg().CIA_H2H2_FILE), "24 MB"),
-    Fetch("H2-He collision-induced absorption table",
-          "https://hitran.org/data/CIA/main/H2-He_2011.cia",
-          lambda: Path(_engine_cfg().CIA_H2HE_FILE), "147 MB"),
-    Fetch("2MASS Ks bandpass",
-          "https://ssb.stsci.edu/trds/comp/nonhst/2mass_ks_001_syn.fits",
-          lambda: Path(ins.PYSYN_CDBS) / "comp" / "nonhst"
-          / "2mass_ks_001_syn.fits", "9 KB"),
-    Fetch("Vega spectrum (CALSPEC)",
-          "https://ssb.stsci.edu/trds/calspec/alpha_lyr_stis_011.fits",
-          lambda: Path(ins.PYSYN_CDBS) / "calspec"
-          / "alpha_lyr_stis_011.fits", "288 KB"),
-    Fetch("PHOENIX stellar grid (synphot)",
-          "https://archive.stsci.edu/hlsps/reference-atlases/"
-          "hlsp_reference-atlases_hst_multi_pheonix-models_multi_v3_"
-          "synphot5.tar",
-          lambda: Path(ins.PYSYN_CDBS) / "grid" / "phoenix",
-          "1.9 GB download (STScI's own 'pheonix' spelling in the URL)",
-          tar_subtree="grp/redcat/trds/grid/phoenix", marker="catalog.fits"),
+    Fetch(
+        "H2-H2 collision-induced absorption table",
+        "https://hitran.org/data/CIA/main/H2-H2_2011.cia",
+        lambda: Path(_engine_cfg().CIA_H2H2_FILE),
+        "24 MB",
+    ),
+    Fetch(
+        "H2-He collision-induced absorption table",
+        "https://hitran.org/data/CIA/main/H2-He_2011.cia",
+        lambda: Path(_engine_cfg().CIA_H2HE_FILE),
+        "147 MB",
+    ),
+    Fetch(
+        "2MASS Ks bandpass",
+        "https://ssb.stsci.edu/trds/comp/nonhst/2mass_ks_001_syn.fits",
+        lambda: Path(ins.PYSYN_CDBS) / "comp" / "nonhst" / "2mass_ks_001_syn.fits",
+        "9 KB",
+    ),
+    Fetch(
+        "Vega spectrum (CALSPEC)",
+        "https://ssb.stsci.edu/trds/calspec/alpha_lyr_stis_011.fits",
+        lambda: Path(ins.PYSYN_CDBS) / "calspec" / "alpha_lyr_stis_011.fits",
+        "288 KB",
+    ),
+    Fetch(
+        "PHOENIX stellar grid (synphot)",
+        "https://archive.stsci.edu/hlsps/reference-atlases/"
+        "hlsp_reference-atlases_hst_multi_pheonix-models_multi_v3_"
+        "synphot5.tar",
+        lambda: Path(ins.PYSYN_CDBS) / "grid" / "phoenix",
+        "1.9 GB download (STScI's own 'pheonix' spelling in the URL)",
+        tar_subtree="grp/redcat/trds/grid/phoenix",
+        marker="catalog.fits",
+    ),
 )
 
 
 def _picaso_tree_problem(root: Path) -> str:
-    """datacheck's version-and-files check of the reference tree, then the
-    pinned md5 of each file picaso's climate path reads. "" when complete."""
-    item = next(it for it in dc.check_picaso(python="", refdata=root)
-                if it.key == "picaso:refdata")
+    """Return what is wrong with the PICASO reference tree, or "" when complete.
+
+    Datacheck's version-and-files check, then the pinned md5 of each file picaso's climate path reads.
+    """
+    item = next(it for it in dc.check_picaso(python="", refdata=root) if it.key == "picaso:refdata")
     if item.status != dc.OK:
         return item.detail
-    bad = [rel for rel, md5 in dc.PICASO_REFDATA_MD5.items()
-           if _md5(root / rel) != md5]
+    bad = [rel for rel, md5 in dc.PICASO_REFDATA_MD5.items() if _md5(root / rel) != md5]
     return f"md5 mismatch: {', '.join(bad)}" if bad else ""
 
 
@@ -102,20 +120,26 @@ def _picaso_tree_problem(root: Path) -> str:
 # the tree is checked file by file (_picaso_tree_problem); each table by its
 # Zenodo md5.
 PICASO_FETCHES = (
-    Fetch(f"PICASO {dc.PICASO_RELEASE} reference data",
-          "https://github.com/natashabatalha/picaso/archive/refs/tags/"
-          f"v{dc.PICASO_RELEASE}.tar.gz",
-          lambda: Path(ins.PICASO_REFDATA),
-          "67 MB source tarball; reference/ unpacks to about 180 MB",
-          tar_subtree=f"picaso-{dc.PICASO_RELEASE}/reference",
-          marker="config.json", check=_picaso_tree_problem),
-) + tuple(
-    Fetch(f"PICASO climate table {name}",
-          f"https://zenodo.org/records/{dc.PICASO_CK_RECORD}/files/"
-          f"{quote(name)}?download=1",
-          lambda name=name: Path(ins.PICASO_REFDATA) / dc.PICASO_CK_DIR / name,
-          "62 MB", md5=md5)
-    for name, md5 in dc.PICASO_CK_MD5.items())
+    Fetch(
+        f"PICASO {dc.PICASO_RELEASE} reference data",
+        f"https://github.com/natashabatalha/picaso/archive/refs/tags/v{dc.PICASO_RELEASE}.tar.gz",
+        lambda: Path(ins.PICASO_REFDATA),
+        "67 MB source tarball; reference/ unpacks to about 180 MB",
+        tar_subtree=f"picaso-{dc.PICASO_RELEASE}/reference",
+        marker="config.json",
+        check=_picaso_tree_problem,
+    ),
+    *tuple(
+        Fetch(
+            f"PICASO climate table {name}",
+            f"https://zenodo.org/records/{dc.PICASO_CK_RECORD}/files/{quote(name)}?download=1",
+            lambda name=name: Path(ins.PICASO_REFDATA) / dc.PICASO_CK_DIR / name,
+            "62 MB",
+            md5=md5,
+        )
+        for name, md5 in dc.PICASO_CK_MD5.items()
+    ),
+)
 
 # What fetch does not download itself, printed verbatim after the downloads.
 # The two Pandeia pieces live on STScI Box, whose /v/ links serve HTML rather
@@ -156,7 +180,7 @@ missing ones and the exact command."""
 
 
 def _present(f: Fetch) -> bool:
-    d = f.dest()          # run_fetch reports an unresolvable root as FAILED
+    d = f.dest()  # run_fetch reports an unresolvable root as FAILED
     if f.check:
         return not f.check(Path(os.path.realpath(d)))
     if f.tar_subtree:
@@ -193,17 +217,14 @@ def _download(url: str, out: Path, label: str, md5: str = "") -> None:
                 print(f"    ... {done >> 20} MiB{pct}", flush=True)
     if total and done != total:
         tmp.unlink(missing_ok=True)
-        raise RuntimeError(
-            f"{label}: truncated download ({done} of {total} bytes)")
+        raise RuntimeError(f"{label}: truncated download ({done} of {total} bytes)")
     if md5 and (got := _md5(tmp)) != md5:
         tmp.unlink(missing_ok=True)
-        raise RuntimeError(f"{label}: md5 mismatch (got {got}, expected "
-                           f"{md5}); the download was deleted")
+        raise RuntimeError(f"{label}: md5 mismatch (got {got}, expected {md5}); the download was deleted")
     os.replace(tmp, out)
 
 
-def _extract_subtree(tar_path: Path, subtree: str, dest: Path,
-                     marker: str = "") -> int:
+def _extract_subtree(tar_path: Path, subtree: str, dest: Path, marker: str = "") -> int:
     """Extract members under ``subtree`` into ``dest`` (prefix stripped).
 
     ``marker`` (relative to the subtree) is written last, so its presence
@@ -216,14 +237,12 @@ def _extract_subtree(tar_path: Path, subtree: str, dest: Path,
         members = [m for m in tf if m.name.startswith(prefix) and m.isfile()]
         members.sort(key=lambda m: m.name == prefix + marker)
         for m in members:
-            rel = m.name[len(prefix):]
+            rel = m.name[len(prefix) :]
             target = dest / rel
             # a member carrying ".." resolves outside dest; startswith(prefix)
             # does not stop it, and the archive is a remote file
-            if os.path.commonpath(
-                    [root, os.path.realpath(target)]) != root:
-                raise RuntimeError(
-                    f"{tar_path}: member {m.name!r} escapes {dest}")
+            if os.path.commonpath([root, os.path.realpath(target)]) != root:
+                raise RuntimeError(f"{tar_path}: member {m.name!r} escapes {dest}")
             target.parent.mkdir(parents=True, exist_ok=True)
             # temp file + rename: a killed extraction never leaves a
             # truncated file, above all an empty marker, under its real name
@@ -248,8 +267,7 @@ def _fetch_one(f: Fetch) -> None:
     # next to the destination, extract, then delete the tarball
     dest_real = Path(os.path.realpath(dest))
     dest_real.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-            dir=dest_real.parent, suffix=".tar", delete=False) as t:
+    with tempfile.NamedTemporaryFile(dir=dest_real.parent, suffix=".tar", delete=False) as t:
         tar_path = Path(t.name)
     try:
         print(f"  downloading {f.label} ({f.size}) ...", flush=True)
@@ -264,13 +282,18 @@ def _fetch_one(f: Fetch) -> None:
 
 
 def run_fetch(argv: list[str] = ()) -> int:
-    """Fetch every missing direct-URL dataset (``--picaso``: also the PICASO
-    engine's). Returns a shell exit code."""
+    """Fetch every missing direct-URL dataset (``--picaso``: also the PICASO engine's).
+
+    Returns a shell exit code.
+    """
     unknown = [a for a in argv if a != "--picaso"]
     if unknown:
-        print(f"jwst-tool fetch: unknown argument(s) {unknown}; the only flag "
-              "is --picaso (also fetch the PICASO engine's reference data and "
-              "climate tables, about 2.4 GB).", file=sys.stderr)
+        print(
+            f"jwst-tool fetch: unknown argument(s) {unknown}; the only flag "
+            "is --picaso (also fetch the PICASO engine's reference data and "
+            "climate tables, about 2.4 GB).",
+            file=sys.stderr,
+        )
         return 2
     picaso = "--picaso" in argv
     failures = []
@@ -280,22 +303,31 @@ def run_fetch(argv: list[str] = ()) -> int:
                 print(f"  already present: {f.label}")
                 continue
             _fetch_one(f)
-        except Exception as e:        # try every item; the exit code reports any failure
+        except Exception as e:  # try every item; the exit code reports any failure
             failures.append((f, e))
             print(f"  FAILED: {f.label}: {e}", file=sys.stderr, flush=True)
     print()
-    print(MANUAL.format(refdata=ins.PANDEIA_REFDATA,
-                        release=ins.BACKEND_RELEASE,
-                        env_suffix=ins.BACKEND_RELEASE.replace(".", "_"),
-                        psf=ins.PANDEIA_PSF_DIR))
+    print(
+        MANUAL.format(
+            refdata=ins.PANDEIA_REFDATA,
+            release=ins.BACKEND_RELEASE,
+            env_suffix=ins.BACKEND_RELEASE.replace(".", "_"),
+            psf=ins.PANDEIA_PSF_DIR,
+        )
+    )
     if picaso:
-        print(f"\nThe PICASO engine runs in its own environment (picaso "
-              f"{dc.PICASO_RELEASE} needs numpy >= 2), created once:\n  "
-              f"{dc.PICASO_ENV_RECIPE}.\nReference data: {ins.PICASO_REFDATA}")
+        print(
+            f"\nThe PICASO engine runs in its own environment (picaso "
+            f"{dc.PICASO_RELEASE} needs numpy >= 2), created once:\n  "
+            f"{dc.PICASO_ENV_RECIPE}.\nReference data: {ins.PICASO_REFDATA}"
+        )
     if failures:
-        print(f"\n{len(failures)} download(s) failed; re-run `jwst-tool "
-              f"fetch{' --picaso' if picaso else ''}` to retry, or follow the "
-              "item's remedy in `jwst-tool data`.", file=sys.stderr)
+        print(
+            f"\n{len(failures)} download(s) failed; re-run `jwst-tool "
+            f"fetch{' --picaso' if picaso else ''}` to retry, or follow the "
+            "item's remedy in `jwst-tool data`.",
+            file=sys.stderr,
+        )
         return 1
     print("\nDone. Run `jwst-tool data` to see the full status report.")
     return 0

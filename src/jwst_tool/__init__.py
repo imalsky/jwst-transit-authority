@@ -5,4 +5,5 @@ shared vulcan-forward engine) -> Pandeia noise; modes are ranked by
 conditional matched-template S/N and Fisher forecasts. Entry point: the
 console script ``jwst-tool``.
 """
-from jwst_tool._version import __version__  # noqa: F401
+
+from jwst_tool._version import __version__  # noqa: F401  (the package's public version)

@@ -5,6 +5,7 @@ the path-based checks take explicit tmp paths, and the engine-config-backed
 checks are exercised only when the shared engine's data root is
 importable (they skip cleanly on the dependency-light CI).
 """
+
 from __future__ import annotations
 
 import json
@@ -13,19 +14,19 @@ import subprocess
 
 import pytest
 
-from jwst_tool import datacheck
-from jwst_tool import forward
-
+from jwst_tool import datacheck, forward
 
 # Pandeia backend path checks (tmp-path injected; mirrors the worker preflight)
 
+
 def _backend_release():
     from jwst_tool import instruments as ins
+
     return ins.BACKEND_RELEASE
 
 
 def _matched_backend(root, rel, psf_rel=None):
-    """python + refdata + PSF triple at ``rel`` (PSF optionally at another)."""
+    """Python + refdata + PSF triple at ``rel`` (PSF optionally at another)."""
     py = root / "env" / "bin" / "python"
     py.parent.mkdir(parents=True)
     py.touch()
@@ -42,14 +43,13 @@ def test_pandeia_backend_present_reads_version(tmp_path):
     """A MATCHED triple at the active backend's release reports OK."""
     rel = _backend_release()
     py, ref, psf = _matched_backend(tmp_path, rel)
-    items = datacheck.check_pandeia_backend(python=py, refdata=ref,
-                                            psf_dir=str(psf))
+    items = datacheck.check_pandeia_backend(python=py, refdata=ref, psf_dir=str(psf))
     by = {it.key: it for it in items}
     assert by["pandeia:python"].status == datacheck.OK
     assert by["pandeia:refdata"].status == datacheck.OK
-    assert rel in by["pandeia:refdata"].detail           # version surfaced
+    assert rel in by["pandeia:refdata"].detail  # version surfaced
     assert by["pandeia:psf"].status == datacheck.OK
-    assert rel in by["pandeia:psf"].detail               # PSF release surfaced
+    assert rel in by["pandeia:psf"].detail  # PSF release surfaced
 
 
 def test_pandeia_backend_missing_and_misconfigured(tmp_path):
@@ -65,20 +65,20 @@ def test_pandeia_backend_missing_and_misconfigured(tmp_path):
     items = datacheck.check_pandeia_backend(
         python=tmp_path / "nope" / "python",
         refdata=tmp_path / "nope" / "refdata",
-        psf_dir=str(tmp_path / "nope" / "psfs"))
+        psf_dir=str(tmp_path / "nope" / "psfs"),
+    )
     by = {it.key: it for it in items}
     assert by["pandeia:python"].status == datacheck.MISSING
     assert by["pandeia:refdata"].status == datacheck.MISSING
     assert by["pandeia:psf"].status == datacheck.MISSING
     assert all(it.required for it in items)
-    assert all(it.remedy for it in items)          # every failure has a remedy
+    assert all(it.remedy for it in items)  # every failure has a remedy
 
     # PSF tree from a different release than the matched refdata
     rel = _backend_release()
     other = "2026.2" if rel != "2026.2" else "2026.7"
     py, ref, psf = _matched_backend(tmp_path / "mismatch", rel, psf_rel=other)
-    by = {it.key: it for it in datacheck.check_pandeia_backend(
-        python=py, refdata=ref, psf_dir=str(psf))}
+    by = {it.key: it for it in datacheck.check_pandeia_backend(python=py, refdata=ref, psf_dir=str(psf))}
     assert by["pandeia:psf"].status == datacheck.MISSING
     assert "RELEASE MISMATCH" in by["pandeia:psf"].detail
     assert other in by["pandeia:psf"].detail and rel in by["pandeia:psf"].detail
@@ -86,20 +86,26 @@ def test_pandeia_backend_missing_and_misconfigured(tmp_path):
     # psf dir that exists but has no VERSION_PSF file
     bare = tmp_path / "bare_psfs"
     bare.mkdir()
-    by = {it.key: it for it in datacheck.check_pandeia_backend(
-        python=tmp_path / "python", refdata=tmp_path / "ref",
-        psf_dir=str(bare))}
+    by = {
+        it.key: it
+        for it in datacheck.check_pandeia_backend(
+            python=tmp_path / "python", refdata=tmp_path / "ref", psf_dir=str(bare)
+        )
+    }
     assert by["pandeia:psf"].status == datacheck.MISSING
     assert "VERSION_PSF" in by["pandeia:psf"].detail
 
     # empty psf_dir string (every supported backend uses the split-PSF layout)
-    by = {it.key: it for it in datacheck.check_pandeia_backend(
-        python=tmp_path / "python", refdata=tmp_path / "ref", psf_dir="")}
+    by = {
+        it.key: it
+        for it in datacheck.check_pandeia_backend(python=tmp_path / "python", refdata=tmp_path / "ref", psf_dir="")
+    }
     assert by["pandeia:psf"].status == datacheck.MISSING
     assert by["pandeia:psf"].required is True
 
 
 # synphot CDBS checks
+
 
 def _make_cdbs(tmp_path):
     cdbs = tmp_path / "cdbs"
@@ -135,6 +141,7 @@ def test_cdbs_tree_states(tmp_path):
 
 # PICASO engine checks (optional section; tmp trees, sparse CK files)
 
+
 def _picaso_tree(root, version="4.1"):
     ref = root / "picaso_refdata"
     for rel in datacheck.PICASO_REFDATA_FILES:
@@ -149,18 +156,21 @@ def _picaso_tree(root, version="4.1"):
     return ref
 
 
-@pytest.mark.parametrize("case, expect, fragment", [
-    ("complete", ("ok", "ok", "ok"), "version 4.1"),
-    ("absent", ("missing",) * 3, "absent: all"),
-    ("wrong_version", ("ok", "missing", "ok"), "version 4.0, need 4.1"),
-    ("missing_file", ("ok", "missing", "ok"), "ck_cx_cont_opacities_661.db"),
-    ("short_table", ("ok", "ok", "missing"), "not 61806680 bytes: H3+_1460"),
-    ("empty_config", ("ok", "missing", "ok"), "version unreadable, need 4.1"),
-    ("list_config", ("ok", "missing", "ok"), "version unreadable, need 4.1"),
-])
+@pytest.mark.parametrize(
+    ("case", "expect", "fragment"),
+    [
+        ("complete", ("ok", "ok", "ok"), "version 4.1"),
+        ("absent", ("missing",) * 3, "absent: all"),
+        ("wrong_version", ("ok", "missing", "ok"), "version 4.0, need 4.1"),
+        ("missing_file", ("ok", "missing", "ok"), "ck_cx_cont_opacities_661.db"),
+        ("short_table", ("ok", "ok", "missing"), "not 61806680 bytes: H3+_1460"),
+        ("empty_config", ("ok", "missing", "ok"), "version unreadable, need 4.1"),
+        ("list_config", ("ok", "missing", "ok"), "version unreadable, need 4.1"),
+    ],
+)
 def test_check_picaso_states(tmp_path, monkeypatch, case, expect, fragment):
-    from jwst_tool import instruments as ins
-    from jwst_tool import provenance
+    from jwst_tool import instruments as ins, provenance
+
     py = tmp_path / "python"
     if case == "absent":
         ref = tmp_path / "nowhere"
@@ -175,8 +185,7 @@ def test_check_picaso_states(tmp_path, monkeypatch, case, expect, fragment):
         with open(ref / datacheck.PICASO_CK_DIR / "H3+_1460.hdf5", "r+b") as w:
             w.truncate(1000)
     items = datacheck.check_picaso(python=py, refdata=ref)
-    assert [it.key for it in items] == ["picaso:python", "picaso:refdata",
-                                        "picaso:ck"]
+    assert [it.key for it in items] == ["picaso:python", "picaso:refdata", "picaso:ck"]
     assert tuple(it.status for it in items) == expect
     assert any(fragment in it.detail for it in items)
     assert not any(it.required for it in items)
@@ -190,31 +199,33 @@ def test_check_picaso_states(tmp_path, monkeypatch, case, expect, fragment):
     # touched "python" is not executable, and empty_config's one hangs
     monkeypatch.setattr(ins, "PICASO_PYTHON", str(py))
     monkeypatch.setattr(ins, "PICASO_REFDATA", str(ref))
-    assert datacheck.picaso_missing() == [
-        it for it in items if it.status == datacheck.MISSING]
+    assert datacheck.picaso_missing() == [it for it in items if it.status == datacheck.MISSING]
     if case == "empty_config":
+
         def hang(cmd, **kw):
             raise subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+
         monkeypatch.setattr(provenance.subprocess, "run", hang)
     rec = provenance._picaso_identity()
     assert rec["picaso"] == "unavailable"
     assert rec["refdata"]["version"] == {
-        "absent": "missing", "wrong_version": "4.0", "empty_config":
-        "unreadable", "list_config": "unreadable"}.get(case, "4.1")
-    assert rec["climate_tables"] == {"zenodo_record": "18644980",
-                                     "count": 36, "status": expect[2]}
+        "absent": "missing",
+        "wrong_version": "4.0",
+        "empty_config": "unreadable",
+        "list_config": "unreadable",
+    }.get(case, "4.1")
+    assert rec["climate_tables"] == {"zenodo_record": "18644980", "count": 36, "status": expect[2]}
     assert str(tmp_path) not in json.dumps(rec)
 
 
 # Report plumbing (no external deps at all)
 
+
 def test_full_report_structure_formatting_and_cache_stats():
-    rep = datacheck.full_report(base_mols=forward.MOLECULES,
-                                extra_mols=forward.EXTRA_MOLECULES)
+    rep = datacheck.full_report(base_mols=forward.MOLECULES, extra_mols=forward.EXTRA_MOLECULES)
     items = datacheck.all_items(rep)
     assert items, "report must not be empty"
-    assert all(it.status in (datacheck.OK, datacheck.MISSING, datacheck.AUTO)
-               for it in items)
+    assert all(it.status in (datacheck.OK, datacheck.MISSING, datacheck.AUTO) for it in items)
     # consistency of the two summary helpers
     assert datacheck.required_ok(rep) == (not datacheck.missing_required(rep))
     # every missing/auto item must tell the user how to fix it
@@ -233,6 +244,7 @@ def test_full_report_structure_formatting_and_cache_stats():
 
 def test_cli_data_subcommand(capsys):
     from jwst_tool import cli
+
     rc = cli._data_status([])
     out = capsys.readouterr().out
     assert rc in (0, 1)
@@ -245,13 +257,12 @@ def test_cli_data_subcommand(capsys):
 
 _engine = datacheck._engine_config()
 needs_engine = pytest.mark.skipif(
-    isinstance(_engine, Exception),
-    reason="engine data root not configured here (set VULCAN_FORWARD_DATA)")
+    isinstance(_engine, Exception), reason="engine data root not configured here (set VULCAN_FORWARD_DATA)"
+)
 
 
 def test_engine_data_unavailable_is_one_loud_item(monkeypatch):
-    monkeypatch.setattr(datacheck, "_engine_config",
-                        lambda: RuntimeError("tree not found"))
+    monkeypatch.setattr(datacheck, "_engine_config", lambda: RuntimeError("tree not found"))
     items = datacheck.check_engine_data(["H2O"], [])
     assert len(items) == 1
     assert items[0].status == datacheck.MISSING and items[0].required
@@ -259,6 +270,7 @@ def test_engine_data_unavailable_is_one_loud_item(monkeypatch):
 
 
 # --- ExoMolOP k-table coverage -----------------------------------------------
+
 
 class _FakeEngineCfg:
     """Just enough engine-config surface for check_engine_data."""
@@ -285,14 +297,12 @@ def test_exomolop_status_never_auto(tmp_path, monkeypatch):
     assert status == {"H2O": datacheck.OK, "CO2": datacheck.MISSING}
 
 
-def test_missing_ktables_are_required_items_with_the_fetch_command(
-        tmp_path, monkeypatch):
+def test_missing_ktables_are_required_items_with_the_fetch_command(tmp_path, monkeypatch):
     # The false green this check exists to prevent: `jwst-tool data`
     # reporting green while the data behind every run is entirely absent.
     cfg = _FakeEngineCfg(_fake_root(tmp_path, ["H2O"]))
     monkeypatch.setattr(datacheck, "_engine_config", lambda: cfg)
-    items = {i.key: i for i in datacheck.check_engine_data(
-        ["H2O", "CO2"], ["HCN", "CS2"])}
+    items = {i.key: i for i in datacheck.check_engine_data(["H2O", "CO2"], ["HCN", "CS2"])}
     assert items["ktable:H2O"].status == datacheck.OK
     assert items["ktable:H2O"].required
     assert items["ktable:CO2"].status == datacheck.MISSING
@@ -315,4 +325,5 @@ def test_exomolop_path_matches_the_engine_convention():
     # the RT stack; pin it against the engine's own table_path so the two
     # conventions cannot drift.
     from vulcan_forward import exomolop
+
     assert datacheck.exomolop_table_path("H2O") == exomolop.table_path("H2O")

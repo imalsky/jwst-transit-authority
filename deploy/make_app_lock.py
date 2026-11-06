@@ -1,24 +1,9 @@
 #!/usr/bin/env python3
 """Generate requirements-app-lock.txt from the LIVE working environment.
 
-Walks the installed dependency closure of the app stack and pins every
-package at exactly the version running here. The Docker build installs this
-lock with --no-deps so it reproduces the validated environment verbatim rather
-than selecting newer transitive dependencies during a later rebuild. Generate
-the lock only from a resolver-clean environment and run ``pip check`` before
-committing it; the deployed working set must not rely on ignored dependency
-metadata.
-
-Run in the environment that runs the tool, then commit the lock:
-    python deploy/make_app_lock.py
-
-The PICASO env is a conda env of its own (picaso 4.1 needs numpy >= 2). Conda
-installs its compiled stack from picaso-conda-lock.txt; this script's
-``--env picaso`` mode pins only the distributions pip installed on top. Run
-both in the validated env (``pip check`` clean), then commit both locks:
-    micromamba env export -p <env> --explicit --md5 > deploy/picaso-conda-lock.txt
-    <env>/bin/python deploy/make_app_lock.py --env picaso
+Why, cost and tolerances: docs/validation.md, section `make_app_lock`.
 """
+
 import argparse
 import json
 import re
@@ -33,11 +18,22 @@ from packaging.requirements import Requirement
 # (streamlit/pandas) and the Space bootstrap's huggingface_hub. The trailing
 # entries are runtime imports that the roots' metadata does NOT declare; the
 # walker only fills in their versions.
-ROOTS = ["jwst-transit-authority", "vulcan3",
-         "streamlit", "pandas", "huggingface_hub", "matplotlib",
-         "pooch", "sortedcontainers", "cloudpickle",
-         "platformdirs", "setuptools", "threadpoolctl", "zstandard",
-         "xyzservices"]
+ROOTS = [
+    "jwst-transit-authority",
+    "vulcan3",
+    "streamlit",
+    "pandas",
+    "huggingface_hub",
+    "matplotlib",
+    "pooch",
+    "sortedcontainers",
+    "cloudpickle",
+    "platformdirs",
+    "setuptools",
+    "threadpoolctl",
+    "zstandard",
+    "xyzservices",
+]
 # (jaraco.collections/jaraco.text are setuptools-vendored, not standalone
 # distributions -- pinning setuptools covers them)
 # Local editables: present in the closure but installed from the repo
@@ -55,17 +51,18 @@ pins: dict[str, str] = {}
 
 
 def canon(name: str) -> str:
+    """Return a distribution name in lockfile form."""
     return name.lower().replace("_", "-")
 
 
 def pip_installed() -> set[str]:
-    """Names of the distributions whose metadata dir in site-packages no
-    conda package's file list owns (exact dir names, so a conda package that
-    pip later replaced counts as pip's)."""
+    """Names of the distributions whose metadata dir in site-packages no conda package's file list owns.
+
+    (exact dir names, so a conda package that pip later replaced counts as pip's).
+    """
     meta = Path(sys.prefix) / "conda-meta"
     if not meta.is_dir():
-        sys.exit(f"--env picaso must run with the picaso conda env's python; "
-                 f"{sys.prefix} has no conda-meta/")
+        sys.exit(f"--env picaso must run with the picaso conda env's python; {sys.prefix} has no conda-meta/")
     owned = set()
     for f in meta.glob("*.json"):
         for path in json.loads(f.read_text()).get("files", []):
@@ -73,15 +70,20 @@ def pip_installed() -> set[str]:
             if m:
                 owned.add(m.group(1))
     site = Path(sysconfig.get_paths()["purelib"])
-    return {pep503(d.name.split("-")[0]) for d in site.iterdir()
-            if d.name.endswith((".dist-info", ".egg-info")) and d.name not in owned}
+    return {
+        pep503(d.name.split("-")[0])
+        for d in site.iterdir()
+        if d.name.endswith((".dist-info", ".egg-info")) and d.name not in owned
+    }
 
 
 def pep503(name: str) -> str:
+    """Return a distribution name in PEP 503 form."""
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
 def walk(name: str) -> None:
+    """Add a distribution and its dependencies to the lock."""
     c = canon(name)
     if c in seen:
         return
@@ -92,14 +94,12 @@ def walk(name: str) -> None:
         # extras and marker-false deps are skipped before the recursion, so
         # this one is required: a lock written without it would install
         # an env that fails at import
-        raise SystemExit(f"{name} is required but not installed; repair the "
-                         "env (pip check) and regenerate") from None
-    if c not in LOCAL and (PIP_ONLY is None
-                           or pep503(dist.metadata["Name"]) in PIP_ONLY):
+        raise SystemExit(f"{name} is required but not installed; repair the env (pip check) and regenerate") from None
+    if c not in LOCAL and (PIP_ONLY is None or pep503(dist.metadata["Name"]) in PIP_ONLY):
         pins[canon(dist.metadata["Name"])] = dist.version
     for raw in dist.requires or []:
         req = Requirement(raw)
-        if req.marker is not None:
+        if req.marker is not None:  # noqa: SIM102  (the comment belongs to the outer test)
             # A marker can only be evaluated for THIS platform. The case
             # that matters is a dep excluded here but needed on the Linux
             # image; it is rare, so a skipped Linux-marked dep is printed
@@ -107,8 +107,7 @@ def walk(name: str) -> None:
             if not req.marker.evaluate({"extra": ""}):
                 m = str(req.marker)
                 if "linux" in m:
-                    print(f"NOTE: skipped linux-marked dep {req.name} "
-                          f"({m}) -- verify it is not needed")
+                    print(f"NOTE: skipped linux-marked dep {req.name} ({m}) -- verify it is not needed")
                 continue
         walk(req.name)
 

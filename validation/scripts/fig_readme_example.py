@@ -1,20 +1,24 @@
-"""The README example: the app's summary figure for the default run (WASP-39 b,
-SO2, one transit per mode), exported exactly as the app's PNG download does
-(200 dpi, tight crop). Runs the app headlessly through Streamlit's AppTest and
-needs the default model and noise caches under output/ (a first run fills them).
+"""The README example.
 
-    python validation/scripts/fig_readme_example.py      # writes assets/w39b_so2_forecast.png"""
+The app's summary figure for the default run (WASP-39 b, SO2, one transit per mode), exported exactly as the app's PNG
+download does (200 dpi, tight crop). Runs the app headlessly through Streamlit's AppTest and needs the default model and
+noise caches under output/ (a first run fills them).
+
+    python validation/scripts/fig_readme_example.py      # writes assets/w39b_so2_forecast.png
+"""
+
 import io
 import sys
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg", force=True)
-from streamlit.testing.v1 import AppTest  # noqa: E402
+from streamlit.testing.v1 import AppTest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
-from jwst_tool import plotting, summary_figure  # noqa: E402
+from jwst_tool import plotting, summary_figure
 
 captured = []
 _compose = summary_figure.compose_summary_figure

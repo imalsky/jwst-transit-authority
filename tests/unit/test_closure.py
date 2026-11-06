@@ -3,33 +3,34 @@ against a smaller-step FD, and emission AD against FD of the full model.
 
 Default runs stay numpy-only; derivative closures need JWST_TOOL_RUN_SLOW=1.
 """
+
 import os
 
 import numpy as np
 import pytest
 
-from jwst_tool import binning, noise as noise_mod
+from jwst_tool import binning, chem_build, model_cache, noise as noise_mod
 
 
 def test_poisson_count_closure():
     """Empirical bin mean/variance of Poisson-count depth estimates must
-    close with the analytic depth_error_bins variance."""
+    close with the analytic depth_error_bins variance.
+    """
     rng = np.random.default_rng(11)
     n_pix = 300
     wl = np.sort(rng.uniform(3.0, 4.0, n_pix))
-    flux = 4e3 * (1.1 + np.sin(4.0 * wl))          # e-/s per pixel
-    t_int = 20.0                                    # one integration cycle (s)
-    n_in, n_out = 120, 150                          # integrations in the window
+    flux = 4e3 * (1.1 + np.sin(4.0 * wl))  # e-/s per pixel
+    t_int = 20.0  # one integration cycle (s)
+    n_in, n_out = 120, 150  # integrations in the window
     # pure-photon pandeia surrogate: sigma of a 1-integration rate estimate
     noise_1int = np.sqrt(flux / t_int)
-    mode_result = dict(wl=wl.tolist(), flux=flux.tolist(),
-                       noise_1int=noise_1int.tolist(), t_cycle_s=t_int)
+    mode_result = dict(wl=wl.tolist(), flux=flux.tolist(), noise_1int=noise_1int.tolist(), t_cycle_s=t_int)
 
     edges = np.array([3.0, 3.25, 3.5, 3.75, 4.0])
     op = binning.build_operator(wl, flux, edges, wl_lo=2.9, wl_hi=4.1)
-    nz = noise_mod.depth_error_bins(mode_result, edges,
-                                    t_in_s=n_in * t_int, t_out_s=n_out * t_int,
-                                    n_transits=1, floor_spec=None, op=op)
+    nz = noise_mod.depth_error_bins(
+        mode_result, edges, t_in_s=n_in * t_int, t_out_s=n_out * t_int, n_transits=1, floor_spec=None, op=op
+    )
 
     depth_true = 0.012 * (1.0 + 0.2 * np.sin(6.0 * wl))
     lam_in = flux * t_int * n_in * (1.0 - depth_true)
@@ -52,26 +53,28 @@ def _force_cadence_1(monkeypatch, tmp_path, forward):
     """Every chemistry build at photolysis cadence 1 -- the regime an escalated
     row is re-solved in. The cadence is NOT part of the cache key, so the run
     also gets its own model cache: a forced cadence-1 result must never be
-    served to a config-cadence run under the same key."""
-    orig = forward._assemble_chem
+    served to a config-cadence run under the same key.
+    """
+    orig = chem_build.assemble_chem
 
     def assemble(cp, log):
         a = orig(cp, log)
         build = a.build_chem
-        a.build_chem = (lambda extra_abun=None, tag="baseline", photo_frq=None:
-                        build(extra_abun, tag, 1))
+        a.build_chem = lambda extra_abun=None, tag="baseline", photo_frq=None: build(extra_abun, tag, 1)
         return a
 
-    monkeypatch.setattr(forward, "_assemble_chem", assemble)
+    monkeypatch.setattr(forward, "assemble_chem", assemble)
     cache = tmp_path / "model_cache"
     cache.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(forward, "MODEL_CACHE", cache)
+    monkeypatch.setattr(model_cache, "MODEL_CACHE", cache)
 
 
-@pytest.mark.skipif(os.environ.get("JWST_TOOL_RUN_SLOW") != "1",
-                    reason="slow: 3 full VULCAN-JAX+ExoJAX forward runs per "
-                           "cadence variant, the cadence-1 one cold "
-                           "(~5-20 min, JAX required); set JWST_TOOL_RUN_SLOW=1")
+@pytest.mark.skipif(
+    os.environ.get("JWST_TOOL_RUN_SLOW") != "1",
+    reason="slow: 3 full VULCAN-JAX+ExoJAX forward runs per "
+    "cadence variant, the cadence-1 one cold "
+    "(~5-20 min, JAX required); set JWST_TOOL_RUN_SLOW=1",
+)
 @pytest.mark.parametrize("cadence", [None, 1])
 def test_jacobian_row_matches_finite_difference(monkeypatch, tmp_path, cadence):
     """The cached FD Jacobian row must agree with an independent smaller-step
@@ -80,7 +83,8 @@ def test_jacobian_row_matches_finite_difference(monkeypatch, tmp_path, cadence):
     escalated row is re-solved on.
 
     Require correlation > 0.99 and scale within 15%. The solver can certify
-    through its loose branch; certification alone does not guarantee closure."""
+    through its loose branch; certification alone does not guarantee closure.
+    """
     from jwst_tool import forward
 
     if cadence == 1:
@@ -90,15 +94,14 @@ def test_jacobian_row_matches_finite_difference(monkeypatch, tmp_path, cadence):
         return None
 
     T0 = 1560.0
-    base = dict(planet="wasp39b", tp_mode="guillot",
-                Tirr=T0, fisher_params=["Tirr"], use_photo=True)
+    base = dict(planet="wasp39b", tp_mode="guillot", Tirr=T0, fisher_params=["Tirr"], use_photo=True)
     if forward.load_result(base) is None:
         forward.run_model(base, log=quiet)
     m0 = forward.load_result(base)
     names = [str(x) for x in m0["jac_names"]]
     row = np.asarray(m0["jac"][names.index("Tirr")])
 
-    h = 2.0                                          # K, small vs T ~ 1000 K
+    h = 2.0  # K, small vs T ~ 1000 K
     d = {}
     for s, tag in ((+h, "p"), (-h, "m")):
         p = dict(base, Tirr=T0 + float(s), fisher_params=[])
@@ -113,10 +116,12 @@ def test_jacobian_row_matches_finite_difference(monkeypatch, tmp_path, cadence):
     assert scale == pytest.approx(1.0, abs=0.15)
 
 
-@pytest.mark.skipif(os.environ.get("JWST_TOOL_RUN_SLOW") != "1",
-                    reason="slow: ~8 FD stencil solves + 2 AD rows per cadence "
-                           "variant (~30-60 min, JAX required); set "
-                           "JWST_TOOL_RUN_SLOW=1")
+@pytest.mark.skipif(
+    os.environ.get("JWST_TOOL_RUN_SLOW") != "1",
+    reason="slow: ~8 FD stencil solves + 2 AD rows per cadence "
+    "variant (~30-60 min, JAX required); set "
+    "JWST_TOOL_RUN_SLOW=1",
+)
 @pytest.mark.parametrize("cadence", [None, 1])
 def test_emission_ad_rows_match_the_certified_fd_rows(monkeypatch, tmp_path, cadence):
     """Default WASP-39 b eclipse case, lnZ and dlnCO rows: each warm-jvp AD row
@@ -125,7 +130,8 @@ def test_emission_ad_rows_match_the_certified_fd_rows(monkeypatch, tmp_path, cad
     that does not certify at the configuration's photolysis cadence is
     re-solved on a cadence-1 build and flagged in photo_escalated, never
     refused. Two rows, because the cadence-1 build is shared: the first
-    escalation carries the later rows with it."""
+    escalation carries the later rows with it.
+    """
     from jwst_tool import forward
 
     if cadence == 1:
@@ -133,14 +139,12 @@ def test_emission_ad_rows_match_the_certified_fd_rows(monkeypatch, tmp_path, cad
 
     rows = {}
     for method in ("fd", "ad"):
-        p = dict(planet="wasp39b", science_mode="emission",
-                 fisher_params=["lnZ", "dlnCO"], jac_method=method)
+        p = dict(planet="wasp39b", science_mode="emission", fisher_params=["lnZ", "dlnCO"], jac_method=method)
         if forward.load_result(p) is None:
             forward.run_model(p, log=lambda _s: None)
         m = forward.load_result(p)
         names = [str(x) for x in m["jac_names"]]
-        rows[method] = {n: np.asarray(m["jac"][names.index(n)])
-                        for n in ("lnZ", "dlnCO")}
+        rows[method] = {n: np.asarray(m["jac"][names.index(n)]) for n in ("lnZ", "dlnCO")}
         if method == "ad":
             print("AD photo_escalated:", list(m["photo_escalated"]))
     for n in ("lnZ", "dlnCO"):

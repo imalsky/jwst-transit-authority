@@ -6,48 +6,14 @@ unknown parameter keys refuse. Condensation is detection-only. The WASP-39 b
 reference state and its cache key are pinned below; re-measure against the
 literature before moving either.
 """
+
 import math
 
 import numpy as np
 import pytest
+from param_helpers import W39B_REFERENCE, _p, _pf, _table
 
-from jwst_tool import fisher, forward, planets
-
-
-def _p(**kw):
-    base = dict(planet="wasp39b", tp_mode="guillot",
-                kzz_mode="const", kzz_const=1.0e9)
-    base.update(kw)
-    return base
-
-
-def _table(tmp_path, kzz=True, name="prof.txt", tmin=800.0, tmax=1400.0,
-           rows=8, scramble=False, p_lo_log10=6.9):
-    # p_lo_log10: bottom pressure exponent. 6.9 (7.9e6 dyn/cm^2) clears the
-    # 7.6 bar transmission column; an EMISSION run needs 100 bar, so pass 8.1.
-    P = np.logspace(p_lo_log10, -1.0, rows)   # dyne/cm^2, descending (deep first)
-    if scramble:
-        P = P.copy()
-        P[2], P[3] = P[3], P[2]               # break monotonicity
-    T = np.linspace(tmax, tmin, rows)
-    lines = ["#(dyne/cm2) (K)" + (" (cm2/s)" if kzz else ""),
-             "Pressure\tTemp" + ("\tKzz" if kzz else "")]
-    for i in range(rows):
-        row = f"{P[i]:.6e}\t{T[i]:.1f}"
-        if kzz:
-            row += "\t1.0e9"
-        lines.append(row)
-    p = tmp_path / name
-    p.write_text("\n".join(lines) + "\n")
-    return p
-
-
-def _pf(path, **kw):
-    base = dict(planet="wasp39b", tp_mode="file",
-                tp_file=forward.TP_FILE_UPLOAD, tp_file_path=str(path),
-                kzz_mode="const", kzz_const=1.0e9)
-    base.update(kw)
-    return base
+from jwst_tool import forward, jacobian, model_cache, model_defs, planets, run_params, tp_tables
 
 
 def test_condensation_detection_only_with_full_refusal_matrix():
@@ -59,18 +25,14 @@ def test_condensation_detection_only_with_full_refusal_matrix():
     # molecular-diffusion coefficient, so moldiff-off refuses too. Condensation
     # runs on sncho only (test_network_semantics), so every case names it.
     assert forward.canonical_params(_p())["use_condense"] is False
-    assert forward.canonical_params(
-        _p(use_condense=True, network="sncho"))["use_condense"] is True
+    assert forward.canonical_params(_p(use_condense=True, network="sncho"))["use_condense"] is True
     for jm in ("fd", "ad"):
         with pytest.raises(ValueError):
-            forward.canonical_params(_p(use_condense=True, network="sncho",
-                                        jac_method=jm, fisher_params=["lnZ"]))
+            forward.canonical_params(_p(use_condense=True, network="sncho", jac_method=jm, fisher_params=["lnZ"]))
     with pytest.raises(ValueError):
-        forward.canonical_params(_p(use_condense=True, network="sncho",
-                                    use_photo=False))
+        forward.canonical_params(_p(use_condense=True, network="sncho", use_photo=False))
     with pytest.raises(ValueError):
-        forward.canonical_params(_p(use_condense=True, network="sncho",
-                                    use_moldiff=False))
+        forward.canonical_params(_p(use_condense=True, network="sncho", use_moldiff=False))
 
 
 def test_shipped_tables_gate_defaults_and_are_never_substituted():
@@ -78,42 +40,40 @@ def test_shipped_tables_gate_defaults_and_are_never_substituted():
     table is VERIFIED end-to-end defaults to it; every other planet defaults
     to analytic Guillot + constant Kzz and carries a written tp_table_note.
     Each planet resolves to ITS OWN table; a planet without one refuses
-    loudly rather than borrowing another's atmosphere."""
+    loudly rather than borrowing another's atmosphere.
+    """
     seen = {}
     for key in planets.PLANETS:
         cp = forward.canonical_params(dict(planet=key))
-        if forward.shipped_tp_table_is_default(key):
+        if tp_tables.shipped_tp_table_is_default(key):
             assert cp["tp_mode"] == "file", key
-            assert cp["tp_file"] == forward.TP_FILE_SHIPPED, key
-            assert cp["tp_file_sha1"], key            # content-addressed
-            assert cp["kzz_mode"] == "file", key      # table carries Kzz
-            assert cp["kzz_const"] == 0.0, key        # inert once tabulated
+            assert cp["tp_file"] == model_defs.TP_FILE_SHIPPED, key
+            assert cp["tp_file_sha1"], key  # content-addressed
+            assert cp["kzz_mode"] == "file", key  # table carries Kzz
+            assert cp["kzz_const"] == 0.0, key  # inert once tabulated
         else:
             assert cp["tp_mode"] == "guillot", key
             assert cp["kzz_mode"] == "const", key
             assert planets.PLANETS[key]["tp_table_note"], key
-        name = forward.shipped_tp_table_name(key)
+        name = tp_tables.shipped_tp_table_name(key)
         if name:
             seen[key] = name
         else:
             with pytest.raises(ValueError):
                 forward.canonical_params(dict(planet=key, tp_mode="file"))
-    assert len(set(seen.values())) == len(seen)       # no shared table
+    assert len(set(seen.values())) == len(seen)  # no shared table
     # the verified set is exactly WASP-39 b today; HD 189733 b ships a good
     # profile the solver does NOT certify at defaults, so it must stay
     # selectable-but-not-default -- choosing it explicitly still resolves
-    assert [k for k in planets.PLANETS
-            if forward.shipped_tp_table_is_default(k)] == ["wasp39b"]
-    assert forward.shipped_tp_table_name("hd189733b")
+    assert [k for k in planets.PLANETS if tp_tables.shipped_tp_table_is_default(k)] == ["wasp39b"]
+    assert tp_tables.shipped_tp_table_name("hd189733b")
     # its table carries a 6000 K thermosphere above 0.1 dyn/cm^2, outside the
     # modelable window, so file mode needs a model top at or below 1e-7 bar
-    cp = forward.canonical_params(dict(planet="hd189733b", tp_mode="file",
-                                       rt_ptop_bar=1.0e-7))
+    cp = forward.canonical_params(dict(planet="hd189733b", tp_mode="file", rt_ptop_bar=1.0e-7))
     assert cp["tp_mode"] == "file" and cp["kzz_mode"] == "file"
     with pytest.raises(ValueError):
-        forward.canonical_params(dict(planet="hd189733b", tp_mode="file",
-                                      rt_ptop_bar=1.0e-8))
-    assert forward._default_tp_mode(dict(planet="wasp39b")) == "file"
+        forward.canonical_params(dict(planet="hd189733b", tp_mode="file", rt_ptop_bar=1.0e-8))
+    assert run_params.default_tp_mode(dict(planet="wasp39b")) == "file"
     # a retired (GCM) mode refuses, never substitutes a profile
     with pytest.raises(ValueError):
         forward.canonical_params(dict(planet="wasp39b", tp_mode="baseline"))
@@ -126,18 +86,17 @@ def test_gray_cloud_pressure_and_opacity_are_one_knob():
     The anchor is vulcan-forward's own closed form, which its
     tests/test_cloud_deck.py gates the RT against (Heng & Kitzmann 2017):
     uniformly mixed kappa gives slant tau = kappa (P/g) sqrt(2 pi Rp/H), so
-    WASP-39 b at kappa = 0.1 cm^2/g and 896.6 K blocks down to 1.53e-4 bar."""
+    WASP-39 b at kappa = 0.1 cm^2/g and 896.6 K blocks down to 1.53e-4 bar.
+    """
     g, rp = 422.0, 1.279
-    assert planets.gray_cloud_log_kappa(1.53e-4, g, rp, 896.6) == pytest.approx(
-        -1.0, abs=2.2e-3)
+    assert planets.gray_cloud_log_kappa(1.53e-4, g, rp, 896.6) == pytest.approx(-1.0, abs=2.2e-3)
 
     teq = planets.system_teq(5485.0, 0.932, 0.04828)
     levels = (-6.0, -3.0, 0.0, 1.0)
-    kappas = [planets.gray_cloud_log_kappa(10.0 ** lp, g, rp, teq)
-              for lp in levels]
+    kappas = [planets.gray_cloud_log_kappa(10.0**lp, g, rp, teq) for lp in levels]
     # one decade of pressure IS one decade of opacity, in both directions
     assert kappas[0] - kappas[1] == pytest.approx(3.0)
-    for lp, lk in zip(levels, kappas):
+    for lp, lk in zip(levels, kappas, strict=True):
         assert lk + lp == pytest.approx(kappas[0] + levels[0])
     # a 1-bar deck needs log10 kappa below -4, a range the pressure-entered
     # gray mode reaches directly
@@ -152,31 +111,28 @@ def test_guillot_default_tirr_follows_planet_and_custom_system():
     20 K step grid (the widget step); a bare constant makes API and GUI
     defaults diverge. The custom planet derives T_eq from the entered star
     and orbit (T_eq = Teff sqrt(Rstar/2a)) -- as does every registry planet, so
-    a refreshed stellar parameter can never leave a stale T_eq behind."""
+    a refreshed stellar parameter can never leave a stale T_eq behind.
+    """
     for key, p in planets.PLANETS.items():
-        teq = planets.system_teq(p["star"]["teff"], p["rstar_rsun"],
-                                 p["orbit_au"])
-        expect = min(max(round(teq * math.sqrt(2.0) / 20.0) * 20.0,
-                         800.0), 2500.0)
+        teq = planets.system_teq(p["star"]["teff"], p["rstar_rsun"], p["orbit_au"])
+        expect = min(max(round(teq * math.sqrt(2.0) / 20.0) * 20.0, 800.0), 2500.0)
         cp = forward.canonical_params(dict(planet=key, tp_mode="guillot"))
         assert cp["Tirr"] == expect, key
     # per-planet values, pinned explicitly
-    assert forward.default_tirr("wasp39b") == 1640.0
-    assert forward.default_tirr("hd209458b") == 2040.0
+    assert model_defs.default_tirr("wasp39b") == 1640.0
+    assert model_defs.default_tirr("hd209458b") == 2040.0
     sys_cool = dict(star_teff=3300.0, rstar_rsun=0.30, orbit_au=0.05)
-    teq = planets.system_teq(**sys_cool)                    # ~350 K
+    teq = planets.system_teq(**sys_cool)  # ~350 K
     expect = min(max(round(teq * math.sqrt(2.0) / 20.0) * 20.0, 800.0), 2500.0)
-    cp = forward.canonical_params(dict(planet="custom", tp_mode="guillot",
-                                       **sys_cool))
+    cp = forward.canonical_params(dict(planet="custom", tp_mode="guillot", **sys_cool))
     assert cp["Tirr"] == expect
     # a different entered system must move the default
-    cp_hot = forward.canonical_params(dict(
-        planet="custom", tp_mode="guillot",
-        star_teff=6100.0, rstar_rsun=1.2, orbit_au=0.03))
+    cp_hot = forward.canonical_params(
+        dict(planet="custom", tp_mode="guillot", star_teff=6100.0, rstar_rsun=1.2, orbit_au=0.03)
+    )
     assert cp_hot["Tirr"] != cp["Tirr"]
     # an explicit Tirr always wins over the derived default
-    cp_exp = forward.canonical_params(dict(planet="custom", tp_mode="guillot",
-                                           Tirr=1234.0, **sys_cool))
+    cp_exp = forward.canonical_params(dict(planet="custom", tp_mode="guillot", Tirr=1234.0, **sys_cool))
     assert cp_exp["Tirr"] == 1234.0
 
 
@@ -186,27 +142,33 @@ def test_tp_table_gates_are_grid_scoped_and_require_the_bottom(tmp_path):
     extending past the grid (a hot thermosphere) is fine if the in-grid part
     is modelable. (2) A table stopping above the chemistry-grid bottom is
     REFUSED: the engine would clamp-extend the last tabulated T
-    isothermally over the quench region."""
+    isothermally over the quench region.
+    """
+
     def _write(name, T):
         p = tmp_path / name
-        p.write_text("#(dyne/cm2) (K)\nPressure Temp\n"
-                     + "\n".join(f"{pv:.6e} {t:.2f}" for pv, t in zip(P, T)))
+        p.write_text(
+            "#(dyne/cm2) (K)\nPressure Temp\n" + "\n".join(f"{pv:.6e} {t:.2f}" for pv, t in zip(P, T, strict=True))
+        )
         return p
 
-    lo, hi = forward.CHEM_P_SPAN_DYN
+    lo, hi = model_defs.CHEM_P_SPAN_DYN
     # extends both ways past the grid, in-grid profile is a modelable 900 K
     P = np.array([lo / 100, lo, hi, hi * 100])
-    T = np.array([5000.0, 900.0, 900.0, 5000.0])       # out of window only outside
-    assert forward._read_tp_table(_write("ok.txt", T))["T"].size == 4
+    T = np.array([5000.0, 900.0, 900.0, 5000.0])  # out of window only outside
+    assert tp_tables.read_tp_table(_write("ok.txt", T))["T"].size == 4
     # in-grid profile itself breaches the ceiling -> refused
     T_bad = np.array([5000.0, 2990.0, 900.0, 5000.0])
     with pytest.raises(ValueError):
-        forward._read_tp_table(_write("bad.txt", T_bad))
+        tp_tables.read_tp_table(_write("bad.txt", T_bad))
     # a 1 bar bottom is too shallow; the standard fixture (past P_b) passes
     Ps = np.logspace(6.0, -1.0, 8)
     shallow = tmp_path / "shallow.txt"
-    shallow.write_text("#(dyne/cm2) (K)\nPressure\tTemp\n" + "\n".join(
-        f"{Ps[i]:.6e}\t{1200.0 - 40.0 * i:.1f}" for i in range(8)) + "\n")
+    shallow.write_text(
+        "#(dyne/cm2) (K)\nPressure\tTemp\n"
+        + "\n".join(f"{Ps[i]:.6e}\t{1200.0 - 40.0 * i:.1f}" for i in range(8))
+        + "\n"
+    )
     with pytest.raises(ValueError):
         forward.canonical_params(_pf(shallow))
     forward.canonical_params(_pf(_table(tmp_path)))
@@ -216,20 +178,19 @@ def test_resolution_knobs_defaults_ranges_and_refusals():
     # nz/yconv are explicit and the RT layer count is derived, not
     # cache-keyed; the spectral grid is the k-tables' own (no knob)
     cp = forward.canonical_params(_p())
-    assert cp["nz"] == forward.NZ_DEFAULT == 100
-    assert cp["yconv_cri"] == forward.YCONV_DEFAULT == 1.0e-2
-    assert "art_nlayer" not in cp     # locked to nz in run_model, not cache-keyed
+    assert cp["nz"] == model_defs.NZ_DEFAULT == 100
+    assert cp["yconv_cri"] == model_defs.YCONV_DEFAULT == 1.0e-2
+    assert "art_nlayer" not in cp  # locked to nz in run_model, not cache-keyed
     # explicit in-range values accepted; the yconv ladder reaches its 1e-4
     # floor
     cp = forward.canonical_params(_p(nz=150, yconv_cri=1.0e-4))
     assert (cp["nz"], cp["yconv_cri"]) == (150, 1.0e-4)
-    for bad in (dict(nz=40), dict(nz=200), dict(yconv_cri=1.0),
-                dict(yconv_cri=5.0e-5)):
+    for bad in (dict(nz=40), dict(nz=200), dict(yconv_cri=1.0), dict(yconv_cri=5.0e-5)):
         with pytest.raises(ValueError):
             forward.canonical_params(_p(**bad))
     # the removed line-by-line / Mie keys refuse BY NAME (an old config says
     # what was dropped), never fall through to the generic unknown-key text
-    for key in sorted(forward._REMOVED_PARAM_KEYS):
+    for key in sorted(run_params._REMOVED_PARAM_KEYS):
         with pytest.raises(ValueError, match="removed in 0.48.0"):
             forward.canonical_params(_p(**{key: 1}))
 
@@ -238,6 +199,7 @@ def test_extra_molecules_resolve_in_engine_and_unknown_refused():
     # The extras cover photochemical sulfur and the CH4-photolysis
     # hydrocarbons. Import-light: vulcan_forward.constants is pure constants.
     from vulcan_forward import constants as _vfc
+
     assert "C2H4" in forward.EXTRA_MOLECULES
     # CS2/C2H6 have no published ExoMolOP k-table: refused, never offered
     assert forward._NO_EXOMOLOP_TABLE == {"CS2", "C2H6"}
@@ -276,17 +238,20 @@ def test_composition_structural_path_baseline_and_ranges():
     # The DEFAULT co_ratio is CO_DEFAULT (the cfg's C_H/O_H, 0.549, rounded
     # onto the widgets' 0.05 grid)
     cp = forward.canonical_params(_p())
-    assert cp["co_ratio"] == forward.CO_DEFAULT == 0.55
+    assert cp["co_ratio"] == model_defs.CO_DEFAULT == 0.55
     assert "dco" not in cp and "co_baseline" not in cp
     # High C/O inside the bound is the same path, with NO detection-only
     # restriction: FD Fisher rows are certified re-solves, valid at any
     # baseline inside the bound
-    cp = forward.canonical_params(_p(co_ratio=0.8, met_x_solar=24.0,
-                                     fisher_params=["lnZ", "dlnCO"]))
+    cp = forward.canonical_params(_p(co_ratio=0.8, met_x_solar=24.0, fisher_params=["lnZ", "dlnCO"]))
     assert cp["co_ratio"] == 0.8 and cp["met_x_solar"] == 24.0
-    for bad in (dict(co_ratio=0.05), dict(co_ratio=2.5, network="sncho"),
-                dict(co_ratio=12.0), dict(met_x_solar=0.05),
-                dict(met_x_solar=150.0)):
+    for bad in (
+        dict(co_ratio=0.05),
+        dict(co_ratio=2.5, network="sncho"),
+        dict(co_ratio=12.0),
+        dict(met_x_solar=0.05),
+        dict(met_x_solar=150.0),
+    ):
         with pytest.raises(ValueError):
             forward.canonical_params(_p(**bad))
 
@@ -299,89 +264,88 @@ def test_fisher_names_and_jac_method_matrix():
     with pytest.raises(ValueError):
         forward.canonical_params(_p(fisher_params=["lnFoo"]))
     # jac_method is canonical -- certified FD by default, unknown refused
-    assert forward.canonical_params(
-        _p(fisher_params=["lnKzz"]))["jac_method"] == "fd"
+    assert forward.canonical_params(_p(fisher_params=["lnKzz"]))["jac_method"] == "fd"
     with pytest.raises(ValueError):
-        forward.canonical_params(_p(fisher_params=["lnKzz"],
-                                    jac_method="magic"))
+        forward.canonical_params(_p(fisher_params=["lnKzz"], jac_method="magic"))
     # the warm-jvp AD rows are validated only photo-on; they cover the
     # CHEMISTRY rows, composition directions included (the C-rich b_z corner
     # refuses at run time), so comp-only selections KEEP 'ad'
-    cp = forward.canonical_params(_p(fisher_params=["lnZ", "dlnCO"],
-                                     jac_method="ad"))
+    cp = forward.canonical_params(_p(fisher_params=["lnZ", "dlnCO"], jac_method="ad"))
     assert cp["jac_method"] == "ad"
     with pytest.raises(ValueError):
-        forward.canonical_params(_p(fisher_params=["lnKzz"], jac_method="ad",
-                                    use_photo=False))
+        forward.canonical_params(_p(fisher_params=["lnKzz"], jac_method="ad", use_photo=False))
     # ... but the photo-off refusal covers CHEMISTRY rows only: a cloud-deck
     # row is an RT-only jvp on the converged column, photolysis-independent,
     # so an all-RT-only request keeps 'ad' photo-off
-    cp = forward.canonical_params(_p(fisher_params=["log_kappa_cloud"],
-                                     jac_method="ad", use_photo=False,
-                                     cloud_on=True))
+    cp = forward.canonical_params(
+        _p(fisher_params=["log_kappa_cloud"], jac_method="ad", use_photo=False, cloud_on=True)
+    )
     assert cp["jac_method"] == "ad"
     assert cp["fisher_params"] == ["log_kappa_cloud"]
     # one chemistry row in the set is enough to refuse the whole request
     with pytest.raises(ValueError, match="chemistry rows"):
-        forward.canonical_params(_p(fisher_params=["log_kappa_cloud", "lnZ"],
-                                    jac_method="ad", use_photo=False,
-                                    cloud_on=True))
+        forward.canonical_params(
+            _p(fisher_params=["log_kappa_cloud", "lnZ"], jac_method="ad", use_photo=False, cloud_on=True)
+        )
     # with no Jacobian requested the knob is inert -- normalized to 'fd' so
     # it cannot fragment the cache key, and photo-off is then fine
     assert forward.canonical_params(_p(jac_method="ad"))["jac_method"] == "fd"
-    assert forward.canonical_params(
-        _p(jac_method="ad", use_photo=False))["jac_method"] == "fd"
+    assert forward.canonical_params(_p(jac_method="ad", use_photo=False))["jac_method"] == "fd"
 
 
 _PIC = dict(planet="wasp39b", chem_provider="picaso")
 
 
-@pytest.mark.parametrize("kw", [
-    dict(),
-    dict(science_mode="emission", fisher_params=["lnZ", "dlnCO"]),
-    dict(tp_mode="guillot", fisher_params=["Tirr"]),
-    dict(tp_mode="guillot", picaso_quench=True, kzz_const=1.0e10),
-    dict(tp_mode="file"),
-])
+@pytest.mark.parametrize(
+    "kw",
+    [
+        dict(),
+        dict(science_mode="emission", fisher_params=["lnZ", "dlnCO"]),
+        dict(tp_mode="guillot", fisher_params=["Tirr"]),
+        dict(tp_mode="guillot", picaso_quench=True, kzz_const=1.0e10),
+        dict(tp_mode="file"),
+    ],
+)
 def test_picaso_payloads_are_idempotent_and_carry_their_own_keys(kw):
     cp = forward.canonical_params({**_PIC, **kw})
     assert forward.canonical_params(cp) == cp
-    assert cp["picaso_stack"] == forward.PICASO_STACK and cp["network"] == ""
+    assert cp["picaso_stack"] == model_defs.PICASO_STACK and cp["network"] == ""
     assert cp["use_photo"] is False and cp["kzz_mode"] == "const"
     climate = cp["tp_mode"] == "picaso_climate"
-    assert (cp["rfacv"] > 0) == climate and (cp["star_teff"] > 0) == (
-        climate or cp["science_mode"] == "emission")
+    assert (cp["rfacv"] > 0) == climate and (cp["star_teff"] > 0) == (climate or cp["science_mode"] == "emission")
     assert (cp["kzz_const"] > 0) == cp["picaso_quench"]
     # the PICASO keys never reach a VULCAN payload
-    assert not {"rfacv", "picaso_quench", "picaso_stack"} & set(
-        forward.canonical_params(_p()))
+    assert not {"rfacv", "picaso_quench", "picaso_stack"} & set(forward.canonical_params(_p()))
 
 
 def test_picaso_lnz_stencil_turns_one_sided_at_the_metallicity_cap():
     # the 10x default keeps its lnZ row; VULCAN's stencil is unchanged
-    assert forward.fd_stencil("lnZ", 10.0, 0.99, forward.PICASO_MET_RANGE[1])[0] == (-1, -2, -4)
-    assert forward.fd_stencil("lnZ", 10.0, 0.99)[0] == (1, -1, 2, -2)
+    assert jacobian.fd_stencil("lnZ", 10.0, 0.99, model_defs.PICASO_MET_RANGE[1])[0] == (-1, -2, -4)
+    assert jacobian.fd_stencil("lnZ", 10.0, 0.99)[0] == (1, -1, 2, -2)
     forward.canonical_params({**_PIC, "fisher_params": ["lnZ"]})
 
 
-@pytest.mark.parametrize("kw,msg", [
-    (dict(use_photo=True), "VULCAN-JAX settings"),
-    (dict(network="sncho"), "VULCAN-JAX settings"),
-    (dict(kzz_mode="JM16"), "VULCAN-JAX settings"),
-    (dict(kzz_x=2.0), "VULCAN-JAX settings"),
-    (dict(jac_method="ad", fisher_params=["lnZ"]), "finite differences"),
-    (dict(picaso_quench=True, fisher_params=["lnKzz"]), "staircase"),
-    (dict(rfacv=0.0), "rfacv"),
-    (dict(Tint=40.0), "Tint"),
-    (dict(fisher_params=["Tint"]), "not a PICASO climate Fisher row"),
-    (dict(p_btm_bar=200.0), "100 bar"),
-    (dict(extra_mols=["N2O"]), "equilibrium species"),
-    (dict(chem_provider="vulcan", tp_mode="picaso_climate"), "chem_provider='picaso'"),
-    (dict(chem_provider="vulcan", rfacv=0.5), "PICASO settings"),
-    (dict(chem_provider="exo"), "unknown chem_provider"),
-    (dict(met_x_solar=20.0), "PICASO engine's range"),
-    (dict(tp_mode="file", picaso_quench=True), "quench search needs it"),
-])
+@pytest.mark.parametrize(
+    ("kw", "msg"),
+    [
+        (dict(use_photo=True), "VULCAN-JAX settings"),
+        (dict(network="sncho"), "VULCAN-JAX settings"),
+        (dict(kzz_mode="JM16"), "VULCAN-JAX settings"),
+        (dict(kzz_x=2.0), "VULCAN-JAX settings"),
+        (dict(jac_method="ad", fisher_params=["lnZ"]), "finite differences"),
+        (dict(picaso_quench=True, fisher_params=["lnKzz"]), "staircase"),
+        (dict(rfacv=0.0), "rfacv"),
+        (dict(Tint=40.0), "Tint"),
+        (dict(fisher_params=["Tint"]), "not a PICASO climate Fisher row"),
+        (dict(p_btm_bar=200.0), "100 bar"),
+        (dict(extra_mols=["N2O"]), "equilibrium species"),
+        (dict(chem_provider="vulcan", tp_mode="picaso_climate"), "chem_provider='picaso'"),
+        (dict(chem_provider="vulcan", rfacv=0.5), "PICASO settings"),
+        (dict(chem_provider="exo"), "unknown chem_provider"),
+        (dict(met_x_solar=20.0), "PICASO engine's range"),
+        (dict(tp_mode="file", picaso_quench=True), "quench search needs it"),
+    ],
+)
 def test_picaso_refusals(kw, msg):
     with pytest.raises(ValueError, match=msg):
         forward.canonical_params({**_PIC, **kw})
@@ -392,11 +356,9 @@ def test_rt_knobs_defaults_validation_and_cache_key():
     cp = forward.canonical_params(_p())
     assert cp["rt_ptop_bar"] == 1.0e-7
     assert cp["rt_integration"] == "simpson"
-    cp = forward.canonical_params(_p(rt_ptop_bar=1.0e-6,
-                                     rt_integration="trapezoid"))
+    cp = forward.canonical_params(_p(rt_ptop_bar=1.0e-6, rt_integration="trapezoid"))
     assert (cp["rt_ptop_bar"], cp["rt_integration"]) == (1.0e-6, "trapezoid")
-    for bad in (dict(rt_ptop_bar=1.0e-5), dict(rt_ptop_bar=1.0e-10),
-                dict(rt_integration="euler")):
+    for bad in (dict(rt_ptop_bar=1.0e-5), dict(rt_ptop_bar=1.0e-10), dict(rt_integration="euler")):
         with pytest.raises(ValueError):
             forward.canonical_params(_p(**bad))
     # a LIVE RT knob must change the cache key (different physics)
@@ -409,25 +371,33 @@ def test_chem_key_separates_chemistry_from_rt_only_edits():
     """The chemistry-level cache key is invariant under every stripped
     RT/observable-only key (an RT edit must reuse the solved column) and
     moves with chemistry-relevant parameters (a wrong hit would corrupt
-    every downstream product). Every stripped key is a canonical key."""
+    every downstream product). Every stripped key is a canonical key.
+    """
     cp = forward.canonical_params(_p())
-    assert set(forward.CHEM_IRRELEVANT_PARAMS) <= set(cp)
-    k0 = forward.chem_key(_p())
-    for kw in (dict(cloud_on=True, log_kappa_cloud=-1.0),
-               dict(wo_mols=["H2O"]),
-               dict(fisher_params=["lnZ"], jac_method="ad"),
-               dict(star_teff=5300.0),
-               dict(rt_integration="trapezoid")):
-        assert forward.chem_key(_p(**kw)) == k0, kw
+    assert set(model_cache.CHEM_IRRELEVANT_PARAMS) <= set(cp)
+    k0 = model_cache.chem_key(_p())
+    for kw in (
+        dict(cloud_on=True, log_kappa_cloud=-1.0),
+        dict(wo_mols=["H2O"]),
+        dict(fisher_params=["lnZ"], jac_method="ad"),
+        dict(star_teff=5300.0),
+        dict(rt_integration="trapezoid"),
+    ):
+        assert model_cache.chem_key(_p(**kw)) == k0, kw
         # the flat key must still see live RT knobs (pinned above); the
         # chem key must not
     # rt_ptop_bar is dual-use: the chemistry grid top follows it. p_ref_bar is
     # the pressure the catalogue radius/gravity apply at, so it sets the
     # chemistry's own radius anchor and moves the converged column.
-    for kw in (dict(met_x_solar=5.0), dict(co_ratio=0.3),
-               dict(p_btm_bar=50.0), dict(nz=110), dict(rt_ptop_bar=1.0e-8),
-               dict(p_ref_bar=0.05)):
-        assert forward.chem_key(_p(**kw)) != k0, kw
+    for kw in (
+        dict(met_x_solar=5.0),
+        dict(co_ratio=0.3),
+        dict(p_btm_bar=50.0),
+        dict(nz=110),
+        dict(rt_ptop_bar=1.0e-8),
+        dict(p_ref_bar=0.05),
+    ):
+        assert model_cache.chem_key(_p(**kw)) != k0, kw
 
 
 def test_data_revision_keys_the_cache_without_moving_the_unset_keys(monkeypatch):
@@ -436,20 +406,21 @@ def test_data_revision_keys_the_cache_without_moving_the_unset_keys(monkeypatch)
     BOTH caches (the mount is synced wholesale, so a chemistry miss is the safe
     direction), and an unset value keys nothing -- a local tree that only
     changes by hand keeps every key it already has, including the pinned
-    WASP-39 b reference below."""
+    WASP-39 b reference below.
+    """
     monkeypatch.delenv("JWST_TOOL_DATA_REVISION", raising=False)
-    k0, c0 = forward.params_key(_p()), forward.chem_key(_p())
+    k0, c0 = forward.params_key(_p()), model_cache.chem_key(_p())
     assert "data_revision" not in forward.canonical_params(_p())
-    for blank in ("", "   "):                       # whitespace is not a revision
+    for blank in ("", "   "):  # whitespace is not a revision
         monkeypatch.setenv("JWST_TOOL_DATA_REVISION", blank)
-        assert (forward.params_key(_p()), forward.chem_key(_p())) == (k0, c0)
+        assert (forward.params_key(_p()), model_cache.chem_key(_p())) == (k0, c0)
     monkeypatch.setenv("JWST_TOOL_DATA_REVISION", "a" * 40)
-    k1, c1 = forward.params_key(_p()), forward.chem_key(_p())
+    k1, c1 = forward.params_key(_p()), model_cache.chem_key(_p())
     assert k1 != k0 and c1 != c0
     monkeypatch.setenv("JWST_TOOL_DATA_REVISION", "b" * 40)
-    assert forward.params_key(_p()) != k1 and forward.chem_key(_p()) != c1
+    assert forward.params_key(_p()) != k1 and model_cache.chem_key(_p()) != c1
     monkeypatch.setenv("JWST_TOOL_DATA_REVISION", "a" * 40)
-    assert (forward.params_key(_p()), forward.chem_key(_p())) == (k1, c1)
+    assert (forward.params_key(_p()), model_cache.chem_key(_p())) == (k1, c1)
     # ... and canonical_params must accept its OWN output: the key is appended
     # from the environment, so every re-canonicalization (an uncached worker
     # run, a share_config reload) feeds it straight back in; refusing it
@@ -459,36 +430,10 @@ def test_data_revision_keys_the_cache_without_moving_the_unset_keys(monkeypatch)
     assert cp["data_revision"] == "a" * 40
     assert forward.canonical_params(cp) == cp
     from jwst_tool import share_config
+
     share = share_config.build_share(cp, goal={}, observation={})
     assert share["canonical_params"]["data_revision"] == "a" * 40
-    assert share_config.widget_state(share, "n0_{}".format)["n0_planet"] \
-        == "wasp39b"
-
-
-# --- WASP-39 b reference state: DO NOT let this drift ------------------------
-# The REFERENCE configuration (tp_mode="file", the shipped evening-terminator
-# table) is the one measured against the published JWST detection, and also
-# the DEFAULT. The guard anchors to the EXPLICIT file-mode
-# config so it protects the reference even if the default moves.
-# Re-measure against the literature before updating expected values.
-W39B_REFERENCE = {
-    "tp_mode": "file",                      # measured evening-terminator table
-    "tp_file": "shipped",
-    "tp_file_sha1": "1a4ce744e65205d8",     # exact profile bytes (T AND Kzz)
-    "kzz_mode": "file",                     # mixing from the table, not a stand-in
-    "kzz_const": 0.0,                       # inert once tabulated
-    "met_x_solar": 10.0,                    # Tsai+2023 10x solar
-    "co_ratio": 0.55,                       # CO_DEFAULT (maintainer):
-                                            # the cfg C_H/O_H 0.549348 rounded
-                                            # onto the 0.05 widget grid; the
-                                            # 0.12% composition shift awaits
-                                            # the SO2 re-measure noted below
-    "use_photo": True,                      # SO2 is photochemical; non-negotiable
-    "sl_angle_deg": 83.0,                   # Tsai+2023 terminator slant
-    "use_vm_mol": False,                    # the validated baseline chemistry
-    "nz": 100,
-    "network": "sncho2025",                 # G395H SO2 4.23 sigma, as on sncho (v61)
-}
+    assert share_config.widget_state(share, "n0_{}".format)["n0_planet"] == "wasp39b"
 
 
 def test_wasp39b_reference_state_is_the_literature_validated_one():
@@ -500,7 +445,8 @@ def test_wasp39b_reference_state_is_the_literature_validated_one():
             f"WASP-39 b reference {key}: {cp[key]!r} != {want!r}. This "
             "changes the atmosphere behind the published-detection agreement "
             "-- re-measure G395H SO2 against Alderson+2023 / Tsai+2023 "
-            "before updating W39B_REFERENCE.")
+            "before updating W39B_REFERENCE."
+        )
 
 
 def test_network_semantics():
@@ -522,11 +468,11 @@ def test_network_semantics():
     # (b)
     cpn = forward.canonical_params(_p(network="ncho"))
     assert cpn["wo_mols"] == [m for m in forward.MOLECULES if m != "SO2"]
-    assert forward.active_molecules(cpn) == cpn["wo_mols"]
-    assert not set(forward.active_molecules(
-        forward.canonical_params(
-            _p(network="ncho",
-               extra_mols=["HCN", "NH3"])))) & forward._S_MOLECULES
+    assert model_defs.active_molecules(cpn) == cpn["wo_mols"]
+    assert (
+        not set(model_defs.active_molecules(forward.canonical_params(_p(network="ncho", extra_mols=["HCN", "NH3"]))))
+        & model_defs.S_MOLECULES
+    )
     with pytest.raises(ValueError):
         forward.canonical_params(_p(network="ncho", extra_mols=["H2S"]))
     with pytest.raises(ValueError):
@@ -537,17 +483,14 @@ def test_network_semantics():
         with pytest.raises(ValueError, match="network='sncho'"):
             forward.canonical_params(_p(network=net, use_condense=True))
     # (d) every network is its own cache key, spectrum AND chemistry level
-    keys = {n: forward.params_key(forward.canonical_params(_p(network=n)))
-            for n in forward.NETWORKS}
-    chem = {n: forward.chem_key(forward.canonical_params(_p(network=n)))
-            for n in forward.NETWORKS}
-    assert len(set(keys.values())) == len(set(chem.values())) == len(forward.NETWORKS)
+    keys = {n: forward.params_key(forward.canonical_params(_p(network=n))) for n in model_defs.NETWORKS}
+    chem = {n: model_cache.chem_key(forward.canonical_params(_p(network=n))) for n in model_defs.NETWORKS}
+    assert len(set(keys.values())) == len(set(chem.values())) == len(model_defs.NETWORKS)
     # (e) sncho2025 keeps sulfur, so it offers the same molecules as sncho
-    assert (forward.active_molecules(forward.canonical_params(_p(network="sncho")))
-            == forward.active_molecules(cp))
+    assert model_defs.active_molecules(forward.canonical_params(_p(network="sncho"))) == model_defs.active_molecules(cp)
 
 
-@pytest.mark.parametrize("network", sorted(forward.CO_MAX))
+@pytest.mark.parametrize("network", sorted(model_defs.CO_MAX))
 @pytest.mark.parametrize("use_photo", [True, False])
 def test_co_bound_is_per_network_and_shared_by_every_surface(network, use_photo):
     """One inclusive C/O bound per (network, photolysis), and the API and
@@ -568,37 +511,40 @@ def test_co_bound_is_per_network_and_shared_by_every_surface(network, use_photo)
     import importlib.util
     from pathlib import Path
 
-    lo, hi = forward.co_bounds(network, use_photo)
-    assert lo == forward.CO_MIN
+    lo, hi = model_defs.co_bounds(network, use_photo)
+    assert lo == model_defs.CO_MIN
     # photolysis off lifts every network to the same permissive ceiling
-    assert hi == (forward.CO_MAX[network] if use_photo
-                  else forward.CO_MAX_PHOTO_OFF)
+    assert hi == (model_defs.CO_MAX[network] if use_photo else model_defs.CO_MAX_PHOTO_OFF)
     # both ends inclusive, and nothing past either
     _q = {"network": network, "use_photo": use_photo}
     for co in (lo, hi):
-        assert forward.canonical_params(
-            _p(co_ratio=co, **_q))["co_ratio"] == co
+        assert forward.canonical_params(_p(co_ratio=co, **_q))["co_ratio"] == co
     with pytest.raises(ValueError, match="below the modelled minimum"):
         forward.canonical_params(_p(co_ratio=lo * 0.5, **_q))
     with pytest.raises(ValueError, match="too high for this setup") as e:
         forward.canonical_params(_p(co_ratio=hi * 1.01, **_q))
     # an escape is named only when one exists: at the permissive ceiling all
     # three are already in force, so suggesting them would be false advice
-    assert ("Try the" in str(e.value)) is (hi < forward.CO_MAX_PHOTO_OFF)
+    assert ("Try the" in str(e.value)) is (hi < model_defs.CO_MAX_PHOTO_OFF)
     # the widget spans the WHOLE range, so nothing silently clamps a stored
     # value when the network or the photolysis switch moves
-    src = Path(importlib.util.find_spec("jwst_tool.app").origin).read_text()
-    co_calls = [n for n in ast.walk(ast.parse(src))
-                if isinstance(n, ast.Call)
-                and isinstance(n.func, ast.Attribute)
-                and n.func.attr == "number_input"
-                and any(kw.arg == "key" and isinstance(kw.value, ast.Call)
-                        and kw.value.args
-                        and getattr(kw.value.args[0], "value", None) == "co"
-                        for kw in n.keywords)]
+    src = Path(importlib.util.find_spec("jwst_tool.gui_atmosphere").origin).read_text()
+    co_calls = [
+        n
+        for n in ast.walk(ast.parse(src))
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Attribute)
+        and n.func.attr == "number_input"
+        and any(
+            kw.arg == "key"
+            and isinstance(kw.value, ast.Call)
+            and kw.value.args
+            and getattr(kw.value.args[0], "value", None) == "co"
+            for kw in n.keywords
+        )
+    ]
     assert len(co_calls) == 1
-    assert [ast.unparse(a) for a in co_calls[0].args[1:3]] == [
-        "forward.CO_MIN", "forward.CO_MAX_PHOTO_OFF"]
+    assert [ast.unparse(a) for a in co_calls[0].args[1:3]] == ["model_defs.CO_MIN", "model_defs.CO_MAX_PHOTO_OFF"]
 
 
 def test_photo_off_carbon_rich_fd_dlnco_row_is_accepted():
@@ -611,553 +557,17 @@ def test_photo_off_carbon_rich_fd_dlnco_row_is_accepted():
     either bound -- and keeping it photolysis-independent leaves every cached
     Jacobian bit-identical.
     """
-    cp = forward.canonical_params(_p(
-        network="sncho", use_photo=False, co_ratio=5.0,
-        jac_method="fd", fisher_params=["dlnCO"]))
+    cp = forward.canonical_params(
+        _p(network="sncho", use_photo=False, co_ratio=5.0, jac_method="fd", fisher_params=["dlnCO"])
+    )
     assert cp["co_ratio"] == 5.0 and cp["use_photo"] is False
-    offs, h = forward.fd_stencil("dlnCO", 5.0, forward.CO_MAX["sncho"])
-    assert offs == (-1, -2, -4) and h == forward.FD_STEPS["dlnCO"] / 2
+    offs, h = jacobian.fd_stencil("dlnCO", 5.0, model_defs.CO_MAX["sncho"])
+    assert offs == (-1, -2, -4) and h == jacobian.FD_STEPS["dlnCO"] / 2
     # every stencil point stays inside the photolysis-aware envelope
-    lo, hi = forward.co_bounds("sncho", False)
+    lo, hi = model_defs.co_bounds("sncho", False)
     assert all(lo <= 5.0 * math.exp(s * h) <= hi for s in offs)
     # ... and the same request with photolysis ON is refused before any solve
     with pytest.raises(ValueError, match="too high for this setup"):
-        forward.canonical_params(_p(
-            network="sncho", use_photo=True, co_ratio=5.0,
-            jac_method="fd", fisher_params=["dlnCO"]))
-
-
-def test_wo_mols_end_to_end_semantics():
-    """The leave-one-out contract, end to end at the numpy level.
-
-    (a) canonical form: default = every RT molecule in fold order; a subset
-        canonicalizes to fold order deduped; unknown molecules refuse; [] is
-        the constrain goal's valid empty set.
-    (b) cache honesty: [] / subset / default are three different keys -- a
-        constrain run must never serve a detect run's cache slot.
-    (c) the progress contract mirrors the real solve sequence: no removed-
-        molecule stage for [], exactly one batch stage otherwise.
-    (d) consumers index depth_wo by the model's wo_mols, never by mols, and
-        refuse loudly when the target has no removed spectrum.
-    (e) the GUI asks for the TARGET only on detect and [] on constrain
-        (the score reads one row, and the all-molecule block dominates a cold
-        run) -- the all-molecule batch stays reachable through the API's
-        wo_mols=None default.
-    """
-    # (a) canonicalization
-    cp = forward.canonical_params(_p())
-    assert cp["wo_mols"] == forward.MOLECULES
-    cp = forward.canonical_params(_p(extra_mols=["HCN", "C2H2"]))
-    assert cp["wo_mols"] == forward.MOLECULES + ["C2H2", "HCN"]
-    cp = forward.canonical_params(_p(wo_mols=["SO2", "H2O", "SO2"]))
-    assert cp["wo_mols"] == ["H2O", "SO2"]          # fold order, deduped
-    assert forward.canonical_params(_p(wo_mols=[]))["wo_mols"] == []
-    with pytest.raises(ValueError):
-        forward.canonical_params(_p(wo_mols=["HCN"]))   # not in the RT set
-    # a saved canonical payload round-trips unchanged (share_config path)
-    assert forward.canonical_params(cp)["wo_mols"] == cp["wo_mols"]
-    # (b) cache keys
-    k_all = forward.params_key(_p())
-    k_none = forward.params_key(_p(wo_mols=[]))
-    k_sub = forward.params_key(_p(wo_mols=["H2O"]))
-    assert len({k_all, k_none, k_sub}) == 3
-    assert forward.params_key(_p(wo_mols=forward.MOLECULES)) == k_all
-    # (c) progress stages mirror the solve sequence
-    for kw, n_wo_stages in ((dict(), 1), (dict(wo_mols=[]), 0),
-                            (dict(science_mode="emission",
-                                  tp_mode="guillot", Tirr=1560.0), 1),
-                            (dict(science_mode="emission", wo_mols=[],
-                                  tp_mode="guillot", Tirr=1560.0), 0)):
-        lines = []
-        advance, _fin = forward._make_progress(
-            forward.canonical_params(_p(**kw)), lambda s, _l=lines: _l.append(s))
-        while True:
-            try:
-                advance()
-            except IndexError:
-                break
-        assert sum("removed-molecule" in s for s in lines) == n_wo_stages, kw
-    # (d) consumers follow wo_mols alignment
-    from jwst_tool import detect
-    n = 8
-    order = np.arange(n)
-    model = {"wo_mols": np.array(["CO2"], dtype="U8"),
-             "depth_wo": np.arange(n, dtype=float)[None, :] * 1e-3}
-    mols = ["H2O", "CO2", "CO"]
-    got = detect._removed_spectrum(model, mols, "CO2", order)
-    assert np.array_equal(got, model["depth_wo"][0])     # NOT mols.index -> 1
-    assert detect._removed_spectrum(model, mols, None, order) is None
-    with pytest.raises(ValueError, match="wo_mols"):
-        detect._removed_spectrum(model, mols, "CO", order)   # constrain cache
-    with pytest.raises(ValueError, match="extra_mols"):
-        detect._removed_spectrum(model, mols, "HCN", order)  # not in RT set
-    with pytest.raises(KeyError):
-        detect._removed_spectrum({"depth_wo": model["depth_wo"]},
-                                 mols, "CO2", order)     # malformed payload
-
-    emission = {**model, "science_mode": "emission",
-                "emis_thin_flux_frac_wo": np.array([0.0])}
-    assert np.array_equal(
-        detect._removed_spectrum(emission, mols, "CO2", order),
-        model["depth_wo"][0])
-    with pytest.raises(ValueError, match="emis_thin_flux_frac_wo"):
-        detect._removed_spectrum(
-            {"wo_mols": model["wo_mols"], "science_mode": "emission"},
-            mols, "CO2", order)
-    for malformed in (np.array([np.nan]), np.array([0.0, 0.0]),
-                      np.array([1.1])):        # non-finite, wrong shape, > 1
-        with pytest.raises(ValueError, match="emis_thin_flux_frac_wo"):
-            detect._removed_spectrum(
-                {"wo_mols": model["wo_mols"], "science_mode": "emission",
-                 "emis_thin_flux_frac_wo": malformed},
-                mols, "CO2", order)
-    # (e) the GUI wiring: target-only on detect, [] on constrain
-    from pathlib import Path
-    app_src = (Path(__file__).resolve().parents[2] / "src" / "jwst_tool"
-               / "app.py").read_text()
-    assert 'wo_mols=([target_mol] if goal == "detect" else [])' in app_src, \
-        "the GUI must ask for the target-only removed spectrum on detect"
-
-
-def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
-    # The key hashes every canonical parameter: if ANY default feeding the
-    # reference run changes, this trips even when the pins above still pass.
-    # Re-pinning it follows a _VERSION bump (the version is a canonical key):
-    # record what moved the spectrum, and whether the canonical
-    # parameter SET moved with it.
-    # The G395H SO2 significance behind this configuration was re-measured at
-    # v61 (notes "Composition, C/O bounds and networks").
-    assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b", tp_mode="file"))) == "58d1754cf09089de"
-    # ... and the bare DEFAULT run is that same atmosphere
-    assert forward.params_key(forward.canonical_params(
-        dict(planet="wasp39b"))) == "58d1754cf09089de"
-    # the sha1 pin is only meaningful re-derived from the file the run
-    # actually reads -- this catches the table itself being swapped
-    path = forward._shipped_tp_file("wasp39b")
-    assert path.name == "atm_W39b_evening_TP_Kzz.txt"
-    tab = forward._read_tp_table(path)
-    assert tab["Kzz"] is not None, "the reference table must carry its Kzz column"
-    import hashlib
-    assert hashlib.sha1(path.read_bytes()).hexdigest()[:16] == \
-        W39B_REFERENCE["tp_file_sha1"]
-
-
-# --- tp_mode="file" ---------------------------------------------------------
-
-def test_file_mode_content_addressing_hygiene_and_bad_tables(tmp_path):
-    p1 = _table(tmp_path, name="a.txt")
-    p2 = _table(tmp_path, name="b.txt")               # same content, other path
-    p3 = _table(tmp_path, name="c.txt", tmax=1500.0)  # different content
-    cp1 = forward.canonical_params(_pf(p1))
-    assert cp1["tp_file_sha1"] and len(cp1["tp_file_sha1"]) == 16
-    assert forward.params_key(_pf(p1)) == forward.params_key(_pf(p2))
-    assert forward.params_key(_pf(p1)) != forward.params_key(_pf(p3))
-    # a tabulated profile has NO T-P Fisher rows
-    assert forward.TP_PARAM_NAMES["file"] == []
-    cp = forward.canonical_params(_pf(p1, fisher_params=["lnZ", "lnKzz"]))
-    assert cp["fisher_params"] == ["lnKzz", "lnZ"]
-    with pytest.raises(ValueError):
-        forward.canonical_params(_pf(p1, fisher_params=["Tirr"]))
-    # parametric T-P knobs are zeroed in file mode (cache hygiene) ...
-    cp = forward.canonical_params(_pf(p1, Tirr=1560.0))
-    assert cp["Tirr"] == cp["Tint"] == cp["log_kappa"] == cp["log_gamma"] == 0.0
-    # ... and outside file mode the file identity is empty
-    cp_g = forward.canonical_params(_p())
-    assert cp_g["tp_file"] == "" and cp_g["tp_file_sha1"] == ""
-    # malformed tables are rejected loudly: non-monotonic pressures, a
-    # profile outside the modelable window, too few rows, no Pressure
-    # column, and a path this machine does not hold
-    nocol = tmp_path / "nocol.txt"
-    nocol.write_text("#(dyne/cm2) (K)\nPress\tT\n1e6\t1000\n1e5\t900\n"
-                     "1e4\t800\n1e3\t700\n")
-    for path in (_table(tmp_path, scramble=True, name="scram.txt"),
-                 _table(tmp_path, tmax=3300.0, name="hot.txt"),
-                 _table(tmp_path, rows=3, name="short.txt"),
-                 nocol, tmp_path / "missing.txt"):
-        with pytest.raises(ValueError):
-            forward.canonical_params(_pf(path))
-
-    # canonical_params is idempotent in file mode too
-    # The GUI hands the SUBPROCESS canonical_params(params) as its params
-    # file, so canonicalization must be idempotent (given a resolvable path).
-    p = _table(tmp_path)
-    cp = forward.canonical_params(_pf(p))
-    cp2 = forward.canonical_params({**cp, "tp_file_path": str(p)})
-    assert cp2 == cp
-
-
-# --- kzz_mode ---------------------------------------------------------------
-
-
-
-def test_kzz_modes_validate_and_zero_inert_knobs(tmp_path):
-    with pytest.raises(ValueError):
-        forward.canonical_params(_p(kzz_mode="file"))
-    no_kzz = _table(tmp_path, kzz=False, name="nokzz.txt")
-    with pytest.raises(ValueError):
-        forward.canonical_params(_pf(no_kzz, kzz_mode="file"))
-    cp = forward.canonical_params(_pf(_table(tmp_path), kzz_mode="file"))
-    assert cp["kzz_const"] == cp["kzz_kmax"] == cp["kzz_plev"] == 0.0
-    assert cp["kzz_kdeep"] == 0.0
-    # parametric modes: only the active mode's knobs survive (cache hygiene)
-    cp = forward.canonical_params(_p(kzz_mode="Pfunc", kzz_kmax=1.0e5,
-                                     kzz_plev=0.1))
-    assert cp["kzz_kmax"] == 1.0e5 and cp["kzz_plev"] == 0.1
-    assert cp["kzz_const"] == 0.0 and cp["kzz_kdeep"] == 0.0
-    cp = forward.canonical_params(_p(kzz_mode="JM16", kzz_kdeep=1.0e6))
-    assert cp["kzz_kdeep"] == 1.0e6
-    assert cp["kzz_const"] == cp["kzz_kmax"] == cp["kzz_plev"] == 0.0
-    for bad in (dict(kzz_mode="Pfunc", kzz_kmax=1.0e15, kzz_plev=0.1),
-                dict(kzz_mode="Pfunc", kzz_kmax=1.0e5, kzz_plev=1.0e5),
-                dict(kzz_mode="JM16", kzz_kdeep=1.0),
-                dict(kzz_mode="scale")):
-        with pytest.raises(ValueError):
-            forward.canonical_params(_p(**bad))
-
-
-# --- removed boundary fluxes / escape / settling -----------------------------
-
-def test_boundary_flux_escape_and_settling_are_removed():
-    """Cache-neutral removal: the four keys stay in the canonical payload
-    pinned off, so no cached spectrum's key moved, and any enabling value
-    is refused instead of silently ignored."""
-    cp0 = forward.canonical_params(_p())
-    assert cp0["use_settling"] is False and cp0["diff_esc"] == []
-    assert cp0["top_flux"] == [] and cp0["bot_flux"] == []
-    for enabling in (dict(use_settling=True),
-                     dict(diff_esc=["H2"]),
-                     dict(top_flux=[["H2O", 1.0e8]]),
-                     dict(bot_flux=[["SO2", 1.0e9, 0.1]])):
-        with pytest.raises(ValueError, match="removed from this tool"):
-            forward.canonical_params(_p(**enabling))
-
-
-# --- cloud deck -------------------------------------------------------------
-
-def test_cloud_fisher_rows_require_their_deck(tmp_path):
-    cp = forward.canonical_params(_p(cloud_on=True,
-                                     fisher_params=["lnZ",
-                                                    "log_kappa_cloud",
-                                                    "alpha_cloud"]))
-    assert set(cp["fisher_params"]) == {"alpha_cloud", "lnZ",
-                                        "log_kappa_cloud"}
-    with pytest.raises(ValueError):
-        forward.canonical_params(_p(fisher_params=["log_kappa_cloud"]))
-    # the deck stays freeable in file mode (no parametric T-P required)
-    cp3 = forward.canonical_params(_pf(
-        _table(tmp_path), cloud_on=True,
-        fisher_params=["lnZ", "log_kappa_cloud"]))
-    assert {"log_kappa_cloud"} <= set(cp3["fisher_params"])
-
-
-def test_every_freeable_param_has_display_metadata():
-    # Any parameter that can be freed in the Fisher forecast is also a valid
-    # constraint goal and a Jacobian row, so it must carry a display label,
-    # unit, symbol, and an FD step -- a missing entry KeyErrors the GUI/run.
-    freeable = (set(forward.CHEM_PARAM_NAMES) | set(forward.CLOUD_FISHER_PARAMS)
-                | {p for ns in forward.TP_PARAM_NAMES.values() for p in ns})
-    for m in (fisher.PARAM_LABELS, fisher.PARAM_UNITS, fisher.PARAM_SYMBOLS,
-              forward.FD_STEPS):
-        assert not (freeable - set(m)), sorted(freeable - set(m))
-
-
-# --- emission mode (science_mode) ------------------------------------------
-
-def test_emission_mode_gating_star_params_and_hygiene(tmp_path):
-    with pytest.raises(ValueError):
-        forward.canonical_params(_p(science_mode="reflection"))
-    cp = forward.canonical_params(_p(science_mode="emission",
-                                     tp_mode="guillot", Tirr=1560.0))
-    assert cp["science_mode"] == "emission"
-    # star defaults come from the planet registry
-    assert cp["star_teff"] == 5485.0 and cp["star_logg"] == 4.5
-    # transmission zeroes the star identity (it is noise-side only there)
-    cp_t = forward.canonical_params(_p())
-    assert cp_t["star_teff"] == cp_t["star_logg"] == cp_t["star_feh"] == 0.0
-    # rayleigh + chord scheme are transmission-only: normalized in emission
-    cp_e = forward.canonical_params(_p(science_mode="emission",
-                                       tp_mode="guillot", Tirr=1560.0,
-                                       use_rayleigh=True,
-                                       rt_integration="trapezoid"))
-    assert cp_e["use_rayleigh"] is False
-    assert cp_e["rt_integration"] == "simpson"
-    with pytest.raises(ValueError):
-        forward.canonical_params(_p(science_mode="emission",
-                                    tp_mode="guillot", Tirr=1560.0,
-                                    star_teff=10000.0))
-    # emission works with a tabulated profile too
-    cp_f = forward.canonical_params(_pf(_table(tmp_path),
-                                        science_mode="emission"))
-    assert cp_f["science_mode"] == "emission"
-    # The default follows the STRUCTURE, not the geometry -- a measured
-    # table caps the column at its own bottom (7.6 bar for the shipped
-    # tables), parametric profiles get the round 10 bar. Emission needs no
-    # deeper default: measured, 7.6 bar is optically thick (tau 30-370) in
-    # every instrument window.
-    assert cp_f["p_btm_bar"] == forward.P_BTM_FILE_BAR
-    assert cp_t["p_btm_bar"] == forward.P_BTM_PARAMETRIC_BAR
-    # a deeper column is still reachable, and still gated on the table covering
-    with pytest.raises(ValueError):
-        forward.canonical_params(_pf(_table(tmp_path),
-                                     science_mode="emission", p_btm_bar=100.0))
-    cp_d = forward.canonical_params(
-        _pf(_table(tmp_path, name="deep.txt", p_lo_log10=8.1),
-            science_mode="emission", p_btm_bar=100.0))
-    assert cp_d["p_btm_bar"] == 100.0
-    # the two geometries can never share a cache entry
-    assert (forward.params_key(_p(science_mode="emission", tp_mode="guillot",
-                                  Tirr=1560.0))
-            != forward.params_key(_p(tp_mode="guillot", Tirr=1560.0)))
-
-
-# --- composition FD stencils + the dayside emission default ----------------
-
-def test_composition_fd_stencil_envelope():
-    """FD Fisher rows solve the chemistry at every stencil point, so a
-    baseline whose stencil leaves the validated range refuses (met=100 ->
-    122x solar, co=0.12 -> C/O 0.098). The dlnCO stencil steps one-sided away
-    from the network's C/O ceiling instead of across it. AD rows take no
-    stencil and are exempt here (the dlnCO AD row has its own run-time margin
-    gate)."""
-    forward.canonical_params(_p(met_x_solar=80.0, fisher_params=["lnZ"]))
-    for kw, fp in (({"met_x_solar": 100.0}, "lnZ"),
-                   ({"met_x_solar": 0.1}, "lnZ"),
-                   ({"co_ratio": 0.12}, "dlnCO")):
-        with pytest.raises(ValueError, match="stencil"):
-            forward.canonical_params(_p(fisher_params=[fp], **kw))
-    h0 = forward.FD_STEPS["dlnCO"]
-    hi = forward.CO_MAX["sncho"]
-    assert forward.fd_stencil("dlnCO", 0.55, hi) == ((1, -1, 2, -2), h0)
-    assert forward.fd_stencil("dlnCO", 0.89, hi) == ((-1, -2, -4), h0 / 2)
-    assert forward.fd_stencil("lnZ", 0.89, hi) == ((1, -1, 2, -2),
-                                                   forward.FD_STEPS["lnZ"])
-    # the flip follows the network's photolysis-on ceiling, not a literal 1
-    hi25 = forward.CO_MAX["sncho2025"]
-    assert forward.fd_stencil("dlnCO", 2.0, hi25) == ((1, -1, 2, -2), h0)
-    assert forward.fd_stencil("dlnCO", 9.0, hi25) == ((-1, -2, -4), h0 / 2)
-    for co in (0.89, 0.95):
-        forward.canonical_params(_p(co_ratio=co, fisher_params=["dlnCO"]))
-    # both schemes' Richardson rows are exact on a cubic (sign and
-    # coefficients of the one-sided stencil included); the one-sided row is
-    # third order -- on a quartic its error is -f''''(x) h^3 / 3 exactly, so
-    # halving h divides it by 8 -- while the central row stays exact
-    x0, h = 0.3, 0.1
-
-    def f(x):
-        return x ** 3 - 2.0 * x
-
-    def g(x):
-        return x ** 4
-
-    for offs in ((1, -1, 2, -2), (-1, -2, -4)):
-        j1, j2 = forward.fd_estimates(offs, {s: f(x0 + s * h) for s in offs},
-                                      f(x0), h)
-        assert abs((4.0 * j1 - j2) / 3.0 - (3.0 * x0 ** 2 - 2.0)) < 1e-12
-    err = {}
-    for offs, hh in (((-1, -2, -4), h), ((-1, -2, -4), h / 2),
-                     ((1, -1, 2, -2), h)):
-        j1, j2 = forward.fd_estimates(offs, {s: g(x0 + s * hh) for s in offs},
-                                      g(x0), hh)
-        err[offs, hh] = abs((4.0 * j1 - j2) / 3.0 - 4.0 * x0 ** 3)
-    assert abs(err[(-1, -2, -4), h] / err[(-1, -2, -4), h / 2] - 8.0) < 1e-6
-    assert err[(1, -1, 2, -2), h] < 1e-12
-    # no stencil under AD; and without fisher_params the value is legal
-    forward.canonical_params(_p(met_x_solar=100.0, fisher_params=["lnZ"],
-                                jac_method="ad"))
-    forward.canonical_params(_p(met_x_solar=100.0))
-
-
-def test_emission_defaults_to_the_dayside_temperature():
-    """An eclipse sees the DAYSIDE; a published equilibrium temperature assumes
-    full redistribution, which is a planet-average profile.
-
-    Measured on HD 189733 b against the published MIRI/LRS eclipse spectrum
-    (Inglis et al. 2024): the planet-average default puts the eclipse depth
-    1.35x LOW (chi2 per point 934); the dayside default lands within 3% of the
-    data (chi2 per point 31), the largest single effect in the emission path.
-    """
-    for key in planets.PLANETS:
-        t = forward.canonical_params(
-            dict(planet=key, tp_mode="guillot"))["Tirr"]
-        e = forward.canonical_params(
-            dict(planet=key, tp_mode="guillot", science_mode="emission"))["Tirr"]
-        # 2**0.25 in temperature, on the 10 K rounding grid the widget uses
-        assert e > t, key
-        assert e == pytest.approx(t * 2 ** 0.25, abs=10.0), (key, t, e)
-    # an explicit T_irr still wins in both geometries
-    for mode in ("transmission", "emission"):
-        cp = forward.canonical_params(dict(planet="wasp39b", tp_mode="guillot",
-                                           science_mode=mode, Tirr=1234.0))
-        assert cp["Tirr"] == 1234.0
-
-
-# --- unknown-key rejection -------------------------------------------------
-
-def test_unknown_keys_refuse_with_a_hint_and_output_round_trips():
-    # Unknown keys must refuse, never drop: a silently ignored
-    # {"mode": "emission"} scores a TRANSMISSION spectrum against eclipse
-    # data (chi2/N ~ 5e5).
-    with pytest.raises(ValueError, match="science_mode"):
-        forward.canonical_params(_p(mode="emission"))
-    with pytest.raises(ValueError):
-        forward.canonical_params(_p(totally_made_up=1))
-    # ... while share_config validates a SAVED canonical payload by feeding
-    # it back in, so every output key (echo fields included) is accepted
-    cp = forward.canonical_params(dict(planet="wasp39b"))
-    assert set(cp) <= forward._KNOWN_PARAM_KEYS
-    cp2 = forward.canonical_params(dict(cp))
-    assert cp2 == cp
-
-
-def test_param_keys_read_matches_the_source():
-    # _PARAM_KEYS_READ is re-derived from the AST of canonical_params and the
-    # helpers it calls, so adding a parameter without updating the allowlist
-    # fails here instead of silently rejecting the new key at run time.
-    import ast
-    import inspect
-
-    src = inspect.getsource(forward)
-    tree = ast.parse(src)
-    funcs = {"canonical_params", "_resolve_tp_file", "default_p_btm_bar",
-             "_default_tp_mode"}
-    keys = set()
-
-    class V(ast.NodeVisitor):
-        def visit_Call(self, node):
-            f = node.func
-            if (isinstance(f, ast.Attribute) and f.attr == "get"
-                    and isinstance(f.value, ast.Name) and f.value.id == "params"
-                    and node.args and isinstance(node.args[0], ast.Constant)
-                    and isinstance(node.args[0].value, str)):
-                keys.add(node.args[0].value)
-            self.generic_visit(node)
-
-        def visit_Subscript(self, node):
-            if (isinstance(node.value, ast.Name) and node.value.id == "params"
-                    and isinstance(node.slice, ast.Constant)
-                    and isinstance(node.slice.value, str)):
-                keys.add(node.slice.value)
-            self.generic_visit(node)
-
-        def visit_Compare(self, node):
-            if (len(node.comparators) == 1 and isinstance(node.ops[0], ast.In)
-                    and isinstance(node.comparators[0], ast.Name)
-                    and node.comparators[0].id == "params"
-                    and isinstance(node.left, ast.Constant)
-                    and isinstance(node.left.value, str)):
-                keys.add(node.left.value)
-            self.generic_visit(node)
-
-    scanned = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name in funcs:
-            scanned.add(node.name)
-            V().visit(node)
-    assert scanned == funcs, f"missing helper(s): {funcs - scanned}"
-    assert keys == set(forward._PARAM_KEYS_READ)
-
-
-# --- ExoMolOP no-table gate ------------------------------------------------
-
-
-def test_molecule_list_invariants():
-    """Menu/default consistency, none of it enforced by the code itself."""
-    import re
-    # the preselected set must be a selectable subset with tables
-    assert set(forward.EXTRA_MOLECULES_DEFAULT) <= set(forward.EXTRA_MOLECULES)
-    assert not (set(forward.EXTRA_MOLECULES_DEFAULT)
-                & forward._NO_EXOMOLOP_TABLE)
-    # _S_MOLECULES must catch EVERY sulfur-bearing species in either list, or
-    # network="ncho" offers one the sulfur-free network cannot produce.
-    # `S(?![a-z])` so SiO-style names never read as sulfur.
-    s_bearing = {m for m in list(forward.MOLECULES) + forward.EXTRA_MOLECULES
-                 if re.search(r"S(?![a-z])", m)}
-    assert s_bearing == set(forward._S_MOLECULES), (
-        f"_S_MOLECULES misses {sorted(s_bearing - set(forward._S_MOLECULES))} "
-        f"/ over-lists {sorted(set(forward._S_MOLECULES) - s_bearing)}")
-    assert not (set(forward.MOLECULES) & set(forward.EXTRA_MOLECULES))
-
-    # ... and one with no published table refuses at the API
-    # ExoMolOP publishes no CS2/C2H6 k-table: the run must refuse at the
-    # API with the pointed reason, not minutes later inside the RT build.
-    for mol in sorted(forward._NO_EXOMOLOP_TABLE):
-        with pytest.raises(ValueError, match="no published ExoMolOP k-table"):
-            forward.canonical_params(_p(extra_mols=[mol]))
-
-
-
-def test_no_exomolop_table_set_matches_the_installed_tables():
-    # Data-gated cross-check: every OTHER extra must have a table installed,
-    # and the frozenset's species must genuinely lack one. Skips without the
-    # data root so light CI stays green.
-    import importlib.util
-    if importlib.util.find_spec("vulcan_forward") is None:
-        pytest.skip("vulcan_forward not installed")
-    from vulcan_forward import exomolop, paths as _fp
-    try:
-        _fp.data_root()
-    except RuntimeError:
-        pytest.skip("VULCAN_FORWARD_DATA not configured")
-    have = set(exomolop.available())
-    if not have:
-        pytest.skip("no ExoMolOP tables installed")
-    for mol in forward._NO_EXOMOLOP_TABLE:
-        assert mol not in have, (
-            f"{mol} now HAS an ExoMolOP table -- remove it from "
-            "forward._NO_EXOMOLOP_TABLE and re-enable it in the GUI default")
-    missing = (set(forward.MOLECULES) | set(forward.EXTRA_MOLECULES)) \
-        - forward._NO_EXOMOLOP_TABLE - have
-    assert not missing, (
-        f"species {sorted(missing)} have no installed ExoMolOP table; fetch "
-        "them or add them to forward._NO_EXOMOLOP_TABLE with a reason")
-
-
-def test_the_chemistry_radius_anchor_is_the_hydrostatic_identity():
-    """The catalogue radius applies at p_ref_bar; chemistry anchors near 1 bar.
-    Converting between them is exact for a constant-T, constant-mu column,
-    where du/dlnP is constant and r(P) = 1/(1/R_ref + C ln(P/P_ref)). Checked
-    against that closed form, then against the two invariants that matter: GM
-    is unchanged (only the LEVEL Rp attaches to moves), and the catalogue
-    gravity comes back at p_ref_bar."""
-    kb, m_u = 1.380649e-16, 1.6605390666e-24
-    p = np.geomspace(7.6, 1e-7, 400)
-    T, mu = np.full(p.size, 1200.0), np.full(p.size, 2.3)
-    rp, gs, p_ref, p_anchor = 9.1438e9, 422.0, 1.0e-3, 0.9233
-    gm = gs * rp ** 2
-    r = forward.radius_at_anchor(p, T, mu, rp, gs, p_ref, p_anchor)
-
-    c = kb * 1200.0 / (2.3 * m_u * gm)
-    assert r == pytest.approx(
-        1.0 / (1.0 / rp + c * np.log(p_anchor / p_ref)), rel=1e-9)
-    assert r < rp                                   # deeper is smaller
-    # GM is level-free, so the catalogue gravity is recovered where it was
-    # quoted
-    back = forward.radius_at_anchor(p, T, mu, r, gm / r ** 2, p_anchor, p_ref)
-    assert back == pytest.approx(rp, rel=1e-9)
-    assert gm / back ** 2 == pytest.approx(gs, rel=1e-9)
-    # the same pressure is a no-op, and outside the column refuses
-    assert forward.radius_at_anchor(p, T, mu, rp, gs, p_ref, p_ref) == \
-        pytest.approx(rp, rel=1e-12)
-    with pytest.raises(ValueError, match="inside the column"):
-        forward.radius_at_anchor(p, T, mu, rp, gs, 50.0, p_anchor)
-
-    # At the allowed 1-bar bottom the engine's anchor can be the exterior
-    # interface. Integrate the remaining half layer at bottom-layer T/mu.
-    p_edge = np.geomspace(1.0, 1e-7, 100)
-    anchor = forward.chem_radius_anchor_bar(p_edge, 1e6, False)
-    assert anchor > p_edge.max()
-    assert forward.radius_at_anchor(
-        p_edge, T[:100], mu[:100], rp, gs, p_ref, anchor) == pytest.approx(
-            1.0 / (1.0 / rp + c * np.log(anchor / p_ref)), rel=1e-9)
-
-
-def test_tint_default_follows_the_planet():
-    """WASP-107 b's Guillot T_int is its published interior temperature
-    (Sing+2024, 460 K); every other preset keeps the generic 100 K, so the
-    WASP-39 b reference key above cannot move. An explicit value wins."""
-    assert forward.canonical_params(dict(planet="wasp107b"))["Tint"] == 460.0
-    assert forward.canonical_params(dict(planet="wasp39b", tp_mode="guillot"))["Tint"] == 100.0
-    assert forward.canonical_params(dict(planet="custom", tp_mode="guillot"))["Tint"] == 100.0
-    assert forward.canonical_params(
-        dict(planet="wasp107b", Tint=120.0))["Tint"] == 120.0
+        forward.canonical_params(
+            _p(network="sncho", use_photo=True, co_ratio=5.0, jac_method="fd", fisher_params=["dlnCO"])
+        )

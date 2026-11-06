@@ -9,6 +9,7 @@ background AND background_level, extraction strategy, sane wavelength span
 published source, and that the parity harness's MODE_KEYS covers every
 registered mode.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -27,15 +28,17 @@ SCRIPTS = Path(__file__).resolve().parents[2] / "validation" / "parity" / "scrip
 def test_display_encodings_are_complete_and_unique():
     """A mode key missing any per-mode table entry is a half-registered mode,
     and while len(MODES) fits the 12-slot palettes every mode must get a
-    DISTINCT color and marker (grayscale print, CVD)."""
+    DISTINCT color and marker (grayscale print, CVD).
+    """
     assert len(ins.MODES) <= 12, (
         "MODES outgrew the 12-slot color/marker palettes -- extend _COLORS/"
-        "_MARKERS (palette-checker validated) before adding the mode")
+        "_MARKERS (palette-checker validated) before adding the mode"
+    )
     for key in ins.MODES:
         assert key in ins.MODE_COLOR, f"{key}: no MODE_COLOR"
         assert re.fullmatch(r"#[0-9a-f]{6}", ins.MODE_COLOR[key]), (
-            f"{key}: MODE_COLOR {ins.MODE_COLOR[key]!r} is not lowercase "
-            "#rrggbb hex")
+            f"{key}: MODE_COLOR {ins.MODE_COLOR[key]!r} is not lowercase #rrggbb hex"
+        )
         assert key in ins.MODE_MARKER, f"{key}: no MODE_MARKER"
         assert ins.MODE_MARKER[key], f"{key}: empty marker"
     colors = list(ins.MODE_COLOR.values())
@@ -45,43 +48,46 @@ def test_display_encodings_are_complete_and_unique():
     # MODE_COLOR/MODE_MARKER are built by enumerate(MODES), so a mode may
     # only ever be APPENDED: inserting one recolors every mode after it
     assert list(ins.MODES)[7] == "nirspec_g395m", (
-        "MODES was reordered -- every mode after the insertion point silently "
-        "changed color and marker")
+        "MODES was reordered -- every mode after the insertion point silently changed color and marker"
+    )
 
 
 def test_ngroup_ordering_and_pandexo_caps_hold_for_every_mode():
     """1 <= ngroup_min <= ngroup_max, and the PandExo per-instrument hard
     caps -- the same conditions the import guard raises on, re-asserted here
-    so the guard itself cannot be quietly deleted."""
+    so the guard itself cannot be quietly deleted.
+    """
     for key, m in ins.MODES.items():
         assert 1 <= m["ngroup_min"] <= m["ngroup_max"], (
-            f"{key}: ngroup ordering broken "
-            f"({m['ngroup_min']}/{m['ngroup_max']})")
+            f"{key}: ngroup ordering broken ({m['ngroup_min']}/{m['ngroup_max']})"
+        )
         # pandeia 2026.7 config.json mingroups, the field PandExo reads
         assert m["ngroup_min"] == (2 if m["instrument"] == "miri" else 1), key
         cap = ins.PANDEXO_NGROUP_MAX.get(m["instrument"])
         if cap is not None:
             assert m["ngroup_max"] <= cap, (
-                f"{key}: ngroup_max {m['ngroup_max']} above the PandExo "
-                f"{m['instrument']} cap {cap}")
+                f"{key}: ngroup_max {m['ngroup_max']} above the PandExo {m['instrument']} cap {cap}"
+            )
 
 
 def test_every_mode_pins_the_full_tso_configuration():
     """Engine defaults are the WRONG (non-TSO) choices, so every mode must
     pin readout_pattern, the extraction strategy, and BOTH background keys
-    explicitly."""
+    explicitly.
+    """
     for key, m in ins.MODES.items():
         assert m["config"]["detector"].get("readout_pattern"), (
-            f"{key}: readout_pattern not pinned (engine defaults are "
-            "non-TSO patterns and drift between releases)")
-        assert m["config"]["detector"].get("subarray"), (
-            f"{key}: subarray not pinned")
+            f"{key}: readout_pattern not pinned (engine defaults are non-TSO patterns and drift between releases)"
+        )
+        assert m["config"]["detector"].get("subarray"), f"{key}: subarray not pinned"
         assert m.get("strategy"), f"{key}: extraction strategy not pinned"
         assert m.get("background") and m.get("background_level"), (
-            f"{key}: background AND background_level must both be pinned")
+            f"{key}: background AND background_level must both be pinned"
+        )
         assert 0.5 < m["wl_min"] < m["wl_max"] <= 15.0, (
             f"{key}: wavelength span {m['wl_min']}-{m['wl_max']} outside the "
-            "forward model's 1-15 um coverage convention")
+            "forward model's 1-15 um coverage convention"
+        )
         assert m.get("label"), f"{key}: no display label"
         assert 0.0 < m["floor_ppm_suggested"] <= 200.0, key
 
@@ -100,37 +106,37 @@ def test_every_mode_pins_the_full_tso_configuration():
 #     curves, rounded inward to 0.05 um.
 #   MIRI: 5-12 um; the 5.0 edge is the jwst-docs slitless-dispersion caution.
 _BAND_SOURCES = {
-    "nirspec_prism": (1.0, 5.30),      # Birkmann T2 PRISM/CLEAR 0.60-5.30
-    "nirspec_g140h": (1.0, 1.83),      # Birkmann T2 0.97-1.31, 1.35-1.83
-    "nirspec_g235h": (1.66, 3.07),     # Birkmann T2 1.66-2.20, 2.27-3.07
-    "nirspec_g235m": (1.66, 3.12),     # Birkmann T2 1.66-3.12
-    "nirspec_g395h": (2.87, 5.18),     # Birkmann T2 2.87-3.72, 3.82-5.18
-    "nirspec_g395m": (2.87, 5.18),     # Birkmann T2 2.87-5.18 (same as G395H)
-    "niriss_soss": (1.0, 2.8),         # pandeia gr700xd_1 clear 0.83-2.81
-    "nircam_f277w": (2.45, 3.10),      # F277W HWHM 2.419-3.130
-    "nircam_f322w2": (2.45, 4.00),     # F322W2 HWHM 2.425-4.012
-    "nircam_f444w": (3.9, 5.00),       # F444W HWHM 3.881-5.009
-    "miri_lrs": (5.0, 12.0),           # LRS 5-12; slitless caution below 5
+    "nirspec_prism": (1.0, 5.30),  # Birkmann T2 PRISM/CLEAR 0.60-5.30
+    "nirspec_g140h": (1.0, 1.83),  # Birkmann T2 0.97-1.31, 1.35-1.83
+    "nirspec_g235h": (1.66, 3.07),  # Birkmann T2 1.66-2.20, 2.27-3.07
+    "nirspec_g235m": (1.66, 3.12),  # Birkmann T2 1.66-3.12
+    "nirspec_g395h": (2.87, 5.18),  # Birkmann T2 2.87-3.72, 3.82-5.18
+    "nirspec_g395m": (2.87, 5.18),  # Birkmann T2 2.87-5.18 (same as G395H)
+    "niriss_soss": (1.0, 2.8),  # pandeia gr700xd_1 clear 0.83-2.81
+    "nircam_f277w": (2.45, 3.10),  # F277W HWHM 2.419-3.130
+    "nircam_f322w2": (2.45, 4.00),  # F322W2 HWHM 2.425-4.012
+    "nircam_f444w": (3.9, 5.00),  # F444W HWHM 3.881-5.009
+    "miri_lrs": (5.0, 12.0),  # LRS 5-12; slitless caution below 5
 }
 
 
 def test_every_mode_band_matches_its_published_source():
     assert set(_BAND_SOURCES) == set(ins.MODES), (
-        "a mode was added or removed without pinning its band to a published "
-        "source -- see _BAND_SOURCES")
+        "a mode was added or removed without pinning its band to a published source -- see _BAND_SOURCES"
+    )
     for key, (lo, hi) in _BAND_SOURCES.items():
         m = ins.MODES[key]
         assert (m["wl_min"], m["wl_max"]) == (lo, hi), (
             f"{key}: band {m['wl_min']}-{m['wl_max']} does not match its "
             f"pinned published source {lo}-{hi}; narrowing an edge silently "
-            "discards real coverage")
+            "discards real coverage"
+        )
     # G395M and G395H are the SAME disperser band; only the detector gap
     # differs, so their bands must not drift apart.
-    assert (ins.MODES["nirspec_g395m"]["wl_min"],
-            ins.MODES["nirspec_g395m"]["wl_max"]) == \
-           (ins.MODES["nirspec_g395h"]["wl_min"],
-            ins.MODES["nirspec_g395h"]["wl_max"]), (
-        "G395M and G395H share the F290LP BOTS band (Birkmann Table 2)")
+    assert (ins.MODES["nirspec_g395m"]["wl_min"], ins.MODES["nirspec_g395m"]["wl_max"]) == (
+        ins.MODES["nirspec_g395h"]["wl_min"],
+        ins.MODES["nirspec_g395h"]["wl_max"],
+    ), "G395M and G395H share the F290LP BOTS band (Birkmann Table 2)"
 
 
 def test_parity_harness_mode_set_covers_every_registered_mode():
@@ -156,7 +162,8 @@ def test_r_native_med_still_matches_the_refdata_over_the_registry_band():
     the registry declares, and requires the shipped figure to be within
     3% -- loose enough for the deliberate rounding onto jwst-docs' nominal
     R ~ 2,700 / 1,000 for the NIRSpec gratings, tight enough to catch a band
-    change that moved the median."""
+    change that moved the median.
+    """
     fits = pytest.importorskip("astropy.io.fits")
 
     root = ins.DATA_DIR / f"pandeia_data-{ins.BACKEND_RELEASE}-jwst" / "jwst"
@@ -190,14 +197,16 @@ def test_r_native_med_still_matches_the_refdata_over_the_registry_band():
         assert abs(shown - measured) / measured <= 0.03, (
             f"{key}: r_native_med {shown:g} is {100 * abs(shown - measured) / measured:.1f}% "
             f"from the median {measured:.1f} measured over the current band "
-            f"{m['wl_min']}-{m['wl_max']} -- re-measure after any band change")
+            f"{m['wl_min']}-{m['wl_max']} -- re-measure after any band change"
+        )
 
 
 def test_lsf_width_table_is_well_formed():
     """Every measured response width names a registered mode, sits inside
     that mode's band in ascending wavelength order, and is a finite width
     >= 1 (the PSF can only broaden the dispersion response); lsf_r divides
-    R by it and leaves a mode without a measurement untouched."""
+    R by it and leaves a mode without a measurement untouched.
+    """
     assert set(ins.LSF_WIDTH) <= set(ins.MODES)
     for key, pts in ins.LSF_WIDTH.items():
         lam, width = np.transpose(pts)
@@ -207,8 +216,7 @@ def test_lsf_width_table_is_well_formed():
         assert np.all(np.isfinite(width)) and np.all(width >= 1.0), key
         r = np.full(lam.size, 1000.0)
         assert np.allclose(ins.lsf_r(key, lam, r), r / width)
-    assert np.array_equal(ins.lsf_r("nirspec_g395h", [3.0, 4.0], [2000.0, 2500.0]),
-                          [2000.0, 2500.0])
+    assert np.array_equal(ins.lsf_r("nirspec_g395h", [3.0, 4.0], [2000.0, 2500.0]), [2000.0, 2500.0])
 
 
 def test_saturation_advice_is_REPORTED_and_never_applied():
@@ -217,30 +225,32 @@ def test_saturation_advice_is_REPORTED_and_never_applied():
     two modes ran at another (and the exported config would assert the looser
     one), and it would change MEASURED worker output for two modes in
     parity_gate.MODE_KEYS without moving any gate key, so the committed parity
-    artifact would go on certifying code that no longer runs."""
+    artifact would go on certifying code that no longer runs.
+    """
     from jwst_tool import noise
+
     star = dict(teff=5500.0, log_g=4.5, metallicity=0.0, ks_mag=9.0)
     advised = ins.SAT_LIMIT_ADVISED["niriss_soss"]
     assert 0.5 < advised < 0.80, "the advice must bite below the 0.80 default"
-    assert ins.sat_limit_advisory("niriss_soss", 0.95)          # above -> say so
-    assert not ins.sat_limit_advisory("niriss_soss", advised)   # at it -> silent
-    assert not ins.sat_limit_advisory("nirspec_prism", 0.95)    # no advice published
+    assert ins.sat_limit_advisory("niriss_soss", 0.95)  # above -> say so
+    assert not ins.sat_limit_advisory("niriss_soss", advised)  # at it -> silent
+    assert not ins.sat_limit_advisory("nirspec_prism", 0.95)  # no advice published
     # NOTHING the run depends on may move: the job the worker receives and the
     # cache key it is filed under must be byte-identical to the pre-advice one
     job = noise.noise_job(star, list(ins.MODES), sat_limit=0.80)
     assert all("sat_limit" not in m for m in job["modes"])
-    assert (noise._mode_key(star, "niriss_soss", 0.80)
-            != noise._mode_key(star, "niriss_soss", advised)), \
+    assert noise._mode_key(star, "niriss_soss", 0.80) != noise._mode_key(star, "niriss_soss", advised), (
         "the cache key must follow the user's setting, not the advice"
+    )
 
 
 def test_ramp_advisory_distinguishes_early_saturation_from_selected_length():
     """Only MIRI's selected ramp drives short-ramp advice; the other
-    thresholds refer to the estimated group at saturation, including BOTS."""
+    thresholds refer to the estimated group at saturation, including BOTS.
+    """
     assert ins.ngroup_advisory("miri_lrs", 5, sat_ngroups=50)
     assert not ins.ngroup_advisory("miri_lrs", 6, sat_ngroups=50)
-    for key, threshold in [("nircam_f322w2", 4), ("niriss_soss", 3),
-                           ("nirspec_prism", 3), ("miri_lrs", 3)]:
+    for key, threshold in [("nircam_f322w2", 4), ("niriss_soss", 3), ("nirspec_prism", 3), ("miri_lrs", 3)]:
         assert not ins.ngroup_advisory(key, 6, sat_ngroups=threshold)
         assert "saturat" in ins.ngroup_advisory(key, 6, sat_ngroups=threshold - 0.1)
         if key != "miri_lrs":
@@ -248,19 +258,19 @@ def test_ramp_advisory_distinguishes_early_saturation_from_selected_length():
             assert not ins.ngroup_advisory(key, 1)
     assert "calibrat" in ins.ngroup_advisory("miri_lrs", 5)
     assert "SUBSTRIP256" in ins.config_label("niriss_soss")
-    assert all(ins.config_label(k) for k in ins.MODES), \
+    assert all(ins.config_label(k) for k in ins.MODES), (
         "an unusable mode must always be reportable with its configuration"
+    )
 
 
 def test_nircam_data_excess_reproduces_pandexo():
     """The estimate is PandExo's (`estimate_nircam_data_excess`), pinned to the
     parity artifact's NIRCam timing rows: subgrism64/rapid, the W39b-like
     visit of 2 x T14. The only term dropped is PandExo's half-frame overhead
-    allocation, 1.5e-4 GB here."""
+    allocation, 1.5e-4 GB here.
+    """
     f = ins.nircam_data_excess_gb
-    assert f("nircam_f444w", 100, 5.618929633333334) == pytest.approx(
-        27.820665751950003, abs=1e-3)
-    assert f("nircam_f322w2", 67, 5.610225155555556) == pytest.approx(
-        27.541948063172, abs=1e-3)
-    assert f("nircam_f322w2", 100, 0.3) == 0.0            # short visit: clipped
-    assert f("nirspec_prism", 100, 5.6) == 0.0            # not a NIRCam mode
+    assert f("nircam_f444w", 100, 5.618929633333334) == pytest.approx(27.820665751950003, abs=1e-3)
+    assert f("nircam_f322w2", 67, 5.610225155555556) == pytest.approx(27.541948063172, abs=1e-3)
+    assert f("nircam_f322w2", 100, 0.3) == 0.0  # short visit: clipped
+    assert f("nirspec_prism", 100, 5.6) == 0.0  # not a NIRCam mode

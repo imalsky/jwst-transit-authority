@@ -1,3 +1,5 @@
+"""The ExoMolOP reader of exojax master, the independent reader of fig_ckd_verification_vs_exojax_exok.py."""
+
 # Vendored from https://raw.githubusercontent.com/HajimeKawahara/exojax/master/src/exojax/provider/exomolop.py
 # at a revision after PR #730 (bugfix batch); the reader only, the downloader
 # is dropped. The independent ExoMolOP reader of fig_ckd_verification_vs_exojax_exok.py.
@@ -7,7 +9,6 @@ from pathlib import Path
 
 import h5py
 import numpy as np
-
 from exojax.utils.molname import e2s
 
 

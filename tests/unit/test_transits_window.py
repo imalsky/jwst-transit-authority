@@ -8,6 +8,7 @@ sig_inf = inf (0 for a signal inside the nuisance span) and never a
 floor-proven "unreachable"; a mixed floor (some bins at 0 ppm) reports
 sig_inf = nan and only the scan decides.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -19,12 +20,16 @@ from jwst_tool import detect
 def _result(floor_ppm: float = 100.0) -> dict:
     n = 80
     wl = np.linspace(3.0, 5.0, n)
-    sigma1 = np.full(n, 300e-6)                      # sigma at n_transits = 1
+    sigma1 = np.full(n, 300e-6)  # sigma at n_transits = 1
     bump = 150e-6 * np.exp(-0.5 * ((np.log(wl) - np.log(4.0)) / 0.10) ** 2)
     return dict(
-        wl=wl, depth=0.02 + bump, depth_wo=np.full(n, 0.02),
-        floor=np.full(n, floor_ppm * 1e-6), var_phot=sigma1 ** 2,
-        n_transits_eval=1, seg=np.zeros(n, int),
+        wl=wl,
+        depth=0.02 + bump,
+        depth_wo=np.full(n, 0.02),
+        floor=np.full(n, floor_ppm * 1e-6),
+        var_phot=sigma1**2,
+        n_transits_eval=1,
+        seg=np.zeros(n, int),
     )
 
 
@@ -32,7 +37,8 @@ def _score(r, n):
     return detect.detection_significance(
         np.asarray(r["depth"]) - np.asarray(r["depth_wo"]),
         detect.sigma_at_transits(r, n),
-        nuisance=detect._segment_rows(r["seg"]))
+        nuisance=detect._segment_rows(r["seg"]),
+    )
 
 
 def test_floor_ceiling_short_circuits_and_smallest_n_is_returned():
@@ -49,10 +55,15 @@ def test_floor_ceiling_short_circuits_and_smallest_n_is_returned():
         assert _score(r, tt2["n"] - 1) < target
     # a MIXED floor (one bin at 0 ppm): the floor-only limit is not
     # evaluated (nan) and the scan finds the one-transit answer (8.7 sigma)
-    rm = dict(depth=np.array([1e-3, 0, 0, 0]), depth_wo=np.zeros(4),
-              sigma=np.full(4, 1e-4), var_phot=np.full(4, 1e-8),
-              floor=np.array([0.0, 1e-5, 1e-5, 1e-5]), n_transits_eval=1,
-              seg=np.zeros(4, int))
+    rm = dict(
+        depth=np.array([1e-3, 0, 0, 0]),
+        depth_wo=np.zeros(4),
+        sigma=np.full(4, 1e-4),
+        var_phot=np.full(4, 1e-8),
+        floor=np.array([0.0, 1e-5, 1e-5, 1e-5]),
+        n_transits_eval=1,
+        seg=np.zeros(4, int),
+    )
     tt3 = detect.transits_to_target(rm, 5.0)
     assert tt3["reachable"] and tt3["n"] == 1 and np.isnan(tt3["sig_inf"])
 
@@ -60,9 +71,9 @@ def test_floor_ceiling_short_circuits_and_smallest_n_is_returned():
 @pytest.mark.parametrize("floor_ppm", [100.0, 0.0])
 def test_score_is_monotone_in_n(floor_ppm):
     """Non-decreasing with a floor; STRICTLY increasing without one (sigma
-    averages down without bound)."""
-    sc = np.diff([_score(_result(floor_ppm), n)
-                  for n in (1, 2, 4, 9, 16, 32, 64, 200, 500)])
+    averages down without bound).
+    """
+    sc = np.diff([_score(_result(floor_ppm), n) for n in (1, 2, 4, 9, 16, 32, 64, 200, 500)])
     assert np.all(sc > 0.0) if floor_ppm == 0.0 else np.all(sc >= 0.0)
 
 
@@ -81,5 +92,4 @@ def test_no_floor_never_reports_floor_proven_unreachable():
     # limit is 0, never "inf" with a failed 500-transit scan
     r0 = _result(floor_ppm=0.0)
     r0["depth"] = r0["depth_wo"] + 1e-3
-    assert detect.transits_to_target(r0, 5.0) == \
-        dict(n=None, reachable=False, sig_inf=0.0)
+    assert detect.transits_to_target(r0, 5.0) == dict(n=None, reachable=False, sig_inf=0.0)

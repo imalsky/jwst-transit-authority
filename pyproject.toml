@@ -59,7 +59,7 @@ Repository = "https://github.com/imalsky/jwst-transit-authority"
 # streamlit floor: app.py uses the width="stretch" API on st.button/st.pyplot/
 # st.dataframe, introduced for those widgets by 1.49.0.
 gui = ["streamlit>=1.49", "pandas"]
-dev =["ruff>=0.11", "build>=1.2", "twine>=5"]
+dev = ["ruff>=0.11", "build>=1.2", "twine>=5"]
 
 [project.scripts]
 jwst-tool = "jwst_tool.cli:main"
@@ -80,14 +80,151 @@ jwst_tool = ["science.mplstyle", "exoplanet_archive_pscomppars.csv"]
 version = { attr = "jwst_tool._version.__version__" }
 
 [tool.ruff]
-line-length = 100
+line-length = 120
+show-fixes = true
+# Markdown: README.md and CLAUDE.md are hand-written.
+extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F"]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "D",      # pydocstyle
+    "N",      # pep8-naming
+    "C90",    # mccabe complexity
+    "ARG",    # flake8-unused-arguments
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "EXE",    # flake8-executable
+    "FURB",   # refurb
+    "G",      # flake8-logging-format
+    "ICN",    # flake8-import-conventions
+    "ISC",    # flake8-implicit-str-concat
+    "LOG",    # flake8-logging
+    "NPY",    # NumPy specific rules
+    "PERF",   # perflint
+    "PGH",    # pygrep-hooks
+    "PL",     # pylint
+    "PT",     # flake8-pytest-style
+    "PTH",    # flake8-use-pathlib
+    "PYI",    # flake8-pyi
+    "Q",      # flake8-quotes
+    "RET",    # flake8-return
+    "RSE",    # flake8-raise
+    "RUF",    # Ruff-specific
+    "SIM",    # flake8-simplify
+    "SLOT",   # flake8-slots
+    "T10",    # flake8-debugger
+    "T20",    # flake8-print
+    "TC",     # flake8-type-checking
+    "TRY",    # tryceratops
+    "UP",     # pyupgrade
+]
+allowed-confusables = ["×", "σ", "α", "γ"]  # the symbols the page and the axis labels show
+ignore = [
+    "PLR09",    # too many <...>: tools/check_size_limits.py covers size
+    "PLR2004",  # magic value in comparison: noisy in numerical code
+    "TRY003",   # long message at the raise: the rules want messages that say what to fix
+    "PERF401",  # list.extend with a comprehension: a guarded append reads better for lists of refusals
+    "PERF203",  # try in a loop: no cost on Python 3.11 and later, and setup reads files
+    "SIM300",   # Yoda conditions: takes math names for constants, and swapping operands has moved a result here
+    "C408",     # dict(key=value) is this code's form for parameter sets (358 sites); a literal gains nothing
+    "N818",     # NotCertified and ModeUnusable name the state they report; other code and the docs use those names
+    "TRY004",   # a refused file or spectrum is a ValueError whatever is wrong with it; callers catch that one type
+    "TRY301",   # a helper that only hides a raise adds indirection
+    "PTH105",   # os.replace is the atomic commit these writers mean; 7 sites
+    "PTH108",   # os.unlink beside it; 2 sites
+    "PTH123",   # open(path) reads as well as path.open(); 20 sites
+]
 
-# Imports that must follow a statement: the GUI smoke test skips before
-# importing streamlit's test harness; the exo_k extractor enables jax x64
-# before importing jax.numpy.
+[tool.ruff.lint.isort]
+known-first-party = ["jwst_tool"]  # the commit guard lints an export without src/, where Ruff cannot detect this
+combine-as-imports = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.pep8-naming]
+# Published symbols used as names: temperature T, pressure P, Kzz, mass and radius of planet and star.
+# docs/glossary.md maps each one.
+extend-ignore-names = [
+    "T", "T_*", "*_T", "*_T_*", "T0", "P", "P_*", "*_P", "*_P_*", "Tirr", "Tint", "*Kzz*", "dP", "lnR0", "Lz", "dL*", "M", "R_bin",
+    "J", "J_*", "Jn", "Jg", "F", "Fw", "U", "V", "An", "S", "N", "K", "A", "A_*", "R",
+]
+
 [tool.ruff.lint.per-file-ignores]
-"tests/unit/test_app_smoke.py" = ["E402"]
-"validation/scripts/inputs/exok_ckd_values.py" = ["E402"]
+# Lazy imports stay lazy on purpose: the light path must not load jax, vulcan3, exojax or streamlit (CLAUDE.md).
+"src/jwst_tool/*.py" = ["PLC0415"]
+# Tests set the environment before imports and pin source text; a test's name is its documentation.
+# PT011 and PT018: the exception type is the contract, and one assert with its message reads as one claim.
+# D2 and D4: a test's docstring says why it exists, in whatever shape that takes. NPY: a seeded legacy stream pins numbers.
+# ARG: stubs keep the signature of what they replace.
+"tests/**" = ["T20", "PLC0415", "D103", "D2", "D4", "E402", "PTH", "PLW0603", "PT011", "PT018", "ARG", "N802", "N803", "N806", "NPY002", "NPY201", "PLW1510", "RUF043", "ICN001", "B023", "E731", "PT017", "PLW0108", "RUF005", "SIM105"]
+"tools/**" = ["T20"]
+"deploy/**" = ["T20", "PLC0415"]
+# Scripts: a loop's lambda is used in the same pass, and they run where the paths and tools are known.
+"validation/**" = ["T20", "PLC0415", "E402", "PT018", "N806", "E731", "B023", "PTH117", "PTH119", "PLW1510"]
+# These run in their own environments and import nothing from the tool. A path refactor would need a worker-version
+# review for no gain; int(round(x)) guards numpy scalars from the engines.
+"src/jwst_tool/pandeia_worker.py" = ["T20", "PTH", "RUF046", "SIM112"]
+"src/jwst_tool/picaso_worker.py" = ["T20", "PTH", "SIM112", "N803"]
+"validation/parity/scripts/pandexo_worker.py" = ["T20", "PLC0415", "PTH", "SIM112", "SIM115"]
+# Commands and reports that talk to a terminal.
+"src/jwst_tool/cli.py" = ["PLC0415", "T20"]
+"src/jwst_tool/forward.py" = ["PLC0415", "T20"]  # the worker's stdout is the GUI's progress protocol
+"src/jwst_tool/adjoint_diag.py" = ["PLC0415", "T20"]
+"src/jwst_tool/fetch.py" = ["PLC0415", "T20"]
+"src/jwst_tool/archive.py" = ["PLC0415", "T20"]
+# The code of these scripts is embedded in their committed PNGs and compared by test_validation_figures, so a lint fix
+# would demand a new figure. Format and docstrings only.
+"validation/scripts/fig_*.py" = ["ALL"]
+"validation/parity/scripts/make_parity_plots.py" = ["ALL"]
+
+[tool.codespell]
+ignore-words-list = "fo,radis"  # the out-of-transit flux, and a Python package
+skip = "data,validation/data,validation/figures,validation/parity/figs,validation/parity/outputs,tests/live/data,deploy/*lock*.txt,src/jwst_tool/exoplanet_archive_pscomppars.csv"
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = ["-ra", "--tb=short", "--strict-markers", "--strict-config"]
+xfail_strict = true
+log_level = "INFO"
+testpaths = ["tests"]
+filterwarnings = ["error"]
+markers = [
+    "slow: minutes or more with the real caches; skipped unless JWST_TOOL_RUN_SLOW=1",
+    "gpu: needs a GPU; runs locally, never in CI",
+]
+
+[tool.coverage.run]
+source = ["jwst_tool"]
+omit = []
+
+[tool.coverage.report]
+fail_under = 80
+exclude_also = [
+    '\.\.\.',
+    'if typing.TYPE_CHECKING:',
+    'if TYPE_CHECKING:',
+]
+
+[tool.mypy]
+files = ["src"]
+strict = true
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
+warn_unreachable = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+# ndarray type parameters add nothing here: shapes and dtypes are in the comments beside each array.
+disallow_any_generics = false
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "jwst_tool.*"
+disallow_untyped_defs = true
+disallow_incomplete_defs = true

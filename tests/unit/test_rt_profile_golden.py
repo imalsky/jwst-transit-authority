@@ -1,27 +1,27 @@
-"""Golden pin on _rt_profile_common: the RT-facing profile keys must be
+"""Golden pin on rt_profile_common: the RT-facing profile keys must be
 EXACTLY these for a default vulcan request (numpy-only; the engine config is
-stubbed)."""
+stubbed).
+"""
+
 from types import SimpleNamespace
 
 import pytest
 
-from jwst_tool import forward
+from jwst_tool import chem_build, forward
 
 
 def _cp(**kw):
-    base = dict(planet="wasp39b", tp_mode="guillot",
-                kzz_mode="const", kzz_const=1.0e9)
+    base = dict(planet="wasp39b", tp_mode="guillot", kzz_mode="const", kzz_const=1.0e9)
     base.update(kw)
     return forward.canonical_params(base)
 
 
-_WIDE = {"nu_min": 666.0, "nu_max": 10000.0, "art_pbtm_bar": 10.0,
-         "some_engine_default": "kept"}
+_WIDE = {"nu_min": 666.0, "nu_max": 10000.0, "art_pbtm_bar": 10.0, "some_engine_default": "kept"}
 
 
 def test_rt_profile_common_golden_default():
     cp = _cp()
-    prof = forward._rt_profile_common(cp, SimpleNamespace(WIDE=_WIDE))
+    prof = chem_build.rt_profile_common(cp, SimpleNamespace(WIDE=_WIDE))
     # config.WIDE passes through untouched...
     assert prof["nu_min"] == 666.0
     assert prof["some_engine_default"] == "kept"
@@ -37,7 +37,7 @@ def test_rt_profile_common_golden_default():
     assert prof["gs_cgs"] == 422.0
     assert prof["rstar_cm"] == pytest.approx(0.932 * 6.957e10, rel=1e-6)
     # none of the chemistry-only keys leak in here (they are added by
-    # _assemble_chem on top): the vulcan profile stays bit-identical because
+    # assemble_chem on top): the vulcan profile stays bit-identical because
     # the union of this dict and the chemistry-only block IS the full profile
     for k in ("yconv_cri", "co_mode", "dt_max", "cfg_overrides"):
         assert k not in prof

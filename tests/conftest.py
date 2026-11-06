@@ -1,3 +1,5 @@
+"""Test environment: CPU JAX, a throwaway output root and the engine's import order."""
+
 import atexit
 import os
 import shutil
@@ -16,8 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 # the output root, so give it a throwaway one (set before any jwst_tool
 # import: instruments resolves the root at import). The slow tier keeps the
 # real caches it reuses.
-if ("JWST_TOOL_OUTPUT_DIR" not in os.environ
-        and os.environ.get("JWST_TOOL_RUN_SLOW") != "1"):
+if "JWST_TOOL_OUTPUT_DIR" not in os.environ and os.environ.get("JWST_TOOL_RUN_SLOW") != "1":
     os.environ["JWST_TOOL_OUTPUT_DIR"] = tempfile.mkdtemp(prefix="jwst-tool-tests-")
     atexit.register(shutil.rmtree, os.environ["JWST_TOOL_OUTPUT_DIR"], True)
 
@@ -27,6 +28,6 @@ if ("JWST_TOOL_OUTPUT_DIR" not in os.environ
 # the WRONG network for every engine test after it in the process. Take the
 # order here, once. Guarded: the light suite runs with no engine installed.
 try:
-    import vulcan_forward.vulcan_chem  # noqa: F401
+    import vulcan_forward.vulcan_chem  # noqa: F401  (imported for its environment and x64 setup)
 except ImportError:
     pass

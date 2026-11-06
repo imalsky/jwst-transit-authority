@@ -12,6 +12,7 @@ tests/live/test_e2e_run_model.py cannot rot silently:
   recomputed NOW (canonical_params is numpy-only), so any canonical-set
   change surfaces immediately.
 """
+
 from __future__ import annotations
 
 import json
@@ -26,13 +27,12 @@ _DATA = Path(__file__).parent.parent / "live" / "data"
 
 
 # the VULCAN default and the PICASO engine's default (climate T-P)
-@pytest.fixture(scope="module", params=["w39b_v61_reference.npz",
-                                        "w39b_picaso_reference.npz"])
+@pytest.fixture(scope="module", params=["w39b_v61_reference.npz", "w39b_picaso_reference.npz"])
 def fixture(request):
     path = _DATA / request.param
     assert path.exists(), (
-        f"missing {path}: the full-chain e2e reference must ship with the "
-        "repo (regenerate per its meta['regenerate'])")
+        f"missing {path}: the full-chain e2e reference must ship with the repo (regenerate per its meta['regenerate'])"
+    )
     z = np.load(path)
     return z, json.loads(bytes(np.asarray(z["meta"])))
 
@@ -43,7 +43,8 @@ def test_fixture_matches_the_live_version(fixture):
         f"fixture generated under v{meta['forward_version']} but forward is "
         f"at v{forward._VERSION}: regenerate the fixture with the recipe in "
         "its meta['script'] (a version bump is not complete until the "
-        "reference moves with it)")
+        "reference moves with it)"
+    )
 
 
 @pytest.mark.parametrize("mode", ["transmission", "emission"])
@@ -52,8 +53,8 @@ def test_recorded_keys_recompute_today(fixture, mode):
     ref = meta[mode]
     cp = forward.canonical_params(dict(ref["params"]))
     assert forward.params_key(cp) == ref["params_key"], (
-        f"{mode}: the canonical parameter set moved since the fixture was "
-        "generated -- regenerate it")
+        f"{mode}: the canonical parameter set moved since the fixture was generated -- regenerate it"
+    )
     assert cp["science_mode"] == mode
 
 

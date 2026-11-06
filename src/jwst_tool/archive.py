@@ -13,10 +13,11 @@ unchanged. Streamlit silently discards an out-of-range session-state value
 and the widget falls back to its default, so a fill without the range check
 would appear to apply a value the form does not hold. Stdlib only.
 """
+
 from __future__ import annotations
 
 import csv
-import datetime
+import datetime as dt
 import functools
 import math
 import os
@@ -41,9 +42,21 @@ TAP_SYNC_URL = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
 # publications, so derived quantities are nominal composite planning values;
 # per-field references and uncertainties are NOT snapshot columns.
 SNAPSHOT_COLUMNS = (
-    "pl_name", "st_spectype", "st_teff", "st_logg", "st_met", "st_metratio",
-    "st_rad", "sy_kmag", "pl_radj", "pl_bmassj", "pl_bmassprov",
-    "pl_orbsmax", "pl_trandur", "pl_radjlim", "pl_bmassjlim",
+    "pl_name",
+    "st_spectype",
+    "st_teff",
+    "st_logg",
+    "st_met",
+    "st_metratio",
+    "st_rad",
+    "sy_kmag",
+    "pl_radj",
+    "pl_bmassj",
+    "pl_bmassprov",
+    "pl_orbsmax",
+    "pl_trandur",
+    "pl_radjlim",
+    "pl_bmassjlim",
 )
 
 # Transiting planets with the four fields without which a fill is meaningless;
@@ -55,7 +68,7 @@ SNAPSHOT_ADQL = (
     "and pl_radj is not null and pl_orbsmax is not null order by pl_name"
 )
 
-_MIN_ROWS = 3000   # refuse a truncated/outage TAP response
+_MIN_ROWS = 3000  # refuse a truncated/outage TAP response
 
 
 class SnapshotError(RuntimeError):
@@ -64,28 +77,35 @@ class SnapshotError(RuntimeError):
 
 @dataclass(frozen=True)
 class Snapshot:
-    fetched_utc: str            # ISO timestamp from the '# fetched:' header
-    names: tuple[str, ...]      # archive pl_name values, file (= pl_name) order
-    rows: dict                  # normalize_name(pl_name) -> {column: str}
+    """The shipped archive table, with its release date."""
+
+    fetched_utc: str  # ISO timestamp from the '# fetched:' header
+    names: tuple[str, ...]  # archive pl_name values, file (= pl_name) order
+    rows: dict  # normalize_name(pl_name) -> {column: str}
 
 
 def normalize_name(name: str) -> str:
-    """Archive-name key: casefold, collapse whitespace, and insert the space
-    before a trailing planet letter when it follows a digit or ')' -- so
-    "WASP-39b", "wasp-39 B", and " WASP-39  b " all key "wasp-39 b"."""
+    """Archive-name key.
+
+    Casefold, collapse whitespace, and insert the space before a trailing planet letter when it follows a digit or
+    ')' -- so "WASP-39b", "wasp-39 B", and " WASP-39  b " all key "wasp-39 b".
+    """
     n = " ".join(str(name).split()).casefold()
     return re.sub(r"(?<=[0-9)])([b-i])$", r" \1", n)
 
 
 @functools.lru_cache(maxsize=4)
 def load_snapshot(path: str | None = None) -> Snapshot:
-    """Parse the shipped snapshot (or ``path``); raises SnapshotError on a
-    missing file, missing provenance, header drift, or a name collision."""
+    """Parse the shipped snapshot (or ``path``).
+
+    Raises SnapshotError on a missing file, missing provenance, header drift, or a name collision.
+    """
     p = Path(path) if path else SNAPSHOT_PATH
     if not p.is_file():
         raise SnapshotError(
             f"archive snapshot not found at {p}; the package ships it -- "
-            "reinstall, or regenerate with `jwst-tool archive-refresh`.")
+            "reinstall, or regenerate with `jwst-tool archive-refresh`."
+        )
     fetched = ""
     names: list[str] = []
     rows: dict = {}
@@ -101,13 +121,15 @@ def load_snapshot(path: str | None = None) -> Snapshot:
     if not fetched:
         raise SnapshotError(
             f"{p} has no '# fetched:' provenance line; regenerate with "
-            "`jwst-tool archive-refresh` (never hand-edit the snapshot).")
+            "`jwst-tool archive-refresh` (never hand-edit the snapshot)."
+        )
     reader = csv.reader(body)
     header = tuple(next(reader, ()))
     if header != SNAPSHOT_COLUMNS:
         raise SnapshotError(
             f"{p} header {header} != expected {SNAPSHOT_COLUMNS}; the archive "
-            "schema drifted -- update archive.py's mapping and regenerate.")
+            "schema drifted -- update archive.py's mapping and regenerate."
+        )
     for cells in reader:
         if not cells:
             continue
@@ -115,31 +137,33 @@ def load_snapshot(path: str | None = None) -> Snapshot:
             raise SnapshotError(
                 f"{p}: row starting {cells[0]!r} has {len(cells)} cells, "
                 f"expected {len(SNAPSHOT_COLUMNS)}; the snapshot is "
-                "malformed -- regenerate it.")
-        row = dict(zip(SNAPSHOT_COLUMNS, cells))
+                "malformed -- regenerate it."
+            )
+        row = dict(zip(SNAPSHOT_COLUMNS, cells, strict=True))
         key = normalize_name(row["pl_name"])
         if key in rows:
             raise SnapshotError(
-                f"{p}: two rows normalize to {key!r} "
-                f"({rows[key]['pl_name']!r} and {row['pl_name']!r}).")
+                f"{p}: two rows normalize to {key!r} ({rows[key]['pl_name']!r} and {row['pl_name']!r})."
+            )
         rows[key] = row
         names.append(row["pl_name"])
     if len(names) < _MIN_ROWS:
         raise SnapshotError(
-            f"{p} has only {len(names)} rows (expected >= {_MIN_ROWS}); "
-            "likely a truncated refresh -- regenerate.")
+            f"{p} has only {len(names)} rows (expected >= {_MIN_ROWS}); likely a truncated refresh -- regenerate."
+        )
     return Snapshot(fetched_utc=fetched, names=tuple(names), rows=rows)
 
 
 def lookup(name: str) -> dict:
-    """The snapshot row for ``name`` (normalized); KeyError names the input."""
+    """Return the snapshot row for ``name`` (normalized); KeyError names the input."""
     snap = load_snapshot()
     key = normalize_name(name)
     if key not in snap.rows:
         raise KeyError(
             f"planet {name!r} is not in the shipped archive snapshot "
             f"(fetched {snap.fetched_utc}); enter the parameters by hand, or "
-            "refresh the snapshot for a newly announced planet.")
+            "refresh the snapshot for a newly announced planet."
+        )
     return snap.rows[key]
 
 
@@ -153,18 +177,22 @@ def _cell(row: dict, col: str) -> float | None:
         raise SnapshotError(
             f"unreadable numeric value {v!r} in column {col} for "
             f"{row.get('pl_name', 'unknown planet')!r}; the snapshot is "
-            "malformed -- regenerate it.") from e
+            "malformed -- regenerate it."
+        ) from e
     if not math.isfinite(x):
         raise SnapshotError(
             f"non-finite value {v!r} in column {col} for "
             f"{row.get('pl_name', 'unknown planet')!r}; the snapshot is "
-            "malformed -- regenerate it.")
+            "malformed -- regenerate it."
+        )
     return x
 
 
 def _is_limit(row: dict, col: str) -> bool:
-    """True when the archive marks the value a one-sided limit (+1/-1);
-    malformed cells raise SnapshotError via _cell, never a raw ValueError."""
+    """Return true when the archive marks the value a one-sided limit (+1/-1).
+
+    Malformed cells raise SnapshotError via _cell, never a raw ValueError.
+    """
     v = _cell(row, col)
     return v is not None and v != 0.0
 
@@ -177,9 +205,16 @@ def custom_fill(row: dict) -> dict:
     value, an out-of-range value, a one-sided limit and a metallicity on
     another basis all leave their field UNCHANGED -- silently, and without
     a substitute. Never clamps, never guesses, and never selects a UV
-    spectrum."""
-    direct = [("teff", "st_teff"), ("logg", "st_logg"), ("ks", "sy_kmag"),
-              ("rstar", "st_rad"), ("a", "pl_orbsmax"), ("t14", "pl_trandur")]
+    spectrum.
+    """
+    direct = [
+        ("teff", "st_teff"),
+        ("logg", "st_logg"),
+        ("ks", "sy_kmag"),
+        ("rstar", "st_rad"),
+        ("a", "pl_orbsmax"),
+        ("t14", "pl_trandur"),
+    ]
     values: dict = {}
 
     def _take(field: str, val: float | None) -> None:
@@ -205,11 +240,14 @@ def custom_fill(row: dict) -> dict:
     # radius from different publications), never derived from a limit
     mass = _cell(row, "pl_bmassj")
     radj = _cell(row, "pl_radj")
-    if (mass is not None and radj is not None and radj > 0
-            and not _is_limit(row, "pl_bmassjlim")
-            and not _is_limit(row, "pl_radjlim")):
-        _take("g", (planets.G_CGS * mass * planets.M_JUP_G
-                    / (radj * planets.R_JUP_CM) ** 2) / 100.0)
+    if (
+        mass is not None
+        and radj is not None
+        and radj > 0
+        and not _is_limit(row, "pl_bmassjlim")
+        and not _is_limit(row, "pl_radjlim")
+    ):
+        _take("g", (planets.G_CGS * mass * planets.M_JUP_G / (radj * planets.R_JUP_CM) ** 2) / 100.0)
     return values
 
 
@@ -221,13 +259,12 @@ def refresh_snapshot(dest: Path | None = None, url: str = TAP_SYNC_URL) -> tuple
     Returns (rows, bytes) written. Loud on HTTP errors, header drift, a
     too-small response, a malformed row or a normalized-name collision (the
     loader's own checks, run on the written file before it replaces
-    ``dest``)."""
+    ``dest``).
+    """
     dest = Path(dest) if dest else SNAPSHOT_PATH
     dest.parent.mkdir(parents=True, exist_ok=True)
     q = urllib.parse.urlencode({"query": SNAPSHOT_ADQL, "format": "csv"})
-    req = urllib.request.Request(f"{url}?{q}",
-                                 headers={"User-Agent":
-                                          "jwst-transit-authority archive-refresh"})
+    req = urllib.request.Request(f"{url}?{q}", headers={"User-Agent": "jwst-transit-authority archive-refresh"})
     with urllib.request.urlopen(req, timeout=300) as resp:
         text = resp.read().decode("utf-8")
     rows = [r for r in csv.reader(text.splitlines()) if r]
@@ -235,15 +272,14 @@ def refresh_snapshot(dest: Path | None = None, url: str = TAP_SYNC_URL) -> tuple
         got = tuple(rows[0]) if rows else ()
         raise SnapshotError(
             f"TAP response header {got} != expected {SNAPSHOT_COLUMNS}; the "
-            "archive schema drifted -- update archive.py before shipping.")
+            "archive schema drifted -- update archive.py before shipping."
+        )
     body = rows[1:]
-    fetched = datetime.datetime.now(datetime.timezone.utc).strftime(
-        "%Y-%m-%dT%H:%M:%SZ")
+    fetched = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     fd, tmp = tempfile.mkstemp(dir=str(dest.parent), suffix=".tmp")
     try:
         with os.fdopen(fd, "w", newline="", encoding="utf-8") as fh:
-            fh.write("# NASA Exoplanet Archive PSCompPars snapshot "
-                     "(shipped with the release)\n")
+            fh.write("# NASA Exoplanet Archive PSCompPars snapshot (shipped with the release)\n")
             fh.write(f"# fetched: {fetched}\n")
             fh.write(f"# endpoint: {url}\n")
             fh.write(f"# query: {SNAPSHOT_ADQL}\n")
@@ -251,12 +287,11 @@ def refresh_snapshot(dest: Path | None = None, url: str = TAP_SYNC_URL) -> tuple
             w = csv.writer(fh, lineterminator="\n")
             w.writerow(SNAPSHOT_COLUMNS)
             w.writerows(body)
-        load_snapshot.__wrapped__(tmp)   # refuses a bad response; uncached
+        load_snapshot.__wrapped__(tmp)  # refuses a bad response; uncached
         os.replace(tmp, dest)
     finally:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
-    load_snapshot.cache_clear()   # a running GUI still needs a restart
+        Path(tmp).unlink(missing_ok=True)
+    load_snapshot.cache_clear()  # a running GUI still needs a restart
     return len(body), dest.stat().st_size
 
 
@@ -269,15 +304,14 @@ def run_refresh(argv: list[str]) -> int:
         if a == "--dest" and args:
             dest = Path(args.pop(0))
         else:
-            print(f"archive-refresh: unknown argument {a!r}\n"
-                  "usage: jwst-tool archive-refresh [--dest PATH]")
+            print(f"archive-refresh: unknown argument {a!r}\nusage: jwst-tool archive-refresh [--dest PATH]")
             return 2
     try:
         n, size = refresh_snapshot(dest=dest)
-    except Exception as e:                      # loud, single line + type
+    except Exception as e:  # loud, single line + type
         print(f"archive-refresh FAILED: {type(e).__name__}: {e}")
         return 1
-    out = dest if dest else SNAPSHOT_PATH
+    out = dest or SNAPSHOT_PATH
     print(f"archive-refresh: wrote {n} planets ({size} bytes) to {out}")
     print("Review the diff and commit.")
     return 0

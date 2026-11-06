@@ -13,7 +13,7 @@ names the code state it was measured on.
   the Dockerfile pin vulcan3 2441e6c and vulcan-forward 0accd36; the Dockerfile pins the
   tool at cd67563. The running Space was last deployed from the earlier pins (tool
   b23df79) and is unchanged until a redeploy.
-- Cache versions: `forward._VERSION` 61, `noise.WORKER_VERSION` 12,
+- Cache versions: `model_defs._VERSION` 61, `noise.WORKER_VERSION` 12,
   `adjoint_diag._ADJ_VERSION` 4, `picaso_engine.WORKER_VERSION` 3. Default keys:
   transmission `58d1754cf09089de` (test-pinned), emission `8fea31aae9546b2a`.
 - Fixtures `tests/live/data/w39b_v61_reference.npz` and `w39b_picaso_reference.npz`
@@ -128,7 +128,7 @@ names the code state it was measured on.
 - Default WASP-39 b SO2, one transit, calibration + R0 projected (v61) [M]: PRISM 2.64,
   G395H 4.23, MIRI LRS 3.11 sigma on sncho2025 and on sncho alike (to 0.01 sigma); the
   published G395H detections (Alderson et al. 2023, Tsai et al. 2023) are 4.5-4.8 sigma.
-- Networks: sncho2025 (default, `forward.DEFAULT_NETWORK`) is upstream's 93-species
+- Networks: sncho2025 (default, `model_defs.DEFAULT_NETWORK`) is upstream's 93-species
   file at a68d715, hash-pinned in VULCAN-JAX `tests/science_sources.yaml`; sncho is the
   Tsai et al. 2023 89-species file with post-publication rate updates (never "exactly
   the published network"), kept for condensation; ncho 69 species (sulfur refused,
@@ -366,7 +366,7 @@ gate 0.25.
   values still ride the photolysis-off column.
 - No width cut on C/O: every finite width is reported in log10(C/O); inf comes only from
   the `fisher.NULL_LOAD_TOL` null-direction test; "unconstrained" prints only above
-  `app._UNCONSTRAINED_ABOVE` (1e4). `ln_gaussian_curve` clips its grid to the solvable
+  `gui_forecast._UNCONSTRAINED_ABOVE` (1e4). `ln_gaussian_curve` clips its grid to the solvable
   C/O range (exp(+-5 sigma) overflows at sigma_ln 142). Mock recovery is the linearized
   identity delta = F^+ J^T Sigma^-1 n, labelled "not a retrieval result".
 - README figure (`fig_readme_example.py`, v61, GUI defaults): PRISM S/N 2.6, G395H 4.2,
@@ -415,8 +415,8 @@ gate 0.25.
 
 ## Cache keys and version history
 
-- `forward._VERSION` busts `model_cache`; every bump is in git (`git log
-  -S"_VERSION = " -- src/jwst_tool/forward.py`). Default transmission / emission keys by
+- `model_defs._VERSION` busts `model_cache`; every bump is in git (`git log
+  -S"_VERSION = " -- src/jwst_tool/forward.py src/jwst_tool/model_defs.py`). Default transmission / emission keys by
   version: v58 `fec633bfcd1095f7` / `de561305d715a10b`; v59 (ExoGibbs seed, emission
   g(r), exojax 2.6.0) `21996e68a45060c0` / `a9ea64d452f0dee1`, transmission max |d| 0.128
   ppm, emission -1.92% to +0.20%; v60 (lnR0 at fixed mass) `8c37a8320c19c75a` /
@@ -521,7 +521,7 @@ lnKzz refused; metallicity capped at 10x; picaso 4.1 pinned; climate redistribut
   `tight_layout`/`savefig` measure mathtext through a process-global parser (without the
   lock 7 of 8 threads crashed).
 - Streamlit silently DISCARDS an out-of-range session-state value, so `share_config`
-  range-checks every restored numeric (`_check_widget_ranges`, AST-pinned to app.py).
+  range-checks every restored numeric (`_check_widget_ranges`, AST-pinned to the GUI sources).
   The Pandeia star is recorded in the observation block because `canonical_params`
   zeroes it in transmission.
 - Restore reads `canonical_params`' OUTPUT and refuses by name, never drops. Files that
@@ -655,7 +655,7 @@ Standing maintainer decisions; the measurements sit in the section named.
   and fixture never move for it. Metals stay in the PICASO composition. PICASO on the
   Space keeps no runtime limit and the three slots ("PICASO engine").
 - The cache key carries no engine version: every engine pin bump bumps
-  `forward._VERSION`. The Space's `data_revision` stamp is the remote dataset HEAD at
+  `model_defs._VERSION`. The Space's `data_revision` stamp is the remote dataset HEAD at
   boot, which may differ from the mounted bytes ("Cache keys and version history").
 - GUI copy is for an exoplanet proposer: precise terms stay, explaining prose goes,
   caveats live in README or notes ("GUI, figures and copy", "Do not retry").
@@ -719,10 +719,10 @@ Real, small, and out of todo.md by decision; nothing here changes a shipped numb
 - No test solves with condensation enabled; the one measured run sits 0.2% inside its
   gate.
 - Code hygiene, no behavior change: `instruments.JWST_TOOL_BACKEND = "current"` rides
-  every noise-cache key; `app.py` validates a restored T-P table against the shipped span;
-  `forward._read_tp_table` re-wraps its own ValueErrors as "not parseable"; `stellar.py`
+  every noise-cache key; `gui_atmosphere` validates a restored T-P table against the shipped span;
+  `tp_tables.read_tp_table` re-wraps its own ValueErrors as "not parseable"; `stellar.py`
   keeps a numpy 1/2 `trapz` shim; `planets.py`/`stellar.py` restate constants
-  `vulcan_forward.constants` owns; `app._LN10` duplicates `fisher._LN10`;
+  `vulcan_forward.constants` owns; `gui_forecast._LN10` duplicates `fisher._LN10`;
   `upload_data.sh` stages k-tables from the `vulcan-retrieval` checkout.
 - pyproject's `vulcan-forward` floor still allows 0.29.0, which runs one extra warm-up
   solve per chemistry build (about 2x chemistry time [E]); CI, the Dockerfile and

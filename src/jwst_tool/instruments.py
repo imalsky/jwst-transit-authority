@@ -1,63 +1,19 @@
 """JWST time-series instrument-mode registry + paths for the noise backend.
 
-Each ``MODES`` entry carries the Pandeia configuration used by
-``pandeia_worker.py`` (running in the Pandeia backend's own environment),
-display metadata, and an illustrative systematic noise floor.
-
-Mode tokens are the engine mode names of the supported Pandeia release
-and are submitted verbatim by ``noise.noise_job`` and the parity harness alike.
-
-Noise floors (``floor_ppm_suggested``) are ILLUSTRATIVE planning values, not
-measured calibrations: ``detect.evaluate_mode`` and ``noise.depth_error_bins``
-require ``floor_spec`` explicitly. The GUI preselects a constant floor using
-these values, displays the selection, and records it in provenance; users can
-choose no floor or upload a wavelength-dependent table. The floor uses PandExo
-semantics (sigma_final = max(sigma_random, floor) on the final bins), so a
-15-40 ppm floor DOMINATES any well-observed target, while zero assumes a
-precision no program has demonstrated. The values are per-mode planning suggestions INFORMED BY
-the Greene et al. 2016 convention (20/30/50 ppm for NIRISS/NIRCam/MIRI), not
-that convention verbatim (here: NIRSpec 15-20, NIRISS 20, NIRCam 25, MIRI 40);
-no value here is a measured end-to-end floor. Any caption describing the
-prefills must describe THESE values, not Greene's.
-
-Band edges (``wl_min``/``wl_max``): the mode's usable science bandpass from
-a published source, intersected with the forward model's 1-15 um coverage
-(short edge = the H2-H2 CIA table). Per instrument:
-  * NIRSpec -- the BOTS/S1600A1 table, SUB2048 column: jwst-docs "NIRSpec
-    BOTS Wavelength Ranges and Gaps" Table 1, identical to Birkmann et al.
-    2022 (A&A 661, A83) Table 2. NOT the nominal disperser table, which is
-    wider: the BOTS values already carry the red-end detector cutoffs
-    (G235x 3.07/3.12 there against a nominal 3.17).
-  * NIRISS -- the Pandeia order-1 range for GR700XD (0.83-2.81), rounded
-    inward.
-  * NIRCam -- the filter half-power points measured from the shipped
-    transmission curves, rounded INWARD to 0.05 um.
-  * MIRI -- LRS 5-12 um; the 5.0 short edge is the jwst-docs caution about
-    the slitless dispersion turnover below 4.5 um, not a rounding.
-Every edge is checked against the Pandeia extracted grid the worker returns,
-and pinned to its source by tests/unit/test_instruments_registry.py. Never
-narrow an edge without a sourced reason on the entry.
-
-Saturation vocabulary: Pandeia's ``fraction_saturation`` is the fraction of
-the engine's per-mode ``saturation_fullwell``, which is NOT the physical full
-well and is not the same fraction of it on every instrument -- NIRCam
-lw_tsgrism 58,100 e- (pandeia_data deliberately holds time-series modes at
-70% of the ~83,000 e- well, and jwst-docs states the NIRCam grism-TSO
-saturation limits "as 70% of the pixel well capacity"), NIRISS 72,000 e- (a
-soft-nonlinearity value below the ~87,300 e- physical well), NIRSpec 65,000
-e-, MIRI 193,655 e-. ``sat_limit`` multiplies THAT number, so an 80% limit is
-~56% of the NIRCam well but 80% of NIRSpec's adopted value. Never call it a
-physical full-well fraction.
+Method and contract: docs/noise_and_binning.md, section `instruments`.
 """
+
 from __future__ import annotations
 
+import contextlib
 import os
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
-TOOL_DIR = Path(__file__).resolve().parent        # pandeia_worker.py lives here
+TOOL_DIR = Path(__file__).resolve().parent  # pandeia_worker.py lives here
 # parents[2] is the repo root in an editable checkout; the src/jwst_tool
 # marker tells a checkout apart from a site-packages install.
 _REPO_DIR = Path(__file__).resolve().parents[2]
@@ -74,7 +30,8 @@ else:
     raise RuntimeError(
         "jwst_tool data root not found: set JWST_TOOL_DATA_DIR to a directory holding "
         "the tool's cdbs/ tree (a site-packages install cannot infer it), or run from "
-        "an editable checkout of jwst-transit-authority.")
+        "an editable checkout of jwst-transit-authority."
+    )
 
 # GENERATED caches (model spectra + pandeia results) live in the repo output/;
 # JWST_TOOL_OUTPUT_DIR overrides. Created on demand by the writers.
@@ -86,14 +43,14 @@ elif _IN_CHECKOUT:
 else:
     raise RuntimeError(
         "jwst_tool output root not found: set JWST_TOOL_OUTPUT_DIR (a site-packages "
-        "install cannot infer it), or run from an editable checkout of jwst-transit-authority.")
+        "install cannot infer it), or run from an editable checkout of jwst-transit-authority."
+    )
 MODEL_CACHE = OUTPUT_DIR / "model_cache"
 NOISE_CACHE = OUTPUT_DIR / "noise_cache"
 
 
-def atomic_write(path: Path, writer) -> None:
-    """Write ``writer(fh)`` to ``path`` atomically (temp file in the same
-    directory, fsync, ``os.replace``).
+def atomic_write(path: Path, writer: Any) -> None:
+    """Write ``writer(fh)`` to ``path`` atomically (temp file in the same directory, fsync, ``os.replace``).
 
     The caches under OUTPUT_DIR are shared by concurrent sessions and
     subprocesses; a direct write to the final path lets a reader (or a
@@ -102,8 +59,7 @@ def atomic_write(path: Path, writer) -> None:
     or the complete new content, never a torn file. ``fh`` is binary.
     """
     path = Path(path)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent),
-                               prefix=path.name + ".tmp.")
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".tmp.")
     try:
         with os.fdopen(fd, "wb") as fh:
             writer(fh)
@@ -111,11 +67,10 @@ def atomic_write(path: Path, writer) -> None:
             os.fsync(fh.fileno())
         os.replace(tmp, path)
     except BaseException:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp)
-        except OSError:
-            pass
         raise
+
 
 # Pandeia backend environment (the real STScI ETC engine, PandExo's core).
 # The worker runs in its own environment; noise.run_pandeia refuses loudly if
@@ -133,9 +88,11 @@ def atomic_write(path: Path, writer) -> None:
 _SUPPORTED_PANDEIA_RELEASE = "2026.7"
 JWST_TOOL_BACKEND = "current"
 BACKEND_RELEASE = _SUPPORTED_PANDEIA_RELEASE
-BACKEND_STATUS = ("Pandeia 2026.7 / pandeia_data-2026.7-jwst / "
-                  "pandeia_psfs-2026.7-jwst (the STScI-supported release, "
-                  "enforced as a matched triple)")
+BACKEND_STATUS = (
+    "Pandeia 2026.7 / pandeia_data-2026.7-jwst / "
+    "pandeia_psfs-2026.7-jwst (the STScI-supported release, "
+    "enforced as a matched triple)"
+)
 
 # The PANDEIA backend interpreter (machine-specific, no portable default;
 # require_pandeia_python() turns a missing setting into one actionable
@@ -158,16 +115,15 @@ def require_pandeia_python() -> str:
         f"    refdata: {PANDEIA_REFDATA}\n"
         f"    PSFs:    {PANDEIA_PSF_DIR}\n"
         "  See the README's Install section and `jwst-tool data` for the setup "
-        "steps.")
+        "steps."
+    )
 
 
-PANDEIA_REFDATA = os.environ.get("JWST_TOOL_PANDEIA_REFDATA",
-                                 str(DATA_DIR / "pandeia_data-2026.7-jwst"))
+PANDEIA_REFDATA = os.environ.get("JWST_TOOL_PANDEIA_REFDATA", str(DATA_DIR / "pandeia_data-2026.7-jwst"))
 # pandeia_data >= 2026 splits the PSF library out of the refdata tree; the
 # engine reads it from $PSF_DIR. Passed to the worker, preflighted, and joins
 # the cache key.
-PANDEIA_PSF_DIR = os.environ.get("JWST_TOOL_PANDEIA_PSF_DIR",
-                                 str(DATA_DIR / "pandeia_psfs-2026.7-jwst"))
+PANDEIA_PSF_DIR = os.environ.get("JWST_TOOL_PANDEIA_PSF_DIR", str(DATA_DIR / "pandeia_psfs-2026.7-jwst"))
 # Minimal synphot CDBS assembled for this tool: phoenix grid, 2MASS Ks
 # bandpass, CALSPEC Vega. The Vega copy is only an OFFLINE pin for the
 # tool-side synphot/stsynphot (stellar.py + the worker); the engine
@@ -180,22 +136,31 @@ PYSYN_CDBS = str(DATA_DIR / "cdbs")
 # picaso's v4.1 `reference/` files the climate path reads plus the 36
 # resort-rebin correlated-k tables (Zenodo 10.5281/zenodo.18644980).
 PICASO_PYTHON = os.environ.get("JWST_TOOL_PICASO_PYTHON")
-PICASO_REFDATA = os.environ.get("JWST_TOOL_PICASO_REFDATA",
-                                str(DATA_DIR / "picaso_refdata-4.1"))
+PICASO_REFDATA = os.environ.get("JWST_TOOL_PICASO_REFDATA", str(DATA_DIR / "picaso_refdata-4.1"))
 
 # Fixed categorical color per mode, never re-assigned when the selection
 # changes. Every color holds >= 3:1 contrast on white (WCAG 2.2 non-text) and
 # the set passes the dataviz palette validator in wavelength-adjacency order,
 # with two residual flags (one chroma, one deutan pair) carried by
 # MODE_MARKER, the secondary color-independent encoding.
-_COLORS = ["#2a78d6", "#199e70", "#a35a00", "#007a00",
-           "#4a3aa7", "#d43f3e", "#a83a9e", "#006c8e",
-           "#c2185b", "#8b46c8", "#00929e", "#d81b8c"]
+_COLORS = [
+    "#2a78d6",
+    "#199e70",
+    "#a35a00",
+    "#007a00",
+    "#4a3aa7",
+    "#d43f3e",
+    "#a83a9e",
+    "#006c8e",
+    "#c2185b",
+    "#8b46c8",
+    "#00929e",
+    "#d81b8c",
+]
 
 # Fixed marker shape per mode: series must never rely on color alone
 # (grayscale print, color-vision deficiency).
-_MARKERS = ["o", "s", "D", "^", "v", "P", "X", "*",
-            "<", ">", "p", "h"]
+_MARKERS = ["o", "s", "D", "^", "v", "P", "X", "*", "<", ">", "p", "h"]
 
 # Hard maximum group counts per instrument, matching BOTH APT's template
 # ranges and PandExo master: NIRCam grism time series 1-100, NIRISS SOSS
@@ -220,7 +185,7 @@ PANDEXO_UNBOUNDED_NGROUP = 65535
 # (per-instrument apertures/annuli; background "ecliptic" + background_level
 # "medium" -- BOTH keys required together), NOT pandeia's generic
 # point-source defaults, which extract a different flux.
-# wl_min/wl_max: see the module docstring for the per-instrument source of
+# wl_min/wl_max: see docs/noise_and_binning.md for the per-instrument source of
 # every band edge; each entry below carries its own citation.
 # readout_pattern is pinned EXPLICITLY on every mode (NRSRAPID/NISRAPID/RAPID/
 # FASTR1, PandExo's TSO choices): engine defaults are non-TSO patterns and
@@ -261,117 +226,152 @@ PANDEXO_UNBOUNDED_NGROUP = 65535
 MODES = {
     "nirspec_prism": dict(
         label="NIRSpec PRISM",
-        instrument="nirspec", mode="bots",
-        config=dict(instrument=dict(disperser="prism", filter="clear"),
-                    detector=dict(subarray="sub512",
-                                  readout_pattern="nrsrapid")),
+        instrument="nirspec",
+        mode="bots",
+        config=dict(
+            instrument=dict(disperser="prism", filter="clear"),
+            detector=dict(subarray="sub512", readout_pattern="nrsrapid"),
+        ),
         strategy=dict(aperture_size=0.7, sky_annulus=[0.75, 1.5]),
-        background="ecliptic", background_level="medium",
+        background="ecliptic",
+        background_level="medium",
         # BOTS Table 1, PRISM/CLEAR on SUB512: 0.60-5.30. 1.0 is the model's
-        # short edge (the band contract in the module docstring); 5.30 is the
+        # short edge (the band contract in docs/noise_and_binning.md); 5.30 is the
         # instrument edge and the Pandeia grid runs to 5.298, with no
         # throughput cliff before it (the reddest pixels still carry ~1% of
         # the peak extracted rate).
-        wl_min=1.0, wl_max=5.30,
+        wl_min=1.0,
+        wl_max=5.30,
         r_native_med=110,
-        floor_ppm_suggested=20.0, ngroup_min=1,
+        floor_ppm_suggested=20.0,
+        ngroup_min=1,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     "nirspec_g395h": dict(
         label="NIRSpec G395H",
-        instrument="nirspec", mode="bots",
-        config=dict(instrument=dict(disperser="g395h", filter="f290lp"),
-                    detector=dict(subarray="sub2048",
-                                  readout_pattern="nrsrapid")),
+        instrument="nirspec",
+        mode="bots",
+        config=dict(
+            instrument=dict(disperser="g395h", filter="f290lp"),
+            detector=dict(subarray="sub2048", readout_pattern="nrsrapid"),
+        ),
         strategy=dict(aperture_size=0.7, sky_annulus=[0.75, 1.5]),
-        background="ecliptic", background_level="medium",
+        background="ecliptic",
+        background_level="medium",
         # BOTS Table 1: 2.87-3.72, 3.82-5.18 (the NRS1/NRS2 gap is measured
         # from the Pandeia grid, never hard-coded here)
-        wl_min=2.87, wl_max=5.18,
+        wl_min=2.87,
+        wl_max=5.18,
         r_native_med=2700,
-        floor_ppm_suggested=15.0, ngroup_min=1,
+        floor_ppm_suggested=15.0,
+        ngroup_min=1,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     "nirspec_g235h": dict(
         label="NIRSpec G235H",
-        instrument="nirspec", mode="bots",
-        config=dict(instrument=dict(disperser="g235h", filter="f170lp"),
-                    detector=dict(subarray="sub2048",
-                                  readout_pattern="nrsrapid")),
+        instrument="nirspec",
+        mode="bots",
+        config=dict(
+            instrument=dict(disperser="g235h", filter="f170lp"),
+            detector=dict(subarray="sub2048", readout_pattern="nrsrapid"),
+        ),
         strategy=dict(aperture_size=0.7, sky_annulus=[0.75, 1.5]),
-        background="ecliptic", background_level="medium",
+        background="ecliptic",
+        background_level="medium",
         # BOTS Table 1: 1.66-2.20, 2.27-3.07. The red edge is the BOTS
         # detector cutoff, BELOW the nominal disperser table's 3.17.
-        wl_min=1.66, wl_max=3.07,
+        wl_min=1.66,
+        wl_max=3.07,
         r_native_med=2700,
-        floor_ppm_suggested=15.0, ngroup_min=1,
+        floor_ppm_suggested=15.0,
+        ngroup_min=1,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     "niriss_soss": dict(
         label="NIRISS SOSS (ord 1)",
-        instrument="niriss", mode="soss",
-        config=dict(instrument=dict(filter="clear", disperser="gr700xd"),
-                    detector=dict(subarray="substrip256",
-                                  readout_pattern="nisrapid")),
+        instrument="niriss",
+        mode="soss",
+        config=dict(
+            instrument=dict(filter="clear", disperser="gr700xd"),
+            detector=dict(subarray="substrip256", readout_pattern="nisrapid"),
+        ),
         strategy=dict(order=1),
-        background="ecliptic", background_level="medium",
+        background="ecliptic",
+        background_level="medium",
         # Pandeia's order-1 CLEAR range is 0.83-2.81 um (jwst-docs quotes the
         # three orders together as 0.6-2.8); 1.0 is the model's short edge
         # (same intersection contract as PRISM), 2.8 is 2.81 rounded inward.
-        wl_min=1.0, wl_max=2.8,
+        wl_min=1.0,
+        wl_max=2.8,
         r_native_med=970,
-        floor_ppm_suggested=20.0, ngroup_min=1,
+        floor_ppm_suggested=20.0,
+        ngroup_min=1,
         ngroup_max=30,
     ),
     "nircam_f322w2": dict(
         label="NIRCam F322W2",
-        instrument="nircam", mode="lw_tsgrism",
-        config=dict(instrument=dict(filter="f322w2", disperser="grismr"),
-                    detector=dict(subarray="subgrism64", readout_pattern="rapid")),
+        instrument="nircam",
+        mode="lw_tsgrism",
+        config=dict(
+            instrument=dict(filter="f322w2", disperser="grismr"),
+            detector=dict(subarray="subgrism64", readout_pattern="rapid"),
+        ),
         strategy=dict(aperture_size=0.4, sky_annulus=[0.5, 1.5]),
-        background="ecliptic", background_level="medium",
+        background="ecliptic",
+        background_level="medium",
         # F322W2 half-power points 2.425-4.012 (measured from the shipped
         # transmission curve), rounded inward to 0.05. jwst-docs quotes the
         # F322W2 grism band as 2.4-4.0, and the published ERS analysis of
         # WASP-39 b used 2.420-4.025; the Pandeia grid runs past it to 4.22.
-        wl_min=2.45, wl_max=4.00,
+        wl_min=2.45,
+        wl_max=4.00,
         r_native_med=1400,
-        floor_ppm_suggested=25.0, ngroup_min=1,
+        floor_ppm_suggested=25.0,
+        ngroup_min=1,
         ngroup_max=100,
     ),
     "nircam_f444w": dict(
         label="NIRCam F444W",
-        instrument="nircam", mode="lw_tsgrism",
-        config=dict(instrument=dict(filter="f444w", disperser="grismr"),
-                    detector=dict(subarray="subgrism64", readout_pattern="rapid")),
+        instrument="nircam",
+        mode="lw_tsgrism",
+        config=dict(
+            instrument=dict(filter="f444w", disperser="grismr"),
+            detector=dict(subarray="subgrism64", readout_pattern="rapid"),
+        ),
         strategy=dict(aperture_size=0.4, sky_annulus=[0.5, 1.5]),
-        background="ecliptic", background_level="medium",
+        background="ecliptic",
+        background_level="medium",
         # F444W half-power points 3.881-5.009, rounded inward to 0.05. The
         # red edge also sits inside the detector cutoff: jwst-docs notes the
         # F444W footprint above 5.03 um runs off the array. The Pandeia grid
         # ends at 4.998, so this edge is not what binds.
-        wl_min=3.9, wl_max=5.00,
+        wl_min=3.9,
+        wl_max=5.00,
         r_native_med=1700,
-        floor_ppm_suggested=25.0, ngroup_min=1,
+        floor_ppm_suggested=25.0,
+        ngroup_min=1,
         ngroup_max=100,
     ),
     "miri_lrs": dict(
         label="MIRI LRS (slitless)",
-        instrument="miri", mode="lrsslitless",
-        config=dict(detector=dict(subarray="slitlessprism",
-                                  readout_pattern="fastr1")),
+        instrument="miri",
+        mode="lrsslitless",
+        config=dict(detector=dict(subarray="slitlessprism", readout_pattern="fastr1")),
         strategy=dict(aperture_size=0.6, sky_annulus=[1.0, 2.8]),
-        background="ecliptic", background_level="medium",
+        background="ecliptic",
+        background_level="medium",
         # LRS covers 5-12 um. The 5.0 short edge is NOT cosmetic: jwst-docs
         # warns that the slitless dispersion profile turns over below 4.5 um,
         # mapping several wavelengths onto the same pixels, so "caution is
         # warranted when analyzing spectra obtained in slitless mode at
         # wavelengths below 5 um". The Pandeia grid itself runs 5.02-13.86.
-        wl_min=5.0, wl_max=12.0,
+        wl_min=5.0,
+        wl_max=12.0,
         # Native R RISES with wavelength here (42 at 5 um, 150 median,
         # 209 at 12 um) -- the opposite of the gratings.
         r_native_med=150,
-        floor_ppm_suggested=40.0, ngroup_min=2,
+        floor_ppm_suggested=40.0,
+        ngroup_min=2,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     # Same band as G395H at ~2.7x lower R (r_native_med 1000 against 2700);
@@ -385,18 +385,23 @@ MODES = {
     # 2.87-5.27 um.
     "nirspec_g395m": dict(
         label="NIRSpec G395M",
-        instrument="nirspec", mode="bots",
-        config=dict(instrument=dict(disperser="g395m", filter="f290lp"),
-                    detector=dict(subarray="sub2048",
-                                  readout_pattern="nrsrapid")),
+        instrument="nirspec",
+        mode="bots",
+        config=dict(
+            instrument=dict(disperser="g395m", filter="f290lp"),
+            detector=dict(subarray="sub2048", readout_pattern="nrsrapid"),
+        ),
         strategy=dict(aperture_size=0.7, sky_annulus=[0.75, 1.5]),
-        background="ecliptic", background_level="medium",
+        background="ecliptic",
+        background_level="medium",
         # BOTS Table 1: G395M/F290LP on SUB2048 covers 2.87-5.18, the SAME
         # band as G395H (which only adds the NRS1/NRS2 gap). The Pandeia
         # grid agrees: usable pixels run 2.871-5.177 with none dropped.
-        wl_min=2.87, wl_max=5.18,
+        wl_min=2.87,
+        wl_max=5.18,
         r_native_med=1000,
-        floor_ppm_suggested=15.0, ngroup_min=1,
+        floor_ppm_suggested=15.0,
+        ngroup_min=1,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     # Tokens verified against pandeia_data-2026.7-jwst config.json
@@ -412,15 +417,20 @@ MODES = {
     # reproduces the shipped G235H/G395H display edges.
     "nirspec_g140h": dict(
         label="NIRSpec G140H",
-        instrument="nirspec", mode="bots",
-        config=dict(instrument=dict(disperser="g140h", filter="f100lp"),
-                    detector=dict(subarray="sub2048",
-                                  readout_pattern="nrsrapid")),
+        instrument="nirspec",
+        mode="bots",
+        config=dict(
+            instrument=dict(disperser="g140h", filter="f100lp"),
+            detector=dict(subarray="sub2048", readout_pattern="nrsrapid"),
+        ),
         strategy=dict(aperture_size=0.7, sky_annulus=[0.75, 1.5]),
-        background="ecliptic", background_level="medium",
-        wl_min=1.0, wl_max=1.83,
-        r_native_med=2700,   # measured median 2734 over 1.0-1.83 um
-        floor_ppm_suggested=15.0, ngroup_min=1,
+        background="ecliptic",
+        background_level="medium",
+        wl_min=1.0,
+        wl_max=1.83,
+        r_native_med=2700,  # measured median 2734 over 1.0-1.83 um
+        floor_ppm_suggested=15.0,
+        ngroup_min=1,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     # G235M: the medium-R companion to G235H (the same trade G395M offers
@@ -429,15 +439,20 @@ MODES = {
     # gratings sit entirely on NRS1, no detector gap.
     "nirspec_g235m": dict(
         label="NIRSpec G235M",
-        instrument="nirspec", mode="bots",
-        config=dict(instrument=dict(disperser="g235m", filter="f170lp"),
-                    detector=dict(subarray="sub2048",
-                                  readout_pattern="nrsrapid")),
+        instrument="nirspec",
+        mode="bots",
+        config=dict(
+            instrument=dict(disperser="g235m", filter="f170lp"),
+            detector=dict(subarray="sub2048", readout_pattern="nrsrapid"),
+        ),
         strategy=dict(aperture_size=0.7, sky_annulus=[0.75, 1.5]),
-        background="ecliptic", background_level="medium",
-        wl_min=1.66, wl_max=3.12,
-        r_native_med=1000,   # measured median 1018 over 1.66-3.12 um
-        floor_ppm_suggested=15.0, ngroup_min=1,
+        background="ecliptic",
+        background_level="medium",
+        wl_min=1.66,
+        wl_max=3.12,
+        r_native_med=1000,  # measured median 1018 over 1.66-3.12 um
+        floor_ppm_suggested=15.0,
+        ngroup_min=1,
         ngroup_max=PANDEXO_UNBOUNDED_NGROUP,
     ),
     # F277W: the fourth NIRCam LW grism TSO filter this registry covers.
@@ -448,14 +463,20 @@ MODES = {
     # filter this registry leaves out; F322W2 already spans its band.
     "nircam_f277w": dict(
         label="NIRCam F277W",
-        instrument="nircam", mode="lw_tsgrism",
-        config=dict(instrument=dict(filter="f277w", disperser="grismr"),
-                    detector=dict(subarray="subgrism64", readout_pattern="rapid")),
+        instrument="nircam",
+        mode="lw_tsgrism",
+        config=dict(
+            instrument=dict(filter="f277w", disperser="grismr"),
+            detector=dict(subarray="subgrism64", readout_pattern="rapid"),
+        ),
         strategy=dict(aperture_size=0.4, sky_annulus=[0.5, 1.5]),
-        background="ecliptic", background_level="medium",
-        wl_min=2.45, wl_max=3.1,
-        r_native_med=1300,   # measured median 1276 over 2.45-3.1 um
-        floor_ppm_suggested=25.0, ngroup_min=1,
+        background="ecliptic",
+        background_level="medium",
+        wl_min=2.45,
+        wl_max=3.1,
+        r_native_med=1300,  # measured median 1276 over 2.45-3.1 um
+        floor_ppm_suggested=25.0,
+        ngroup_min=1,
         ngroup_max=100,
     ),
 }
@@ -507,44 +528,53 @@ REPORTED_WARNINGS = frozenset({"full_saturated", "partial_saturated"})
 
 
 def config_label(mode_key: str) -> str:
-    """The pinned detector configuration, for any message that reports a mode
-    as unusable -- the SCOPE note above is why this is never omitted."""
+    """Return the pinned detector configuration, for any message that reports a mode as unusable.
+
+    The SCOPE note above is why this is never omitted.
+    """
     det = MODES[mode_key].get("config", {}).get("detector", {})
-    return "/".join(str(det[k]).upper() for k in ("subarray", "readout_pattern")
-                    if det.get(k))
+    return "/".join(str(det[k]).upper() for k in ("subarray", "readout_pattern") if det.get(k))
 
 
 # MIRI's advice concerns the selected ramp; NIRCam and general TSO advice
 # concern the estimated group at saturation. These notes never change the
 # worker's ramp search or its minimum group count.
-def ngroup_advisory(mode_key: str, ngroup, sat_ngroups=None) -> str:
+def ngroup_advisory(mode_key: str, ngroup: int, sat_ngroups: float | None = None) -> str:
     """Selected-ramp and early-saturation risks, when supported by the result."""
     instrument = MODES[mode_key]["instrument"]
     notes = []
     if instrument == "miri" and int(ngroup) < 6:
-        notes.append(f"{int(ngroup)}-group ramp; STScI describes MIRI ramps with "
-                     "2-5 groups as very difficult to calibrate accurately")
+        notes.append(
+            f"{int(ngroup)}-group ramp; STScI describes MIRI ramps with "
+            "2-5 groups as very difficult to calibrate accurately"
+        )
     # A missing saturation estimate is not evidence of early saturation.
     if sat_ngroups is not None and np.isfinite(float(sat_ngroups)):
         threshold = 4 if instrument == "nircam" else 3
         if 0 <= float(sat_ngroups) < threshold:
             notes.append(
                 f"estimated saturation at {float(sat_ngroups):.2g} groups; "
-                + ("STScI advises avoiding NIRCam saturation before 4 groups"
-                   if instrument == "nircam" else
-                   "STScI identifies saturation before 3 groups as a risk "
-                   "requiring instrument-specific guidance"))
+                + (
+                    "STScI advises avoiding NIRCam saturation before 4 groups"
+                    if instrument == "nircam"
+                    else "STScI identifies saturation before 3 groups as a risk requiring instrument-specific guidance"
+                )
+            )
     return "; ".join(notes)
 
 
 def sat_limit_advisory(mode_key: str, sat_limit: float) -> str:
-    """Note for a run whose saturation limit exceeds this mode's published
-    advice, or "" when it does not. Advice only -- nothing is changed."""
+    """Note for a run whose saturation limit exceeds this mode's published advice, or "" when it does not.
+
+    Advice only -- nothing is changed.
+    """
     advised = SAT_LIMIT_ADVISED.get(mode_key)
     if advised is None or float(sat_limit) <= advised:
         return ""
-    return (f"saturation limit {float(sat_limit):.2f} is above the "
-            f"{advised:.3f} (56,000 e-) STScI advises for SOSS precision")
+    return (
+        f"saturation limit {float(sat_limit):.2f} is above the "
+        f"{advised:.3f} (56,000 e-) STScI advises for SOSS precision"
+    )
 
 
 # NIRCam grism TSO data excess: PandExo's estimate of what APT computes
@@ -558,37 +588,37 @@ def sat_limit_advisory(mode_key: str, sat_limit: float) -> str:
 NIRCAM_RAW_GROUP_RATE_GB_PER_HOUR = 8.60103
 NIRCAM_SUSTAINABLE_GB_PER_HOUR = 3.132
 NIRCAM_ALLOCATION_OVERHEAD_S = 694.0 + 2100.0
-NIRCAM_DATA_EXCESS_GB = (5.0, 15.0)         # PandExo's flag threshold, APT limit
+NIRCAM_DATA_EXCESS_GB = (5.0, 15.0)  # PandExo's flag threshold, APT limit
 # readout pattern -> (frame cadence per group, frames averaged per group), for
 # the patterns MODES pins; a new pattern takes its row from PandExo's table
 NIRCAM_READOUT = {"rapid": (1, 1)}
 
 
-def nircam_data_excess_gb(mode_key: str, ngroup, exposure_hours: float) -> float:
-    """Estimated data excess (GB) of one visit of ``exposure_hours`` on a
-    NIRCam grism mode; 0.0 for every other instrument."""
+def nircam_data_excess_gb(mode_key: str, ngroup: int, exposure_hours: float) -> float:
+    """Estimated data excess (GB) of one visit of ``exposure_hours`` on a NIRCam grism mode.
+
+    0.0 for every other instrument.
+    """
     m = MODES[mode_key]
     if m["instrument"] != "nircam":
         return 0.0
     det = m["config"]["detector"]
     if not str(det["subarray"]).startswith("subgrism"):
-        raise ValueError(f"{mode_key}: data-excess rate is known for the "
-                         "4-output subgrism subarrays only")
+        raise ValueError(f"{mode_key}: data-excess rate is known for the 4-output subgrism subarrays only")
     cadence, nframe = NIRCAM_READOUT[str(det["readout_pattern"]).lower()]
     ngroup = int(ngroup)
     clock_frames = 1 + nframe + (ngroup - 1) * cadence
     saved_groups = ngroup + int(nframe > 1)
-    rate = (NIRCAM_RAW_GROUP_RATE_GB_PER_HOUR * saved_groups / clock_frames
-            - NIRCAM_SUSTAINABLE_GB_PER_HOUR)
-    allocation = (NIRCAM_SUSTAINABLE_GB_PER_HOUR
-                  * NIRCAM_ALLOCATION_OVERHEAD_S / 3600.0)
+    rate = NIRCAM_RAW_GROUP_RATE_GB_PER_HOUR * saved_groups / clock_frames - NIRCAM_SUSTAINABLE_GB_PER_HOUR
+    allocation = NIRCAM_SUSTAINABLE_GB_PER_HOUR * NIRCAM_ALLOCATION_OVERHEAD_S / 3600.0
     return max(0.0, rate * float(exposure_hours) - allocation)
 
 
-def lsf_r(key: str, wl, r_native):
-    """Effective resolving power of the extracted response, R_refdata /
-    width, on the caller's wavelength grid; ``r_native`` unchanged for a
-    mode with no measured width."""
+def lsf_r(key: str, wl: np.ndarray, r_native: np.ndarray) -> np.ndarray:
+    """Effective resolving power of the extracted response, R_refdata / width, on the caller's wavelength grid.
+
+    ``r_native`` unchanged for a mode with no measured width.
+    """
     pts = LSF_WIDTH.get(key)
     r = np.asarray(r_native, float)
     if pts is None:
@@ -605,12 +635,14 @@ for _key, _m in MODES.items():
             f"mode {_key!r} sets ngroup_max={_m['ngroup_max']}, above the "
             f"PandExo-compatible maximum {_cap} for {_m['instrument']}; the "
             "optimizer would select an unsupported group count on faint "
-            "targets.")
+            "targets."
+        )
     if not (1 <= _m["ngroup_min"] <= _m["ngroup_max"]):
         raise RuntimeError(
             f"mode {_key!r} breaks 1 <= ngroup_min={_m['ngroup_min']} <= "
             f"ngroup_max={_m['ngroup_max']}; the ramp search assumes this "
-            "ordering.")
+            "ordering."
+        )
 
 MODE_COLOR = {key: _COLORS[i % len(_COLORS)] for i, key in enumerate(MODES)}
 MODE_MARKER = {key: _MARKERS[i % len(_MARKERS)] for i, key in enumerate(MODES)}

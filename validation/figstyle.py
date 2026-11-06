@@ -1,6 +1,6 @@
-"""The figure style for every committed figure in this repo (validation/figures
-and validation/parity/figs). The app loads the same science.mplstyle and adds
-its own GUI overrides; the helpers here are validation-only.
+"""The figure style for every committed figure in this repo (validation/figures and validation/parity/figs).
+
+The app loads the same science.mplstyle and adds its own GUI overrides; the helpers here are validation-only.
 
     import sys; sys.path.insert(0, "<repo>/validation")
     import figstyle as fs; fs.use()
@@ -10,6 +10,7 @@ square panels, axis labels + legend only. save() embeds the generating script
 in the PNG (tEXt chunks) so tests/unit/test_validation_figures.py can prove
 each committed figure was made by the committed code.
 """
+
 from __future__ import annotations
 
 import sys
@@ -26,14 +27,15 @@ DATA = HERE / "data"
 
 # Okabe-Ito / Wong 2011, yellow dropped, ordered for lines on white.
 CYC = ["#0072B2", "#D55E00", "#009E73", "#E69F00", "#CC79A7", "#56B4E9"]
-INK = "#2b2b2b"          # data points; the reference curve of a two-code comparison
-RED = "#CC3311"          # the model curve of a two-code comparison
-MS = 3.5                 # marker size for data points
+INK = "#2b2b2b"  # data points; the reference curve of a two-code comparison
+RED = "#CC3311"  # the model curve of a two-code comparison
+MS = 3.5  # marker size for data points
 DASH_KW = dict(ls="--")  # matplotlib's own dash, never a custom pattern
 DOT_KW = dict(ls=":")
 
 
 def use():
+    """Apply the house style."""
     plt.style.use(str(HERE.parent / "src" / "jwst_tool" / "science.mplstyle"))
 
 
@@ -43,13 +45,13 @@ def pastel(c, keep=0.6):
 
 
 def square():
+    """Return one square panel."""
     return plt.subplots(figsize=(6.5, 6.5))
 
 
 def panels(nrows=1, ncols=3):
     """Grid of square panels: 1x3 -> (16, 5.2), 2x2 -> (10.7, 10.4)."""
-    return plt.subplots(nrows, ncols, figsize=(5.33 * ncols, 5.2 * nrows),
-                        constrained_layout=True)
+    return plt.subplots(nrows, ncols, figsize=(5.33 * ncols, 5.2 * nrows), constrained_layout=True)
 
 
 def overlay(ax, x, ref, mod, c, labels, lws=(2.5, 1.2)):
@@ -59,7 +61,7 @@ def overlay(ax, x, ref, mod, c, labels, lws=(2.5, 1.2)):
 
 
 def overlay2(ax, x, ref, mod, labels, colors=(INK, RED), lws=(2.0, 1.2)):
-    """The one coincident pair of a panel: black solid reference, red dashed model."""
+    """Return the one coincident pair of a panel: black solid reference, red dashed model."""
     ax.plot(x, ref, color=colors[0], lw=lws[0], solid_capstyle="round", label=labels[0])
     ax.plot(x, mod, color=colors[1], lw=lws[1], label=labels[1], **DASH_KW)
 
@@ -77,8 +79,10 @@ def lollipop(ax, names, a, b, labels, colors=(INK, RED), fontsize=8):
 
 
 def legend(ax, **kw):
-    """Legend in the corner covering the fewest plotted points, one column then
-    two; matplotlib's 'best' if every corner sits on data. Never widens the axes."""
+    """Legend in the corner covering the fewest plotted points, one column then two.
+
+    Matplotlib's 'best' if every corner sits on data. Never widens the axes.
+    """
     fig = ax.figure
 
     def covered(loc, **k2):
@@ -104,10 +108,15 @@ def save(fig, name, out_dir=FIGURES, script=None):
     """Write out_dir/name at 300 dpi with the generating script embedded.
 
     tEXt chunks: Source = the script's file name, Generator-Source = its full
-    text, Creation Time. Read back with embedded_source()."""
+    text, Creation Time. Read back with embedded_source().
+    """
     src = Path(script or sys._getframe(1).f_code.co_filename).resolve()
-    meta = {"Title": name, "Source": src.name, "Generator-Source": src.read_text(),
-            "Creation Time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    meta = {
+        "Title": name,
+        "Source": src.name,
+        "Generator-Source": src.read_text(),
+        "Creation Time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
     path = Path(out_dir) / name
     fig.savefig(path, dpi=300, metadata=meta)
     print("wrote", path)
@@ -115,7 +124,8 @@ def save(fig, name, out_dir=FIGURES, script=None):
 
 
 def embedded_source(png_path):
-    """The tEXt chunks save() wrote, as a dict (empty for a PNG without them)."""
+    """Return the tEXt chunks save() wrote, as a dict (empty for a PNG without them)."""
     from PIL import Image
+
     with Image.open(png_path) as im:
         return dict(im.text)

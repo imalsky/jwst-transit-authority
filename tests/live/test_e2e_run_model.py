@@ -1,26 +1,8 @@
-"""Full-chain end-to-end regression: chemistry -> ExoJAX RT -> spectrum, for
-both engines (VULCAN kinetics; PICASO climate + equilibrium chemistry).
+"""Full-chain end-to-end regression for both engines against committed reference fixtures.
 
-Runs the tool's real `run_model` for the default WASP-39 b case in BOTH
-science modes -- a fresh solve each (on an empty model cache, so this
-validates the chain, not the cache) -- and asserts the R = 100 binned
-spectrum against a committed reference fixture generated under the same
-`forward._VERSION`. The engine side of the physics is separately pinned
-against petitRADTRANS in vulcan-forward's own e2e suite; THIS test pins that
-the whole tool still reproduces its own verified state end to end.
-
-Cost: one cold solve per case, about 9 min per VULCAN mode and 20 min per
-PICASO mode on daw. Gated like the FD closure test: JWST_TOOL_RUN_SLOW=1,
-plus clean skips without the RT stack, the engine data or the PICASO
-environment.
-
-Tolerances: cross-run JAX nondeterminism on this chain measures under a ppm
-(the committed reference reproduces bit-identically), so the band is set per
-mode at 5% of the reference's own structure -- an absolute ppm would be far
-too loose on emission, where a quarter of the bins sit below 100 ppm while
-transmission runs near 20000. On a breach: if the change is INTENDED,
-regenerate the fixture (its meta["regenerate"]) and bump forward._VERSION.
+Why, cost and tolerances: docs/validation.md, section `test_e2e_run_model`.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -31,17 +13,20 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get("JWST_TOOL_RUN_SLOW") != "1",
-    reason="full-chain e2e (~5 min): set JWST_TOOL_RUN_SLOW=1")
+from jwst_tool import model_cache
 
-if importlib.util.find_spec("exojax") is None or \
-        importlib.util.find_spec("vulcan3") is None:
+pytestmark = pytest.mark.skipif(
+    os.environ.get("JWST_TOOL_RUN_SLOW") != "1", reason="full-chain e2e (~5 min): set JWST_TOOL_RUN_SLOW=1"
+)
+
+if importlib.util.find_spec("exojax") is None or importlib.util.find_spec("vulcan3") is None:
     pytest.skip("RT stack not installed", allow_module_level=True)
 
-FIXTURES = {"vulcan": Path(__file__).parent / "data" / "w39b_v61_reference.npz",
-            # the PICASO engine: climate T-P + equilibrium chemistry, same RT
-            "picaso": Path(__file__).parent / "data" / "w39b_picaso_reference.npz"}
+FIXTURES = {
+    "vulcan": Path(__file__).parent / "data" / "w39b_v61_reference.npz",
+    # the PICASO engine: climate T-P + equilibrium chemistry, same RT
+    "picaso": Path(__file__).parent / "data" / "w39b_picaso_reference.npz",
+}
 
 WL_LO, WL_HI, R_BIN = 1.02, 5.26, 100.0
 
@@ -62,9 +47,7 @@ def bin_r100(wl_model, y_model):
     n = int(np.floor(R_BIN * np.log(WL_HI / WL_LO)))
     edges = WL_LO * np.exp(np.arange(n + 1) / R_BIN)
     edges = edges[(edges >= wl_model[0]) & (edges <= wl_model[-1])]
-    cum = np.concatenate(
-        [[0.0], np.cumsum(0.5 * (y_model[1:] + y_model[:-1])
-                          * np.diff(wl_model))])
+    cum = np.concatenate([[0.0], np.cumsum(0.5 * (y_model[1:] + y_model[:-1]) * np.diff(wl_model))])
     integ = np.interp(edges, wl_model, cum)
     means = np.diff(integ) / np.diff(edges)
     centers = np.sqrt(edges[:-1] * edges[1:])
@@ -80,25 +63,25 @@ def _load_fixture(fixture):
 
 def _engine_data_ready():
     from vulcan_forward import exomolop, paths
+
     try:
         paths.data_root()
     except RuntimeError:
         pytest.skip("VULCAN_FORWARD_DATA not configured")
     if not exomolop.table_path("H2O").exists():
-        pytest.skip("ExoMolOP tables absent; "
-                    "python -m vulcan_forward.fetch_exomolop --molecules H2O,...")
+        pytest.skip("ExoMolOP tables absent; python -m vulcan_forward.fetch_exomolop --molecules H2O,...")
 
 
 @pytest.mark.parametrize("engine", ["vulcan", "picaso"])
 @pytest.mark.parametrize("mode", ["transmission", "emission"])
-def test_full_chain_reproduces_the_verified_reference(mode, engine, tmp_path,
-                                                      monkeypatch):
+def test_full_chain_reproduces_the_verified_reference(mode, engine, tmp_path, monkeypatch):
     from jwst_tool import forward
 
     _engine_data_ready()
     z, meta = _load_fixture(FIXTURES[engine])
     if engine == "picaso":
         from jwst_tool import datacheck, picaso_engine
+
         if any(i.status != datacheck.OK for i in datacheck.check_picaso()):
             pytest.skip("PICASO environment or data not installed")
         # a cold climate solve, not the PICASO request cache (~20 min per mode)
@@ -108,30 +91,31 @@ def test_full_chain_reproduces_the_verified_reference(mode, engine, tmp_path,
     cp = forward.canonical_params(params)
     key = forward.params_key(cp)
     assert meta["forward_version"] == forward._VERSION, (
-        "fixture was generated under a different forward._VERSION -- "
-        "regenerate it (meta['regenerate'])")
+        "fixture was generated under a different forward._VERSION -- regenerate it (meta['regenerate'])"
+    )
     # _VERSION moves with the TOOL; an engine release under the same _VERSION
     # would leave a reference solved by code that no longer runs here.
+    import vulcan3
     import vulcan_forward
     from vulcan_forward import vulcan_chem  # noqa: F401  freezes the engine env before vulcan3 loads
-    import vulcan3
-    assert (meta["software"]["vulcan3"],
-            meta["software"]["vulcan-forward"]) == (
-        vulcan3.__version__, vulcan_forward.__version__), (
+
+    assert (meta["software"]["vulcan3"], meta["software"]["vulcan-forward"]) == (
+        vulcan3.__version__,
+        vulcan_forward.__version__,
+    ), (
         f"fixture solved on vulcan3 {meta['software']['vulcan3']} / "
         f"vulcan-forward {meta['software']['vulcan-forward']}, installed is "
         f"{vulcan3.__version__} / {vulcan_forward.__version__} -- "
-        "regenerate it (meta['regenerate'])")
-    assert key == ref["params_key"], (
-        "the canonical parameter set moved since the fixture was generated")
+        "regenerate it (meta['regenerate'])"
+    )
+    assert key == ref["params_key"], "the canonical parameter set moved since the fixture was generated"
 
     # An empty model cache: no cached spectrum AND no cached chemistry column
     # (a cached column would re-run only the RT), and the real cache that the
     # GUI's default run reads is left alone.
-    monkeypatch.setattr(forward, "MODEL_CACHE", tmp_path / "model_cache")
+    monkeypatch.setattr(model_cache, "MODEL_CACHE", tmp_path / "model_cache")
 
-    out = np.load(forward.run_model(params, log=lambda *a: None),
-                  allow_pickle=False)
+    out = np.load(forward.run_model(params, log=lambda *a: None), allow_pickle=False)
     got_cp = json.loads(str(out["params_json"]))
     assert got_cp["science_mode"] == mode
     assert str(out["science_mode"]) == mode
@@ -145,10 +129,9 @@ def test_full_chain_reproduces_the_verified_reference(mode, engine, tmp_path,
     wl_c, got = bin_r100(out["wl_um"], np.asarray(out["depth"]) * 1e6)
     want = np.asarray(z[f"{mode}_depth_ppm"])
     assert wl_c.shape == want.shape
-    tol = 0.05 * np.std(want)         # ~28 ppm transmission, ~27 emission
+    tol = 0.05 * np.std(want)  # ~28 ppm transmission, ~27 emission
     dev = got - want
-    label = (f"{mode}: max|d depth| {np.max(np.abs(dev)):.2f} ppm, "
-             f"std ratio {np.std(got) / np.std(want):.5f}")
+    label = f"{mode}: max|d depth| {np.max(np.abs(dev)):.2f} ppm, std ratio {np.std(got) / np.std(want):.5f}"
     print("\n  " + label)
     assert np.max(np.abs(dev)) < tol, label
     assert abs(np.std(got) / np.std(want) - 1.0) < 0.02, label

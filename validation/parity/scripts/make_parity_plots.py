@@ -1,55 +1,33 @@
 """Render PandExo-parity figures from a gate-PASS parity_summary.json and,
 where available, the raw per-wavelength run outputs.
 
-Usage:
-    python validation/parity/scripts/make_parity_plots.py
-
-These figures show the quantities that are in PARITY between this tool and
-current PandExo on the same Pandeia 2026.7 engine -- the things that match
-1:1: the selected groups, integration time, integration counts, and the
-extracted stellar flux. The depth-uncertainty difference (a noise-model
-difference, not a configuration one) is quantified in REPORT.md and
-parity_summary.json, not plotted.
-
-The summary is RE-VALIDATED through the shared gate (parity_gate.py) before
-any figure gets current-release labels; the persisted `gate.passed` boolean
-is never trusted. The extracted-flux figure also reads the raw
-{star}_{ours,pandexo}.json that run_parity.py writes into the outputs
-directory (git-ignored); it is skipped with a notice if those are absent (a
-fresh clone has the committed figures already, and re-running run_parity.py
-regenerates the raw JSON).
-
-Layout under validation/parity/: scripts/ (this + the harness), outputs/ (the
-committed parity_summary.json + REPORT.md and the git-ignored raw run JSON),
-figs/ (the committed PNG figures this writes).
-
-Style: validation/figstyle.py, the one style of every committed figure here
-(serif, Okabe-Ito cycle, square panels, axis labels and legend only). Two-code
-overlays are black under, red dashed on top; the timing panels colour by
-instrument and mark by star. fs.save() embeds this script in each PNG.
+Method and contract: docs/validation.md, section `make_parity_plots`.
 """
+
 import json
 import sys
 from pathlib import Path
 
 import numpy as np
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-HERE = Path(__file__).resolve().parent        # validation/parity/scripts
-OUTPUTS = HERE.parent / "outputs"             # parity_summary.json + raw JSON
-FIGS = HERE.parent / "figs"                   # committed PNG figures
+HERE = Path(__file__).resolve().parent  # validation/parity/scripts
+OUTPUTS = HERE.parent / "outputs"  # parity_summary.json + raw JSON
+FIGS = HERE.parent / "figs"  # committed PNG figures
 sys.path.insert(0, str(HERE))
 
-import parity_gate as pg                       # noqa: E402
+import parity_gate as pg
 
-from jwst_tool import instruments as _ins       # noqa: E402
+from jwst_tool import instruments as _ins
 
-sys.path.insert(0, str(HERE.parents[1]))       # validation/figstyle
-import figstyle as fs                          # noqa: E402
-from figstyle import CYC, INK, RED, MS         # noqa: E402
+sys.path.insert(0, str(HERE.parents[1]))  # validation/figstyle
+import figstyle as fs
+from figstyle import CYC, INK, RED, MS
+
 fs.use()
 
 # The plotted mode set is the GATE's declared experiment, never a local copy.
@@ -59,20 +37,27 @@ fs.use()
 # registry, so deriving from it inherits that guard. Colours and short labels
 # likewise come from the one validated registry palette.
 MODES = list(pg.MODE_KEYS)
-INSTRUMENT_LABEL = {"nirspec": "NIRSpec", "niriss": "NIRISS",
-                    "nircam": "NIRCam", "miri": "MIRI"}
+INSTRUMENT_LABEL = {"nirspec": "NIRSpec", "niriss": "NIRISS", "nircam": "NIRCam", "miri": "MIRI"}
 INSTRUMENT_COLOR = {ins: CYC[i] for i, ins in enumerate(INSTRUMENT_LABEL)}
-LABEL = {k: (_ins.MODES[k]["label"]
-             .replace("NIRSpec ", "").replace("NIRCam ", "")
-             .replace("NIRISS ", "").replace(" (ord 1)", "")
-             .replace(" (slitless)", ""))
-         for k in MODES}
+LABEL = {
+    k: (
+        _ins.MODES[k]["label"]
+        .replace("NIRSpec ", "")
+        .replace("NIRCam ", "")
+        .replace("NIRISS ", "")
+        .replace(" (ord 1)", "")
+        .replace(" (slitless)", "")
+    )
+    for k in MODES
+}
 STAR_MARK = {"w39_like": "o", "bright_hot": "s", "faint_k": "^"}
 # gate-owned data, never re-typed here (the MODES rule above applies)
-STAR_LABEL = {"w39_like": f"W39-like (Ks {pg.STARS['w39_like']['ks_mag']:.1f})",
-              "bright_hot": f"bright (Ks {pg.STARS['bright_hot']['ks_mag']:.1f})",
-              "faint_k": f"faint (Ks {pg.STARS['faint_k']['ks_mag']:.0f})"}
-SAT_LIMIT = pg.SAT_LIMIT   # a mode above this is saturated (unusable)
+STAR_LABEL = {
+    "w39_like": f"W39-like (Ks {pg.STARS['w39_like']['ks_mag']:.1f})",
+    "bright_hot": f"bright (Ks {pg.STARS['bright_hot']['ks_mag']:.1f})",
+    "faint_k": f"faint (Ks {pg.STARS['faint_k']['ks_mag']:.0f})",
+}
+SAT_LIMIT = pg.SAT_LIMIT  # a mode above this is saturated (unusable)
 
 
 def load_summary():
@@ -89,19 +74,20 @@ def require_passing_summary(summary):
         raise RuntimeError(
             "make_parity_plots: parity_summary.json has no gate block "
             "(regenerate with run_parity.py); refusing to put "
-            "current-release labels on an unvalidated artifact")
+            "current-release labels on an unvalidated artifact"
+        )
     problems = pg.validate_artifact(summary)
     if problems:
         raise RuntimeError(
             "make_parity_plots: parity_summary.json failed its gate "
             f"({len(problems)} problems; first: {problems[0]}); refusing to "
-            "put current-release labels on an unvalidated artifact")
+            "put current-release labels on an unvalidated artifact"
+        )
     return str(pg.REQUIRED_PANDEIA_RELEASE)
 
 
 def ok_rows(summary, star):
-    return {m["key"]: m for m in summary["stars"][star]["modes"]
-            if m.get("status") == "OK"}
+    return {m["key"]: m for m in summary["stars"][star]["modes"] if m.get("status") == "OK"}
 
 
 # Configuration & timing parity: ours vs PandExo on the 1:1 line
@@ -123,9 +109,16 @@ def fig_config_parity(summary, release):
                 x, y = rows[key][kx], rows[key][ky]
                 xs.append(x)
                 ys.append(y)
-                ax.plot(x, y, STAR_MARK[star], ms=MS, ls="", clip_on=False,
-                        color=INSTRUMENT_COLOR[_ins.MODES[key]["instrument"]],
-                        zorder=3)
+                ax.plot(
+                    x,
+                    y,
+                    STAR_MARK[star],
+                    ms=MS,
+                    ls="",
+                    clip_on=False,
+                    color=INSTRUMENT_COLOR[_ins.MODES[key]["instrument"]],
+                    zorder=3,
+                )
         lo, hi = min(xs + ys), max(xs + ys)
         ax.plot([lo, hi], [lo, hi], color=INK, lw=1.0, ls="--", zorder=1)
         ax.set_xscale("log")
@@ -135,11 +128,14 @@ def fig_config_parity(summary, release):
         ax.set_box_aspect(1)
         ax.set_xlabel(f"PandExo {name}")
         ax.set_ylabel(f"this tool {name}")
-    handles = ([Line2D([], [], marker="o", ls="", ms=MS, color=c, label=INSTRUMENT_LABEL[k])
-                for k, c in INSTRUMENT_COLOR.items()]
-               + [Line2D([], [], marker=STAR_MARK[st], ls="", ms=MS, color=INK,
-                         label=STAR_LABEL[st]) for st in STAR_MARK]
-               + [Line2D([], [], color=INK, ls="--", lw=1.0, label="1:1")])
+    handles = (
+        [
+            Line2D([], [], marker="o", ls="", ms=MS, color=c, label=INSTRUMENT_LABEL[k])
+            for k, c in INSTRUMENT_COLOR.items()
+        ]
+        + [Line2D([], [], marker=STAR_MARK[st], ls="", ms=MS, color=INK, label=STAR_LABEL[st]) for st in STAR_MARK]
+        + [Line2D([], [], color=INK, ls="--", lw=1.0, label="1:1")]
+    )
     axes[0].legend(handles=handles, loc="upper left")
     out = fs.save(fig, "parity_config_timing.png", out_dir=FIGS)
     plt.close(fig)
@@ -168,15 +164,13 @@ def _require_raw_matches_summary(summary, star, o_all, p_all, of, pf):
         if missing := sorted(s_modes - r_modes):
             problems.append(
                 f"{path.name}: missing mode(s) {missing} that the summary "
-                f"declares -- this raw file predates the current experiment")
+                f"declares -- this raw file predates the current experiment"
+            )
         s_prov = s_star.get(f"provenance_{label}", {})
         r_prov = raw.get("__provenance__", {})
-        for key in ("worker_version", "engine_version", "refdata_version",
-                    "psf_version"):
+        for key in ("worker_version", "engine_version", "refdata_version", "psf_version"):
             if key in s_prov and key in r_prov and s_prov[key] != r_prov[key]:
-                problems.append(
-                    f"{path.name}: {key}={r_prov[key]!r} but the summary "
-                    f"records {s_prov[key]!r}")
+                problems.append(f"{path.name}: {key}={r_prov[key]!r} but the summary records {s_prov[key]!r}")
     if problems:
         raise SystemExit(
             "make_parity_plots: the raw run outputs do not belong to the "
@@ -184,18 +178,17 @@ def _require_raw_matches_summary(summary, star, o_all, p_all, of, pf):
             "would misrepresent the gated run:\n  "
             + "\n  ".join(problems)
             + "\n\nEither re-run validation/parity/scripts/run_parity.py to "
-              "regenerate the raw outputs for THIS experiment, or move the "
-              "stale *_ours.json / *_pandexo.json aside and keep the "
-              "committed figure.")
+            "regenerate the raw outputs for THIS experiment, or move the "
+            "stale *_ours.json / *_pandexo.json aside and keep the "
+            "committed figure."
+        )
 
 
-def fig_extracted_flux(summary, out_root, mode="nirspec_g395h",
-                       star="w39_like", release="unknown"):
+def fig_extracted_flux(summary, out_root, mode="nirspec_g395h", star="w39_like", release="unknown"):
     of = out_root / f"{star}_ours.json"
     pf = out_root / f"{star}_pandexo.json"
     if not (of.exists() and pf.exists()):
-        print(f"  [flux fig] raw run outputs not in {out_root} -- skipping "
-              "(re-run run_parity.py to regenerate them)")
+        print(f"  [flux fig] raw run outputs not in {out_root} -- skipping (re-run run_parity.py to regenerate them)")
         return None
     o_all = json.loads(of.read_text())
     p_all = json.loads(pf.read_text())
@@ -217,10 +210,8 @@ def fig_extracted_flux(summary, out_root, mode="nirspec_g395h",
     ratio = flux_o[io] / erate[ip]
     med = float(np.median(ratio))
     fig, ax = plt.subplots(figsize=(6.5, 6.5))
-    ax.plot(wl_p, erate, color=INK, lw=1.5, solid_capstyle="round",
-            label=f"PandExo, {LABEL[mode]}, {STAR_LABEL[star]}")
-    ax.plot(wl_o, flux_o, color=RED, lw=0.7, ls="--",
-            label=f"this tool (median ratio {med:.4f})")
+    ax.plot(wl_p, erate, color=INK, lw=1.5, solid_capstyle="round", label=f"PandExo, {LABEL[mode]}, {STAR_LABEL[star]}")
+    ax.plot(wl_o, flux_o, color=RED, lw=0.7, ls="--", label=f"this tool (median ratio {med:.4f})")
     ax.set_xlabel("wavelength ($\\mu$m)")
     ax.set_ylabel("extracted stellar count rate (e$^-$ s$^{-1}$)")
     ax.legend(loc="upper right")

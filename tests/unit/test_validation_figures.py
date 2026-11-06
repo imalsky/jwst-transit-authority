@@ -2,10 +2,12 @@
 generator (figstyle.save writes it into a tEXt chunk) and that code equals the
 script of the same name. Compared as parsed code with docstrings stripped, so
 a comment or docstring edit does not demand a new PNG (each regeneration adds
-the file to git history). Covers validation/figures and validation/parity/figs."""
+the file to git history). Covers validation/figures and validation/parity/figs.
+"""
+
 import ast
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import matplotlib
 import pytest
@@ -13,18 +15,22 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 VAL = ROOT / "validation"
 sys.path.insert(0, str(VAL))
-import figstyle  # noqa: E402
+import figstyle
 
-FIGURE_DIRS = {VAL / "figures": VAL / "scripts",
-               VAL / "parity" / "figs": VAL / "parity" / "scripts"}
+FIGURE_DIRS = {VAL / "figures": VAL / "scripts", VAL / "parity" / "figs": VAL / "parity" / "scripts"}
 
 
 def _code(text):
     tree = ast.parse(text)
     for node in ast.walk(tree):
         body = getattr(node, "body", None)
-        if (isinstance(body, list) and body and isinstance(body[0], ast.Expr)
-                and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str)):
+        if (
+            isinstance(body, list)
+            and body
+            and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)
+        ):
             node.body = body[1:] or [ast.Pass()]
     return ast.dump(tree)
 
@@ -35,20 +41,21 @@ def test_use_applies_the_serif_style():
     assert [c["color"] for c in matplotlib.rcParams["axes.prop_cycle"]] == figstyle.CYC
 
 
-@pytest.mark.parametrize("png", sorted(p for d in FIGURE_DIRS for p in d.glob("*.png")),
-                         ids=lambda p: p.name)
+@pytest.mark.parametrize("png", sorted(p for d in FIGURE_DIRS for p in d.glob("*.png")), ids=lambda p: p.name)
 def test_every_committed_figure_embeds_its_committed_generator(png):
     meta = figstyle.embedded_source(png)
     script = FIGURE_DIRS[png.parent] / meta["Source"]
     assert script.exists(), f"{png.name}: generator {meta['Source']} is not committed"
-    assert _code(meta["Generator-Source"]) == _code(script.read_text()), \
+    assert _code(meta["Generator-Source"]) == _code(script.read_text()), (
         f"{png.name} was not made by the committed {script.name}; regenerate it"
+    )
 
 
 def test_six_atmosphere_references_are_paired_and_a_bad_input_is_refused(tmp_path, monkeypatch):
     import hashlib
     import runpy
     import shutil
+
     import numpy as np
 
     def restamp(atmosphere, **keys):
@@ -72,13 +79,14 @@ def test_six_atmosphere_references_are_paired_and_a_bad_input_is_refused(tmp_pat
         shutil.copy2(reference, tmp_path / reference.name)
 
     monkeypatch.setattr(figstyle, "DATA", tmp_path)
+
     def no_figure(*args, **kwargs):
         pytest.fail("a mismatched comparison must fail before saving a figure")
+
     monkeypatch.setattr(figstyle, "save", no_figure)
 
     def run():
-        runpy.run_path(str(VAL / "scripts" / "fig_rt_verification_six_atmospheres.py"),
-                       run_name="__main__")
+        runpy.run_path(str(VAL / "scripts" / "fig_rt_verification_six_atmospheres.py"), run_name="__main__")
 
     # Columns solved at different photolysis cadences are not comparable.
     frq = dict(photo_escalated=False, ini_update_photo_frq=5, final_update_photo_frq=5)

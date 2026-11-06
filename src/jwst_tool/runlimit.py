@@ -11,8 +11,11 @@ and unlinking a path another process may still hold flock'd creates two
 "exclusive" locks on different inodes. The pid/tag/start-time in a slot file
 is observability metadata only.
 """
+
 from __future__ import annotations
 
+import contextlib
+import errno
 import fcntl
 import json
 import logging
@@ -23,6 +26,7 @@ import threading
 import time
 from email.message import EmailMessage
 from pathlib import Path
+from typing import Any
 
 from jwst_tool import instruments as _ins
 
@@ -39,50 +43,47 @@ SLOT_DIR = Path(tempfile.gettempdir()) / "jwst_tool_run_slots"
 
 
 class Slot:
-    """A held run slot; ``release()`` exactly once when the run finishes
-    (the OS also releases it if the holding process dies)."""
+    """A held run slot.
 
-    def __init__(self, fh, index: int):
+    ``release()`` exactly once when the run finishes (the OS also releases it if the holding process dies).
+    """
+
+    def __init__(self, fh: Any, index: int) -> None:
         self._fh = fh
         self.index = index
 
     def release(self) -> None:
-        try:
+        """Release the slot."""
+        with contextlib.suppress(OSError, ValueError):
             fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
-        except (OSError, ValueError):
-            pass
-        try:
+        with contextlib.suppress(OSError):
             self._fh.close()
-        except OSError:
-            pass
 
 
-def acquire(tag: str = "run"):
-    """A :class:`Slot`, or ``None`` when all slots are busy. Never blocks."""
+def acquire(tag: str = "run") -> Slot | None:
+    """Return a :class:`Slot`, or ``None`` when all slots are busy. Never blocks."""
     SLOT_DIR.mkdir(parents=True, exist_ok=True)
     for i in range(MAX_CONCURRENT):
-        fh = open(SLOT_DIR / f"slot{i}.lock", "a+")
+        fh = open(SLOT_DIR / f"slot{i}.lock", "a+")  # noqa: SIM115  (held until the slot is released)
         try:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
             fh.close()
-            import errno as _errno
-            if exc.errno not in (_errno.EAGAIN, _errno.EACCES,
-                                 _errno.EWOULDBLOCK):
+            if exc.errno not in (errno.EAGAIN, errno.EACCES, errno.EWOULDBLOCK):
                 raise RuntimeError(
                     f"run-slot lock failed on {SLOT_DIR} with {exc!r}: "
                     "this filesystem does not support flock. Set TMPDIR "
-                    "to a filesystem with working advisory locks.") from exc
+                    "to a filesystem with working advisory locks."
+                ) from exc
             continue
         fh.truncate(0)
-        fh.write(json.dumps({"pid": os.getpid(), "tag": str(tag),
-                             "t0": time.time()}))
+        fh.write(json.dumps({"pid": os.getpid(), "tag": str(tag), "t0": time.time()}))
         fh.flush()
         return Slot(fh, i)
     return None
 
 
-def oldest_start():
+def oldest_start() -> float | None:
     """Start time (epoch s) of the longest-running held slot, or None.
 
     Read without the locks, so best effort: a slot file mid-rewrite or
@@ -100,8 +101,9 @@ def oldest_start():
 
 
 def notify_refused(context: str) -> None:
-    """Mail the maintainer that a visitor was refused (every slot busy, or an
-    illegal parameter set), at most once an hour per instance.
+    """Mail the maintainer that a visitor was refused.
+
+    (every slot busy, or an illegal parameter set), at most once an hour per instance.
 
     Off unless ALERT_SMTP_USER, ALERT_SMTP_PASS and ALERT_TO are all set, so
     it is inert locally and in the tests. The send runs in a daemon thread --
@@ -132,12 +134,11 @@ def notify_refused(context: str) -> None:
             msg = EmailMessage()
             msg["Subject"] = "[jwst-transit-authority] user refused"
             msg["From"], msg["To"] = user, to
-            msg.set_content("%s\n%s\n" % (
-                time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), context))
+            msg.set_content("{}\n{}\n".format(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), context))
             with smtplib.SMTP_SSL("smtp.gmail.com", 465) as srv:
                 srv.login(user, password)
                 srv.send_message(msg)
-        except Exception as exc:       # broad: never break a page render
+        except Exception as exc:  # broad: never break a page render
             log.warning("refusal alert failed: %r", exc)
 
     threading.Thread(target=_send, name="refusal-alert", daemon=True).start()

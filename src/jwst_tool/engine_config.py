@@ -1,4 +1,4 @@
-"""This tool's view of the shared forward engine's configuration.
+"""Hold the tool's view of the shared forward engine's configuration.
 
 Holds what the planner needs from the ``vulcan-forward`` engine:
 
@@ -8,42 +8,44 @@ Holds what the planner needs from the ``vulcan-forward`` engine:
 - the engine's data locations, resolved lazily so importing this module never
   touches the filesystem.
 
-The attribute surface is a contract: ``forward``, ``picaso_engine``,
-``datacheck``, ``fetch`` and ``app`` reach for these names (``adjoint_diag``
-through forward's assembler), so keep them working.
+The attribute surface is a contract: ``chem_build``, ``picaso_engine``, ``spectrum``,
+``datacheck``, ``fetch`` and ``gui_results`` read these names, so keep them working.
 """
+
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from vulcan_forward import constants as _fwd
-from vulcan_forward import paths as _fwd_paths
+from vulcan_forward import constants as _fwd, paths as _fwd_paths
 
-# --- shared physics: re-exported, never redefined --------------------------
+if TYPE_CHECKING:
+    from pathlib import Path
+
+# Shared physics: re-exported, never redefined
 MOLECULES = _fwd.MOLECULES
 W39B_CFG_NAME = _fwd.DEFAULT_CFG_NAME
 
-# --- the planner's own base RT profile -------------------------------------
+# The planner's own base RT profile
 # Only the band edges: run_model sets every other key from the canonical
 # parameter set. The engine owns the supported 1-15 um window (short edge =
 # the H2-H2 CIA table).
 WIDE = {
-    "nu_min": _fwd.WIDE_BAND_NU_MIN,    # 667 cm^-1 = 15 um
-    "nu_max": _fwd.WIDE_BAND_NU_MAX,    # 10000 cm^-1 = 1 um (H2-H2 CIA edge)
+    "nu_min": _fwd.WIDE_BAND_NU_MIN,  # 667 cm^-1 = 15 um
+    "nu_max": _fwd.WIDE_BAND_NU_MAX,  # 10000 cm^-1 = 1 um (H2-H2 CIA edge)
 }
 
-# --- data locations --------------------------------------------------------
+# Data locations
 # Resolved on ACCESS, not at import: the tool must stay importable on a
 # machine with no data installed ($VULCAN_FORWARD_DATA contract). Touching
 # one without a configured root raises RuntimeError naming the remedy.
 _LAZY = {
-    "DATA_DIR": lambda: _fwd_paths.data_root(),
-    "CIA_H2H2_FILE": lambda: _fwd_paths.cia_h2h2_file(),
-    "CIA_H2HE_FILE": lambda: _fwd_paths.cia_h2he_file(),
+    "DATA_DIR": _fwd_paths.data_root,
+    "CIA_H2H2_FILE": _fwd_paths.cia_h2h2_file,
+    "CIA_H2HE_FILE": _fwd_paths.cia_h2he_file,
     # ExoMolOP k-table tree (the gas opacity every run reads). No existence
     # check in the engine accessor, so datacheck can report per-molecule
     # MISSING items even when the whole tree is absent.
-    "EXOMOLOP_DIR": lambda: _fwd_paths.exomolop_dir(),
+    "EXOMOLOP_DIR": _fwd_paths.exomolop_dir,
 }
 
 

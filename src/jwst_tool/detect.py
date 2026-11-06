@@ -1,48 +1,15 @@
-"""Detection-significance math: bin the model per instrument THROUGH THE SAME
-count-space measurement operator as the noise, combine with the per-bin depth
-uncertainty, and score the science goal.
+"""Detection-significance math.
 
-Model, removed-molecule model, Jacobians, and noise all go through one
-operator (binning.build_operator, flux-weighted). Fully saturated pixels are
-excluded from the operator; partially saturated ones are kept (the worker's
-native-grid census reports both). For modes whose final bins approach the
-native resolving power (MIRI LRS, NIRSpec PRISM, SOSS) the model is first
-blurred to the instrument's measured response, R(lambda) / instruments.LSF_WIDTH
-(binning.smooth_to_native_r); a no-op for high-R gratings.
-
-sigma_detect is a CONDITIONAL MATCHED-TEMPLATE S/N at the specified
-atmospheric state: the nested-model chi-square distance between the full
-spectrum and the spectrum with one molecule's opacity removed, with the
-calibration nuisances profiled out --
-
-    chi2 = s^T W s - b^T A^{-1} b,   W = diag(1/sigma^2),
-    b = U W s,  A = U W U^T,         s_b = d_full - d_without_X
-
-The rows of U are one constant depth offset and one step per extra detector
-segment (NRS1|NRS2 -- real G395H fits float such offsets). It is NOT a
-retrieval detection significance: the atmosphere
-is held at the specified state, and a retrieval that frees more parameters
-under the same model and noise assumptions will usually report a lower
-significance (a best-case comparison under those conditions, not a universal
-bound). When a Fisher Jacobian is available, ``sigma_detect_proj``
-additionally projects out whichever of the T-P, lnR0 and cloud derivative
-directions the run actually built (_NUISANCE_JAC below; still conditional) and
-is the number to prefer for narrow margins -- any caption describing it must
-name the rows that were present, which metric_label does.
-
-Multi-transit extrapolation: the random variance scales as 1/N; the minimum
-floor is a hard lower bound at every N, so with a floor in every bin the
-score reaches a ceiling (``sig_inf`` in transits_to_target) instead of
-growing as sqrt(N) without bound.
+Method and contract: docs/forecast_statistics.md, section `detect`.
 """
+
 from __future__ import annotations
+
+from typing import Any
 
 import numpy as np
 
-from . import binning
-from . import instruments as ins
-from . import forward
-from . import noise as noise_mod
+from . import binning, certify, instruments as ins, model_defs, noise as noise_mod
 
 # transits-to-target scan cap: beyond this, effectively unreachable anyway
 N_TRANSITS_CAP = 500
@@ -52,22 +19,23 @@ N_TRANSITS_CAP = 500
 # like an offset). Never add the chemistry rows (lnZ, dlnCO, lnKzz) -- they
 # ARE the signal being scored.
 _NUISANCE_JAC = frozenset(
-    {"lnR0", *forward.CLOUD_FISHER_PARAMS,
-     *(p for names in forward.TP_PARAM_NAMES.values() for p in names)})
+    {"lnR0", *model_defs.CLOUD_FISHER_PARAMS, *(p for names in model_defs.TP_PARAM_NAMES.values() for p in names)}
+)
 
 
 def _segment_rows(seg: np.ndarray) -> list[np.ndarray]:
-    """Indicator rows (one per segment beyond the first); with the constant
-    offset they span the per-segment offset space."""
+    """Return indicator rows (one per segment beyond the first).
+
+    With the constant offset they span the per-segment offset space.
+    """
     seg = np.asarray(seg, int)
     return [(seg == s).astype(float) for s in range(1, int(seg.max()) + 1)]
 
 
-def detection_significance(signal: np.ndarray, sigma: np.ndarray,
-                           nuisance: list[np.ndarray] | None = None,
-                           marginalize_offset: bool = True) -> float:
-    """sqrt(Delta chi^2) of a binned signal against noise, with linear
-    nuisance directions profiled out (rank-aware).
+def detection_significance(
+    signal: np.ndarray, sigma: np.ndarray, nuisance: list[np.ndarray] | None = None, marginalize_offset: bool = True
+) -> float:
+    """sqrt(Delta chi^2) of a binned signal against noise, with linear nuisance directions profiled out (rank-aware).
 
     ``marginalize_offset=True`` (default) includes a constant depth offset;
     ``nuisance`` adds arbitrary extra rows. The result depends only on the
@@ -86,27 +54,23 @@ def detection_significance(signal: np.ndarray, sigma: np.ndarray,
     """
     signal = np.asarray(signal, float)
     if signal.ndim != 1 or signal.size == 0 or not np.all(np.isfinite(signal)):
-        raise ValueError("detection_significance: signal must be a non-empty "
-                         "1-D finite array")
+        raise ValueError("detection_significance: signal must be a non-empty 1-D finite array")
     for i, r in enumerate(nuisance or []):
         if not np.all(np.isfinite(r)):
-            raise ValueError(f"detection_significance: nuisance row {i} "
-                             "must contain only finite values")
+            raise ValueError(f"detection_significance: nuisance row {i} must contain only finite values")
         if np.asarray(r).shape != signal.shape:
-            raise ValueError(f"detection_significance: nuisance row {i} has "
-                             f"shape {np.asarray(r).shape}, expected "
-                             f"{signal.shape}")
+            raise ValueError(
+                f"detection_significance: nuisance row {i} has shape {np.asarray(r).shape}, expected {signal.shape}"
+            )
     sig = np.asarray(sigma, float)
-    if sig.shape != signal.shape or not np.all(np.isfinite(sig)) \
-            or np.any(sig <= 0.0):
-        raise ValueError("detection_significance: sigma must match signal's "
-                         "shape and be finite and > 0")
+    if sig.shape != signal.shape or not np.all(np.isfinite(sig)) or np.any(sig <= 0.0):
+        raise ValueError("detection_significance: sigma must match signal's shape and be finite and > 0")
     # keep the constant row even for a single bin: one bin + free offset =
     # zero shape information, so the score is 0 (never |s|/sigma)
     rows = [np.ones_like(signal)] if marginalize_offset else []
     rows += [np.asarray(r, float) for r in (nuisance or [])]
     w = 1.0 / np.asarray(sigma, float) ** 2
-    chi2 = chi2_raw = float(np.sum(w * signal ** 2))
+    chi2 = chi2_raw = float(np.sum(w * signal**2))
     if rows:
         U = np.stack(rows)
         A = (U * w) @ U.T
@@ -122,7 +86,7 @@ def detection_significance(signal: np.ndarray, sigma: np.ndarray,
             good = ew > 1e-12 * max(float(ew[-1]), 1e-300)
             if good.any():
                 proj = ev[:, good].T @ bn
-                chi2 -= float(np.sum(proj ** 2 / ew[good]))
+                chi2 -= float(np.sum(proj**2 / ew[good]))
     if chi2 <= 1e-12 * chi2_raw:
         # below the eigen-threshold's own resolution: the projection's
         # rounding noise, not shape information -- report exactly 0
@@ -138,21 +102,22 @@ def detection_significance(signal: np.ndarray, sigma: np.ndarray,
 def metric_label(r: dict) -> str:
     """Name the nuisance directions the reported score actually profiled.
 
-    The rows actually PRESENT, never the rows the statistic could use."""
+    The rows actually PRESENT, never the rows the statistic could use.
+    """
     if not np.isfinite(float(r.get("sigma_detect_proj", float("nan")))):
         return "calibration profiled"
-    cloud = frozenset(forward.CLOUD_FISHER_PARAMS)
+    cloud = frozenset(model_defs.CLOUD_FISHER_PARAMS)
     have = {str(n) for n in r.get("jac_names", [])}
     parts = ["calibration"] + [
-        lab for lab, grp in (("T-P", _NUISANCE_JAC - cloud - {"lnR0"}),
-                             ("cloud", cloud),
-                             ("R0", frozenset({"lnR0"}))) if have & grp]
+        lab
+        for lab, grp in (("T-P", _NUISANCE_JAC - cloud - {"lnR0"}), ("cloud", cloud), ("R0", frozenset({"lnR0"})))
+        if have & grp
+    ]
     return " + ".join(parts) + " projected"
 
 
 def detection_metric(r: dict) -> tuple[float, bool]:
-    """Reportable score for one evaluated mode, and whether the physical
-    nuisance directions were projected out of it."""
+    """Return the reportable score of one evaluated mode, and whether physical nuisance rows were projected out."""
     projected = float(r.get("sigma_detect_proj", float("nan")))
     if np.isfinite(projected):
         return projected, True
@@ -160,7 +125,7 @@ def detection_metric(r: dict) -> tuple[float, bool]:
 
 
 def has_floor(result: dict) -> bool:
-    """Does this mode result carry a systematic noise floor anywhere?"""
+    """Return whether this mode result carries a systematic noise floor anywhere."""
     return bool(np.any(np.asarray(result["floor"]) > 0.0))
 
 
@@ -173,31 +138,25 @@ def sigma_at_transits(result: dict, n_transits: int) -> np.ndarray:
     """
     n0 = int(result["n_transits_eval"])
     scale = n0 / float(noise_mod.n_transits_int(n_transits))
-    return np.maximum(np.sqrt(np.asarray(result["var_phot"]) * scale),
-                      np.asarray(result["floor"]))
+    return np.maximum(np.sqrt(np.asarray(result["var_phot"]) * scale), np.asarray(result["floor"]))
 
 
 def _detection_nuisance(result: dict, projected: bool) -> list[np.ndarray]:
-    """Calibration rows (per-segment offset steps), plus local physical
-    nuisance rows when requested."""
+    """Calibration rows (per-segment offset steps), plus local physical nuisance rows when requested."""
     rows = _segment_rows(result["seg"])
     if not projected:
         return rows
     names = [str(x) for x in result.get("jac_names", [])]
     jac = result.get("jac_bins")
     if jac is None or not names:
-        raise ValueError(
-            "projected detection score requires jac_bins and jac_names")
+        raise ValueError("projected detection score requires jac_bins and jac_names")
     jac = np.asarray(jac, float)
     if jac.ndim != 2 or jac.shape[0] != len(names):
-        raise ValueError(
-            "projected detection score: jac_bins rows must match jac_names")
-    return rows + [jac[i] for i, name in enumerate(names)
-                   if name in _NUISANCE_JAC]
+        raise ValueError("projected detection score: jac_bins rows must match jac_names")
+    return rows + [jac[i] for i, name in enumerate(names) if name in _NUISANCE_JAC]
 
 
-def detection_score(result: dict, sigma: np.ndarray | None = None,
-                    *, projected: bool = False) -> float:
+def detection_score(result: dict, sigma: np.ndarray | None = None, *, projected: bool = False) -> float:
     """Recompute a result's matched-template score with one explicit metric.
 
     ``projected=False`` is the calibration-profiled score.
@@ -209,13 +168,10 @@ def detection_score(result: dict, sigma: np.ndarray | None = None,
         return float("nan")
     signal = np.asarray(result["depth"]) - np.asarray(result["depth_wo"])
     use_sigma = np.asarray(result["sigma"] if sigma is None else sigma)
-    return detection_significance(
-        signal, use_sigma,
-        nuisance=_detection_nuisance(result, projected=projected))
+    return detection_significance(signal, use_sigma, nuisance=_detection_nuisance(result, projected=projected))
 
 
-def transits_to_target(result: dict, target_sig: float, *,
-                       projected: bool = False) -> dict:
+def transits_to_target(result: dict, target_sig: float, *, projected: bool = False) -> dict:
     """Smallest transit count reaching ``target_sig`` for the detect goal.
 
     Returns dict(n=int|None, reachable=bool, sig_inf=float). ``sig_inf`` is
@@ -236,10 +192,9 @@ def transits_to_target(result: dict, target_sig: float, *,
         # no floor: the score grows as sqrt(N) without bound, so the limit
         # is inf -- unless the signal lies in the nuisance span, where it is
         # 0 at every N (exactly 0: detection_significance snaps it)
-        sig_inf = (float("inf")
-                   if detection_score(result, sigma_at_transits(result, 1),
-                                      projected=projected) > 0.0
-                   else 0.0)
+        sig_inf = (
+            float("inf") if detection_score(result, sigma_at_transits(result, 1), projected=projected) > 0.0 else 0.0
+        )
     elif np.all(floor > 0.0):
         sig_inf = detection_score(result, floor, projected=projected)
     else:
@@ -249,23 +204,22 @@ def transits_to_target(result: dict, target_sig: float, *,
     if target_sig > sig_inf:
         return dict(n=None, reachable=False, sig_inf=sig_inf)
     for n in range(1, N_TRANSITS_CAP + 1):
-        if detection_score(result, sigma_at_transits(result, n),
-                           projected=projected) >= target_sig:
+        if detection_score(result, sigma_at_transits(result, n), projected=projected) >= target_sig:
             return dict(n=n, reachable=True, sig_inf=sig_inf)
     return dict(n=None, reachable=False, sig_inf=sig_inf)
 
 
-def _removed_spectrum(model: dict, mols: list[str], target_mol,
-                      order: np.ndarray) -> np.ndarray | None:
+def _removed_spectrum(model: dict, mols: list[str], target_mol: str | None, order: np.ndarray) -> np.ndarray | None:
     if target_mol is None:
         return None
     if target_mol not in mols:
         raise ValueError(
             f"target molecule {target_mol!r} is not in the cached model's RT "
             f"set {mols} -- re-run the forward model with it enabled "
-            "(extra_mols)")
+            "(extra_mols)"
+        )
     # depth_wo rows (and the emis_*_wo certificates) align with the model's
-    # wo_mols set, not with mols. wo_mols is a REQUIRED key: forward._VERSION
+    # wo_mols set, not with mols. wo_mols is a REQUIRED key: model_defs._VERSION
     # rides in the cache key, so a missing one is a malformed payload.
     wo = [str(m) for m in np.asarray(model["wo_mols"])]
     if target_mol not in wo:
@@ -273,7 +227,8 @@ def _removed_spectrum(model: dict, mols: list[str], target_mol,
             f"this cached model computed removed-molecule spectra only for "
             f"{wo or 'no molecules'} (wo_mols), not for {target_mol!r} -- it "
             "was a constrain-goal run. Re-run the forward model with the "
-            "detect goal (or wo_mols including the target).")
+            "detect goal (or wo_mols including the target)."
+        )
     index = wo.index(target_mol)
     if str(model.get("science_mode", "transmission")) == "emission":
         # FLUX-WEIGHTED, never a min-tau test: a narrow blue-edge notch
@@ -282,10 +237,9 @@ def _removed_spectrum(model: dict, mols: list[str], target_mol,
         # rides in the cache key, so a readable model always carries it.
         cert = _emis_evidence(model, "emis_thin_flux_frac_wo", (len(wo),))
         if np.any(cert > 1.0):
-            raise ValueError("cached emission model has a malformed "
-                             "'emis_thin_flux_frac_wo' (a fraction above 1)")
+            raise ValueError("cached emission model has a malformed 'emis_thin_flux_frac_wo' (a fraction above 1)")
         frac = float(cert[index])
-        if frac > forward.EMIS_THIN_FLUX_FRAC:
+        if frac > certify.EMIS_THIN_FLUX_FRAC:
             raise ModeUnusable(
                 f"{target_mol} emission detection is not supported for "
                 f"this atmosphere: with {target_mol} removed, "
@@ -293,17 +247,19 @@ def _removed_spectrum(model: dict, mols: list[str], target_mol,
                 "wavelengths where the RT column bottom is optically thin, "
                 "so its eclipse detection contrast would be overstated. "
                 "Detect a molecule with deeper opacity, or use "
-                "transmission.")
+                "transmission."
+            )
         return _emis_evidence(model, "depth_wo", (len(wo), order.size))[index][order]
     return np.asarray(model["depth_wo"])[index][order]
 
 
 class ModeUnusable(ValueError):
-    """This mode's data cannot support the requested measurement.
+    """The mode's data cannot support the requested measurement.
 
     Distinct from a calculation failure: the caller reports it with the mode's
     CONFIGURATION and drops the mode from every ranking and forecast, rather
-    than showing a traceback for something that is a property of the target."""
+    than showing a traceback for something that is a property of the target.
+    """
 
 
 # Band margin for the LSF blur and the emission band certificate. The
@@ -315,8 +271,10 @@ _LSF_BAND_MARGIN = (0.97, 1.03)
 
 
 def _emis_evidence(model: dict, key: str, shape: tuple) -> np.ndarray:
-    """A cached emission-evidence array, validated. A missing or malformed one
-    refuses; it never defaults to safe."""
+    """Return a cached emission-evidence array, validated.
+
+    A missing or malformed one refuses; it never defaults to safe.
+    """
     if key not in model:
         raise ValueError(f"cached emission model is missing {key!r}")
     try:
@@ -328,8 +286,15 @@ def _emis_evidence(model: dict, key: str, shape: tuple) -> np.ndarray:
     return a
 
 
-def _certify_emission_band(model: dict, order: np.ndarray, wl_model: np.ndarray,
-                           cell_lo, cell_hi, mode_key: str, target_mol) -> None:
+def _certify_emission_band(
+    model: dict,
+    order: np.ndarray,
+    wl_model: np.ndarray,
+    cell_lo: np.ndarray,
+    cell_hi: np.ndarray,
+    mode_key: str,
+    target_mol: str | None,
+) -> None:
     """Re-evaluate the thin-bottom gate over the wavelengths THIS mode measures.
 
     The band-global certificate cannot certify a narrower band: a mode
@@ -338,13 +303,14 @@ def _certify_emission_band(model: dict, order: np.ndarray, wl_model: np.ndarray,
     spectrum can pass at 1% globally while the
     band actually being measured is far thinner. Same gate, same threshold,
     restricted support. Raises so the mode is excluded from every ranking and
-    forecast rather than reporting a contrast the column cannot support."""
+    forecast rather than reporting a contrast the column cannot support.
+    """
     n = wl_model.size
     tau = _emis_evidence(model, "emis_tau_bottom", (n,))[order]
     flux = _emis_evidence(model, "fp_flux", (n,))[order]
     lo, hi = float(np.min(cell_lo)), float(np.max(cell_hi))
     measured = np.zeros(n, dtype=bool)
-    for a, b in zip(cell_lo, cell_hi):
+    for a, b in zip(cell_lo, cell_hi, strict=True):
         measured |= (wl_model >= a) & (wl_model <= b)
     lo, hi = lo * _LSF_BAND_MARGIN[0], hi * _LSF_BAND_MARGIN[1]
     m = (wl_model >= lo) & (wl_model <= hi)
@@ -352,7 +318,8 @@ def _certify_emission_band(model: dict, order: np.ndarray, wl_model: np.ndarray,
         raise ValueError(
             f"{mode_key}: fewer than two model bands inside its measured "
             f"support {lo:.3f}-{hi:.3f} um; the emission certificate cannot "
-            "be evaluated")
+            "be evaluated"
+        )
     nu = 1.0e4 / wl_model
     stages = [("baseline", tau, flux)]
     if target_mol is not None:
@@ -363,26 +330,29 @@ def _certify_emission_band(model: dict, order: np.ndarray, wl_model: np.ndarray,
             raise ValueError("cached emission model has a malformed emis_depth_norm: must be positive")
         fs = _emis_evidence(model, "fs_flux", (n,))[order]
         d_wo = _emis_evidence(model, "depth_wo", (len(wo), n))
-        stages.append((
-            f"with {target_mol} removed",
-            _emis_evidence(model, "emis_tau_bottom_wo", (len(wo), n))[i][order],
-            d_wo[i][order] * fs / norm))
+        stages.append(
+            (
+                f"with {target_mol} removed",
+                _emis_evidence(model, "emis_tau_bottom_wo", (len(wo), n))[i][order],
+                d_wo[i][order] * fs / norm,
+            )
+        )
     for stage, tau_s, flux_s in stages:
-        frac = forward.thin_flux_fraction(tau_s[m], flux_s[m], nu[m])
+        frac = certify.thin_flux_fraction(tau_s[m], flux_s[m], nu[m])
         # Retain the contiguous grid for bandwidths: slicing out gaps would
         # make gradient(nu) assign the missing bandwidth to their neighbours.
-        core_frac = forward.thin_flux_fraction(
-            tau_s[m], np.where(measured[m], flux_s[m], 0.0), nu[m])
+        core_frac = certify.thin_flux_fraction(tau_s[m], np.where(measured[m], flux_s[m], 0.0), nu[m])
         frac = max(frac, core_frac)
-        if frac > forward.EMIS_THIN_FLUX_FRAC:
+        if frac > certify.EMIS_THIN_FLUX_FRAC:
             # one line: this goes into the GUI's exclusion warning beside the
             # other excluded modes, so it states what and where, not what to do
             raise ModeUnusable(
                 f"over the {lo:.2f}-{hi:.2f} um it measures, "
                 f"{100.0 * frac:.1f}% of the emitted flux ({stage}) comes "
                 "from wavelengths where the RT column bottom is optically "
-                f"thin (tau < {forward.EMIS_TAU_THIN:g}), above the "
-                f"{100.0 * forward.EMIS_THIN_FLUX_FRAC:g}% tolerance")
+                f"thin (tau < {certify.EMIS_TAU_THIN:g}), above the "
+                f"{100.0 * certify.EMIS_THIN_FLUX_FRAC:g}% tolerance"
+            )
 
 
 def _usable_pixels(mode_key: str, mode_result: dict) -> tuple:
@@ -404,52 +374,26 @@ def _usable_pixels(mode_key: str, mode_result: dict) -> tuple:
             f"saturated ({int((full > 0).sum())}) or wavelength-degenerate "
             f"({int(degenerate.sum())}). Choose a mode with a larger "
             "saturation margin or a different target, or check the "
-            "worker's wavelength grid")
+            "worker's wavelength grid"
+        )
     return wl, flux, degenerate, usable
 
 
-def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
-                  R_bin: float, t_in_s: float, t_out_s: float, n_transits: int,
-                  floor_spec, noise_inflation: float = 1.0) -> dict:
-    """One instrument mode -> binned model, sigmas, conditional template S/N.
-
-    Bins cover the intersection of the mode's science band, the model's
-    coverage, and the pixels pandeia returned; model, Jacobians, and noise
-    share ONE count-space operator (module docstring). ``target_mol=None``
-    (the parameter-constraint goal) skips the molecule-removed comparison:
-    ``sigma_detect`` comes back NaN and ``depth_wo`` None.
-    """
-    m = ins.MODES[mode_key]
-    wl_model = binning._validate_wl(model["wl_um"], f"{mode_key}: wl_model")
-    depth_raw = np.asarray(model["depth"], dtype=float)
-    if wl_model.size < 3 or depth_raw.shape != wl_model.shape:
-        raise ValueError("model wavelength and depth must be aligned 1-D arrays with >=3 points")
-    if not np.all(np.isfinite(depth_raw)):
-        raise ValueError("model depth must be finite")
-    order = np.argsort(wl_model)
-    wl_model = wl_model[order]
-    depth = depth_raw[order]
-    # The model's own resolving power, measured from its grid (correlated-k
-    # is fixed at the published k-tables' R = 1000 band grid).
-    r_model = 1.0 / float(np.median(np.diff(np.log(wl_model))))
-    if float(R_bin) > r_model:
-        raise ValueError(
-            f"{mode_key}: analysis resolving power R_bin={float(R_bin):g} is "
-            f"finer than the model spectrum's own resolving power "
-            f"(R = {r_model:.0f}). Bins narrower than the model grid would "
-            "report interpolated structure the model does not contain. Lower "
-            "R_bin to at most the model resolving power: the grid is the "
-            "published k-tables' R = 1000 band grid and cannot be raised.")
-    mols = [str(x) for x in model["mols"]]
-    depth_wo = _removed_spectrum(model, mols, target_mol, order)
-
-    wl_pix, flux_pix, degen, usable = _usable_pixels(mode_key, mode_result)
-
-    lo = max(m["wl_min"], float(wl_model.min()), float(wl_pix[usable].min()))
-    hi = min(m["wl_max"], float(wl_model.max()), float(wl_pix[usable].max()))
-    if hi <= lo:
-        raise ValueError(f"{mode_key}: no overlap between instrument band and model")
-
+def _blur_to_response(
+    mode_key: str,
+    model: dict,
+    order: np.ndarray,
+    mode_result: dict,
+    wl_model: np.ndarray,
+    depth: np.ndarray,
+    depth_wo: np.ndarray | None,
+    wl_pix: np.ndarray,
+    flux_pix: np.ndarray,
+    degen: Any,
+    lo: float,
+    hi: float,
+) -> tuple:
+    """Return depth, removed-molecule depth and Jacobian rows, blurred to the mode's response R(lambda)."""
     # blur the model to the native R(lambda), always (a no-op for high-R
     # modes). Pixel cells extend at most one native pixel past the bin span,
     # hence the margin.
@@ -480,31 +424,103 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
     # dispersion, sets it.
     wl_r = wl_pix[po]
     r_curve = ins.lsf_r(mode_key, wl_r, r_nat[po])
-    depth = binning.smooth_to_native_r(wl_model, depth, wl_r, r_curve,
-                                       b_lo, b_hi, weight=flux_model)
+    depth = binning.smooth_to_native_r(wl_model, depth, wl_r, r_curve, b_lo, b_hi, weight=flux_model)
     if depth_wo is not None:
-        depth_wo = binning.smooth_to_native_r(wl_model, depth_wo, wl_r,
-                                              r_curve, b_lo, b_hi,
-                                              weight=flux_model)
+        depth_wo = binning.smooth_to_native_r(wl_model, depth_wo, wl_r, r_curve, b_lo, b_hi, weight=flux_model)
     if jac_rows is not None:
-        jac_rows = [binning.smooth_to_native_r(wl_model, row, wl_r,
-                                               r_curve, b_lo, b_hi,
-                                               weight=flux_model)
-                    for row in jac_rows]
+        jac_rows = [
+            binning.smooth_to_native_r(wl_model, row, wl_r, r_curve, b_lo, b_hi, weight=flux_model) for row in jac_rows
+        ]
+    return depth, depth_wo, jac_rows
 
+
+def _mode_warnings(mode_key: str, mode_result: dict, t_in_s: float, t_out_s: float) -> dict:
+    """Return the per-mode advisories: reported, never ranked on or applied."""
+    # CURATED, never passed through (ins.REPORTED_WARNINGS).
+    warnings = {k: str(v) for k, v in mode_result["warnings"].items() if k in ins.REPORTED_WARNINGS}
+    _adv = ins.ngroup_advisory(mode_key, mode_result["ngroup"], mode_result.get("sat_ngroups"))
+    if _adv:
+        warnings["ngroup"] = _adv
+    # per VISIT (one event plus its baseline): APT's data allocation is per
+    # visit, and so is PandExo's estimate this reproduces
+    _gb = ins.nircam_data_excess_gb(mode_key, mode_result["ngroup"], (t_in_s + t_out_s) / 3600.0)
+    if _gb >= ins.NIRCAM_DATA_EXCESS_GB[0]:
+        _lim = ins.NIRCAM_DATA_EXCESS_GB[1]
+        warnings["data_excess"] = (
+            f"estimated data excess {_gb:.1f} GB per visit, "
+            f"{'above' if _gb > _lim else 'within'} the {_lim:g} GB APT "
+            "recommendation (PandExo's estimate of what APT computes; verify "
+            "there)"
+        )
+    return warnings
+
+
+# size-limit-ok: one mode's measurement in order, through one operator
+def evaluate_mode(
+    mode_key: str,
+    mode_result: dict,
+    model: dict,
+    target_mol: str | None,
+    R_bin: float,
+    t_in_s: float,
+    t_out_s: float,
+    n_transits: int,
+    floor_spec: float | np.ndarray | None,
+    noise_inflation: float = 1.0,
+) -> dict:
+    """One instrument mode -> binned model, sigmas, conditional template S/N.
+
+    Bins cover the intersection of the mode's science band, the model's
+    coverage, and the pixels pandeia returned; model, Jacobians, and noise
+    share ONE count-space operator (docs/forecast_statistics.md). ``target_mol=None``
+    (the parameter-constraint goal) skips the molecule-removed comparison:
+    ``sigma_detect`` comes back NaN and ``depth_wo`` None.
+    """
+    m = ins.MODES[mode_key]
+    wl_model = binning._validate_wl(model["wl_um"], f"{mode_key}: wl_model")
+    depth_raw = np.asarray(model["depth"], dtype=float)
+    if wl_model.size < 3 or depth_raw.shape != wl_model.shape:
+        raise ValueError("model wavelength and depth must be aligned 1-D arrays with >=3 points")
+    if not np.all(np.isfinite(depth_raw)):
+        raise ValueError("model depth must be finite")
+    order = np.argsort(wl_model)
+    wl_model = wl_model[order]
+    depth = depth_raw[order]
+    # The model's own resolving power, measured from its grid (correlated-k
+    # is fixed at the published k-tables' R = 1000 band grid).
+    r_model = 1.0 / float(np.median(np.diff(np.log(wl_model))))
+    if float(R_bin) > r_model:
+        raise ValueError(
+            f"{mode_key}: analysis resolving power R_bin={float(R_bin):g} is "
+            f"finer than the model spectrum's own resolving power "
+            f"(R = {r_model:.0f}). Bins narrower than the model grid would "
+            "report interpolated structure the model does not contain. Lower "
+            "R_bin to at most the model resolving power: the grid is the "
+            "published k-tables' R = 1000 band grid and cannot be raised."
+        )
+    mols = [str(x) for x in model["mols"]]
+    depth_wo = _removed_spectrum(model, mols, target_mol, order)
+
+    wl_pix, flux_pix, degen, usable = _usable_pixels(mode_key, mode_result)
+
+    lo = max(m["wl_min"], float(wl_model.min()), float(wl_pix[usable].min()))
+    hi = min(m["wl_max"], float(wl_model.max()), float(wl_pix[usable].max()))
+    if hi <= lo:
+        raise ValueError(f"{mode_key}: no overlap between instrument band and model")
+    depth, depth_wo, jac_rows = _blur_to_response(
+        mode_key, model, order, mode_result, wl_model, depth, depth_wo, wl_pix, flux_pix, degen, lo, hi
+    )
     edges = noise_mod.make_bins(lo, hi, R_bin)
-    op = binning.build_operator(wl_pix, flux_pix, edges,
-                                wl_lo=float(wl_model.min()),
-                                wl_hi=float(wl_model.max()), valid=usable)
+    op = binning.build_operator(
+        wl_pix, flux_pix, edges, wl_lo=float(wl_model.min()), wl_hi=float(wl_model.max()), valid=usable
+    )
     if str(model.get("science_mode", "transmission")) == "emission":
         # over the support the operator ACTUALLY integrates, not the 1-15 um
         # model band the cached certificate was measured on
-        _certify_emission_band(model, order, wl_model,
-                               op["cell_lo"], op["cell_hi"],
-                               mode_key, target_mol)
-    nz = noise_mod.depth_error_bins(mode_result, edges, t_in_s, t_out_s,
-                                    n_transits, floor_spec, op=op,
-                                    noise_inflation=noise_inflation)
+        _certify_emission_band(model, order, wl_model, op["cell_lo"], op["cell_hi"], mode_key, target_mol)
+    nz = noise_mod.depth_error_bins(
+        mode_result, edges, t_in_s, t_out_s, n_transits, floor_spec, op=op, noise_inflation=noise_inflation
+    )
 
     # detector segments (NRS1|NRS2 for the two-detector gratings) -> one
     # calibration-offset nuisance per segment in every score/forecast
@@ -515,11 +531,9 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
 
     d_full_b = binning.bin_model(op, wl_model, depth)
     jac_bins = None
-    jac_names = ([str(x) for x in model["jac_names"]]
-                 if "jac_names" in model else [])
+    jac_names = [str(x) for x in model["jac_names"]] if "jac_names" in model else []
     if jac_rows is not None:
-        jac_bins = np.stack([binning.bin_model(op, wl_model, row)
-                             for row in jac_rows])
+        jac_bins = np.stack([binning.bin_model(op, wl_model, row) for row in jac_rows])
     if depth_wo is not None:
         s_b = d_full_b - binning.bin_model(op, wl_model, depth_wo)
         d_wo_b = d_full_b - s_b
@@ -528,42 +542,31 @@ def evaluate_mode(mode_key: str, mode_result: dict, model: dict, target_mol,
         sigma_detect_proj = float("nan")
         if jac_bins is not None and jac_names:
             sigma_detect_proj = detection_significance(
-                s_b, nz["sigma"], nuisance=_detection_nuisance(
-                    dict(seg=seg, jac_bins=jac_bins, jac_names=jac_names),
-                    projected=True))
+                s_b,
+                nz["sigma"],
+                nuisance=_detection_nuisance(dict(seg=seg, jac_bins=jac_bins, jac_names=jac_names), projected=True),
+            )
     else:
         d_wo_b, sigma_detect, sigma_detect_proj = None, float("nan"), float("nan")
-
-    # CURATED, never passed through (ins.REPORTED_WARNINGS).
-    warnings = {k: str(v) for k, v in mode_result["warnings"].items()
-                if k in ins.REPORTED_WARNINGS}
-    _adv = ins.ngroup_advisory(
-        mode_key, mode_result["ngroup"], mode_result.get("sat_ngroups"))
-    if _adv:
-        warnings["ngroup"] = _adv
-    # per VISIT (one event plus its baseline): APT's data allocation is per
-    # visit, and so is PandExo's estimate this reproduces
-    _gb = ins.nircam_data_excess_gb(mode_key, mode_result["ngroup"],
-                                    (t_in_s + t_out_s) / 3600.0)
-    if _gb >= ins.NIRCAM_DATA_EXCESS_GB[0]:
-        _lim = ins.NIRCAM_DATA_EXCESS_GB[1]
-        warnings["data_excess"] = (
-            f"estimated data excess {_gb:.1f} GB per visit, "
-            f"{'above' if _gb > _lim else 'within'} the {_lim:g} GB APT "
-            "recommendation (PandExo's estimate of what APT computes; verify "
-            "there)")
+    warnings = _mode_warnings(mode_key, mode_result, t_in_s, t_out_s)
 
     return dict(
-        jac_bins=jac_bins, jac_names=jac_names,
+        jac_bins=jac_bins,
+        jac_names=jac_names,
         warnings=warnings,
-        mode_key=mode_key, label=m["label"],
+        mode_key=mode_key,
+        label=m["label"],
         wl=nz["wl_center"],
         wl_eff=binning.bin_values(op, wl_pix),
         seg=seg,
-        depth=d_full_b, depth_wo=d_wo_b, sigma=nz["sigma"],
-        var_phot=nz["var_phot"], floor=nz["floor"],
+        depth=d_full_b,
+        depth_wo=d_wo_b,
+        sigma=nz["sigma"],
+        var_phot=nz["var_phot"],
+        floor=nz["floor"],
         n_transits_eval=int(nz["n_transits"]),
-        sigma_detect=sigma_detect, sigma_detect_proj=sigma_detect_proj,
+        sigma_detect=sigma_detect,
+        sigma_detect_proj=sigma_detect_proj,
         ramp_search_complete=bool(mode_result["ramp_search_complete"]),
         saturated=bool(mode_result["saturated"]),
     )

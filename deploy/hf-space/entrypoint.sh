@@ -126,7 +126,7 @@ done
 export JWST_TOOL_PICASO_REFDATA="$PICASO_DST"
 if [ "$picaso_missing" -eq 0 ]; then
     echo "[entrypoint] PICASO reference files copied to $PICASO_DST;" \
-         "$(echo $PICASO_LINK | wc -w) CK tables linked from $PICASO_SRC"
+         "$(echo "$PICASO_LINK" | wc -w) CK tables linked from $PICASO_SRC"
 else
     rm -rf "$PICASO_DST"
     echo "[entrypoint] WARNING: $picaso_missing PICASO file(s) missing under" \
@@ -141,6 +141,7 @@ fi
 # cache instead. It is only ever allowed to be AHEAD of the mount (a partial
 # sync then costs a miss, never a stale hit). Unreachable Hub or no token: leave
 # it unset, which is the local-tree behaviour and keys nothing.
+# shellcheck disable=SC2155  # a failed probe must leave the revision empty, not stop the boot
 export JWST_TOOL_DATA_REVISION="$(python - <<'PY' 2>/dev/null || true
 import os
 from huggingface_hub import HfApi

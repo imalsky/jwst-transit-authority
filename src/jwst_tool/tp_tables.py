@@ -1,0 +1,228 @@
+"""Tabulated T-P/Kzz files: the shipped table per planet, uploads, parsing and validation."""
+
+from __future__ import annotations
+
+import hashlib
+import re
+from pathlib import Path
+
+import numpy as np
+
+from jwst_tool import planets
+from jwst_tool.instruments import MODEL_CACHE
+from jwst_tool.model_defs import CHEM_P_SPAN_DYN, T_WINDOW, TP_FILE_SHIPPED, TP_FILE_UPLOAD
+
+# tp_mode="file" helpers (light path: no vulcan3/jax imports)
+
+
+def shipped_tp_table_name(planet: str) -> str:
+    """Filename of the MEASURED structure table bundled for ``planet``, or "" when that planet has none.
+
+    (planets.PLANETS[...]["tp_table"]).
+    """
+    entry = planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS)
+    return entry.get("tp_table") or ""
+
+
+def shipped_tp_table_is_default(planet: str) -> bool:
+    """Whether ``planet``'s bundled table is its DEFAULT structure.
+
+    Separate from merely having one: a table becomes the default only once a default run on it is verified
+    end-to-end here. A planet whose table the solver will not certify at default settings stays
+    selectable-but-not-default rather than erroring on arrival (planets.PLANETS[...]["tp_table_note"] says why).
+    """
+    entry = planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS)
+    return bool(entry.get("tp_table") and entry.get("tp_table_default"))
+
+
+def shipped_tp_file(planet: str) -> Path:
+    """Return the path of the shipped T-P/Kzz table for ``planet``, without importing vulcan3.
+
+    find_spec only: importing parses the reaction network, far too heavy for the GUI's cache-key path. A planet with
+    no usable
+    table raises the reason, never substitutes another planet's atmosphere.
+    """
+    name = shipped_tp_table_name(planet)
+    if not name:
+        entry = planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS)
+        why = entry.get("tp_table_note") or "no table is bundled for it"
+        raise ValueError(
+            f"tp_file='shipped' is not available for planet {planet!r}: {why} "
+            "Choose tp_mode='guillot', or upload a table "
+            "with tp_file='upload'."
+        )
+    import importlib.util
+
+    spec = importlib.util.find_spec("vulcan3")
+    if spec is None or not spec.origin:
+        raise RuntimeError(
+            "vulcan3 is not installed (or has no package origin): "
+            f"tp_mode='file' with tp_file='shipped' needs its bundled "
+            f"atm/{name} table."
+        )
+    return Path(spec.origin).parent / "atm" / name
+
+
+def uploads_dir() -> Path:
+    """Content-addressed home for uploaded T-P tables (sibling of model_cache)."""
+    return MODEL_CACHE.parent / "uploads"
+
+
+def _parse_table(path: Path) -> np.ndarray:
+    """Return the table as a structured array; malformed content is a ValueError naming the expected layout."""
+    try:
+        # genfromtxt warns instead of raising on an empty file: reject it
+        # before NumPy so corrupt share uploads fail cleanly.
+        text = path.read_text()
+        lines = [line for line in text.splitlines() if line.strip()]
+        if path.stat().st_size == 0 or not text.strip():
+            raise ValueError("file is empty")
+        if len(lines) < 6:
+            raise ValueError("file is too short for a units line, column header, and four rows")
+        tab = np.genfromtxt(path, names=True, dtype=None, skip_header=1)
+    except Exception as e:
+        raise ValueError(
+            f"T-P table {path} is not parseable as a VULCAN atm file "
+            f"(header comment line, then 'Pressure Temp [Kzz]' columns): {e}"
+        ) from e
+    return tab
+
+
+def read_tp_table(path: Path, span: tuple | None = None) -> dict:
+    """Parse + validate a VULCAN atm table on the LIGHT path.
+
+    ``span`` is the RUN's chemistry span (P_t, P_b) in dyn/cm^2 that the
+    coverage and T-window checks are made against; it defaults to the shipped
+    cfg's own span, and an emission run passes its deeper one.
+
+    Mirrors the engine's read exactly (np.genfromtxt, names=True,
+    skip_header=1: line 1 a units comment, line 2 the column names). Columns
+    'Pressure' (dyne/cm^2) and 'Temp' (K) are required, 'Kzz' (cm^2/s)
+    optional; returns {"P_dyn", "T", "Kzz" or None}. Malformed content raises
+    ValueError at the API, never inside the engine's pre-loop.
+    """
+    span = CHEM_P_SPAN_DYN if span is None else (float(span[0]), float(span[1]))
+    tab = _parse_table(path)
+    names = list(tab.dtype.names or [])
+    if "Pressure" not in names or "Temp" not in names:
+        raise ValueError(
+            f"T-P table {path} needs 'Pressure' and 'Temp' columns "
+            f"(found {names}). Line 1 must be a units comment (e.g. "
+            "'#(dyne/cm2) (K) (cm2/s)'), line 2 the column names."
+        )
+    P = np.asarray(tab["Pressure"], dtype=np.float64)
+    T = np.asarray(tab["Temp"], dtype=np.float64)
+    if P.ndim != 1 or P.size < 4:
+        raise ValueError(f"T-P table {path}: need >= 4 rows (got {P.size})")
+    if not (np.all(np.isfinite(P)) and np.all(np.isfinite(T))):
+        raise ValueError(f"T-P table {path}: non-finite Pressure/Temp entries")
+    if np.any(P <= 0.0):
+        raise ValueError(f"T-P table {path}: Pressure must be > 0 (dyne/cm^2)")
+    dP = np.diff(P)
+    if not (np.all(dP > 0) or np.all(dP < 0)):
+        raise ValueError(f"T-P table {path}: Pressure must be strictly monotonic")
+    # Bottom coverage is a HARD requirement: the engine clamp-extends outside
+    # the table, so a short table would run the quench region isothermal.
+    if P.max() < span[1]:
+        raise ValueError(
+            f"T-P table {path}: bottom pressure {P.max():.3g} dyn/cm^2 does "
+            f"not reach the chemistry-grid bottom {span[1]:.3g} "
+            f"dyn/cm^2 ({span[1] / 1e6:.1f} bar). The engine would "
+            "clamp-extend the last tabulated temperature isothermally over "
+            "the deep quench region (CO/CH4/NH3 quenching lives there), "
+            "silently biasing quenched abundances. Extend the table to at "
+            "least the grid bottom, lower p_btm_bar, or (in emission) use the "
+            "Guillot profile, which is defined at every depth."
+        )
+    # The T window applies to what the engine evaluates -- the profile over the
+    # chemistry span with the edge clamp, NOT every raw row (raw rows wrongly
+    # reject a table that merely extends past the span). Sampled in log P while
+    # the engine interpolates T linearly in P (VULCAN-JAX atm_setup): the two
+    # agree at every tabulated row and differ only by the temperature change
+    # across the single row-interval at each span edge.
+    o = np.argsort(P)
+    grid = np.logspace(np.log10(span[0]), np.log10(span[1]), 200)
+    T_grid = np.interp(np.log10(grid), np.log10(P[o]), T[o])
+    if T_grid.min() < T_WINDOW[0] or T_grid.max() > T_WINDOW[1]:
+        lo_all, hi_all = float(T.min()), float(T.max())
+        extra = (
+            ""
+            if (lo_all >= T_WINDOW[0] and hi_all <= T_WINDOW[1])
+            else f" (the file spans [{lo_all:.0f}, {hi_all:.0f}] K in total; "
+            "only the part covering the chemistry grid is checked)"
+        )
+        raise ValueError(
+            f"T-P table {path}: on the chemistry grid "
+            f"({span[0]:g}-{span[1]:g} dyn/cm^2) the "
+            f"profile spans [{T_grid.min():.0f}, {T_grid.max():.0f}] K, which "
+            f"leaves the modelable window [{T_WINDOW[0]:.0f}, "
+            f"{T_WINDOW[1]:.0f}] K{extra} (the raw k-tables span a wider "
+            "range); out-of-window profiles are rejected, never clipped."
+        )
+    Kzz = None
+    if "Kzz" in names:
+        Kzz = np.asarray(tab["Kzz"], dtype=np.float64)
+        if not np.all(np.isfinite(Kzz)) or np.any(Kzz <= 0.0):
+            raise ValueError(f"T-P table {path}: Kzz column must be finite and > 0")
+    return {"P_dyn": P, "T": T, "Kzz": Kzz}
+
+
+def resolve_tp_file(params: dict) -> tuple[Path, str]:
+    """(path, content-sha1[:16]) of the requested T-P table.
+
+    'shipped' is the vulcan3 table bundled FOR THIS PLANET; 'upload' is params['tp_file_path'], which run_model
+    copies to the content-addressed uploads/<sha1>.txt so canonical params alone can re-resolve it.
+    """
+    src = str(params.get("tp_file", TP_FILE_SHIPPED))
+    if src == TP_FILE_SHIPPED:
+        path = shipped_tp_file(str(params.get("planet", "wasp39b")))
+    elif src == TP_FILE_UPLOAD:
+        raw = params.get("tp_file_path")
+        if raw:
+            path = Path(str(raw))
+        else:
+            # No raw path: the content-addressed archive is what makes
+            # canonical params ROUND-TRIP -- the sha re-resolves the bytes.
+            sha = str(params.get("tp_file_sha1", ""))
+            if not re.fullmatch(r"[0-9a-f]{16}", sha):
+                raise ValueError(
+                    "tp_file='upload' requires tp_file_path (the saved "
+                    "table; the GUI sets it on upload) or tp_file_sha1 (a "
+                    "previously archived upload)."
+                )
+            path = uploads_dir() / f"{sha}.txt"
+    else:
+        raise ValueError(
+            f"tp_file={src!r}: choose '{TP_FILE_SHIPPED}' (the measured table "
+            f"bundled with vulcan3 for this planet) or '{TP_FILE_UPLOAD}'"
+        )
+    if not path.exists():
+        raise ValueError(f"T-P table not found: {path}")
+    sha1 = hashlib.sha1(path.read_bytes()).hexdigest()[:16]
+    return path, sha1
+
+
+def tp_file_from_cp(cp: dict) -> Path:
+    """Re-resolve the T-P table from CANONICAL params alone.
+
+    Shipped -> the bundled file; upload -> the content-addressed uploads/<sha1>.txt. Verifies the hash, so a table
+    that changed since the key was computed is refused.
+    """
+    if cp["tp_file"] == TP_FILE_SHIPPED:
+        path = shipped_tp_file(cp["planet"])
+    else:
+        path = uploads_dir() / f"{cp['tp_file_sha1']}.txt"
+    if not path.exists():
+        raise RuntimeError(
+            f"T-P table for this run is missing: {path}. For uploads the "
+            "content-addressed copy is written by run_model; re-upload the "
+            "table if the output directory was cleaned."
+        )
+    sha1 = hashlib.sha1(path.read_bytes()).hexdigest()[:16]
+    if sha1 != cp["tp_file_sha1"]:
+        raise RuntimeError(
+            f"T-P table {path} content drifted: sha1 {sha1} != canonical "
+            f"{cp['tp_file_sha1']}. Refusing -- the cached spectrum would be "
+            "keyed to different physics than the file now holds."
+        )
+    return path

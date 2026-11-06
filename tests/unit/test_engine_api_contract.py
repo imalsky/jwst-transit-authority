@@ -1,20 +1,8 @@
 """The tool's calls into the shared engine must exist on the INSTALLED engine.
 
-`deploy/pins.env` pins the sibling repositories by commit, and
-`test_deploy_pins.py` checks that the Dockerfile and CI agree on those strings.
-What neither can check is whether the pinned pair is COMPATIBLE. Shipping
-VULCAN3 at a commit that has removed a parameter alongside vulcan-forward
-at a commit that still passes it makes every fresh forward model on the
-deployed Space raise TypeError, while three green suites and a passing pin
-test say nothing, because no test called the engine.
-
-This closes that at the consumer boundary: CI installs the siblings at the
-pinned commits, so an incompatible pair fails HERE. It is deliberately a
-signature check, not a run -- it needs no data, no k-tables and no solve.
-
-The sibling repository carries the mirror of this test for its own calls into
-VULCAN-JAX's private API (`vulcan-forward/tests/test_vulcan3_private_api.py`).
+Why, cost and tolerances: docs/validation.md, section `test_engine_api_contract`.
 """
+
 from __future__ import annotations
 
 import ast
@@ -24,6 +12,8 @@ import inspect
 from pathlib import Path
 
 import pytest
+
+from jwst_tool import chem_build
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "jwst_tool"
 
@@ -37,9 +27,15 @@ EXPECTED = {
     "vulcan_forward.paths": ["opacity_cache_dir"],
     "vulcan_forward.exomolop": ["table_path", "provenance", "table_info"],
     "vulcan_forward.constants": [
-        "MOLECULES", "ATOM_COLS", "ATOMIC_MASSES",
-        "ART_PTOP_BAR", "ART_PBTM_BAR", "T_OPA_MIN_K", "T_OPA_MAX_K",
-        "P_REF_BAR", "P_REF_EMISSION_BAR",
+        "MOLECULES",
+        "ATOM_COLS",
+        "ATOMIC_MASSES",
+        "ART_PTOP_BAR",
+        "ART_PBTM_BAR",
+        "T_OPA_MIN_K",
+        "T_OPA_MAX_K",
+        "P_REF_BAR",
+        "P_REF_EMISSION_BAR",
     ],
 }
 
@@ -47,9 +43,18 @@ EXPECTED = {
 # means an engine too old for this tool, which is exactly the pin bug: the
 # tool would call it and fail at run time on a user's machine instead of here.
 # Exactly the attributes forward.py reads (the RT echo keys included).
-RT_NAMESPACE = ["transmission_depth_r", "wl_um", "nu_grid", "p_art_bar",
-                "molecules", "art_ptop_bar", "art_pbtm_bar", "p_ref_bar",
-                "rt_integration", "opacity_mode"]
+RT_NAMESPACE = [
+    "transmission_depth_r",
+    "wl_um",
+    "nu_grid",
+    "p_art_bar",
+    "molecules",
+    "art_ptop_bar",
+    "art_pbtm_bar",
+    "p_ref_bar",
+    "rt_integration",
+    "opacity_mode",
+]
 EMIS_NAMESPACE = ["eclipse_flux_tau", "emission_radius", "art_pbtm_bar"]
 
 
@@ -63,30 +68,30 @@ def test_engine_module_exposes_what_the_tool_calls(mod_name):
     _skip_without_engine()
     if mod_name in ("vulcan_forward.exojax_rt", "vulcan_forward.interp_map"):
         # these import exojax; honour the load-bearing import order
-        if importlib.util.find_spec("exojax") is None:       # pragma: no cover
+        if importlib.util.find_spec("exojax") is None:  # pragma: no cover
             pytest.skip("RT stack (exojax) not installed")
         importlib.import_module("vulcan_forward.vulcan_chem")
     mod = importlib.import_module(mod_name)
     missing = [a for a in EXPECTED[mod_name] if not hasattr(mod, a)]
     assert not missing, (
         f"{mod_name} is missing {missing}. The installed vulcan-forward is "
-        "older than this tool needs; check deploy/pins.env.")
+        "older than this tool needs; check deploy/pins.env."
+    )
 
 
 def test_the_rt_namespaces_carry_what_the_tool_reads_off_them():
     """build_rt_model / build_emis_model return SimpleNamespaces, so a missing
     attribute is an AttributeError deep inside a multi-minute run rather than
     an import error. Checked against the engine's source, because building the
-    real namespaces needs the k-tables and an opacity build."""
+    real namespaces needs the k-tables and an opacity build.
+    """
     _skip_without_engine()
-    if importlib.util.find_spec("exojax") is None:           # pragma: no cover
+    if importlib.util.find_spec("exojax") is None:  # pragma: no cover
         pytest.skip("RT stack (exojax) not installed")
     importlib.import_module("vulcan_forward.vulcan_chem")
-    src = (Path(importlib.import_module("vulcan_forward.exojax_rt").__file__)
-           .read_text())
+    src = Path(importlib.import_module("vulcan_forward.exojax_rt").__file__).read_text()
     for name in RT_NAMESPACE + EMIS_NAMESPACE:
-        assert f"{name}=" in src, (
-            f"the engine's RT namespace has no {name!r}; the tool reads it")
+        assert f"{name}=" in src, f"the engine's RT namespace has no {name!r}; the tool reads it"
 
 
 def test_the_profile_keys_the_tool_sets_are_ones_the_engine_reads():
@@ -94,56 +99,51 @@ def test_the_profile_keys_the_tool_sets_are_ones_the_engine_reads():
     actually consumes. An engine that does not know a key ignores it SILENTLY,
     which would cache a spectrum under a key describing physics that was never
     applied. run_model's echo check catches this at run time; this catches it
-    in CI."""
+    in CI.
+    """
     _skip_without_engine()
-    if importlib.util.find_spec("exojax") is None:           # pragma: no cover
+    if importlib.util.find_spec("exojax") is None:  # pragma: no cover
         pytest.skip("RT stack (exojax) not installed")
     importlib.import_module("vulcan_forward.vulcan_chem")
-    src = (Path(importlib.import_module("vulcan_forward.exojax_rt").__file__)
-           .read_text())
-    for key in ("art_ptop_bar", "art_pbtm_bar", "rt_integration",
-                "p_ref_bar", "opacity_mode", "art_nlayer"):
-        assert f'"{key}"' in src, (
-            f"the engine never reads profile[{key!r}], so the tool sets a knob "
-            "that does nothing")
+    src = Path(importlib.import_module("vulcan_forward.exojax_rt").__file__).read_text()
+    for key in ("art_ptop_bar", "art_pbtm_bar", "rt_integration", "p_ref_bar", "opacity_mode", "art_nlayer"):
+        assert f'"{key}"' in src, f"the engine never reads profile[{key!r}], so the tool sets a knob that does nothing"
     # the chemistry side: the solver knobs the tool drives, plus the two
     # margins the AD dlnCO gate reads (their absence must fail here, not at
     # run time)
-    chem_src = (Path(importlib.import_module("vulcan_forward.vulcan_chem").__file__)
-                .read_text())
+    chem_src = Path(importlib.import_module("vulcan_forward.vulcan_chem").__file__).read_text()
     for key in ("yconv_cri", "yconv_min", "dt_max", "co_mode"):
-        assert f'"{key}"' in chem_src, (
-            f"the engine never reads profile[{key!r}]")
+        assert f'"{key}"' in chem_src, f"the engine never reads profile[{key!r}]"
     for attr in ("co_bz_bound", "co_bz_margin"):
-        assert f"{attr}=" in chem_src, (
-            f"the engine no longer returns {attr!r}; forward.check_ad_co_margin "
-            "reads it")
+        assert f"{attr}=" in chem_src, f"the engine no longer returns {attr!r}; certify.check_ad_co_margin reads it"
 
 
 def test_the_engine_calls_in_forward_py_pass_arguments_it_accepts():
     """AST-scan the tool's own calls into the engine and check each against the
     live signature. This catches a sibling that drops a parameter while the
-    caller keeps passing it."""
+    caller keeps passing it.
+    """
     _skip_without_engine()
-    if importlib.util.find_spec("exojax") is None:           # pragma: no cover
+    if importlib.util.find_spec("exojax") is None:  # pragma: no cover
         pytest.skip("RT stack (exojax) not installed")
     importlib.import_module("vulcan_forward.vulcan_chem")
-    mods = {"exojax_rt": importlib.import_module("vulcan_forward.exojax_rt"),
-            "vulcan_chem": importlib.import_module("vulcan_forward.vulcan_chem"),
-            "interp_map": importlib.import_module("vulcan_forward.interp_map")}
-    tree = ast.parse((SRC / "forward.py").read_text())
+    mods = {
+        "exojax_rt": importlib.import_module("vulcan_forward.exojax_rt"),
+        "vulcan_chem": importlib.import_module("vulcan_forward.vulcan_chem"),
+        "interp_map": importlib.import_module("vulcan_forward.interp_map"),
+    }
+    trees = [ast.parse(path.read_text()) for path in sorted(SRC.glob("*.py"))]
     checked = 0
-    for node in ast.walk(tree):
+    for node in (node for tree in trees for node in ast.walk(tree)):
         if not isinstance(node, ast.Call):
             continue
         f = node.func
-        if not (isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name)
-                and f.value.id in mods):
+        if not (isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f.value.id in mods):
             continue
         fn = getattr(mods[f.value.id], f.attr, None)
         assert fn is not None, (
-            f"forward.py calls {f.value.id}.{f.attr}, which the installed "
-            "vulcan-forward does not define")
+            f"the tool calls {f.value.id}.{f.attr}, which the installed vulcan-forward does not define"
+        )
         if not callable(fn):
             continue
         sig = inspect.signature(fn)
@@ -153,60 +153,60 @@ def test_the_engine_calls_in_forward_py_pass_arguments_it_accepts():
             if kw.arg is None or var_kw:
                 continue
             assert kw.arg in names, (
-                f"forward.py calls {f.value.id}.{f.attr}({kw.arg}=...) but the "
+                f"the tool calls {f.value.id}.{f.attr}({kw.arg}=...) but the "
                 f"installed signature is {sig}. The pinned engine and this "
-                "tool disagree.")
+                "tool disagree."
+            )
         checked += 1
     assert checked >= 3, (
-        f"only {checked} engine calls found in forward.py -- the scan is not "
-        "looking where it thinks it is")
+        f"only {checked} engine calls found in the tool -- the scan is not looking where it thinks it is"
+    )
 
 
-@pytest.mark.parametrize("dist,mod_name", [("vulcan-forward", "vulcan_forward"),
-                                           ("vulcan3", "vulcan3")])
+@pytest.mark.parametrize(("dist", "mod_name"), [("vulcan-forward", "vulcan_forward"), ("vulcan3", "vulcan3")])
 def test_pinned_engine_floor_is_recorded(dist, mod_name):
-    """pyproject must state a floor for BOTH engines, and each installed engine
-    must meet it. A pin without a floor is a string, not a contract."""
-    if importlib.util.find_spec(mod_name) is None:           # pragma: no cover
+    """Pyproject must state a floor for BOTH engines, and each installed engine
+    must meet it. A pin without a floor is a string, not a contract.
+    """
+    if importlib.util.find_spec(mod_name) is None:  # pragma: no cover
         pytest.skip(f"{dist} not installed (light CI job)")
     root = Path(__file__).resolve().parents[2]
     text = (root / "pyproject.toml").read_text()
-    line = next((ln for ln in text.splitlines()
-                 if dist in ln and ">=" in ln), None)
+    line = next((ln for ln in text.splitlines() if dist in ln and ">=" in ln), None)
     assert line, f"pyproject does not pin a {dist} floor"
     floor = line.split(">=")[1].split("#")[0].strip().strip('",').strip()
     got = getattr(importlib.import_module(mod_name), "__version__", None)
     assert got, f"{mod_name} exposes no __version__"
-    to_t = lambda v: tuple(int(x) for x in v.split(".")[:3])   # noqa: E731
-    assert to_t(got) >= to_t(floor), (
-        f"installed {dist} {got} is below this tool's floor {floor}")
+    to_t = lambda v: tuple(int(x) for x in v.split(".")[:3])
+    assert to_t(got) >= to_t(floor), f"installed {dist} {got} is below this tool's floor {floor}"
 
 
 def test_the_chemistry_radius_anchor_matches_the_engines_own_rule():
-    """`forward.chem_radius_anchor_bar` RESTATES one engine rule -- which grid
+    """`chem_build.chem_radius_anchor_bar` RESTATES one engine rule -- which grid
     interface VULCAN anchors g = G*Mp/Rp**2 at -- because the engine offers no
     way to ask. Restating is only safe while it agrees, so check it against
     `compute_mu_dz_g` on both branches (gas giant reaching 1 bar; shallow or
     rocky column). If this fails the engine moved its anchor and the tool is
-    handing chemistry a radius quoted at the wrong pressure."""
-    if importlib.util.find_spec("vulcan3") is None:        # pragma: no cover
+    handing chemistry a radius quoted at the wrong pressure.
+    """
+    if importlib.util.find_spec("vulcan3") is None:  # pragma: no cover
         pytest.skip("VULCAN-JAX not installed (light CI job)")
-    import numpy as np
     from types import SimpleNamespace
-    from jwst_tool import forward
+
+    import numpy as np
     from vulcan3.atm_setup import compute_mu_dz_g, compute_pico
 
-    for p_b_bar, p_t_bar, nz, rocky in ((7.6, 1e-7, 100, False),
-                                        (300.0, 1e-7, 60, False),
-                                        (7.6, 1e-7, 100, True),
-                                        (0.5, 1e-7, 40, False)):
+    for p_b_bar, p_t_bar, nz, rocky in (
+        (7.6, 1e-7, 100, False),
+        (300.0, 1e-7, 60, False),
+        (7.6, 1e-7, 100, True),
+        (0.5, 1e-7, 40, False),
+    ):
         pco = np.logspace(np.log10(p_b_bar * 1e6), np.log10(p_t_bar * 1e6), nz)
         pico = np.asarray(compute_pico(pco))
-        cfg = SimpleNamespace(Mp=5.4e29, Rp=9.1e9, rocky=rocky,
-                              P_b=p_b_bar * 1e6, use_moldiff=False)
-        out = compute_mu_dz_g(cfg, np.full((nz, 1), 1.0), np.array([2.3]),
-                              pico, np.full(nz, 1200.0))
+        cfg = SimpleNamespace(Mp=5.4e29, Rp=9.1e9, rocky=rocky, P_b=p_b_bar * 1e6, use_moldiff=False)
+        out = compute_mu_dz_g(cfg, np.full((nz, 1), 1.0), np.array([2.3]), pico, np.full(nz, 1200.0))
         engine = float(pico[int(out["pref_indx"])]) / 1e6
-        assert forward.chem_radius_anchor_bar(
-            pco / 1e6, p_b_bar * 1e6, rocky) == pytest.approx(engine, rel=0), (
-            f"anchor rule drifted at P_b={p_b_bar} rocky={rocky}")
+        assert chem_build.chem_radius_anchor_bar(pco / 1e6, p_b_bar * 1e6, rocky) == pytest.approx(engine, rel=0), (
+            f"anchor rule drifted at P_b={p_b_bar} rocky={rocky}"
+        )

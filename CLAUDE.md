@@ -65,6 +65,14 @@ skill; policy: the project-root `CLAUDE.md`.
 - PICASO runs `picaso_worker.py` in its own environment at `JWST_TOOL_PICASO_PYTHON`, built from
   `deploy/picaso-conda-lock.txt` + `deploy/requirements-picaso-lock.txt`; its reference data is
   `data/picaso_refdata-4.1` (`JWST_TOOL_PICASO_REFDATA`).
+- Layout of the forward model: `forward` runs the stages (`python -m jwst_tool.forward params.json`, the GUI's worker);
+  `model_defs` holds what the model offers, `run_params` and `param_checks` validate a request, `tp_tables` reads T-P files,
+  `model_cache` owns keys and cache reads, `chem_build` assembles the chemistry, `spectrum` the RT and depths, `certify` the
+  gates, `jacobian` the rows. `forward` re-exports the names the deploy scripts and the note's scripts read (`__all__`).
+- Layout of the GUI: `app.py` is the Streamlit script and reads as the page; `gui_sidebar` and `gui_atmosphere` draw the
+  steps and return `gui_inputs` records; `gui_run` validates and launches; `gui_results`, `gui_forecast`, `gui_summary` and
+  `gui_sources` draw the page. A module outlives one script run and is shared between sessions, so run state goes in
+  arguments or the session, never in a module global.
 - Commands: `jwst-tool` launches the GUI after preflight checks; `jwst-tool fetch [--picaso]` downloads missing data,
   including the machine-local PHOENIX grid `data/cdbs/grid/phoenix`; `jwst-tool data [--deep]` prints the data report.
 - Normal tier: `python -m pytest tests -q -n 6` (on daw `unset PYTHONSAFEPATH` first). `tests/conftest.py` sets
@@ -73,7 +81,8 @@ skill; policy: the project-root `CLAUDE.md`.
 - Slow tier (`JWST_TOOL_RUN_SLOW=1`, real `output/` caches): the FD/AD closures, the e2e of both engines against
   `tests/live/data/`, and the PICASO live tests. It runs for hours (notes "Current state"): before a release or when the
   maintainer asks.
-- Lint: `ruff check .` must pass.
+- Lint: `uvx pre-commit run --all-files` must pass; `python3 tools/check_size_limits.py` holds the size limits, and mypy
+  is a manual hook (`uvx pre-commit run mypy --all-files --hook-stage manual`).
 
 ## Rules
 
@@ -87,11 +96,11 @@ skill; policy: the project-root `CLAUDE.md`.
 
 - Composition is structural: `met_x_solar` + `co_ratio` re-initialize the equilibrium seed. Pin `use_vm_mol` explicitly
   (default False); never inherit it.
-- `co_ratio` is bounded by `forward.co_bounds(network, use_photo)`, enforced in `canonical_params` and so shared by the
+- `co_ratio` is bounded by `model_defs.co_bounds(network, use_photo)`, enforced in `canonical_params` and so shared by the
   API and `share_config`. Two gate axes, network and photolysis: never add temperature or Kzz, never hard-code an
   excluded C/O band, never call the permissive bounds a ceiling, and never move the sncho photolysis-on bound without a
   science decision (notes "Composition, C/O bounds and networks"). A refusal must cost no solve.
-- `sncho2025` is the default network (`forward.DEFAULT_NETWORK`); `sncho` (the 2021 file) and `ncho` stay selectable.
+- `sncho2025` is the default network (`model_defs.DEFAULT_NETWORK`); `sncho` (the 2021 file) and `ncho` stay selectable.
 - Condensation requires `sncho`. It is detection-only and API-only (the GUI pins it off; `share_config` refuses files
   that enable it), refused with any Jacobian, photolysis off or moldiff off. Settling, escape and boundary fluxes are
   removed: their four keys stay in the payload pinned off and enabling values are refused.
@@ -99,9 +108,9 @@ skill; policy: the project-root `CLAUDE.md`.
 ### Certificates
 
 - Every certified stage records branch, longdydt, aflux_change and the controlling `species@z` cell, and a failure names
-  them (`forward.check_converged`).
-- Every certified column passes `forward.check_elements` (layer-median X/H within `ELEMENT_TOL` of the build column) and
-  `forward.check_unmodeled` (an absorber with no k-table above `UNMODELED_VMR_REFUSE` is refused before any spectrum;
+  them (`certify.check_converged`).
+- Every certified column passes `certify.check_elements` (layer-median X/H within `ELEMENT_TOL` of the build column) and
+  `certify.check_unmodeled` (an absorber with no k-table above `UNMODELED_VMR_REFUSE` is refused before any spectrum;
   above `UNMODELED_VMR_WARN` the run warns). Values and basis: notes "Convergence certificate and element gate".
 - `yconv_min` is canonical and may only tighten below 0.1: cold baseline solves exit on the loose branch, so `yconv_cri`
   alone cannot tighten them.
@@ -174,7 +183,7 @@ skill; policy: the project-root `CLAUDE.md`.
 
 ### Caches and versions
 
-- `forward._VERSION` busts `model_cache`: bump it whenever the physics, the canonical key set or `forward.DT_MAX_S`
+- `model_defs._VERSION` busts `model_cache`: bump it whenever the physics, the canonical key set or `model_defs.DT_MAX_S`
   changes, and with every engine pin bump (vulcan3 or vulcan-forward in `deploy/pins.env`, the Dockerfile and CI), since
   the key carries no engine version.
 - A `_VERSION` bump regenerates both e2e fixtures in the same change (`test_e2e_fixture_sanity` fails until they agree;
@@ -193,7 +202,7 @@ skill; policy: the project-root `CLAUDE.md`.
   belong in README or notes; precise statistical terms stay. The GUI shows no install inventory; `jwst-tool data` is the
   only place for that.
 - All figure work goes through `plotting.py` under `render_lock`; figures are pure builders, never re-implemented in
-  `app.py` (AST-checked). Legends never cover data; axis ranges are typed min/max pairs, never sliders; only the summary
+  the GUI modules (AST-checked). Legends never cover data; axis ranges are typed min/max pairs, never sliders; only the summary
   figure has axis controls.
 - Widget keys are a shipped contract: labels may move, keys may not. A widget whose key is always pre-set in
   session_state takes no `index=`/`value=` default. The "Chemistry engine" selector opens Step 2; PICASO widgets carry a
@@ -203,7 +212,7 @@ skill; policy: the project-root `CLAUDE.md`.
 - Keep `st.set_page_config(..., initial_sidebar_state="expanded")`. The shortfall warning renders in `_verdict_slot`
   beside the Run button.
 - A loaded configuration applies only through the Populate button's callback (`_populate_config`); the success line says
-  only "Populated". The staleness guard compares the full `_run_sig` (goal + observation minus the display-only
+  only "Populated". The staleness guard compares the full `run_sig` (goal + observation minus the display-only
   `show_noise`, `seed`, `combos`).
 - Live readouts are fixed-width; progress bars keep the "[fwd]/[adj] PROG <frac> <label>" stdout protocol. A Run that
   returns nothing pops the previous result. A failed forward model shows only its exception sentence; the log tail sits
@@ -212,7 +221,7 @@ skill; policy: the project-root `CLAUDE.md`.
   emission; internal tokens stay out of labels; no "(one draw)" wording. Never call a curve fitted to the jitter
   realization a forecast.
 - The result order, the removed result sections, the figure wording and colours and the structure figure's axes are
-  pinned by `tests/unit/test_app_smoke.py`, `test_plotting.py` and `test_summary_figure.py`: read the pinning test
+  pinned by `tests/unit/test_app_smoke.py`, `test_app_results.py`, `test_plotting.py` and `test_summary_figure.py`: read the pinning test
   before changing one.
 
 ### Figures, reports and deploy

@@ -1,31 +1,8 @@
 """PandExo parity worker -- runs INSIDE a current-Pandeia environment.
 
-Standalone on purpose (mirrors src/jwst_tool/pandeia_worker.py): stdlib +
-numpy + pandexo only. Executes current PandExo (master, at the commit
-parity_gate.REQUIRED_PANDEXO_COMMIT pins) on matched star/instrument
-configurations and dumps the raw quantities the parity comparison needs.
-
-    python pandexo_worker.py job.json result.json
-
-job.json:
-    {"refdata": <pandeia_refdata>, "psf_dir": <pandeia PSF library>,
-     "cdbs": <PYSYN_CDBS>, "vega_file": <local CALSPEC alpha_lyr fits>,
-     "star": {"teff":.., "logg":.., "metal":.., "kmag":..},
-     "transit_duration_s": .., "sat_level_pct": 80.0, "depth": 0.01,
-     "modes": [{"key":.., "pandexo_name":..,
-                "config_overrides": {"detector": {...}, "instrument": {...},
-                                     "strategy": {...}}},
-               ...]}
-
-result.json: {"__provenance__": {...}, <key>: {...} | {"error": traceback}}.
-Per mode key: PandExo's native-grid (R=None) results with noise_floor=0 and
-baseline fraction 1.0 (out-of-transit time == in-transit time):
-    wave, error (final error with floor=0), timing (PandExo timing dict),
-    ngroup, config (the exact pandeia configuration PandExo ran),
-    electrons_out/in, var_out/in, e_rate_out, error_no_floor, warnings,
-    qy_on_grid (the quantum-yield curve PandExo's remove_QY divided out of
-    every flux; multiply back to recover pandeia's electron rate).
+Method and contract: docs/validation.md, section `pandexo_worker`.
 """
+
 import json
 import os
 import sys
@@ -79,8 +56,7 @@ def _pandexo_commit(pandexo_dir):
     import subprocess
 
     def _git(*args):
-        return subprocess.run(["git", "-C", pandexo_dir, *args],
-                              capture_output=True, text=True, timeout=10)
+        return subprocess.run(["git", "-C", pandexo_dir, *args], capture_output=True, text=True, timeout=10)
 
     def _is_commit(s):
         return len(s) == 40 and all(c in "0123456789abcdef" for c in s.lower())
@@ -88,15 +64,14 @@ def _pandexo_commit(pandexo_dir):
     # 1. pip's record of the resolved commit (authoritative, no git needed)
     try:
         from importlib.metadata import distribution
+
         dist = distribution("pandexo.engine")
         raw = dist.read_text("direct_url.json")
         if raw:
-            commit = str((json.loads(raw).get("vcs_info") or {})
-                         .get("commit_id") or "")
+            commit = str((json.loads(raw).get("vcs_info") or {}).get("commit_id") or "")
             root = os.path.realpath(str(dist.locate_file("")))
             pkg = os.path.realpath(pandexo_dir)
-            if (_is_commit(commit)
-                    and (pkg == root or pkg.startswith(root + os.sep))):
+            if _is_commit(commit) and (pkg == root or pkg.startswith(root + os.sep)):
                 return commit
     except Exception:
         pass
@@ -120,8 +95,10 @@ def _pandexo_commit(pandexo_dir):
 def _provenance():
     import pandeia.engine
     import pandexo
+
     try:
         from importlib.metadata import version
+
         pandexo_version = version("pandexo.engine")
     except Exception:
         pandexo_version = str(getattr(pandexo, "__version__", "unknown"))
@@ -129,14 +106,14 @@ def _provenance():
     refdata = os.environ.get("pandeia_refdata")
     psf_dir = os.environ.get("PSF_DIR")
     return {
-        "pandeia_engine_version": str(getattr(pandeia.engine, "__version__",
-                                              "unknown")),
+        "pandeia_engine_version": str(getattr(pandeia.engine, "__version__", "unknown")),
         "pandexo_version": pandexo_version,
         "pandexo_commit": _pandexo_commit(pandexo_dir),
         "pandexo_path": pandexo_dir,
         "refdata": refdata,
-        "refdata_version": (_version_file_release(refdata, "VERSION")
-                            or _version_file_release(refdata, "VERSION_DATA")),
+        "refdata_version": (
+            _version_file_release(refdata, "VERSION") or _version_file_release(refdata, "VERSION_DATA")
+        ),
         "psf_dir": psf_dir,
         # the PSF RELEASE, not just the directory: a mixed PSF tree changes the
         # point-spread function and hence the extracted flux on this side too
@@ -155,38 +132,39 @@ def _shared_star(job):
     both Pandeia calculations receive the same wavelength/flux arrays.
     """
     import stsynphot
-    from synphot import Observation, units
-    from pandexo.engine.synphot_compat import (
-        load_bandpass_from_file, load_phoenix_spectrum,
-        renormalize_to_vegamag, sample_spectrum_micron_mjy)
     from pandexo.engine.create_input import outTrans
+    from pandexo.engine.synphot_compat import (
+        load_bandpass_from_file,
+        load_phoenix_spectrum,
+        renormalize_to_vegamag,
+        sample_spectrum_micron_mjy,
+    )
+    from synphot import Observation, units
 
     star = job["star"]
     root = os.path.join(job["cdbs"], "comp", "nonhst")
-    ks = load_bandpass_from_file(
-        os.path.join(root, "2mass_ks_001_syn.fits"))
-    bessell_k = load_bandpass_from_file(
-        os.path.join(root, "bessell_k_003_syn.fits"))
-    raw = load_phoenix_spectrum(
-        float(star["teff"]), float(star["metal"]), float(star["logg"]))
+    ks = load_bandpass_from_file(os.path.join(root, "2mass_ks_001_syn.fits"))
+    bessell_k = load_bandpass_from_file(os.path.join(root, "bessell_k_003_syn.fits"))
+    raw = load_phoenix_spectrum(float(star["teff"]), float(star["metal"]), float(star["logg"]))
     normalized = renormalize_to_vegamag(raw, float(star["kmag"]), ks)
-    k_mag = Observation(normalized, bessell_k, force="extrap").effstim(
-        units.VEGAMAG, vegaspec=stsynphot.Vega)
+    k_mag = Observation(normalized, bessell_k, force="extrap").effstim(units.VEGAMAG, vegaspec=stsynphot.Vega)
     wave, flux = sample_spectrum_micron_mjy(normalized)
     # Record the spectrum *after* PandExo's own user-input normalization and
     # sampling. Feeding this exact array to the tool side prevents a second
     # resampling implementation from masquerading as an estimator difference.
-    pandexo_source = outTrans({
-        "type": "user",
-        "starpath": {"w": np.asarray(wave, float),
-                     "f": np.asarray(flux, float) * 1e-3},
-        "w_unit": "um", "f_unit": "Jy", "ref_wave": 2.22,
-        "mag": float(k_mag.value),
-    })
+    pandexo_source = outTrans(
+        {
+            "type": "user",
+            "starpath": {"w": np.asarray(wave, float), "f": np.asarray(flux, float) * 1e-3},
+            "w_unit": "um",
+            "f_unit": "Jy",
+            "ref_wave": 2.22,
+            "mag": float(k_mag.value),
+        }
+    )
     return {
         "wave_um": np.asarray(pandexo_source["wave"], float).tolist(),
-        "flux_mjy": np.asarray(
-            pandexo_source["flux_out_trans"], float).tolist(),
+        "flux_mjy": np.asarray(pandexo_source["flux_out_trans"], float).tolist(),
         "pandexo_k_mag": float(k_mag.value),
         "normalization": "2MASS Ks vegamag",
         "ks_mag": float(star["kmag"]),
@@ -198,10 +176,10 @@ def _exo_dict(jdi, job, shared_star):
     exo["observation"]["sat_level"] = float(job["sat_level_pct"])
     exo["observation"]["sat_unit"] = "%"
     exo["observation"]["noccultations"] = 1
-    exo["observation"]["R"] = None                 # native grid
-    exo["observation"]["baseline"] = 1.0           # t_out == t_in
+    exo["observation"]["R"] = None  # native grid
+    exo["observation"]["baseline"] = 1.0  # t_out == t_in
     exo["observation"]["baseline_unit"] = "frac"
-    exo["observation"]["noise_floor"] = 0          # random noise only
+    exo["observation"]["noise_floor"] = 0  # random noise only
 
     star = job["star"]
     exo["star"]["type"] = "user"
@@ -214,7 +192,7 @@ def _exo_dict(jdi, job, shared_star):
     exo["star"]["w_unit"] = "um"
     exo["star"]["f_unit"] = "Jy"
     exo["star"]["mag"] = float(shared_star["pandexo_k_mag"])
-    exo["star"]["ref_wave"] = 2.22                 # K normalization branch
+    exo["star"]["ref_wave"] = 2.22  # K normalization branch
     exo["star"]["temp"] = float(star["teff"])
     exo["star"]["metal"] = float(star["metal"])
     exo["star"]["logg"] = float(star["logg"])
@@ -255,11 +233,11 @@ def _one_mode(jdi, job, m, shared_star):
     # spectrum on the same grid -- no reimplementation to drift. Identity
     # (all 1.0) for NIRCam/MIRI and red of ~3 um on NIRSpec.
     from pandexo.engine.jwst import remove_QY
+
     _wave = np.asarray(fs["wave"], float)
     _probe = {"1d": {"extracted_flux": [_wave, np.ones_like(_wave)]}}
     _inst_name = m["pandexo_name"].split(" ")[0].lower()
-    qy_on_grid = 1.0 / np.asarray(
-        remove_QY(_probe, _inst_name)["1d"]["extracted_flux"][1], float)
+    qy_on_grid = 1.0 / np.asarray(remove_QY(_probe, _inst_name)["1d"]["extracted_flux"][1], float)
     # validity only (finite, positive): the reference files themselves dip
     # marginally below 1 (NIRISS red end reaches 0.99990), so a physics
     # bound of >= 1 would reject real reference data
@@ -267,24 +245,23 @@ def _one_mode(jdi, job, m, shared_star):
         raise RuntimeError(
             f"{m['key']}: probed quantum-yield curve is not finite and "
             f"positive (min {np.nanmin(qy_on_grid)}, "
-            f"max {np.nanmax(qy_on_grid)})")
+            f"max {np.nanmax(qy_on_grid)})"
+        )
     raw = res["RawData"]
     pout = res["PandeiaOutTrans"]
     cfg = res["PandeiaOutTrans"]["input"]["configuration"]
     sat_wave = np.asarray(pout["1d"]["sn"][0], float)
     n_part_sat = np.asarray(pout["1d"]["n_partial_saturated"][1], float)
     n_full_sat = np.asarray(pout["1d"]["n_full_saturated"][1], float)
-    pandeia_star = np.asarray(
-        pout["input"]["scene"][0]["spectrum"]["sed"]["spectrum"], float)
+    pandeia_star = np.asarray(pout["input"]["scene"][0]["spectrum"]["sed"]["spectrum"], float)
     if pandeia_star.ndim != 2 or pandeia_star.shape[0] != 2:
-        raise RuntimeError(
-            "PandExo did not submit a 2 x N input spectrum to Pandeia; "
-            f"got shape {pandeia_star.shape}")
+        raise RuntimeError(f"PandExo did not submit a 2 x N input spectrum to Pandeia; got shape {pandeia_star.shape}")
     if n_part_sat.shape != sat_wave.shape or n_full_sat.shape != sat_wave.shape:
         raise RuntimeError(
             "PandExo Pandeia saturation curves are not aligned with the "
             f"native wavelength grid: wave={sat_wave.shape}, "
-            f"partial={n_part_sat.shape}, full={n_full_sat.shape}")
+            f"partial={n_part_sat.shape}, full={n_full_sat.shape}"
+        )
     return {
         "wave": np.asarray(fs["wave"], float).tolist(),
         "error": np.asarray(fs["error_w_floor"], float).tolist(),
@@ -304,8 +281,9 @@ def _one_mode(jdi, job, m, shared_star):
             "normalization": "2MASS Ks vegamag; PandExo-resampled input",
             "ks_mag": float(job["star"]["kmag"]),
         },
-        "timing": {k: (float(v) if isinstance(v, (int, float, np.floating))
-                       else str(v)) for k, v in res["timing"].items()},
+        "timing": {
+            k: (float(v) if isinstance(v, (int, float, np.floating)) else str(v)) for k, v in res["timing"].items()
+        },
         "ngroup": int(cfg["detector"]["ngroup"]),
         "config": cfg,
         "warnings": {k: str(v) for k, v in res.get("warning", {}).items()},
@@ -313,17 +291,19 @@ def _one_mode(jdi, job, m, shared_star):
 
 
 def main():
+    """Run a job file and write its result file."""
     job = json.load(open(sys.argv[1]))
-    for var, key in (("pandeia_refdata", "refdata"), ("PSF_DIR", "psf_dir"),
-                     ("PYSYN_CDBS", "cdbs")):
+    for var, key in (("pandeia_refdata", "refdata"), ("PSF_DIR", "psf_dir"), ("PYSYN_CDBS", "cdbs")):
         path = job[key]
         if not os.path.isdir(path):
             raise RuntimeError(f"{var} path does not exist: {path}")
         os.environ[var] = path
 
     import warnings as _w
+
     _w.filterwarnings("ignore")
     import stsynphot
+
     vega = job["vega_file"]
     if not os.path.isfile(vega):
         raise RuntimeError(f"local Vega spectrum not found: {vega}")
@@ -335,8 +315,7 @@ def main():
 
     shared_star = _shared_star(job)
     out = {"__provenance__": _provenance()}
-    print(f"[pandexo] engine {out['__provenance__']['pandeia_engine_version']}",
-          flush=True)
+    print(f"[pandexo] engine {out['__provenance__']['pandeia_engine_version']}", flush=True)
     for m in job["modes"]:
         key = m["key"]
         print(f"[pandexo] {key} ({m['pandexo_name']}) ...", flush=True)
@@ -348,9 +327,9 @@ def main():
             elif submitted != out["__shared_star__"]:
                 raise RuntimeError(
                     "PandExo submitted different stellar spectra across modes; "
-                    "a single fixed-source parity comparison is impossible")
-            print(f"[pandexo] {key}: ngroup={out[key]['ngroup']} "
-                  f"npix={len(out[key]['wave'])}", flush=True)
+                    "a single fixed-source parity comparison is impossible"
+                )
+            print(f"[pandexo] {key}: ngroup={out[key]['ngroup']} npix={len(out[key]['wave'])}", flush=True)
         except Exception:
             out[key] = {"error": traceback.format_exc()}
             print(f"[pandexo] {key}: FAILED", flush=True)

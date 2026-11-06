@@ -1,7 +1,9 @@
 """Rank-aware Fisher tests: duplicated Jacobian columns must be reported as
 degenerate, near-singular matrices must not return arbitrary finite sigmas,
 the well-conditioned case must match independent analytic oracles, and the
-no-floor transits-to-target limit must be exact."""
+no-floor transits-to-target limit must be exact.
+"""
+
 import numpy as np
 import pytest
 
@@ -12,12 +14,16 @@ from jwst_tool import fisher, posteriors
 def test_nonfinite_derivative_cannot_disappear_as_a_null_direction(bad_row):
     # A failed science OR radius-nuisance row must invalidate the forecast,
     # not be dropped by the positive-diagonal mask during rank detection.
-    result = dict(jac_bins=np.array([[1., -1., 2., -2.],
-                                     [2., 1., -1., -2.]]),
-                  sigma=np.ones(4), seg=np.zeros(4, dtype=int))
+    result = dict(
+        jac_bins=np.array([[1.0, -1.0, 2.0, -2.0], [2.0, 1.0, -1.0, -2.0]]),
+        sigma=np.ones(4),
+        seg=np.zeros(4, dtype=int),
+    )
     result["jac_bins"][bad_row] = np.nan
-    for forecast in (lambda: fisher.mode_forecast(result, ["lnZ"]),
-                     lambda: fisher.combined_forecast([result], ["lnZ"])):
+    for forecast in (
+        lambda: fisher.mode_forecast(result, ["lnZ"]),
+        lambda: fisher.combined_forecast([result], ["lnZ"]),
+    ):
         with pytest.raises(ValueError, match="non-finite"):
             forecast()
 
@@ -26,10 +32,10 @@ def test_marg_sigmas_matches_independent_oracles():
     """Marginalized sigmas against three independent references: the analytic
     inverse of a well-conditioned Fisher matrix, an SVD of the noise-whitened
     design, and (for the Fisher construction itself) the finite curvature of
-    the Gaussian likelihood."""
+    the Gaussian likelihood.
+    """
     # analytic inverse + rank/condition diagnostics
-    J = np.array([[1.0, 0.5, 0.2, 0.9],
-                  [0.1, 1.3, 0.7, 0.2]])
+    J = np.array([[1.0, 0.5, 0.2, 0.9], [0.1, 1.3, 0.7, 0.2]])
     s = np.array([1.0, 2.0, 0.5, 1.5]) * 1e-4
     F = (J / s[None, :] ** 2) @ J.T
     diag = {}
@@ -47,8 +53,7 @@ def test_marg_sigmas_matches_independent_oracles():
     got = fisher._marg_sigmas(whitened.T @ whitened, 4)
     assert np.allclose(got, np.sqrt(np.diag(covariance)), rtol=1e-11)
     # the (J / sigma^2) J^T construction IS the likelihood curvature
-    design2 = np.array([[0.4, -0.2, 0.7, 0.1],
-                        [0.3, 0.8, -0.1, 0.5]])
+    design2 = np.array([[0.4, -0.2, 0.7, 0.1], [0.3, 0.8, -0.1, 0.5]])
     sigma2 = np.array([0.8, 1.1, 0.9, 1.3])
 
     def nll(theta):
@@ -60,8 +65,7 @@ def test_marg_sigmas_matches_independent_oracles():
         for j in range(2):
             ei = np.eye(2)[i] * step
             ej = np.eye(2)[j] * step
-            curvature[i, j] = (nll(ei + ej) - nll(ei - ej)
-                               - nll(-ei + ej) + nll(-ei - ej)) / (4.0 * step ** 2)
+            curvature[i, j] = (nll(ei + ej) - nll(ei - ej) - nll(-ei + ej) + nll(-ei - ej)) / (4.0 * step**2)
     expected = (design2 / sigma2[None, :] ** 2) @ design2.T
     assert np.allclose(curvature, expected, rtol=1e-9, atol=1e-10)
     # adding a known Gaussian prior as explicit precision reproduces the
@@ -70,17 +74,17 @@ def test_marg_sigmas_matches_independent_oracles():
     sp = np.array([1e-4, 2e-4, 1.5e-4])
     Fp = (Jp / sp[None, :] ** 2) @ Jp.T
     prior_sig = np.array([0.05, 0.2])
-    F_post = Fp + np.diag(1.0 / prior_sig ** 2)
+    F_post = Fp + np.diag(1.0 / prior_sig**2)
     sig_post = fisher._marg_sigmas(F_post, 2)
-    assert np.allclose(sig_post, np.sqrt(np.diag(np.linalg.inv(F_post))),
-                       rtol=1e-10)
+    assert np.allclose(sig_post, np.sqrt(np.diag(np.linalg.inv(F_post))), rtol=1e-10)
 
 
 def test_degenerate_directions_read_inf_never_garbage():
     """Two identical Jacobian rows are a perfect degeneracy: both must come
     back inf, never a finite number. An ALMOST-duplicated row (relative
     difference 1e-8) is numerically unconstrained too; a plain np.linalg.inv
-    would return a huge-but-finite 'constraint' without any error."""
+    would return a huge-but-finite 'constraint' without any error.
+    """
     rng = np.random.default_rng(0)
     row = rng.standard_normal(50)
     other = rng.standard_normal(50)
@@ -113,13 +117,17 @@ def test_wide_co_width_is_reported_not_hidden():
     reserved for a genuine null direction (test_degenerate_directions_...).
     Sigma scales linearly with the per-bin noise, so one design reaches any
     target width. 920 is the real extreme of a SOSS order-2 run,
-    the width at which the UNBOUNDED curve grid overflows float64."""
+    the width at which the UNBOUNDED curve grid overflows float64.
+    """
     rng = np.random.default_rng(7)
     nb = 40
     free = ["dlnCO", "lnZ"]
-    base = dict(jac_bins=rng.standard_normal((3, nb)),   # [dlnCO, lnZ, lnR0]
-                sigma=np.full(nb, 1e-4), mode_key="nirspec_prism",
-                depth=np.full(nb, 0.02))
+    base = dict(
+        jac_bins=rng.standard_normal((3, nb)),  # [dlnCO, lnZ, lnR0]
+        sigma=np.full(nb, 1e-4),
+        mode_key="nirspec_prism",
+        depth=np.full(nb, 0.02),
+    )
     s0 = fisher.mode_forecast(base, free)["dlnCO"]
     assert np.isfinite(s0)
     lo, hi = posteriors.co_curve_bounds()
@@ -128,8 +136,7 @@ def test_wide_co_width_is_reported_not_hidden():
         sig = fisher.mode_forecast(r, free)
         assert sig["dlnCO"] == pytest.approx(target, rel=1e-9)
         assert np.isfinite(sig["lnZ"])
-        out = posteriors.marginalized_posteriors(
-            r, free, {"dlnCO": 0.55, "lnZ": 1.0}, co_eval=0.55)
+        out = posteriors.marginalized_posteriors(r, free, {"dlnCO": 0.55, "lnZ": 1.0}, co_eval=0.55)
         rec = out["params"]["dlnCO"]
         assert rec["constrained"] is True
         theta = rec["theta"]
@@ -143,26 +150,23 @@ def test_wide_co_width_is_reported_not_hidden():
 def test_combined_forecast_structure_and_order_invariance():
     """Combined Fisher must allocate one offset column per segment of every
     mode (dimension check via the diag), and the result is invariant to mode
-    order and parameter order."""
+    order and parameter order.
+    """
     rng = np.random.default_rng(4)
-    r1 = dict(jac_bins=rng.standard_normal((2, 25)), sigma=np.full(25, 1e-4),
-              seg=np.array([0] * 12 + [1] * 13))   # 2 segments
-    r2 = dict(jac_bins=rng.standard_normal((2, 20)), sigma=np.full(20, 1e-4),
-              seg=np.zeros(20, int))               # 1 segment
+    r1 = dict(
+        jac_bins=rng.standard_normal((2, 25)), sigma=np.full(25, 1e-4), seg=np.array([0] * 12 + [1] * 13)
+    )  # 2 segments
+    r2 = dict(jac_bins=rng.standard_normal((2, 20)), sigma=np.full(20, 1e-4), seg=np.zeros(20, int))  # 1 segment
     diag = {}
     fisher.combined_forecast([r1, r2], ["p0"], diag=diag)
     # 1 free + lnR0 + (2 + 1) segment offsets = 5
     assert diag["fisher_dimension"] == 1 + 1 + 3
     rng = np.random.default_rng(14)
-    r3 = dict(jac_bins=rng.normal(size=(3, 25)), sigma=np.linspace(1, 2, 25),
-              seg=np.zeros(25, int))
-    r4 = dict(jac_bins=rng.normal(size=(3, 31)), sigma=np.linspace(2, 1, 31),
-              seg=np.array([0] * 15 + [1] * 16))
+    r3 = dict(jac_bins=rng.normal(size=(3, 25)), sigma=np.linspace(1, 2, 25), seg=np.zeros(25, int))
+    r4 = dict(jac_bins=rng.normal(size=(3, 31)), sigma=np.linspace(2, 1, 31), seg=np.array([0] * 15 + [1] * 16))
     base = fisher.combined_forecast([r3, r4], ["p0", "p1"])
-    assert fisher.combined_forecast([r4, r3], ["p0", "p1"]) == \
-        pytest.approx(base)
-    swapped = [dict(r, jac_bins=np.asarray(r["jac_bins"])[[1, 0, 2]])
-               for r in (r3, r4)]
+    assert fisher.combined_forecast([r4, r3], ["p0", "p1"]) == pytest.approx(base)
+    swapped = [dict(r, jac_bins=np.asarray(r["jac_bins"])[[1, 0, 2]]) for r in (r3, r4)]
     reordered = fisher.combined_forecast(swapped, ["p1", "p0"])
     assert reordered["p0"] == pytest.approx(base["p0"])
     assert reordered["p1"] == pytest.approx(base["p1"])
@@ -172,10 +176,11 @@ def test_single_segment_offset_and_diag():
     """A single-segment mode and a no-seg call agree: both carry exactly one
     constant-offset nuisance, because lnR0 is a physical derivative, not a
     constant, and never stands in for the offset. Diag dimension = free +
-    lnR0 + the always-present constant offset."""
+    lnR0 + the always-present constant offset.
+    """
     rng = np.random.default_rng(7)
     nb = 45
-    jac = rng.standard_normal((3, nb))             # 2 free + lnR0
+    jac = rng.standard_normal((3, nb))  # 2 free + lnR0
     r1 = dict(jac_bins=jac, sigma=np.full(nb, 1e-4))
     a1 = fisher.mode_forecast(dict(r1), ["p0", "p1"])
     r2 = dict(jac_bins=jac, sigma=np.full(nb, 1e-4), seg=np.zeros(nb, int))
@@ -185,8 +190,10 @@ def test_single_segment_offset_and_diag():
     # diag passthrough on a minimal mode
     diag = {}
     out = fisher.mode_forecast(
-        dict(jac_bins=np.array([[1.0, 2.0, 0.5], [0.2, 0.1, 0.9]]),
-             sigma=np.array([1e-4, 1e-4, 1e-4])), ["p0"], diag=diag)
+        dict(jac_bins=np.array([[1.0, 2.0, 0.5], [0.2, 0.1, 0.9]]), sigma=np.array([1e-4, 1e-4, 1e-4])),
+        ["p0"],
+        diag=diag,
+    )
     assert set(out) == {"p0"} and np.isfinite(out["p0"])
     assert diag["fisher_dimension"] == 3 and diag["fisher_rank"] == 3
 
@@ -197,16 +204,16 @@ def test_constant_science_derivative_unconstrained():
     constant: lnR0 cannot stand in for the offset. The same holds per
     segment: a derivative constant WITHIN each segment (any step pattern,
     including a pure detector step) lies in the span of the per-segment
-    offsets -- but only once segment info is supplied."""
+    offsets -- but only once segment info is supplied.
+    """
     nb = 40
     x = np.linspace(0.0, 1.0, nb)
-    jac = np.stack([np.ones(nb), 0.3 + 0.2 * x])   # [free=const, lnR0 nonconst]
+    jac = np.stack([np.ones(nb), 0.3 + 0.2 * x])  # [free=const, lnR0 nonconst]
     r = dict(jac_bins=jac, sigma=np.full(nb, 1e-4))
     assert np.isinf(fisher.mode_forecast(r, ["p0"])["p0"])
     # a science derivative with real shape stays constrained
     jac2 = np.stack([np.sin(6 * x), 0.3 + 0.2 * x])
-    assert np.isfinite(fisher.mode_forecast(
-        dict(jac_bins=jac2, sigma=np.full(nb, 1e-4)), ["p0"])["p0"])
+    assert np.isfinite(fisher.mode_forecast(dict(jac_bins=jac2, sigma=np.full(nb, 1e-4)), ["p0"])["p0"])
     # per-segment constant derivative (general step pattern)
     seg = np.array([0] * 20 + [1] * 20)
     jac3 = np.stack([np.where(seg == 0, 0.7, -0.2), np.linspace(1, 2, nb)])
@@ -222,11 +229,12 @@ def test_constant_science_derivative_unconstrained():
 
 def test_mode_forecast_matches_schur_complement():
     """Marginalized sigma against an independent Schur-complement GLS
-    calculation on the full nuisance-augmented design."""
+    calculation on the full nuisance-augmented design.
+    """
     rng = np.random.default_rng(11)
     nb = 60
     seg = np.array([0] * 30 + [1] * 30)
-    jac = rng.standard_normal((3, nb))             # 2 free + lnR0
+    jac = rng.standard_normal((3, nb))  # 2 free + lnR0
     sigma = np.full(nb, 2e-4)
     r = dict(jac_bins=jac, sigma=sigma, seg=seg)
     got = fisher.mode_forecast(dict(r), ["p0", "p1"])
@@ -237,7 +245,7 @@ def test_mode_forecast_matches_schur_complement():
     A = F[:n_f, :n_f]
     B = F[:n_f, n_f:]
     D = F[n_f:, n_f:]
-    S = A - B @ np.linalg.solve(D, B.T)            # Schur complement
+    S = A - B @ np.linalg.solve(D, B.T)  # Schur complement
     cov = np.linalg.inv(S)
     assert got["p0"] == pytest.approx(np.sqrt(cov[0, 0]), rel=1e-9)
     assert got["p1"] == pytest.approx(np.sqrt(cov[1, 1]), rel=1e-9)
@@ -245,7 +253,8 @@ def test_mode_forecast_matches_schur_complement():
 
 def test_display_sigma_units():
     """Report-unit conventions: metallicity/Kzz in dex (log10), C/O as an
-    ABSOLUTE number ratio (sigma_CO = C/O * sigma_lnCO), temperature in K."""
+    ABSOLUTE number ratio (sigma_CO = C/O * sigma_lnCO), temperature in K.
+    """
     # internal natural-log sigma of ln(10) -> exactly 1 dex
     assert fisher.display_sigma("lnZ", np.log(10.0)) == pytest.approx(1.0)
     assert fisher.display_sigma("lnKzz", np.log(10.0)) == pytest.approx(1.0)
@@ -262,11 +271,11 @@ def test_conditional_sigmas():
     """Conditional (others fixed) <= marginalized (others free), always; the
     two coincide when the parameter rows are orthogonal; a zero-response
     parameter reads inf; a second mode never worsens the conditional. All
-    read off the SAME nuisance-augmented Fisher matrix."""
+    read off the SAME nuisance-augmented Fisher matrix.
+    """
     rng = np.random.default_rng(7)
     nb = 40
-    jac = np.vstack([rng.standard_normal((2, nb)),
-                     rng.standard_normal(nb) + 1.0])   # p0, p1, lnR0
+    jac = np.vstack([rng.standard_normal((2, nb)), rng.standard_normal(nb) + 1.0])  # p0, p1, lnR0
     r = dict(jac_bins=jac, sigma=np.full(nb, 1e-4))
     cond = {}
     marg = fisher.mode_forecast(r, ["p0", "p1"], conditional=cond)
@@ -285,10 +294,9 @@ def test_conditional_sigmas():
     for n in ("p0", "p1"):
         assert np.isclose(cond2[n], marg2[n], rtol=1e-12)
     # a dead parameter (zero response) reads inf
-    jac3 = np.vstack([np.zeros(10), np.ones(10)])       # p0 dead, lnR0 alive
+    jac3 = np.vstack([np.zeros(10), np.ones(10)])  # p0 dead, lnR0 alive
     cond3 = {}
-    fisher.mode_forecast(dict(jac_bins=jac3, sigma=np.ones(10)), ["p0"],
-                         conditional=cond3)
+    fisher.mode_forecast(dict(jac_bins=jac3, sigma=np.ones(10)), ["p0"], conditional=cond3)
     assert cond3["p0"] == np.inf
     # two modes must beat (or match) either alone, conditionally too
     rng = np.random.default_rng(3)
@@ -302,17 +310,23 @@ def test_conditional_sigmas():
 
 # --- fisher no-floor limits ---------------------------------------------------
 
+
 def _fisher_result(floor_ppm: float, n=60) -> dict:
     wl = np.linspace(3.0, 5.0, n)
     bump = 150e-6 * np.exp(-0.5 * ((np.log(wl) - np.log(4.0)) / 0.10) ** 2)
     rng = np.random.default_rng(0)
-    jac = np.vstack([1e-4 * np.sin(2.0 * wl), 1e-4 * np.cos(3.0 * wl),
-                     1e-4 * rng.normal(size=n)])
-    r = dict(wl=wl, depth=0.02 + bump, depth_wo=np.full(n, 0.02),
-             floor=np.full(n, floor_ppm * 1e-6),
-             var_phot=np.full(n, 300e-6) ** 2, n_transits_eval=1,
-             seg=np.zeros(n, int),
-             jac_bins=jac, jac_names=["lnZ", "lnKzz", "lnR0"])
+    jac = np.vstack([1e-4 * np.sin(2.0 * wl), 1e-4 * np.cos(3.0 * wl), 1e-4 * rng.normal(size=n)])
+    r = dict(
+        wl=wl,
+        depth=0.02 + bump,
+        depth_wo=np.full(n, 0.02),
+        floor=np.full(n, floor_ppm * 1e-6),
+        var_phot=np.full(n, 300e-6) ** 2,
+        n_transits_eval=1,
+        seg=np.zeros(n, int),
+        jac_bins=jac,
+        jac_names=["lnZ", "lnKzz", "lnR0"],
+    )
     r["sigma"] = np.maximum(np.sqrt(r["var_phot"]), r["floor"])
     return r
 
@@ -323,8 +337,9 @@ def test_fisher_transits_to_target_limits():
     for a direction the Jacobian never constrains, and the scan stays
     monotone; a floored result keeps a finite positive limit; a
     MIXED floor (one bin at 0 ppm) reports nan and scans instead of gating
-    on the ill-conditioned floor-only limit."""
-    names = ["lnZ", "lnKzz"]                       # jac rows: names + lnR0
+    on the ill-conditioned floor-only limit.
+    """
+    names = ["lnZ", "lnKzz"]  # jac rows: names + lnR0
     tt = fisher.transits_to_target(_fisher_result(0.0), names, "lnZ", 1e9)
     assert tt["sig_inf"] == 0.0
     assert tt["reachable"]
@@ -332,10 +347,14 @@ def test_fisher_transits_to_target_limits():
     assert np.isfinite(tt2["sig_inf"]) and tt2["sig_inf"] > 0.0
     # one transit already meets the 0.1 dex target here (0.031 dex); clipping
     # the zero bin would collapse the whitened rank and read unreachable
-    r = dict(jac_bins=1e-3 * np.array([[1, 0, -1, 0], [0, 1, 0, -1.0]]),
-             sigma=np.full(4, 1e-4), var_phot=np.full(4, 1e-8),
-             floor=np.array([0.0, 1e-5, 1e-5, 1e-5]), n_transits_eval=1,
-             seg=np.zeros(4, int))
+    r = dict(
+        jac_bins=1e-3 * np.array([[1, 0, -1, 0], [0, 1, 0, -1.0]]),
+        sigma=np.full(4, 1e-4),
+        var_phot=np.full(4, 1e-8),
+        floor=np.array([0.0, 1e-5, 1e-5, 1e-5]),
+        n_transits_eval=1,
+        seg=np.zeros(4, int),
+    )
     tt3 = fisher.transits_to_target(r, ["lnZ"], "lnZ", 0.1)
     assert tt3["reachable"] and tt3["n"] == 1 and np.isnan(tt3["sig_inf"])
     # an unconstrained direction (zero Jacobian row) stays unconstrained at
@@ -343,15 +362,15 @@ def test_fisher_transits_to_target_limits():
     rz = _fisher_result(0.0)
     rz["jac_bins"] = rz["jac_bins"].copy()
     rz["jac_bins"][0] = 0.0
-    assert fisher.transits_to_target(rz, names, "lnZ", 0.1) == \
-        dict(n=None, reachable=False, sig_inf=float("inf"))
+    assert fisher.transits_to_target(rz, names, "lnZ", 0.1) == dict(n=None, reachable=False, sig_inf=float("inf"))
 
 
 def test_co_width_is_the_value_and_error_in_log10():
     """Batalha & Line's convention -- value and error both in log10(C/O),
     the coordinate the Gaussian is symmetric in. Their cases are tagged
     "logC/O = -0.26" for exactly this C/O. A wide width is still reported:
-    it IS a weak local constraint, not the absence of one."""
+    it IS a weak local constraint, not the absence of one.
+    """
     # the ERROR sets the precision (format_pm): 2 sig figs on it, the value
     # rounded to the same decimal place -- never "-0.26 ± 0.0324".
     assert fisher.format_co_width(0.55, 0.0745) == "log10(C/O) = -0.260 ± 0.032"
@@ -363,26 +382,29 @@ def test_co_width_is_the_value_and_error_in_log10():
     assert fisher.format_co_width(1.27, 0.9218) == "log10(C/O) = 0.10 ± 0.40"
 
 
-@pytest.mark.parametrize("center,width,want", [
-    # the error carries 2 significant figures and the value is rounded to
-    # the SAME decimal place, in both directions across the decimal point
-    (1.0, 0.922, "1.00 ± 0.92"),
-    (-0.26, 0.599, "-0.26 ± 0.60"),
-    (-0.26, 0.0324, "-0.260 ± 0.032"),
-    (1200.0, 45.0, "1200 ± 45"),
-    (5678.0, 1234.0, "5700 ± 1200"),
-    (None, 0.0324, "±0.032"),
-    (None, 45.0, "±45"),
-    # no scale to round against: fixed precision rather than a crash
-    (1.0, 0.0, "1 ± 0"),
-    (1.0, np.inf, "1 ± inf"),
-])
+@pytest.mark.parametrize(
+    ("center", "width", "want"),
+    [
+        # the error carries 2 significant figures and the value is rounded to
+        # the SAME decimal place, in both directions across the decimal point
+        (1.0, 0.922, "1.00 ± 0.92"),
+        (-0.26, 0.599, "-0.26 ± 0.60"),
+        (-0.26, 0.0324, "-0.260 ± 0.032"),
+        (1200.0, 45.0, "1200 ± 45"),
+        (5678.0, 1234.0, "5700 ± 1200"),
+        (None, 0.0324, "±0.032"),
+        (None, 45.0, "±45"),
+        # no scale to round against: fixed precision rather than a crash
+        (1.0, 0.0, "1 ± 0"),
+        (1.0, np.inf, "1 ± inf"),
+    ],
+)
 def test_format_pm_lets_the_error_set_the_precision(center, width, want):
     assert fisher.format_pm(center, width) == want
 
 
 @pytest.mark.parametrize("center", [0.0, -0.55, np.nan, np.inf])
 def test_format_co_width_validates_center(center):
-    """center finite and positive; it is NOT required to lie in any band."""
+    """Center finite and positive; it is NOT required to lie in any band."""
     with pytest.raises(ValueError):
         fisher.format_co_width(center, 0.1)
