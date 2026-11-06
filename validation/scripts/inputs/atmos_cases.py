@@ -30,7 +30,7 @@ cp = forward.canonical_params({"planet": planet, "science_mode": mode,
                                "extra_mols": forward.EXTRA_MOLECULES_DEFAULT})
 A = forward._assemble_chem(cp, print)
 chem = A.build_chem()
-cfg = chem._integ._cfg          # the cfg the solver ran; only place the cadence lives
+cfg = chem._integ.config          # the cfg the solver ran; only place the cadence lives
 theta = jnp.asarray(A.theta)
 y, diag = chem.converged_y(theta, return_conv_diag=True)
 assert bool(diag.conv_normal) and float(diag.longdy) < chem.yconv_min, \

@@ -218,8 +218,8 @@ def run_adjoint(params: dict, species: str, log=print) -> Path:
     from vulcan3 import chem_funs
     from vulcan3 import steady_state_grad as ssg
 
-    net = chem_funs._NET_JAX
-    network = chem_funs._NETWORK
+    net = chem_funs.NET_JAX
+    network = chem_funs.NETWORK
     integ = chem._integ
     compo_j = jnp.asarray(np.asarray(chem.compo_array))
     dz_j = jnp.asarray(np.asarray(chem.dz))
@@ -227,7 +227,7 @@ def run_adjoint(params: dict, species: str, log=print) -> Path:
     # make_body_terms carries the geometry/operator splice (incl. the hybrid
     # vm_mol choice and boundary pins) -- never the manual 5-field splice.
     atm_step, body_terms = ssg.make_body_terms(integ, final, atm_T)
-    recompute_k = (ssg.make_photo_recompute_k(integ._photo_static, final)
+    recompute_k = (ssg.make_photo_recompute_k(integ.photo_static, final)
                    if cp["use_photo"] else None)
 
     # --- scope audit FIRST: refuse on errors ---------------------------------
@@ -239,7 +239,7 @@ def run_adjoint(params: dict, species: str, log=print) -> Path:
     for dt in sorted(ssg.BODY_MAP_DT_CANDIDATES):
         log(f"[adj] PROG 0.35 adjoint scope audit (body_dt {dt:.0e})")
         a = ssg.audit_adjoint_scope(
-            y_star, k_arr, atm_step, net, cfg=integ._cfg, final_state=final,
+            y_star, k_arr, atm_step, net, cfg=integ.config, final_state=final,
             loss_fn=loss_fn, photo_recompute_k=recompute_k,
             body_terms=body_terms, body_dt=dt, print_report=False)
         audit_trail.append(dict(
@@ -327,9 +327,9 @@ def run_adjoint(params: dict, species: str, log=print) -> Path:
     from vulcan3 import rates_jax
     from vulcan3.phy_const import kb
 
-    cfg = integ._cfg
+    cfg = integ.config
     nasa9, _present = load_nasa9(network.species,
-                                 rates_jax._thermo_dir(cfg.network))
+                                 rates_jax.thermo_dir(cfg.network))
     nasa9_j = jnp.asarray(nasa9)
     remove_list = cfg.remove_list
     use_caps = bool(cfg.use_lowT_limit_rates)
