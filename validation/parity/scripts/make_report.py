@@ -35,7 +35,6 @@ def _measured(summary) -> dict:
     ng_dev_bright = max(
         (abs(m["ngroup_ours"] - m["ngroup_pandexo"]) for s, m in rows if s not in pg.FAINT_STARS), default=0
     )
-    g = next((m for s, m in rows if s == "w39_like" and m["key"] == "nirspec_g395h"), None)
     return {
         "n_ok": len(rows),
         "min_match_frac": min(match_fracs) if match_fracs else float("nan"),
@@ -44,7 +43,6 @@ def _measured(summary) -> dict:
         "tint_worst": tint_devs[0] if tint_devs else (float("nan"), "?", "?", 0),
         "ng_dev_faint": ng_dev_faint,
         "ng_dev_bright": ng_dev_bright,
-        "g395h": g,
     }
 
 
@@ -171,8 +169,8 @@ def main():
     w(
         f"Generated {date.today().isoformat()} by `run_parity.py` + "
         "`make_report.py` in this directory. This file is a SUMMARY. The "
-        "method, scope, and known intended differences live in the harness "
-        "docstrings (`../scripts/run_parity.py`). The full per-mode rows, the "
+        "method, scope, and known intended differences live in "
+        "`docs/validation.md`, section `run_parity`. The full per-mode rows, the "
         "noise-model attribution, and the raw PandExo warnings live in "
         "`parity_summary.json` beside this file. Figures live in `../figs/`."
     )

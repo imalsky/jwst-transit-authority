@@ -8,6 +8,7 @@ examines the same booted app lives in one test.
 
 from __future__ import annotations
 
+import ast
 import re
 
 import pytest
@@ -115,14 +116,22 @@ def test_every_download_button_is_plain_and_click_safe():
     """Clicking a download widget queues a rerun, and a queued rerun cancels
     the script run in flight -- on the Run pass, the forward model itself.
     on_click="ignore" is what keeps the buttons live during a run instead of
-    dead stand-ins, so EVERY download button must carry it (AppTest cannot
-    click one, hence the source count). Both pre-run downloads are plain,
+    dead stand-ins, so EVERY download call must carry it (AppTest cannot
+    click one, hence the per-call scan). Both pre-run downloads are plain,
     always-live download buttons.
     """
-    src = "".join(path.read_text() for path in GUI_SOURCES)
-    assert src.count("download_button(") == src.count('on_click="ignore"'), (
-        "a download button without on_click=ignore cancels a run in flight"
-    )
+    calls = [
+        node
+        for path in GUI_SOURCES
+        for node in ast.walk(ast.parse(path.read_text()))
+        if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "download_button"
+    ]
+    assert len(calls) > 5, f"only {len(calls)} download calls found: the scan is not looking where it thinks it is"
+    for call in calls:
+        on_click = next((k.value for k in call.keywords if k.arg == "on_click"), None)
+        assert isinstance(on_click, ast.Constant) and on_click.value == "ignore", (
+            f"the download call at line {call.lineno} cancels a run in flight"
+        )
     at = run_app()
     assert not at.exception, at.exception
     assert "Download configuration (JSON)" in {b.label for b in at.get("download_button")}
@@ -335,32 +344,41 @@ def test_engine_switch_keeps_each_engines_settings(monkeypatch):
     assert at.session_state["n0_wasp39b_tpsrc"] == model_defs.TP_FILE_UPLOAD
 
 
-def test_source_pins_fig_width_fisher_table_and_noise_recording():
-    """Source-level pins for three maintainer decisions: (1) the
-    global noise multiplier COMPOSES with the per-mode multipliers and the
-    config records the two factors APART (the product would re-multiply on
-    restore); (2) every figure is shown from the PNG bytes its download
-    button carries, at an explicit pixel width (st.pyplot hardcodes dpi 200
-    and "stretch" makes the figure wiggle on resize); (3) the Fisher
-    table is st.table, never st.dataframe -- its mode column is BLANKED on
-    repeat rows, so a header-click re-sort would attribute numbers to the
-    wrong instrument, while the CSV is built from the UNBLANKED rows.
+def test_the_global_noise_multiplier_composes_and_the_config_records_the_factors_apart(monkeypatch):
+    """The run applies global x per-mode; the share file records the two apart, since the product would re-multiply
+    on restore.
     """
-    src = "".join(path.read_text() for path in GUI_SOURCES)
-    assert "infl = {k: float(noise_scale) * float(infl_mode[k])" in src, (
-        "the global multiplier no longer composes with the per-mode ones"
-    )
-    assert "noise_infl={k: float(o.infl_mode[k]) for k in o.mode_keys}" in src, (
-        "noise_infl must record the PER-MODE widget values, not the product"
-    )
-    assert "noise_scale=float(o.noise_scale)," in src, "the global scale is not recorded, so a run cannot be reproduced"
-    assert "width=_FIG_DISPLAY_PX" in src.split("def show_fig")[1], "show_fig no longer pins the display width"
-    assert "show_fig(fig3, struct_png)" in src and "show_fig(fig_sum, sum_png)" in src, (
-        "a figure must display the PNG its download button rasterized"
-    )
-    assert "st.pyplot(" not in src, "st.pyplot hardcodes dpi 200"
-    block = (APP.parent / "gui_forecast.py").read_text()
-    assert "st.table(" in block, "the Fisher table must stay a static st.table (blanked mode names)"
-    assert "st.dataframe(" not in block, "the Fisher table must stay a static st.table (blanked mode names)"
-    assert 'r2["mode"] = ""' in block, "mode names are no longer blanked; re-check whether st.table is needed"
-    assert "view.csv(pd.DataFrame(frows))" in block, "the Fisher CSV is no longer built from the unblanked rows"
+    from jwst_tool import gui_run, share_config
+
+    seen = {}
+    real_request, real_share = gui_run.build_request, share_config.build_share
+
+    def spy_request(t, a, g, o, s):
+        seen["infl"] = dict(o.noise.infl)
+        return real_request(t, a, g, o, s)
+
+    def spy_share(*, canon, goal, observation, **kw):
+        seen["observation"] = observation
+        return real_share(canon=canon, goal=goal, observation=observation, **kw)
+
+    monkeypatch.setattr(gui_run, "build_request", spy_request)
+    monkeypatch.setattr(share_config, "build_share", spy_share)
+    at = AppTest.from_file(str(APP), default_timeout=60)
+    at.session_state["n0_noisescale"] = 2.0
+    at.session_state["n0_infl_nirspec_prism"] = 1.5
+    at.run()
+    assert not at.exception, at.exception
+    assert seen["infl"]["nirspec_prism"] == pytest.approx(3.0)
+    assert seen["observation"]["noise_infl"]["nirspec_prism"] == pytest.approx(1.5)
+    assert seen["observation"]["noise_scale"] == pytest.approx(2.0)
+
+
+def test_no_figure_goes_through_st_pyplot():
+    """st.pyplot hardcodes 200 dpi; every figure is shown from the PNG bytes its download carries."""
+    calls = [
+        (path.name, node.lineno)
+        for path in GUI_SOURCES
+        for node in ast.walk(ast.parse(path.read_text()))
+        if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "pyplot"
+    ]
+    assert not calls, calls

@@ -25,7 +25,7 @@ for var in (
     "JWST_TOOL_OUTPUT_DIR",
 ):
     if not os.environ.get(var):
-        raise SystemExit(f"run_parity: {var} must be set (see module docstring)")
+        raise SystemExit(f"run_parity: {var} must be set (see docs/validation.md)")
 
 import parity_gate as pg
 
@@ -127,10 +127,10 @@ assert set(PANDEXO_MODES) == set(pg.MODE_KEYS), "PANDEXO_MODES does not match th
 
 
 def run_ours(star: dict, keys: list[str], star_spectrum: dict) -> dict:
+    """Return this tool's Pandeia results for a star and modes."""
     # Parity submits the SAME job noise_job builds for a normal run, never a
     # parity-only mode rename: a parity-only patch can pass the gate while the
     # production path sends a token Pandeia rejects.
-    """Return this tool's Pandeia results for a star and modes."""
     job = noise.noise_job(star, keys, sat_limit=SAT_LIMIT)
     job["star_spectrum"] = star_spectrum
     eng = noise.backend_fingerprint()["engine_version"]
@@ -139,7 +139,7 @@ def run_ours(star: dict, keys: list[str], star_spectrum: dict) -> dict:
             f"run_parity: JWST_TOOL_PANDEIA_PYTHON resolves engine {eng!r}; "
             f"the release gate requires the supported "
             f"{pg.REQUIRED_PANDEIA_RELEASE} engine. Point it at a matching "
-            "environment (see the module docstring), or run the harness "
+            "environment (see docs/validation.md), or run the harness "
             "knowing the gate will fail."
         )
     return noise.run_pandeia(job, progress=lambda s: print("  " + s, flush=True))
@@ -177,19 +177,6 @@ def run_pandexo(star: dict, keys: list[str], workdir: Path, tag: str = "") -> di
     if r.returncode != 0 or not rf.exists():
         raise SystemExit(f"pandexo worker failed (rc={r.returncode}):\n{r.stderr[-3000:]}")
     return json.loads(rf.read_text())
-
-
-def _stats(ratio: np.ndarray) -> dict:
-    r = ratio[np.isfinite(ratio)]
-    if r.size == 0:
-        return dict(n=0)
-    return dict(
-        n=int(r.size),
-        median=float(np.median(r)),
-        p05=float(np.percentile(r, 5)),
-        p95=float(np.percentile(r, 95)),
-        max_abs_dev=float(np.max(np.abs(r - 1.0))),
-    )
 
 
 def _saturation_mask_stats(ours: dict, px: dict) -> dict:
@@ -261,7 +248,6 @@ def _scrub_paths(d: dict) -> dict:
     return out
 
 
-# size-limit-ok: one mode's comparison table, top to bottom
 def compare_mode(key: str, ours: dict, px: dict) -> dict:
     """Compare one mode's two results."""
     out = {"key": key}
@@ -285,7 +271,11 @@ def compare_mode(key: str, ours: dict, px: dict) -> dict:
         out["ngroup_pandexo"] = px.get("ngroup")
         out["pandexo_warnings"] = px.get("warnings")
         return out
+    return _compare_measured(out, key, ours, px)
 
+
+def _compare_measured(out: dict, key: str, ours: dict, px: dict) -> dict:
+    """Fill a comparison row for a mode both sides measured."""
     wl_o = np.asarray(ours["wl"])
     flux_o = np.asarray(ours["flux"])
     noise_o = np.asarray(ours["noise_1int"])
@@ -295,14 +285,7 @@ def compare_mode(key: str, ours: dict, px: dict) -> dict:
     err_p = np.asarray(px["error"])
     tim = px["timing"]
 
-    # grid identity: match pixels by wavelength (the two sides run the same
-    # engine, so the extraction grids should agree exactly; PandExo NaNs
-    # fully saturated pixels, ours drops non-finite ones)
-    ok_p = np.isfinite(err_p) & (err_p > 0)
-    ii = np.searchsorted(wl_o, wl_p[ok_p])
-    ii = np.clip(ii, 0, wl_o.size - 1)
-    exact = np.abs(wl_o[ii] - wl_p[ok_p]) < 1e-9 * np.maximum(wl_p[ok_p], 1e-9)
-    io, ip = ii[exact], np.where(ok_p)[0][exact]
+    io, ip = pg.match_pixels(wl_o, wl_p, err_p)
 
     # integration counts: our floor policy vs PandExo's timing
     t_cyc = float(ours["t_cycle_s"])
@@ -357,17 +340,13 @@ def compare_mode(key: str, ours: dict, px: dict) -> dict:
             "filter": px["config"]["instrument"].get("filter"),
             "disperser": px["config"]["instrument"].get("disperser"),
         },
-        # like-for-like electron rates: PandExo's remove_QY divided the
-        # detector quantum yield out of e_rate_out (photon convention for its
-        # shot-noise formula); multiply the recorded curve back so both sides
-        # are pandeia's extracted electron rate. Gated to unity in the gate.
-        flux_ratio=_stats(flux_o[io] / (np.asarray(px["e_rate_out"])[ip] * np.asarray(px["qy_on_grid"])[ip])),
+        flux_ratio=pg.flux_ratio_stats(ours, px),  # gated to unity
         # disclosed only: the photon-convention ratio (== the QY curve when
         # the electron rates agree) so the artifact keeps the divergence
         # between the two conventions visible
-        flux_ratio_photon=_stats(flux_o[io] / np.asarray(px["e_rate_out"])[ip]),
-        sigma_ratio_matched=_stats(sigma_ours(n_p_in, n_p_out) / err_p[ip]),
-        sigma_ratio_policy=_stats(sigma_ours(n_ours, n_ours) / err_p[ip]),
+        flux_ratio_photon=pg.ratio_stats(flux_o[io] / np.asarray(px["e_rate_out"])[ip]),
+        sigma_ratio_matched=pg.ratio_stats(sigma_ours(n_p_in, n_p_out) / err_p[ip]),
+        sigma_ratio_policy=pg.ratio_stats(sigma_ours(n_ours, n_ours) / err_p[ip]),
         var_excess_ours=excess_ours,
         var_excess_pandexo=excess_px,
         pandexo_warnings=px.get("warnings"),

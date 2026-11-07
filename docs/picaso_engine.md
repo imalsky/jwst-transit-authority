@@ -20,6 +20,10 @@ the worker's requests, caches and certifies its results, and hands
 (``p_bar`` bottom to top, ``sidx``, ``species_masses``, ``T_base``) plus the
 solved column ``y``.
 
+Gravity: one constant g per run for the climate solve, the quench scale height and the Guillot profile, at the tool's
+chemistry anchor (the grid interface nearest 1 bar), as on the VULCAN path. A climate baseline iterates g with its own T
+and mean molecular weight to `ANCHOR_TOL`; the composition stencil points of a run reuse that g.
+
 ## `picaso_worker`
 
 PICASO worker -- runs INSIDE the PICASO environment (JWST_TOOL_PICASO_PYTHON).

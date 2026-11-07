@@ -94,3 +94,14 @@ def test_a_failed_mode_is_not_cached(stub, tmp_path, monkeypatch):
     cached = [json.loads(p.read_text()) for p in tmp_path.glob("*.json")]
     assert [c for c in cached if "nirspec_prism" in c], "the good mode must cache"
     assert not [c for c in cached if "miri_lrs" in c], cached
+
+
+def test_a_cache_entry_without_its_provenance_is_refused(stub):
+    key = "nirspec_prism"
+    noise.run_modes(STAR, [key])
+    path = next(ins.NOISE_CACHE.iterdir())
+    entry = json.loads(path.read_text())
+    del entry["__provenance__"]
+    path.write_text(json.dumps(entry))
+    with pytest.raises(KeyError, match="__provenance__"):
+        noise.run_modes(STAR, [key])

@@ -20,31 +20,22 @@ from jwst_tool.certify import (
     check_emission_thin,
     check_t_window,
 )
-from jwst_tool.model_defs import CHEM_PARAM_NAMES, CLOUD_FISHER_PARAMS, CO_MAX, CO_MAX_PHOTO_OFF, PICASO_MET_RANGE
+from jwst_tool.model_defs import (
+    CHEM_PARAM_NAMES,
+    CLOUD_FISHER_PARAMS,
+    CO_MAX,
+    CO_MAX_PHOTO_OFF,
+    FD_COMP_PARAMS,
+    FD_STEPS,
+    PICASO_MET_RANGE,
+    fd_stencil,
+)
 from jwst_tool.spectrum import ColumnSpectrum, RtSetup
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-# FD Fisher steps. lnZ scales O/C/N/S together (C/O preserved), dlnCO scales
-# C_H at fixed O, lnKzz/T-P rows perturb theta on the same build. Every row is
-# evaluated at h AND 2h -- disagreement beyond FD_CONSISTENCY_TOL RAISES --
-# and reported as the Richardson combination (4 J_h - J_2h)/3.
-FD_STEPS = {
-    "lnZ": 0.10,
-    "dlnCO": 0.10,
-    "lnKzz": 0.10,  # ln-space steps
-    "Tirr": 10.0,
-    "Tint": 10.0,  # Kelvin
-    "log_kappa": 0.05,
-    "log_gamma": 0.05,  # dex
-    "log_kappa_cloud": 0.05,
-    "alpha_cloud": 0.05,
-}  # dex / slope
-
-
-FD_COMP_PARAMS = ("lnZ", "dlnCO")  # need a chemistry re-init per FD point
-
+    from jwst_tool.tool_types import AnyArray, Log
 
 FD_CONSISTENCY_TOL = 0.25
 
@@ -65,23 +56,7 @@ AD_BUILD_OVERRIDES = {"count_max": 6000, "dt_max": 1.0e5}
 AD_RETRY_COUNT_MAX = 30000
 
 
-def fd_stencil(name: str, value: float, co_max: float, met_max: float | None = None) -> tuple[tuple[int, ...], float]:
-    """(step multiples, step) a composition row solves at.
-
-    Central (+-h, +-2h) at h = FD_STEPS[name], unless the dlnCO stencil would leave co_max (the network's
-    photolysis-ON ceiling, the conservative choice photo-off too) or the lnZ stencil would leave met_max (the PICASO
-    cap; None = no cap): then the row uses the one-sided stencil (-1, -2, -4) toward lower values -- third order
-    after Richardson -- at h/2 so its reach equals the central stencil's 2h (at the full step the curvature toward
-    the boundary fails the h-vs-2h gate on a 1600 K hot Jupiter).
-    """
-    h = FD_STEPS[name]
-    top = {"dlnCO": co_max, "lnZ": met_max}.get(name)
-    if top is not None and value * float(np.exp(2.0 * h)) > top:
-        return (-1, -2, -4), h / 2.0
-    return (1, -1, 2, -2), h
-
-
-def fd_estimates(offs: tuple, dvals: dict, f0: np.ndarray, h: float) -> tuple:
+def fd_estimates(offs: tuple, dvals: dict, f0: np.ndarray | None, h: float) -> tuple[np.ndarray, np.ndarray]:
     """(J_h, J_2h) from stencil values dvals[s] = f(x + s h).
 
     Central when offs holds +-1, else the one-sided stencil anchored on f0 = f(x). The Richardson combination (4 J_h
@@ -91,12 +66,12 @@ def fd_estimates(offs: tuple, dvals: dict, f0: np.ndarray, h: float) -> tuple:
         return ((dvals[1] - dvals[-1]) / (2.0 * h), (dvals[2] - dvals[-2]) / (4.0 * h))
     d = offs[0]
     return (
-        d * (-3.0 * f0 + 4.0 * dvals[d] - dvals[2 * d]) / (2.0 * h),
-        d * (-3.0 * f0 + 4.0 * dvals[2 * d] - dvals[4 * d]) / (4.0 * h),
+        d * (-3.0 * f0 + 4.0 * dvals[d] - dvals[2 * d]) / (2.0 * h),  # type: ignore[operator]  # a one-sided stencil carries f0
+        d * (-3.0 * f0 + 4.0 * dvals[2 * d] - dvals[4 * d]) / (4.0 * h),  # type: ignore[operator]  # a one-sided stencil carries f0
     )
 
 
-def fd_row(name: str, j1: np.ndarray, j2: np.ndarray, h: float) -> tuple:
+def fd_row(name: str, j1: np.ndarray, j2: np.ndarray, h: float) -> tuple[np.ndarray, float]:
     """Richardson-combined Jacobian row and its h-vs-2h consistency error.
 
     j1 / j2 are the same scheme's estimate at step h and 2h. Raises when the
@@ -126,7 +101,7 @@ def fd_row(name: str, j1: np.ndarray, j2: np.ndarray, h: float) -> tuple:
             f"check: max|J(h) - J(2h)| / max|J(h)| = {err:.3f} > "
             f"{FD_CONSISTENCY_TOL} (h = {h:g}). The row is dominated "
             "by solver convergence noise or curvature -- lower yconv_min "
-            "(and yconv_cri with it), raise nz, or adjust jacobian.FD_STEPS. "
+            "(and yconv_cri with it), raise nz, or adjust model_defs.FD_STEPS. "
             "An uncertified derivative is never reported."
         )
     return (4.0 * j1 - j2) / 3.0, err  # Richardson: O(h^4) central, O(h^3) one-sided
@@ -153,7 +128,7 @@ class Baseline:
     escalated: list
     bz_build: float
     advance: Callable[[], None]
-    log: Callable[..., None]
+    log: Log
 
 
 @dataclass
@@ -175,7 +150,7 @@ class Rows:
         self.method.append(method)
 
 
-def _gate_emis(b: Baseline, dep: Any, tau: np.ndarray, stage: str) -> np.ndarray:
+def _gate_emis(b: Baseline, dep: AnyArray, tau: AnyArray, stage: str) -> AnyArray:
     """Thin-bottom gate for a perturbed emission spectrum.
 
     `dep * fs_j` is Fp times the eclipse prefactor, and the fraction is a ratio, so the scalar cancels.
@@ -184,7 +159,9 @@ def _gate_emis(b: Baseline, dep: Any, tau: np.ndarray, stage: str) -> np.ndarray
     return dep
 
 
-def _certified_depth(b: Baseline, chem_b: Any, th: Any, stage: str, tp_eval_b: Any = None) -> np.ndarray:
+def _certified_depth(
+    b: Baseline, chem_b: Any, th: AnyArray, stage: str, tp_eval_b: Callable | None = None
+) -> np.ndarray:
     """One stencil point: the chemistry certificate AND, in emission, the thin-bottom certificate.
 
     A Fisher row is never built from a spectrum neither gate has passed. A point that does not certify RAISES -- the
@@ -193,7 +170,7 @@ def _certified_depth(b: Baseline, chem_b: Any, th: Any, stage: str, tp_eval_b: A
     import jax.numpy as jnp
 
     if b.pic:  # a PICASO build is an already-certified column
-        y_b = jnp.asarray(chem_b.y)
+        y_b: AnyArray = jnp.asarray(chem_b.y)
     else:
         y_b, chem_b, _, _ = certified_solve(chem_b, th, stage, log=b.log)
         check_elements(np.asarray(y_b), chem_b, stage, b.log)
@@ -204,7 +181,7 @@ def _certified_depth(b: Baseline, chem_b: Any, th: Any, stage: str, tp_eval_b: A
     return np.asarray(_gate_emis(b, dep, tau, stage))
 
 
-def _ad_row(b: Baseline, chem_x: Any, e_h: Any) -> tuple:
+def _ad_row(b: Baseline, chem_x: Any, e_h: np.ndarray) -> tuple:
     # Warm continuation from the converged column, differentiated
     # along `e_h` (a unit direction times its FD step: the solver
     # certifies the tangent per cell in those units, together with
@@ -225,10 +202,8 @@ def _ad_row(b: Baseline, chem_x: Any, e_h: Any) -> tuple:
     return dep, diag, tau, y_w, ddep
 
 
-def _ad_chemistry_rows(b: Baseline, rows: Rows) -> dict:
+def _ad_chemistry_rows(b: Baseline, rows: Rows) -> dict[str, np.ndarray]:
     """Return the AD chemistry rows by name, one tangent-certified warm jvp per row."""
-    import numpy as np
-
     jac_names = rows.names
     # AD differentiates the CHEMISTRY rows only. A T-P row takes the FD
     # branch under either method: the warm jvp runs at the baseline
@@ -303,7 +278,7 @@ def _ad_chemistry_rows(b: Baseline, rows: Rows) -> dict:
     return ad_cols
 
 
-def _rt_deck_row(b: Baseline, name: str) -> tuple:
+def _rt_deck_row(b: Baseline, name: str) -> tuple[np.ndarray, float, float, str]:
     """RT-only Jacobian row for a cloud-deck parameter (no chemistry re-solve).
 
     AD -> one jvp along it. FD -> a SINGLE central difference, since the analytic power-law deck carries no solver
@@ -322,9 +297,9 @@ def _rt_deck_row(b: Baseline, name: str) -> tuple:
     h = FD_STEPS[name]
 
     def _d(step: float) -> np.ndarray:
-        v = base_vec.copy()
-        v[idx] += step
-        v = jnp.asarray(v)
+        shifted = base_vec.copy()
+        shifted[idx] += step
+        v = jnp.asarray(shifted)
         if b.setup.emis is None:
             return np.asarray(b.column.depth(b.y_sol, b.th0, cloud=v))
         dep, tau = b.column.depth(b.y_sol, b.th0, return_tau=True, cloud=v)
@@ -334,103 +309,103 @@ def _rt_deck_row(b: Baseline, name: str) -> tuple:
     return j1, h, np.nan, "fd-rt"  # truncation unmeasured, not 0
 
 
-# size-limit-ok: the row's closures share its stencil and cadence
+def _stencil_points(b: Baseline, name: str, offs: tuple[int, ...], h: float, frq: int | None) -> dict:
+    """Every stencil point of a row at ONE photolysis cadence.
+
+    Never mix: the cadence moves a converged spectrum by 0.01-2.4 ppm on the presets, and in a row that offset divides
+    by h and lands in the derivative.
+    """
+    pts = {}
+    if name in FD_COMP_PARAMS:
+        # equilibrium re-seed + certified cold solve per point
+        for s in offs:
+            f = float(np.exp(s * h))
+            if name == "lnZ":  # all metals together; C/O preserved
+                ab = b.abundance_overrides(b.cp["met_x_solar"] * f, b.cp["co_ratio"])
+            else:  # dlnCO: carbon at fixed oxygen
+                ab = b.abundance_overrides(b.cp["met_x_solar"], b.cp["co_ratio"] * f)
+            chem_s = b.build_chem(ab, tag=f"FD {name} {s:+d}h", photo_frq=frq)
+            if b.pic and b.setup.tp_eval is None:  # a climate point has its own T
+                check_t_window(None, b.theta, chem_s.p_bar, b.log, T_base=chem_s.T_base)
+            pts[s] = _certified_depth(b, chem_s, b.theta, f"FD {name} {s:+d}h")
+        return pts
+    # Kzz changes only the live transport coefficient. T-P also
+    # changes the radius/gravity anchor and hence the Guillot
+    # mapping, so rebuild it just as a full perturbed run does.
+    i_par = b.theta_names.index(name)
+    chem_r = (
+        b.chem
+        if frq == b.run_frq or i_par >= 3
+        else b.build_chem(tag=f"{name} row [photo cadence {frq}]", photo_frq=frq)
+    )
+    for s in offs:
+        if i_par >= 3:
+            cp_s = dict(b.cp, **{name: b.cp[name] + s * h})
+            A_s = b.assemble(cp_s, b.log)
+            chem_s = A_s.build_chem(tag=f"FD {name} {s:+d}h", photo_frq=frq)
+            check_t_window(A_s.tp_eval, A_s.theta, chem_s.p_bar, b.log, T_base=chem_s.T_base)
+            pts[s] = _certified_depth(b, chem_s, A_s.theta, f"FD {name} {s:+d}h", A_s.tp_eval)
+            continue
+        th_s = b.theta.copy()
+        th_s[i_par] += s * h
+        pts[s] = _certified_depth(b, chem_r, th_s, f"FD {name} {s:+d}h")
+    return pts
+
+
+def _stencil_anchor(b: Baseline, name: str, frq: int | None) -> np.ndarray:
+    """Return a one-sided stencil's anchor, the BASELINE point.
+
+    At the run's own cadence it is the already-gated baseline spectrum; an escalated row needs the anchor at ITS
+    cadence, which costs one solve.
+    """
+    if frq == b.run_frq:
+        return np.asarray(b.column.depth(b.y_sol, b.th0))
+    return _certified_depth(
+        b,
+        b.build_chem(tag=f"baseline [photo cadence {frq}]", photo_frq=frq),
+        b.theta,
+        f"FD {name} anchor [photo cadence {frq}]",
+    )
+
+
 def _fd_row(b: Baseline, name: str, rows: Rows, j: int, t1: float) -> None:
     """One certified FD row: every stencil point at one photolysis cadence, escalated as a whole on a stall."""
-    cp, theta, theta_names, chem, run_frq, pic = b.cp, b.theta, b.theta_names, b.chem, b.run_frq, b.pic
-    tp_eval, log = b.setup.tp_eval, b.log
-    build_chem, y_sol, th0, abundance_overrides = b.build_chem, b.y_sol, b.th0, b.abundance_overrides
-    depth_from_y = b.column.depth
-    offs, h = (1, -1, 2, -2), FD_STEPS[name]
+    offs: tuple[int, ...] = (1, -1, 2, -2)
+    h = FD_STEPS[name]
     if name in FD_COMP_PARAMS:
         # composition direction: central, or one-sided away from the
         # C/O bound or the PICASO metallicity cap -- see fd_stencil
         offs, h = fd_stencil(
             name,
-            cp["met_x_solar" if name == "lnZ" else "co_ratio"],
-            CO_MAX_PHOTO_OFF if pic else CO_MAX[cp["network"]],
-            PICASO_MET_RANGE[1] if pic else None,
+            b.cp["met_x_solar" if name == "lnZ" else "co_ratio"],
+            CO_MAX_PHOTO_OFF if b.pic else CO_MAX[b.cp["network"]],
+            PICASO_MET_RANGE[1] if b.pic else None,
         )
-    method = "fd-central" if len(offs) == 4 else "fd-onesided"
-
-    def _row_points(frq: int | None) -> dict:
-        """Every stencil point of this row at ONE photolysis cadence.
-
-        Never mix: the cadence moves a converged spectrum by 0.01-2.4 ppm on the presets, and in a row that
-        offset divides by h and lands in the derivative.
-        """
-        pts = {}
-        if name in FD_COMP_PARAMS:
-            # equilibrium re-seed + certified cold solve per point
-            for s in offs:
-                f = float(np.exp(s * h))
-                if name == "lnZ":  # all metals together; C/O preserved
-                    ab = abundance_overrides(cp["met_x_solar"] * f, cp["co_ratio"])
-                else:  # dlnCO: carbon at fixed oxygen
-                    ab = abundance_overrides(cp["met_x_solar"], cp["co_ratio"] * f)
-                chem_s = build_chem(ab, tag=f"FD {name} {s:+d}h", photo_frq=frq)
-                if pic and tp_eval is None:  # a climate point has its own T
-                    check_t_window(None, theta, chem_s.p_bar, log, T_base=chem_s.T_base)
-                pts[s] = _certified_depth(b, chem_s, theta, f"FD {name} {s:+d}h")
-            return pts
-        # Kzz changes only the live transport coefficient. T-P also
-        # changes the radius/gravity anchor and hence the Guillot
-        # mapping, so rebuild it just as a full perturbed run does.
-        i_par = theta_names.index(name)
-        chem_r = (
-            chem if frq == run_frq or i_par >= 3 else build_chem(tag=f"{name} row [photo cadence {frq}]", photo_frq=frq)
-        )
-        for s in offs:
-            if i_par >= 3:
-                cp_s = dict(cp, **{name: cp[name] + s * h})
-                A_s = b.assemble(cp_s, log)
-                chem_s = A_s.build_chem(tag=f"FD {name} {s:+d}h", photo_frq=frq)
-                check_t_window(A_s.tp_eval, A_s.theta, chem_s.p_bar, log, T_base=chem_s.T_base)
-                pts[s] = _certified_depth(b, chem_s, A_s.theta, f"FD {name} {s:+d}h", A_s.tp_eval)
-                continue
-            th_s = theta.copy()
-            th_s[i_par] += s * h
-            pts[s] = _certified_depth(b, chem_r, th_s, f"FD {name} {s:+d}h")
-        return pts
-
-    def _row_anchor(frq: int | None) -> np.ndarray | None:
-        """Return the one-sided anchor, the BASELINE point.
-
-        At the run's own cadence it is the already-gated baseline spectrum; an escalated row needs the anchor at
-        ITS cadence, which costs one solve.
-        """
-        if method == "fd-central":
-            return None
-        if frq == run_frq:
-            return np.asarray(depth_from_y(y_sol, th0))
-        return _certified_depth(
-            b,
-            build_chem(tag=f"baseline [photo cadence {frq}]", photo_frq=frq),
-            theta,
-            f"FD {name} anchor [photo cadence {frq}]",
-        )
-
+    central = len(offs) == 4
+    method = "fd-central" if central else "fd-onesided"
     try:
-        dvals, f0 = _row_points(run_frq), _row_anchor(run_frq)
+        dvals = _stencil_points(b, name, offs, h, b.run_frq)
+        f0 = None if central else _stencil_anchor(b, name, b.run_frq)
     except NotCertified as exc:
         # ONLY a stalled column escalates. Every other RuntimeError
         # this try spans -- a backend fault, the element gate, the
         # emission gate, the T-window check -- propagates: re-solving
         # it at cadence 1 pays a second full stencil and reports a
         # photolysis escalation for a failure that is not one.
-        if run_frq == 1:  # already at the finest cadence
+        if b.run_frq == 1:  # already at the finest cadence
             raise
-        log(f"[fwd] FD {name} row: {exc}")
-        log(
+        b.log(f"[fwd] FD {name} row: {exc}")
+        b.log(
             f"[fwd] FD {name} row: re-solving EVERY point of this row "
             "with photolysis refreshed every accepted step (a row may "
             "not mix cadences)"
         )
-        dvals, f0 = _row_points(1), _row_anchor(1)
+        dvals = _stencil_points(b, name, offs, h, 1)
+        f0 = None if central else _stencil_anchor(b, name, 1)
         b.escalated.append(f"FD {name} row")
     row, err = fd_row(name, *fd_estimates(offs, dvals, f0, h), h)
     rows.add(j, row, h, err, method)
-    log(
+    b.log(
         f"[fwd] FD Jacobian d(depth)/d({name}) [{method}] in "
         f"{time.time() - t1:.0f} s (h-vs-2h consistency {err:.3f} < "
         f"{FD_CONSISTENCY_TOL})"
@@ -442,25 +417,25 @@ def _lnr0_row(b: Baseline, rows: Rows, j: int) -> None:
     import jax
     import jax.numpy as jnp
 
-    cp, y_sol, th0, emis = b.cp, b.y_sol, b.th0, b.setup.emis
-    depth_from_y = b.column.depth
     t1 = time.time()
     b.advance()
-    if cp["jac_method"] == "ad":
-        _, dd = jax.jvp(lambda r: depth_from_y(y_sol, th0, lnR0=r), (jnp.asarray(0.0),), (jnp.asarray(1.0),))
+    if b.cp["jac_method"] == "ad":
+        _, dd = jax.jvp(lambda r: b.column.depth(b.y_sol, b.th0, lnR0=r), (jnp.asarray(0.0),), (jnp.asarray(1.0),))
         rows.add(j, np.asarray(dd), 0.0, np.nan, "ad-jvp")
     else:
         # lnR0 re-hangs the column at fixed planet mass (radius and gravity move together), so in emission the flux and
         # the bottom optical depth move too: each point is gated like a deck row's.
         def _d_r(step: float) -> np.ndarray:
-            if emis is None:
-                return np.asarray(depth_from_y(y_sol, th0, lnR0=step))
-            dep, tau = depth_from_y(y_sol, th0, lnR0=step, return_tau=True)
+            if b.setup.emis is None:
+                return np.asarray(b.column.depth(b.y_sol, b.th0, lnR0=step))
+            dep, tau = b.column.depth(b.y_sol, b.th0, lnR0=step, return_tau=True)
             return np.asarray(_gate_emis(b, dep, tau, f"FD lnR0 {step:+g}"))
 
         row = (_d_r(FD_LNR0_STEP) - _d_r(-FD_LNR0_STEP)) / (2.0 * FD_LNR0_STEP)
         rows.add(j, row, FD_LNR0_STEP, np.nan, "fd-rt")  # single central difference: truncation unmeasured
-    b.log(f"[fwd] {cp['jac_method'].upper()} Jacobian d(depth)/d(lnR0) [RT-only nuisance] in {time.time() - t1:.0f} s")
+    b.log(
+        f"[fwd] {b.cp['jac_method'].upper()} Jacobian d(depth)/d(lnR0) [RT-only nuisance] in {time.time() - t1:.0f} s"
+    )
 
 
 def build_jacobian(b: Baseline, depth_size: int) -> Rows:

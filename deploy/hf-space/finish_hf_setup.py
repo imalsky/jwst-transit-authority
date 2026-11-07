@@ -32,7 +32,8 @@ STAGE_MARKERS = [
     STAGE / "jwst-data" / "pandeia_data-2026.7-jwst" / "VERSION_DATA",
     STAGE / "jwst-data" / "pandeia_psfs-2026.7-jwst" / "VERSION_PSF",
     STAGE / "retrieval-data" / "cm24_wasp39b",
-    STAGE / "retrieval-data" / "opacity_cache",
+    STAGE / "retrieval-data" / "opacity_cache" / "H2-H2_2011.cia",
+    STAGE / "retrieval-data" / "opacity_cache" / "H2-He_2011.cia",
 ]
 
 

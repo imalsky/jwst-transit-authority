@@ -106,7 +106,7 @@ def test_estimator_mc_mean_and_variance():
     # cell-average vs point-sample difference, < 1e-6 on this smooth model)
     se = np.sqrt(var_bin / n_mc)
     assert np.all(np.abs(mc_mean - d_true_bin) < 5.0 * se + 1e-6)
-    assert np.allclose(mc_var, var_bin, rtol=0.15)
+    assert np.allclose(mc_var, var_bin, rtol=0.15, atol=0.0)
 
 
 def test_noise_and_model_share_bins_and_estimator():

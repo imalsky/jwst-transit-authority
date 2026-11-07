@@ -23,7 +23,7 @@ directory (git-ignored); it is skipped with a notice if those are absent (a
 fresh clone has the committed figures already, and re-running run_parity.py
 regenerates the raw JSON).
 
-Layout under validation/parity/: scripts/ (this + the harness), outputs/ (the
+Layout under validation/parity/: scripts/ (the plot and report scripts and the harness), outputs/ (the
 committed parity_summary.json + REPORT.md and the git-ignored raw run JSON),
 figs/ (the committed PNG figures this writes).
 
@@ -38,8 +38,8 @@ Render the short REPORT.md from parity_summary.json (after run_parity.py).
 
 The report is a SUMMARY, kept deliberately short: gate banner, provenance,
 and the measured envelope against each declared threshold. The durable
-narrative -- method, scope, and known intended differences -- lives in the
-harness docstrings (`run_parity.py` in this directory), and the full
+narrative -- method, scope, and known intended differences -- lives in section
+`run_parity` of this file, and the full
 per-mode rows, noise-model attribution, and raw PandExo warnings stay in
 `parity_summary.json`, which is committed beside it. Do not grow this
 renderer into a per-mode table dump; the JSON is already the record.
@@ -92,13 +92,13 @@ SAME Pandeia backend and compares them mode by mode:
 
   * this package's worker (src/jwst_tool/pandeia_worker.py) + its box-transit
     depth-error propagation (noise.pixel_depth_variance), and
-  * current PandExo (master; pandexo_worker.py in this directory).
+  * current PandExo (master; validation/parity/scripts/pandexo_worker.py).
 
 Running both sides on one engine/refdata generation isolates ESTIMATOR
 differences (timing policy, in/out propagation, saturation handling) from
 engine-calibration differences -- the point of the parity gate.
 This is a FIXED-CONFIGURATION estimator gate: the submitted instrument
-configuration is pinned identically on both sides (PANDEXO_MODES below
+configuration is pinned identically on both sides (run_parity.PANDEXO_MODES
 overrides PandExo's templates to this tool's registry), so it deliberately
 does NOT test PandExo's own configuration-selection policy. The harness
 points the worker at the backend under test explicitly via environment
@@ -183,7 +183,7 @@ Runs the tool's real `run_model` for the default WASP-39 b case in BOTH
 science modes -- a fresh solve each (on an empty model cache, so this
 validates the chain, not the cache) -- and asserts the R = 100 binned
 spectrum against a committed reference fixture generated under the same
-`forward._VERSION`. The engine side of the physics is separately pinned
+`model_defs._VERSION`. The engine side of the physics is separately pinned
 against petitRADTRANS in vulcan-forward's own e2e suite; THIS test pins that
 the whole tool still reproduces its own verified state end to end.
 
@@ -197,7 +197,7 @@ Tolerances: cross-run JAX nondeterminism on this chain measures under a ppm
 mode at 5% of the reference's own structure -- an absolute ppm would be far
 too loose on emission, where a quarter of the bins sit below 100 ppm while
 transmission runs near 20000. On a breach: if the change is INTENDED,
-regenerate the fixture (its meta["regenerate"]) and bump forward._VERSION.
+regenerate the fixture (its meta["regenerate"]) and bump model_defs._VERSION.
 
 ## `test_picaso_published`
 

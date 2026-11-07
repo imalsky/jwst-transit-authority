@@ -6,7 +6,7 @@ the projected score.
 import numpy as np
 import pytest
 
-from jwst_tool import certify, detect, instruments as ins, noise as noise_mod
+from jwst_tool import binning, certify, detect, instruments as ins, noise as noise_mod
 
 
 def test_offset_profiled_out():
@@ -95,7 +95,14 @@ def _lsf_mode_inputs(depth_baseline):
     )
     wl_model = np.linspace(0.95, 2.05, 4000)
     jac_row = 1e-3 * np.exp(-0.5 * ((wl_model - 1.5) / 0.002) ** 2)
-    model = dict(wl_um=wl_model, depth=depth_baseline(wl_model), mols=["H2O"], jac=[jac_row], jac_names=["p0"])
+    model = dict(
+        science_mode="transmission",
+        wl_um=wl_model,
+        depth=depth_baseline(wl_model),
+        mols=["H2O"],
+        jac=[jac_row],
+        jac_names=["p0"],
+    )
     return mode_result, model
 
 
@@ -126,18 +133,17 @@ def test_duplicate_pixel_wavelengths_are_masked_not_raised():
     """
     mr, model = _lsf_mode_inputs(lambda wl: np.zeros(wl.size))
     mr["wl"][10] = mr["wl"][9]
-    r = detect.evaluate_mode(
-        "nirspec_prism",
-        mr,
-        model,
-        target_mol=None,
-        R_bin=200.0,
-        t_in_s=3600.0,
-        t_out_s=3600.0,
-        n_transits=1,
-        floor_spec=None,
-    )
+    kw = dict(target_mol=None, R_bin=200.0, t_in_s=3600.0, t_out_s=3600.0, n_transits=1, floor_spec=None)
+    r = detect.evaluate_mode("nirspec_prism", mr, model, **kw)
     assert np.all(np.isfinite(r["sigma"]))
+    # the same measurement as a grid that never had the degenerate pixels
+    keep = np.logical_not(binning.degenerate_wl_mask(np.asarray(mr["wl"])))
+    assert not keep.all()
+    per_pixel = ("wl", "flux", "noise_1int", "r_native", "n_full_sat", "n_part_sat")
+    removed = {**mr, **{k: np.asarray(mr[k])[keep].tolist() for k in per_pixel}}
+    without = detect.evaluate_mode("nirspec_prism", removed, model, **kw)
+    np.testing.assert_array_equal(r["sigma"], without["sigma"])
+    np.testing.assert_array_equal(r["depth"], without["depth"])
 
 
 def test_lsf_width_is_applied_as_r_over_width(monkeypatch):
@@ -166,7 +172,14 @@ def test_lsf_width_is_applied_as_r_over_width(monkeypatch):
         )
         wl_model = np.linspace(4.9, 7.1, 4000)
         jac = 1e-3 * np.exp(-0.5 * ((wl_model - 6.0) / 0.005) ** 2)
-        model = dict(wl_um=wl_model, depth=np.zeros(wl_model.size), mols=["H2O"], jac=[jac], jac_names=["p0"])
+        model = dict(
+            science_mode="transmission",
+            wl_um=wl_model,
+            depth=np.zeros(wl_model.size),
+            mols=["H2O"],
+            jac=[jac],
+            jac_names=["p0"],
+        )
         return mode_result, model
 
     kw = dict(target_mol=None, R_bin=200.0, t_in_s=3600.0, t_out_s=3600.0, n_transits=1, floor_spec=None)
@@ -342,7 +355,7 @@ def _miri_descending_inputs(descending):
     # point of any blur and would make this test vacuous)
     wl_model = np.linspace(4.9, 12.1, 8000)
     depth = 0.02 + 1e-3 * np.sin(60.0 * np.log(wl_model))
-    model = dict(wl_um=wl_model, depth=depth, mols=["H2O"])
+    model = dict(science_mode="transmission", wl_um=wl_model, depth=depth, mols=["H2O"])
     return mode_result, model
 
 
@@ -402,7 +415,9 @@ def test_worker_warnings_and_the_ramp_advisory_reach_the_evaluated_result():
         },
     )
     wl_model = np.linspace(m["wl_min"] * 0.95, m["wl_max"] * 1.05, 2000)
-    model = dict(wl_um=wl_model, depth=np.full(wl_model.size, 0.01), mols=["X"], wo_mols=[])
+    model = dict(
+        science_mode="transmission", wl_um=wl_model, depth=np.full(wl_model.size, 0.01), mols=["X"], wo_mols=[]
+    )
     kw = dict(target_mol=None, R_bin=100.0, t_in_s=3600.0, t_out_s=3600.0, n_transits=1, floor_spec=None)
     w = detect.evaluate_mode("miri_lrs", mr, model, **kw)["warnings"]
     assert w["full_saturated"] == "96 pixels saturated"  # forwarded
@@ -534,7 +549,9 @@ def test_nircam_data_excess_rides_the_warnings_channel():
         warnings={},
     )
     wl_model = np.linspace(m["wl_min"] * 0.95, m["wl_max"] * 1.05, 2000)
-    model = dict(wl_um=wl_model, depth=np.full(wl_model.size, 0.01), mols=["X"], wo_mols=[])
+    model = dict(
+        science_mode="transmission", wl_um=wl_model, depth=np.full(wl_model.size, 0.01), mols=["X"], wo_mols=[]
+    )
     kw = dict(target_mol=None, R_bin=100.0, n_transits=1, floor_spec=None)
     # the parity artifact's visit: 27.8 GB, above the 15 GB recommendation
     w = detect.evaluate_mode("nircam_f444w", mr, model, t_in_s=2.8 * 3600.0, t_out_s=2.819 * 3600.0, **kw)["warnings"]
@@ -542,3 +559,21 @@ def test_nircam_data_excess_rides_the_warnings_channel():
     # a one-hour visit stays under PandExo's 5 GB flag: silent
     w = detect.evaluate_mode("nircam_f444w", mr, model, t_in_s=1800.0, t_out_s=1800.0, **kw)["warnings"]
     assert "data_excess" not in w
+
+
+def test_a_model_without_its_science_mode_is_refused_rather_than_read_as_transmission():
+    """Read as transmission, an emission model would skip its band certificate."""
+    mode_result, model = _lsf_mode_inputs(lambda wl: 0.02 * np.ones_like(wl))
+    del model["science_mode"]
+    with pytest.raises(KeyError, match="science_mode"):
+        detect.evaluate_mode(
+            "nirspec_prism",
+            mode_result,
+            model,
+            None,
+            50.0,
+            t_in_s=3600.0,
+            t_out_s=3600.0,
+            n_transits=1,
+            floor_spec=None,
+        )

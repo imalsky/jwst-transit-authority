@@ -31,18 +31,27 @@ def test_results_render_and_below_target_is_warning_not_error(monkeypatch):
     """
     from streamlit.delta_generator import DeltaGenerator
 
-    from jwst_tool import plotting, summary_figure as _sf
+    from jwst_tool import gui_common, plotting, summary_figure as _sf
 
-    downloads = {}
+    downloads, png_downloads, shown = {}, [], []
     original = DeltaGenerator.download_button
 
     def capture(self, label, data, *args, **kwargs):
         if isinstance(data, bytes) and "CSV" in label:
             downloads[label] = data.decode()
+        if isinstance(data, bytes) and "PNG" in label:
+            png_downloads.append(data)
         return original(self, label, data, *args, **kwargs)
 
     monkeypatch.setattr(DeltaGenerator, "download_button", capture)
     monkeypatch.setattr(st, "download_button", capture.__get__(st.download_button.__self__))
+    real_image = st.image
+
+    def capture_image(png, **kwargs):
+        shown.append((png, kwargs.get("width")))
+        return real_image(png, **kwargs)
+
+    monkeypatch.setattr(st, "image", capture_image)
 
     # The app closes every Figure it builds, so record what each builder
     # DREW and whether it landed on a panel.
@@ -99,11 +108,49 @@ def test_results_render_and_below_target_is_warning_not_error(monkeypatch):
         assert "No opacity table for C6H6" in text, (name, text)
         assert "FD dlnCO row" in text, (name, text)
         assert not on_a_panel, f"the {name} caveat footnote covers a panel"
+    # a figure displays the very PNG its download carries, at the fixed width: st.pyplot hardcodes 200 dpi, and
+    # "stretch" makes the figure wiggle on resize
+    assert len(shown) == 2, len(shown)
+    for png, width in shown:
+        assert png in png_downloads
+        assert width == gui_common._FIG_DISPLAY_PX
+    # the static table blanks repeated mode names, which a header-click re-sort would misattribute; the CSV is the
+    # unblanked rows
+    table = next(t.value for t in at.table if "parameter" in getattr(t.value, "columns", []))
+    assert "" in {str(m).strip() for m in table["mode"]}
+    rows = [ln for ln in downloads["Constraint forecast (CSV)"].splitlines() if ln and not ln.startswith("#")]
+    head = rows[0].split(",")
+    assert all(r.split(",")[head.index("mode")].strip() for r in rows[1:])
     # the fixture puts H2 (not an RT molecule) first at 0.85; by NAME, not
     # by position
     got = {n: float(np.asarray(y)[0]) for n, y in columns}
     assert set(got) == {"H2O", "CO2", "CO", "CH4", "SO2"}, got
     assert (got["CO"], got["H2O"], got["CO2"]) == pytest.approx((1e-3, 1e-4, 1e-6))
+
+
+def test_the_rate_caveat_reaches_the_page_and_every_export(monkeypatch):
+    """A cache hit never solves and never logs, so the stored counts are the only way a run can say so."""
+    from streamlit.delta_generator import DeltaGenerator
+
+    csvs = {}
+    original = DeltaGenerator.download_button
+
+    def capture(self, label, data, *args, **kwargs):
+        if isinstance(data, bytes) and "CSV" in label:
+            csvs[label] = data.decode()
+        return original(self, label, data, *args, **kwargs)
+
+    monkeypatch.setattr(DeltaGenerator, "download_button", capture)
+    monkeypatch.setattr(st, "download_button", capture.__get__(st.download_button.__self__))
+    out, out_meta = synthetic_out(with_jac=True)
+    out["model"]["rate_rows_outside"] = np.array([3])
+    out["model"]["rate_rows_total"] = np.array([10])
+    at = run_with_result(out, out_meta)
+    assert not at.exception, at.exception
+    assert any("3 of 10 reaction rates" in w.value for w in at.warning)
+    assert csvs
+    for label, payload in csvs.items():
+        assert "3 of 10 reaction rates" in payload, label
 
 
 def test_emission_results_use_eclipse_terms():
@@ -334,8 +381,7 @@ def test_changing_any_run_input_marks_the_result_stale(widget, value, field, mon
 
     def _spy(*, canon, goal, observation, **kw):
         # the app hands the same two blocks to the shareable config and to the
-        # staleness guard, minus the display-only observation fields (app.py
-        # _DISPLAY_ONLY), which the guard never compares
+        # staleness guard, minus the display-only observation fields, which the guard never compares
         seen["run_sig"] = dict(
             goal=goal, observation={k: v for k, v in observation.items() if k not in ("show_noise", "seed", "combos")}
         )

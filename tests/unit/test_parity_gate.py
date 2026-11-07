@@ -28,6 +28,7 @@ PDX = (*W39, "provenance_pandexo")
 R0 = W39 + ("modes", 0)  # first mode row, the usual target
 BH_R0 = ("stars", "bright_hot", "modes", 0)
 _DEL = object()
+_NAN = float("nan")
 
 
 @pytest.fixture(scope="module")
@@ -303,6 +304,20 @@ _CASES = [
     (lambda p: _saturate_bh(p, drop_verdict=True), "no PandExo full-well verdict"),
     (lambda p: _saturate_bh(p, sat_frac_ours=0.5), "must come from the measurement"),
     (lambda p: _saturate_bh(p, ngroup_pandexo=2), "floors the two tools saturate at"),
+    # NaN compares false against every threshold: non-finite evidence fails its gate, never slips past it
+    (lambda p: _mut(p, (*R0, "flux_ratio", "median"), _NAN), "no extracted-flux ratio"),
+    (lambda p: _mut(p, (*R0, "saturation_mask", "matched_frac"), _NAN), "saturation grids matched fraction"),
+    (lambda p: _mut(p, (*R0, "saturation_mask", "partial_equal_frac"), _NAN), "partial-saturation mask"),
+    (lambda p: _mut(p, (*R0, "saturation_mask", "full_equal_frac"), _NAN), "full-saturation mask"),
+    (lambda p: _mut(p, (*R0, "sat_frac_ours"), _NAN), "no measured sat_frac"),
+    (lambda p: _mut(p, (*R0, "npix_matched"), _NAN), "pixel-match counts"),
+    (lambda p: _mut(p, (*R0, "npix_pandexo"), _NAN), "pixel-match counts"),
+    (lambda p: _mut(p, (*R0, "ngroup_ours"), _NAN), "missing ngroup"),
+    (lambda p: _mut(p, (*R0, "ngroup_pandexo"), _NAN), "missing ngroup"),
+    (lambda p: _mut(p, (*R0, "t_int_ours_s"), _NAN), "timing gate cannot run"),
+    (lambda p: _mut(p, (*R0, "sigma_ratio_matched", "median"), _NAN), "anomaly gate cannot run"),
+    (lambda p: _saturate_bh(p, sat_frac_ours=_NAN), "must come from the measurement"),
+    (lambda p: _saturate_bh(p, ngroup_ours=_NAN), "non-finite ngroup"),
 ]
 
 
@@ -363,8 +378,7 @@ def test_committed_artifact_is_a_current_scrubbed_pass(gate):
     import json
 
     path = SCRIPTS.parents[1] / "parity" / "outputs" / "parity_summary.json"
-    if not path.is_file():  # pragma: no cover
-        pytest.skip("committed parity_summary.json not present")
+    assert path.is_file(), "the committed parity certificate is missing: a release needs it"
     text = path.read_text()
     summary = json.loads(text)
 
@@ -403,4 +417,71 @@ def test_plots_revalidate_instead_of_trusting_the_passed_bit(plots, gate, passin
     with pytest.raises(RuntimeError, match="failed its gate"):
         plots.require_passing_summary(broken)
 
-    assert plots.require_passing_summary(s) == gate["REQUIRED_PANDEIA_RELEASE"]
+    plots.require_passing_summary(s)
+
+
+def _raw_run(gate):
+    """A summary star and the two raw files of the run it describes."""
+    rel = gate["REQUIRED_PANDEIA_RELEASE"]
+    ours_prov = {"worker_version": 12, "engine_version": rel, "refdata_version": rel, "psf_version": rel}
+    pdx_prov = {
+        "pandeia_engine_version": rel,
+        "refdata_version": rel,
+        "psf_version": rel,
+        "pandexo_version": rel,
+        "pandexo_commit": gate["REQUIRED_PANDEXO_COMMIT"],
+    }
+    wl = [1.0, 2.0, 3.0, 4.0]
+    ours = {"m": {"wl": wl[::-1], "flux": [8.0, 6.0, 4.0, 2.0]}, "__provenance__": dict(ours_prov)}
+    pdx = {
+        "m": {"wave": wl, "error": [0.1] * 4, "e_rate_out": [1.0, 2.0, 3.0, 4.0], "qy_on_grid": [2.0] * 4},
+        "__provenance__": dict(pdx_prov),
+    }
+    star = {
+        "provenance_ours": ours_prov,
+        "provenance_pandexo": pdx_prov,
+        "modes": [{"key": "m", "flux_ratio": {"n": 4, "median": 1.0, "max_abs_dev": 0.0}}],
+    }
+    return star, ours, pdx
+
+
+def test_raw_outputs_must_belong_to_the_gated_run(gate):
+    """The guard refuses a raw file that cannot be attributed to the summary, by identity and by measurement."""
+    problems_of = gate["raw_run_problems"]
+    star, ours, pdx = _raw_run(gate)
+    assert problems_of(star, ours, pdx, "m") == []
+
+    def broken(edit):
+        s, o, p = copy.deepcopy((star, ours, pdx))
+        edit(s, o, p)
+        return " | ".join(problems_of(s, o, p, "m"))
+
+    # a wrong PandExo engine or commit, once skipped because the field names differ by side
+    assert "pandeia_engine_version" in broken(lambda s, o, p: p["__provenance__"].update(pandeia_engine_version="1"))
+    assert "pandexo_commit" in broken(lambda s, o, p: p["__provenance__"].update(pandexo_commit="0" * 40))
+    assert "worker_version" in broken(lambda s, o, p: o["__provenance__"].update(worker_version=5))
+    # a missing identity field is a refusal, not a skipped comparison
+    assert "psf_version is absent" in broken(lambda s, o, p: o["__provenance__"].pop("psf_version"))
+    assert "pandexo_commit is absent" in broken(lambda s, o, p: s["provenance_pandexo"].pop("pandexo_commit"))
+    # the right names on the wrong numbers
+    assert "flux ratio median" in broken(lambda s, o, p: o["m"].update(flux=[9.0, 7.0, 5.0, 3.0]))
+    assert "matched pixels" in broken(lambda s, o, p: p["m"].update(error=[0.1, 0.1, 0.1, float("nan")]))
+    # the expected mode names over empty payloads
+    assert "lacks 'wl'" in broken(lambda s, o, p: o.update(m={}))
+    assert "missing mode(s) ['n']" in broken(lambda s, o, p: s["modes"].append({"key": "n"}))
+
+
+def test_the_committed_raw_files_reproduce_the_committed_summary(gate):
+    """Where this checkout holds the raw files, they are the gated run's. They are git-ignored, so may be absent."""
+    import json
+
+    outputs = SCRIPTS.parents[1] / "parity" / "outputs"
+    if not (outputs / "w39_like_ours.json").is_file():
+        pytest.skip("raw parity outputs are git-ignored and not in this checkout")
+    summary = json.loads((outputs / "parity_summary.json").read_text())
+    for name in gate["STARS"]:
+        ours = json.loads((outputs / f"{name}_ours.json").read_text())
+        pdx = json.loads((outputs / f"{name}_pandexo.json").read_text())
+        ok = [r["key"] for r in summary["stars"][name]["modes"] if r["status"] == "OK"]
+        for mode in ok:
+            assert gate["raw_run_problems"](summary["stars"][name], ours, pdx, mode) == [], (name, mode)

@@ -3,7 +3,8 @@
 JWST Transit Authority is a planning tool for JWST observations. The goal is to understand, for a given
 science goal, the relative information that different JWST modes give you. The tool combines:
 
-- VULCAN-JAX photochemical kinetics;
+- VULCAN-JAX photochemical kinetics (default), or PICASO climate and equilibrium
+  chemistry as a second engine;
 - ExoJAX transmission or thermal-emission spectra; and
 - STScI Pandeia instrument signal and noise.
 
@@ -68,6 +69,8 @@ jwst-tool data
 
 `jwst-tool fetch` prints instructions for STScI files that need a manual
 download. Pandeia engine, reference-data, and PSF releases must match.
+`jwst-tool fetch --picaso` also downloads PICASO's reference data and climate
+tables (about 2.4 GB) and prints how to build its separate environment.
 
 ## Run
 
@@ -75,7 +78,7 @@ download. Pandeia engine, reference-data, and PSF releases must match.
 jwst-tool
 ```
 
-This starts the Streamlit app. The first model can take several minutes.
+This starts the Streamlit app. The first model can take tens of minutes.
 Later runs can use cached chemistry, spectra, and noise calculations.
 
 The tool includes fixed configurations for selected NIRSpec, NIRISS SOSS,
@@ -106,7 +109,7 @@ the current JWST ETC and APT.
   the OPACITY. The chemistry is not re-solved, so the T-P profile, mean
   molecular weight, gravity, continuum, and every other species are unchanged.
 - Eclipse depths use the wavelength-dependent tau = 2/3 photospheric radius
-  (Fortney et al. 2019). Emission is absorption-only: no scattering.
+  ([Fortney et al. 2019](https://doi.org/10.3847/2041-8213/ab2a10)). Emission is absorption-only: no scattering.
 - The depth uncertainty counts all of T14 as full depth (a box transit). For a
   typical hot Jupiter that is optimistic by roughly 5% in sigma, partly offset
   by the conservatism of the symmetric in/out variance term.
@@ -147,6 +150,8 @@ used in the analysis:
 - PandExo comparison: [Batalha et al. (2017)](https://doi.org/10.1088/1538-3873/aa65b0)
 - ExoMolOP tables: [Chubb et al. (2021)](https://doi.org/10.1051/0004-6361/202038350)
 - ExoGibbs equilibrium initialization: [ExoGibbs](https://github.com/HajimeKawahara/exogibbs)
+- PICASO climate: [Mukherjee et al. (2023)](https://doi.org/10.3847/1538-4357/ac9f48)
+- photochem: [Wogan et al. (2025)](https://doi.org/10.3847/PSJ/ae0e1c)
 
 Record the software commits, Pandeia release, reference-data release, opacity
 data, reaction network, and model settings with any published result.

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import streamlit as st
 
@@ -11,6 +11,7 @@ from jwst_tool import datacheck, instruments as ins, model_defs, planets, proven
 
 if TYPE_CHECKING:
     from jwst_tool.gui_inputs import Atmosphere, Target
+    from jwst_tool.tool_types import Slot
 
 
 # Data availability -- detected live. The GUI reports only what BLOCKS a run;
@@ -107,19 +108,82 @@ def data_status() -> tuple[list, dict, str | None]:
     return missing_req, ksrc, ksrc_err
 
 
-# size-limit-ok: one literal citation table
-def _source_rows(
-    ksrc: dict,
-    base_set: Any,
-    extra_set: list,
-    extra_on: list,
-    rayleigh_on: bool,
-    cloud_on: Any,
-    photo_on: bool,
-    sflux_sel: str,
-    engine: str,
-    tp_mode: str,
-) -> Any:
+def _row(component: str, used: bool, data_set: str, doi: str, page: str) -> dict:
+    return {
+        "component": component,
+        "used in this setup": used,
+        "data set": data_set,
+        "source DOI": doi,
+        "source page": page,
+    }
+
+
+_STSCI_CATALOGS = (
+    "https://www.stsci.edu/hst/instrumentation/reference-data-for-calibration-and-tools/astronomical-catalogs/"
+)
+# Read by every run.
+_ALWAYS_READ = (
+    (
+        "Stellar spectrum grid",
+        "PHOENIX (Allard et al., synphot CDBS)",
+        "10.1098/rsta.2011.0269",
+        _STSCI_CATALOGS + "phoenix-models-available-in-synphot",
+    ),
+    (
+        "Ks bandpass (flux normalization)",
+        "2MASS",
+        "10.1086/498708",
+        "https://irsa.ipac.caltech.edu/Missions/2mass.html",
+    ),
+    (
+        "Flux standard (Vega)",
+        "CALSPEC alpha_lyr_stis_011",
+        "10.1086/677655",
+        _STSCI_CATALOGS + "calspec",
+    ),
+    (
+        "JWST exposure & noise model; instrument bands, dispersion and native resolving power",
+        f"Pandeia {ins.BACKEND_RELEASE} (incl. dispersion files)",
+        "10.1117/12.2231768",
+        "https://jwst-docs.stsci.edu/jwst-exposure-time-calculator-overview/jwst-etc-pandeia-engine-tutorial",
+    ),
+)
+
+
+def _picaso_rows(picaso: bool, climate: bool) -> list[dict]:
+    return [
+        _row(
+            "Climate model (radiative-convective equilibrium)",
+            climate,
+            "PICASO 4.1 climate (Mukherjee et al. 2023)",
+            "10.3847/1538-4357/ac9f48",
+            "https://github.com/natashabatalha/picaso/tree/v4.1",
+        ),
+        _row(
+            "Equilibrium chemistry (PICASO engine)",
+            picaso,
+            "photochem 0.9.2 (Wogan et al. 2025)",
+            "10.3847/PSJ/ae0e1c",
+            "https://github.com/Nicholaswogan/photochem",
+        ),
+        _row(
+            "Climate opacities (correlated-k)",
+            climate,
+            "PICASO resort-rebin tables, 661 bins",
+            "10.5281/zenodo.18644980",
+            "https://zenodo.org/records/18644980",
+        ),
+        _row(
+            "Solar abundances (PICASO engine)",
+            picaso,
+            "Lodders (2020) Table 8, present-day solar system",
+            "10.1093/acrefore/9780190647926.013.145",
+            "https://doi.org/10.1093/acrefore/9780190647926.013.145",
+        ),
+    ]
+
+
+def _source_rows(ksrc: dict, t: Target, a: Atmosphere) -> list[dict]:
     """One row per data source the tool reads.
 
     The offered k-tables (base first), the continuum terms, and the non-opacity data files. Every row carries a
@@ -127,134 +191,43 @@ def _source_rows(
     grid is one line in the Opacity panel rather than a column repeating 25 identical values.
     """
     rows = []
-    for m in list(base_set) + list(extra_set):
+    for m in list(a.base_set) + list(a.extra_set):
         r = ksrc.get(m, {})
         iso = "natural abundance" if r.get("natural_abundance") else r.get("iso", "")
         rows.append(
-            {
-                "component": m,
-                "used in this setup": m in base_set or m in extra_on,
-                "data set": f"ExoMol {r['dataset']} ({iso})" if r else "",
-                "source DOI": r.get("doi") or "",
-                "source page": r.get("url", ""),
-            }
+            _row(
+                m,
+                m in a.base_set or m in a.extra_mols,
+                f"ExoMol {r['dataset']} ({iso})" if r else "",
+                r.get("doi") or "",
+                r.get("url", ""),
+            )
         )
+    rayleigh_on = a.clouds.use_rayleigh and t.science_mode == "transmission"
     rows += [
-        {
-            "component": "H2-H2 CIA",
-            "used in this setup": True,
-            "data set": _CIA_SRC[0],
-            "source DOI": _CIA_SRC[1],
-            "source page": _CIA_SRC[2],
-        },
-        {
-            "component": "H2-He CIA",
-            "used in this setup": True,
-            "data set": _CIA_SRC[0],
-            "source DOI": _CIA_SRC[1],
-            "source page": _CIA_SRC[2],
-        },
-        {
-            "component": "Rayleigh scattering (H2, He)",
-            "used in this setup": bool(rayleigh_on),
-            "data set": "ExoJAX H2/He polarizabilities",
-            "source DOI": _EXOJAX_SRC[1],
-            "source page": _EXOJAX_SRC[2],
-        },
+        _row("H2-H2 CIA", True, *_CIA_SRC),
+        _row("H2-He CIA", True, *_CIA_SRC),
+        _row("Rayleigh scattering (H2, He)", bool(rayleigh_on), "ExoJAX H2/He polarizabilities", *_EXOJAX_SRC[1:]),
         # Cites the code that runs: exojax.atm.simple_clouds.powerlaw_clouds.
         # Its alpha is -gamma of the petitRADTRANS definition
         # (Molliere et al. 2019, 10.1051/0004-6361/201935470).
-        {
-            "component": "Power-law cloud/haze",
-            "used in this setup": bool(cloud_on),
-            "data set": "ExoJAX powerlaw_clouds (kappa_cloud, alpha)",
-            "source DOI": _EXOJAX_SRC[1],
-            "source page": _EXOJAX_SRC[2],
-        },
+        _row(
+            "Power-law cloud/haze",
+            bool(a.clouds.cloud_on),
+            "ExoJAX powerlaw_clouds (kappa_cloud, alpha)",
+            *_EXOJAX_SRC[1:],
+        ),
     ]
+    picaso = a.chem_provider == "picaso"
     for fname, label in planets.SFLUX_CHOICES.items():
-        ds, doi, url = planets.SFLUX_SOURCES[fname]
-        rows.append(
-            {
-                "component": f"Stellar UV — {label}",
-                "used in this setup": (bool(photo_on) and engine == "vulcan" and fname == sflux_sel),
-                "data set": ds,
-                "source DOI": doi,
-                "source page": url,
-            }
-        )
-    climate = engine == "picaso" and tp_mode == "picaso_climate"
-    rows += [
-        {
-            "component": "Climate model (radiative-convective equilibrium)",
-            "used in this setup": climate,
-            "data set": "PICASO 4.1 climate (Mukherjee et al. 2023)",
-            "source DOI": "10.3847/1538-4357/ac9f48",
-            "source page": "https://github.com/natashabatalha/picaso/tree/v4.1",
-        },
-        {
-            "component": "Equilibrium chemistry (PICASO engine)",
-            "used in this setup": engine == "picaso",
-            "data set": "photochem 0.9.2 (Wogan et al. 2025)",
-            "source DOI": "10.3847/PSJ/ae0e1c",
-            "source page": "https://github.com/Nicholaswogan/photochem",
-        },
-        {
-            "component": "Climate opacities (correlated-k)",
-            "used in this setup": climate,
-            "data set": "PICASO resort-rebin tables, 661 bins",
-            "source DOI": "10.5281/zenodo.18644980",
-            "source page": "https://zenodo.org/records/18644980",
-        },
-        {
-            "component": "Solar abundances (PICASO engine)",
-            "used in this setup": engine == "picaso",
-            "data set": "Lodders (2020) Table 8, present-day solar system",
-            "source DOI": "10.1093/acrefore/9780190647926.013.145",
-            "source page": "https://doi.org/10.1093/acrefore/9780190647926.013.145",
-        },
-    ]
-    rows += [
-        {
-            "component": "Stellar spectrum grid",
-            "used in this setup": True,
-            "data set": "PHOENIX (Allard et al., synphot CDBS)",
-            "source DOI": "10.1098/rsta.2011.0269",
-            "source page": "https://www.stsci.edu/hst/instrumentation/"
-            "reference-data-for-calibration-and-tools/"
-            "astronomical-catalogs/"
-            "phoenix-models-available-in-synphot",
-        },
-        {
-            "component": "Ks bandpass (flux normalization)",
-            "used in this setup": True,
-            "data set": "2MASS",
-            "source DOI": "10.1086/498708",
-            "source page": "https://irsa.ipac.caltech.edu/Missions/2mass.html",
-        },
-        {
-            "component": "Flux standard (Vega)",
-            "used in this setup": True,
-            "data set": "CALSPEC alpha_lyr_stis_011",
-            "source DOI": "10.1086/677655",
-            "source page": "https://www.stsci.edu/hst/instrumentation/"
-            "reference-data-for-calibration-and-tools/"
-            "astronomical-catalogs/calspec",
-        },
-        {
-            "component": "JWST exposure & noise model; instrument bands, dispersion and native resolving power",
-            "used in this setup": True,
-            "data set": f"Pandeia {ins.BACKEND_RELEASE} (incl. dispersion files)",
-            "source DOI": "10.1117/12.2231768",
-            "source page": "https://jwst-docs.stsci.edu/"
-            "jwst-exposure-time-calculator-overview/"
-            "jwst-etc-pandeia-engine-tutorial",
-        },
-    ]
+        used = bool(a.photo.use_photo) and a.chem_provider == "vulcan" and fname == t.sflux
+        rows.append(_row(f"Stellar UV — {label}", used, *planets.SFLUX_SOURCES[fname]))
+    rows += _picaso_rows(picaso, picaso and a.profile.tp_mode == "picaso_climate")
+    rows += [_row(component, True, *rest) for component, *rest in _ALWAYS_READ]
     return rows
 
 
-def render_source_table(opacity_slot: Any, ksrc: dict, ksrc_err: str | None, t: Target, a: Atmosphere) -> None:
+def render_source_table(opacity_slot: Slot, ksrc: dict, ksrc_err: str | None, t: Target, a: Atmosphere) -> None:
     """Fill the data panel's citation table for the current settings."""
     with opacity_slot:
         st.markdown("#### Data sources")
@@ -262,18 +235,7 @@ def render_source_table(opacity_slot: Any, ksrc: dict, ksrc_err: str | None, t: 
             st.warning(KSRC_WARN + ksrc_err)
         else:
             st.dataframe(
-                _source_rows(
-                    ksrc,
-                    a.base_set,
-                    a.extra_set,
-                    a.extra_mols,
-                    a.use_rayleigh and t.science_mode == "transmission",
-                    a.cloud_on,
-                    a.use_photo,
-                    t.sflux,
-                    a.chem_provider,
-                    a.tp_mode,
-                ),
+                _source_rows(ksrc, t, a),
                 column_config={
                     "used in this setup": st.column_config.CheckboxColumn("used in this setup"),
                     # No display_text: it is a regex over the URL, and these

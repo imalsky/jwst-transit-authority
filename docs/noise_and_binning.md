@@ -118,7 +118,12 @@ Guardrails:
 * Where final bins approach the NATIVE resolving power (MIRI LRS, PRISM,
   blue SOSS), detect.evaluate_mode blurs depth, removed-molecule depth, and
   every Jacobian row to R_native via smooth_to_native_r BEFORE the cell
-  average; on high-R modes the blur is a no-op. The Gaussian kernel
+  average; on high-R modes the blur is a no-op. It cell-averages model and
+  stellar flux onto a uniform ln-lambda grid finer than the narrowest kernel,
+  convolves with the wavelength-dependent Gaussian, and interpolates back
+  inside the band; the working band extends 5 sigma past the edges so a
+  one-sided kernel never touches the returned region. The flux weight is only
+  pixel-resolved, so sub-pixel stellar lines are a limit. The Gaussian kernel
   approximates the full Pandeia response matrix; its width is
   R_refdata / instruments.LSF_WIDTH, the per-mode width fitted to an impulse
   through the engine (validation/parity/scripts/run_parity.py --impulse,
@@ -174,7 +179,7 @@ result.json: one entry per mode key, plus a reserved "__provenance__" entry
                                     divided by the engine's per-mode
                                     saturation_fullwell. That divisor is not
                                     the physical full well and differs by
-                                    mode (instruments.py docstring), and for
+                                    mode (section `instruments`), and for
                                     a multi-order mode (SOSS) it is the
                                     brightest order, not the extracted one.
      "sat_ngroups": ..,             min over the detector of pandeia's

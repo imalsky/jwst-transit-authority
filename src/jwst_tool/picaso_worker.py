@@ -10,12 +10,9 @@ import os
 import sys
 import threading
 import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 # picaso's own temperature-perturbation ladder for a layer that does not
 # converge at T (picaso/photochem.py EquilibriumChemistry.equilibrate_atmosphere)
@@ -24,9 +21,9 @@ _HEARTBEAT_S = 30.0
 
 
 def _bootstrap(job: dict) -> tuple:
-    """Pin picaso's data roots BEFORE its import.
+    """Pin picaso's data roots before its import, and check the stack versions.
 
-    (justdoit checks both paths at import, and os.path.exists(None) raises), check the stack versions.
+    justdoit checks both paths at import, and os.path.exists(None) raises.
     """
     os.environ["picaso_refdata"] = job["refdata"]
     os.environ["PYSYN_CDBS"] = job["cdbs"]
@@ -35,11 +32,12 @@ def _bootstrap(job: dict) -> tuple:
     got = {k: version(k) for k in job["versions"]}
     if got != job["versions"]:
         raise RuntimeError(f"PICASO environment mismatch: installed {got}, required {job['versions']}")
+    vega = os.path.join(job["cdbs"], "calspec", "alpha_lyr_stis_011.fits")
+    if not os.path.isfile(vega):  # stsynphot would otherwise fetch it from the network mid-run
+        raise RuntimeError(f"the offline Vega spectrum is missing: {vega}. `jwst-tool fetch` downloads it.")
     import synphot
 
-    vega = os.path.join(job["cdbs"], "calspec", "alpha_lyr_stis_011.fits")
-    if os.path.isfile(vega):  # offline Vega: stsynphot never phones home
-        synphot.conf.vega_file = vega
+    synphot.conf.vega_file = vega
     import stsynphot
 
     stsynphot.conf.rootdir = job["cdbs"]
@@ -52,7 +50,7 @@ def _bootstrap(job: dict) -> tuple:
 def _solver_class() -> Any:
     from picaso.photochem import EquilibriumChemistry
 
-    class ToolEquilibrium(EquilibriumChemistry):
+    class ToolEquilibrium(EquilibriumChemistry):  # type: ignore[misc]  # picaso is untyped, in its own environment
         """picaso's on-the-fly solver at an explicit atom composition.
 
         ``method='sonora-approx'`` keeps picaso's species list and lets
@@ -60,7 +58,7 @@ def _solver_class() -> Any:
         ``inputs['climate']['chemeq_solver']``.
         """
 
-        def __init__(self, thermofile: str | Path, xh: dict, metallicity: float) -> None:
+        def __init__(self, thermofile: str, xh: dict, metallicity: float) -> None:
             super().__init__(thermofile, method="sonora-approx")
             names = list(self.atoms_names)
             if (set(names) - {"H"}) != set(xh):
@@ -122,10 +120,7 @@ def _heartbeat(label: str) -> Any:
 
 
 def _quenched_column(jdi: Any, u: Any, solver: Any, req: dict, p: Any, T: np.ndarray, opa: Any) -> tuple:
-    """Picaso's own quench recipe.
-
-    (Zahnle & Marley 2014 timescales at one constant Kzz, kinetic CO2) on the evaluation column.
-    """
+    """Picaso's own quench recipe on the evaluation column: Zahnle & Marley 2014 timescales at one Kzz, kinetic CO2."""
     from picaso.climate import calculate_atm, update_quench_levels
 
     b = jdi.inputs(calculation="planet", climate=True)
@@ -256,7 +251,7 @@ def _run(jdi: Any, u: Any, job: dict, req: dict) -> dict:
     )
 
 
-def main(job_path: str | Path, out_path: str | Path) -> None:
+def main(job_path: str, out_path: str) -> None:
     """Run a job file and write its result file."""
     with open(job_path) as fh:
         job = json.load(fh)

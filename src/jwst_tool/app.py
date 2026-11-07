@@ -30,7 +30,7 @@ TOOL_DIR = Path(__file__).resolve().parent
 # Data colors/markers stay the fixed per-mode palette in
 # instruments.MODE_COLOR / MODE_MARKER (no series relies on color alone).
 plt.style.use(str(TOOL_DIR / "science.mplstyle"))
-plt.rcParams.update(summary_figure._STYLE_OVERRIDES)
+plt.rcParams.update(summary_figure._STYLE_OVERRIDES)  # type: ignore[arg-type]  # the stub lists only literal keys
 
 
 # initial_sidebar_state: the default ("auto") starts the sidebar COLLAPSED
@@ -59,7 +59,7 @@ st.markdown(
 # sidebar state that is read further down, so the slot is reserved now and
 # filled once those values exist. The staleness warning is filled the same
 # way: it belongs with the Run button it tells the user to press, not
-# hundreds of lines down beside the results it qualifies.
+# further down beside the results it qualifies.
 _run_slot = st.container()
 _stale_slot = st.container()
 # The shortfall verdict is the ANSWER -- which mode, what significance,
@@ -91,7 +91,7 @@ with st.expander("Data" + (f" ({len(_missing_req)} required item(s) missing)" if
 # Sidebar controls
 # Reset = bump a nonce that namespaces EVERY widget key: session_state.clear()
 # alone does not reset keyless widgets.
-_NONCE = st.session_state.setdefault("reset_nonce", 0)
+st.session_state.setdefault("reset_nonce", 0)
 
 gui_sidebar.apply_pending_archive_fill()
 gui_sidebar.keep_hidden_engine_state()
@@ -114,7 +114,8 @@ if not view.results:
     st.stop()
 mode_notes = gui_results.render_mode_notes(view, excluded)
 combos = gui_forecast.combo_records(view)
-gui_results.render_verdict(view, _verdict_slot)
+if not gui_results.render_verdict(view, _verdict_slot):
+    st.stop()
 # Mock-observation layer: one seeded N(0, sigma_i) draw per
 # bin ON TOP of the binned noiseless model, generated AFTER the forward
 # model and the noise model (posteriors.mock_realization). The LIVE widget

@@ -79,19 +79,74 @@ def test_engine_module_exposes_what_the_tool_calls(mod_name):
     )
 
 
+def _engine_tree(mod_name):
+    return ast.parse(Path(importlib.import_module(mod_name).__file__).read_text())
+
+
+def _returned_fields(tree, function):
+    """Keyword names of the record ``function`` returns, or of the helper it returns the result of."""
+    defs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    fields, todo, seen = set(), [function], set()
+    while todo:
+        name = todo.pop()
+        if name in seen or name not in defs:
+            continue
+        seen.add(name)
+        for node in ast.walk(defs[name]):
+            if isinstance(node, ast.Return) and isinstance(node.value, ast.Call):
+                fields |= {k.arg for k in node.value.keywords if k.arg}
+                if isinstance(node.value.func, ast.Name):
+                    todo.append(node.value.func.id)
+    assert seen, f"{function} is not in the engine module: the scan is not looking where it thinks it is"
+    return fields
+
+
+def _profile_reads(tree):
+    """Keys read off a ``profile``: subscripts, .get, membership, and the literal keys of a loop that subscripts it."""
+    reads = set()
+
+    def on_profile(node):
+        return isinstance(node, ast.Name) and node.id == "profile"
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Subscript) and on_profile(node.value) and isinstance(node.slice, ast.Constant):
+            reads.add(node.slice.value)
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and on_profile(node.func.value)
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+        ):
+            reads.add(node.args[0].value)
+        if (
+            isinstance(node, ast.Compare)
+            and isinstance(node.left, ast.Constant)
+            and any(on_profile(c) for c in node.comparators)
+        ):
+            reads.add(node.left.value)
+        if isinstance(node, ast.For) and any(
+            isinstance(n, ast.Subscript) and on_profile(n.value) and isinstance(n.slice, ast.Name)
+            for n in ast.walk(node)
+        ):
+            reads |= {c.value for c in ast.walk(node.iter) if isinstance(c, ast.Constant) and isinstance(c.value, str)}
+    return reads
+
+
 def test_the_rt_namespaces_carry_what_the_tool_reads_off_them():
     """build_rt_model / build_emis_model return SimpleNamespaces, so a missing
     attribute is an AttributeError deep inside a multi-minute run rather than
-    an import error. Checked against the engine's source, because building the
+    an import error. Checked against the record the engine's source returns, because building the
     real namespaces needs the k-tables and an opacity build.
     """
     _skip_without_engine()
     if importlib.util.find_spec("exojax") is None:  # pragma: no cover
         pytest.skip("RT stack (exojax) not installed")
     importlib.import_module("vulcan_forward.vulcan_chem")
-    src = Path(importlib.import_module("vulcan_forward.exojax_rt").__file__).read_text()
-    for name in RT_NAMESPACE + EMIS_NAMESPACE:
-        assert f"{name}=" in src, f"the engine's RT namespace has no {name!r}; the tool reads it"
+    tree = _engine_tree("vulcan_forward.exojax_rt")
+    assert set(RT_NAMESPACE) <= _returned_fields(tree, "build_rt_model")
+    assert set(EMIS_NAMESPACE) <= _returned_fields(tree, "build_emis_model")
 
 
 def test_the_profile_keys_the_tool_sets_are_ones_the_engine_reads():
@@ -105,20 +160,22 @@ def test_the_profile_keys_the_tool_sets_are_ones_the_engine_reads():
     if importlib.util.find_spec("exojax") is None:  # pragma: no cover
         pytest.skip("RT stack (exojax) not installed")
     importlib.import_module("vulcan_forward.vulcan_chem")
-    src = Path(importlib.import_module("vulcan_forward.exojax_rt").__file__).read_text()
+    reads = _profile_reads(_engine_tree("vulcan_forward.exojax_rt"))
     for key in ("art_ptop_bar", "art_pbtm_bar", "rt_integration", "p_ref_bar", "opacity_mode", "art_nlayer"):
-        assert f'"{key}"' in src, f"the engine never reads profile[{key!r}], so the tool sets a knob that does nothing"
+        assert key in reads, f"the engine never reads profile[{key!r}], so the tool sets a knob that does nothing"
     # the chemistry side: the solver knobs the tool drives, plus the two
     # margins the AD dlnCO gate reads (their absence must fail here, not at
     # run time)
-    chem_src = Path(importlib.import_module("vulcan_forward.vulcan_chem").__file__).read_text()
+    chem_tree = _engine_tree("vulcan_forward.vulcan_chem")
+    reads = _profile_reads(chem_tree)
     for key in ("yconv_cri", "yconv_min", "dt_max", "co_mode"):
-        assert f'"{key}"' in chem_src, f"the engine never reads profile[{key!r}]"
+        assert key in reads, f"the engine never reads profile[{key!r}]"
+    returned = _returned_fields(chem_tree, "build_chem_model")
     for attr in ("co_bz_bound", "co_bz_margin"):
-        assert f"{attr}=" in chem_src, f"the engine no longer returns {attr!r}; certify.check_ad_co_margin reads it"
+        assert attr in returned, f"the engine no longer returns {attr!r}; certify.check_ad_co_margin reads it"
 
 
-def test_the_engine_calls_in_forward_py_pass_arguments_it_accepts():
+def test_the_tools_engine_calls_pass_arguments_it_accepts():
     """AST-scan the tool's own calls into the engine and check each against the
     live signature. This catches a sibling that drops a parameter while the
     caller keeps passing it.

@@ -1,7 +1,7 @@
-"""Radiative transfer vs petitRADTRANS 3.4.0 on the engine's committed fixtures.
+"""Radiative transfer vs petitRADTRANS 3.4.0 on the engine's committed fixtures, and a grey absorber vs a closed form.
 
-(isothermal H2O transmission, the WASP-39 b eight-species column, H2O emission) and a grey absorber vs the Lecavelier
-des Etangs et al. (2008) closed form. Inputs: validation/data/prt_ref/prt_ref_*.npz (vulcan-forward's own test
+The fixtures are isothermal H2O transmission, the WASP-39 b eight-species column and H2O emission; the closed form is
+Lecavelier des Etangs et al. (2008). Inputs: validation/data/prt_ref/prt_ref_*.npz (vulcan-forward's own test
 fixtures), the W39b column validation/data/ers2023/photochem/ wasp39b_10Xsolar_evening_vulcan.txt, and the installed
 ExoMolOP k-tables.
 
@@ -146,10 +146,7 @@ def emission_h2o():
 
 
 def grey_absorber():
-    """Isothermal 1000 K, mu 2.33, g 1e3, R = 100 R_J.
-
-    (constant g), anchor 1e-2 bar, no H2/He (no CIA), Rayleigh off, the one H2O table loaded with VMR 0.
-    """
+    """Isothermal 1000 K, mu 2.33, constant g 1e3, R = 100 R_J, anchor 1e-2 bar, no H2/He, Rayleigh off, H2O at VMR 0."""
     T, mu, g, rp, p_ref = 1000.0, 2.33, 1.0e3, 100 * RJ, 1.0e-2
     n = 120
     trt = exojax_rt.build_rt_model(

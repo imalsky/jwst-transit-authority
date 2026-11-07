@@ -19,11 +19,7 @@ from jwst_tool import (
 )
 from jwst_tool.gui_atmosphere import atmosphere_step
 from jwst_tool.gui_common import K
-from jwst_tool.gui_inputs import Atmosphere, Goal, Observation, Solver, Target
-
-# EVERY download button is rendered with on_click=ignore. Without it a click
-# queues a rerun, and a queued rerun CANCELS the script run in flight -- on the
-# Run pass that is the forward model itself.
+from jwst_tool.gui_inputs import Atmosphere, Goal, NoiseModel, Observation, Solver, Target
 
 # default target precision per parameter (DISPLAY units: dex / K / absolute C/O)
 _TARGET_DEFAULT = {
@@ -218,7 +214,7 @@ def _target_step() -> Target:  # size-limit-ok: a linear widget layout, read top
             ["transmission", "emission"],
             horizontal=True,
             key=K("scimode"),
-            format_func={"transmission": "Transmission", "emission": "Emission"}.get,
+            format_func={"transmission": "Transmission", "emission": "Emission"}.__getitem__,
         )
     # Event word for observation-facing labels: only the vocabulary changes
     # with the observation type, not the calculation.
@@ -365,7 +361,7 @@ def _free_parameter_section(
                     ["fd"],
                     key=K("jacm_picaso"),
                     disabled=True,
-                    format_func={"fd": "Finite differences"}.get,
+                    format_func={"fd": "Finite differences"}.__getitem__,
                 )
             else:
                 # Seeded once (share_config writes it on Populate), so no
@@ -379,7 +375,7 @@ def _free_parameter_section(
                     format_func={
                         "fd": "Finite differences",
                         "ad": "Automatic differentiation (forward-mode, default)",
-                    }.get,
+                    }.__getitem__,
                 )
                 # Loud slow-path flag: FD re-solves the chemistry per row.
                 if fisher_params and jac_method == "fd":
@@ -393,14 +389,12 @@ def _free_parameter_section(
 
 def _goal_step(atm: Atmosphere) -> Goal:
     """Draw step 3, only the controls the selected goal needs, and return its settings."""
-    pic, tp_mode, cloud_on, cloud_mode = atm.pic, atm.tp_mode, atm.cloud_on, atm.cloud_mode
-    network, extra_mols = atm.network, atm.extra_mols
     target_mol = None
     st.divider()
     st.markdown("### 3 · Science goal")
-    avail_free = share_config.free_parameters(pic, tp_mode, cloud_on, cloud_mode)
-    goal_sfx = share_config.goal_suffix(pic, tp_mode, cloud_on, cloud_mode)
-    mol_options = model_defs.active_molecules({"network": network, "extra_mols": extra_mols})
+    avail_free = share_config.free_parameters(atm.pic, atm.profile.tp_mode, atm.clouds.cloud_on, atm.clouds.cloud_mode)
+    goal_sfx = share_config.goal_suffix(atm.pic, atm.profile.tp_mode, atm.clouds.cloud_on, atm.clouds.cloud_mode)
+    mol_options = model_defs.active_molecules({"network": atm.photo.network, "extra_mols": atm.extra_mols})
 
     goal_param, target_prec, marginalize = None, None, True
     do_fisher = False
@@ -417,22 +411,21 @@ def _goal_step(atm: Atmosphere) -> Goal:
             ["detect", "constrain"],
             horizontal=True,
             key=K("goal"),
-            format_func={"detect": "Detect a molecule", "constrain": "Constrain a parameter"}.get,
+            format_func={"detect": "Detect a molecule", "constrain": "Constrain a parameter"}.__getitem__,
         )
         if goal == "detect":
             # SO2 is the flagship W39b science under VULCAN (photochemical);
             # in equilibrium (PICASO) it is negligible, so H2O is the default
-            mol_default = "SO2" if "SO2" in mol_options and not pic else "H2O"
+            mol_default = "SO2" if "SO2" in mol_options and not atm.pic else "H2O"
             target_mol = st.selectbox(
                 "Molecule to detect",
                 mol_options,
                 index=mol_options.index(mol_default),
-                key=K(share_config.target_mol_key(pic, network, extra_mols)),
+                key=K(share_config.target_mol_key(atm.pic, atm.photo.network, atm.extra_mols)),
             )
             target_sig = st.number_input("Target significance (σ)", *_W["tsig"], step=0.5, key=K("tsig"))
             do_fisher = st.checkbox("Also calculate parameter constraints", key=K("dofish"))
         else:
-            target_mol = None
             goal_param = st.selectbox(
                 "Parameter to constrain",
                 avail_free,
@@ -458,7 +451,7 @@ def _goal_step(atm: Atmosphere) -> Goal:
                 )
             target_sig = st.number_input("Report Fisher half-width at Nσ", *_W["tsig"], step=0.5, key=K("tsig"))
     fisher_params, jac_method = _free_parameter_section(
-        goal, do_fisher, goal_param, marginalize, avail_free, goal_sfx, pic
+        goal, do_fisher, goal_param, marginalize, avail_free, goal_sfx, atm.pic
     )
     return Goal(
         goal=goal,
@@ -473,7 +466,7 @@ def _goal_step(atm: Atmosphere) -> Goal:
     )
 
 
-def _noise_section(mode_keys: list, noise_scale: float) -> tuple:
+def _noise_section(mode_keys: list, noise_scale: float) -> NoiseModel:
     """Draw the noise floor and multipliers; return (floor type, table, per-mode floors, choice made, multipliers)."""
     with st.expander("Noise model (Pandeia)"):
         st.markdown("**Minimum noise floor** (PandExo convention)")
@@ -488,7 +481,7 @@ def _noise_section(mode_keys: list, noise_scale: float) -> tuple:
             horizontal=True,
             index=0,
             key=K("floormode"),
-            format_func={"constant": "Constant (ppm)", "none": "No floor", "file": "Wavelength table"}.get,
+            format_func={"constant": "Constant (ppm)", "none": "No floor", "file": "Wavelength table"}.__getitem__,
         )
         floor_table = None
         floors = dict.fromkeys(mode_keys)
@@ -546,7 +539,7 @@ def _noise_section(mode_keys: list, noise_scale: float) -> tuple:
             for k in mode_keys
         }
         infl = {k: float(noise_scale) * float(infl_mode[k]) for k in mode_keys}
-    return floor_mode, floor_table, floors, floor_choice_made, infl_mode, infl
+    return NoiseModel(floor_mode, floor_table, floors, floor_choice_made, infl_mode, infl)
 
 
 def _observation_step(target: Target) -> Observation:
@@ -583,7 +576,7 @@ def _observation_step(target: Target) -> Observation:
         noise_scale = st.number_input("Global noise multiplier", *_W["noisescale"], 0.05, key=K("noisescale"))
 
     with st.expander("Timing, saturation & binning (Pandeia)"):
-        # follow-until-overridden (same pattern as _k("tirr")): while the
+        # follow-until-overridden (same pattern as the T_irr widget): while the
         # baseline still equals the T14 it last tracked, it keeps following the
         # event duration (PandExo convention baseline = T14); the first manual
         # edit breaks the link, so a former planet's duration never sticks.
@@ -608,7 +601,6 @@ def _observation_step(target: Target) -> Observation:
             "Saturation limit (fraction of Pandeia's saturation level)", *_W["sat"], 0.05, key=K("sat")
         )
         r_bin = st.number_input("Analysis resolving power, R", *_W["rbin"], 25, key=K("rbin"))
-    floor_mode, floor_table, floors, floor_choice_made, infl_mode, infl = _noise_section(mode_keys, noise_scale)
     return Observation(
         mode_keys=mode_keys,
         n_transits=n_transits,
@@ -618,18 +610,13 @@ def _observation_step(target: Target) -> Observation:
         t_base=t_base,
         sat_limit=sat_limit,
         r_bin=r_bin,
-        floor_mode=floor_mode,
-        floor_table=floor_table,
-        floors=floors,
-        floor_choice_made=floor_choice_made,
-        infl_mode=infl_mode,
-        infl=infl,
+        noise=_noise_section(mode_keys, noise_scale),
     )
 
 
 def _more_settings_step(target: Target, atm: Atmosphere) -> Solver:
     """Draw the solver grid and advanced RT settings and return them."""
-    science_mode, pic = target.science_mode, atm.pic
+    science_mode = target.science_mode
     # More settings: solver grid and advanced RT, behind one entry point.
     # No help tooltips in here: the labels stand on their own and the
     # reference material lives in README.md.
@@ -644,7 +631,7 @@ def _more_settings_step(target: Target, atm: Atmosphere) -> Solver:
         )
         # the VULCAN-JAX kinetics solver's gates; not sent under PICASO
         yconv_cri, yconv_min = model_defs.YCONV_DEFAULT, model_defs.YCONV_MIN_DEFAULT
-        if not pic:
+        if not atm.pic:
             yconv_cri = st.number_input(
                 "Solver convergence tolerance", *_W["yconv"], 1.0e-4, format="%.1e", key=K("yconv")
             )
@@ -670,7 +657,7 @@ def _more_settings_step(target: Target, atm: Atmosphere) -> Solver:
             ["simpson", "trapezoid"],
             key=K("rtint"),
             disabled=(science_mode == "emission"),
-            format_func={"simpson": "Simpson (ExoJAX default)", "trapezoid": "Trapezoid"}.get,
+            format_func={"simpson": "Simpson (ExoJAX default)", "trapezoid": "Trapezoid"}.__getitem__,
         )
     return Solver(
         nz=nz,

@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from jwst_tool import model_cache
+from jwst_tool import instruments as ins
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("JWST_TOOL_RUN_SLOW") != "1",
@@ -53,7 +53,7 @@ def test_picaso_engine_reproduces_the_published_prism_picaso_spectrum(tmp_path, 
     if any(i.status != datacheck.OK for i in datacheck.check_picaso()):
         pytest.skip("PICASO environment or data not installed")
     monkeypatch.setattr(picaso_engine, "PICASO_CACHE", tmp_path)
-    monkeypatch.setattr(model_cache, "MODEL_CACHE", tmp_path / "model_cache")
+    monkeypatch.setattr(ins, "MODEL_CACHE", tmp_path / "model_cache")
 
     z = np.load(DATA)
     meta = json.loads(bytes(np.asarray(z["meta"])))

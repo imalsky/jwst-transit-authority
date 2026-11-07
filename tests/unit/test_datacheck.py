@@ -159,18 +159,24 @@ def _picaso_tree(root, version="4.1"):
 @pytest.mark.parametrize(
     ("case", "expect", "fragment"),
     [
-        ("complete", ("ok", "ok", "ok"), "version 4.1"),
-        ("absent", ("missing",) * 3, "absent: all"),
-        ("wrong_version", ("ok", "missing", "ok"), "version 4.0, need 4.1"),
-        ("missing_file", ("ok", "missing", "ok"), "ck_cx_cont_opacities_661.db"),
-        ("short_table", ("ok", "ok", "missing"), "not 61806680 bytes: H3+_1460"),
-        ("empty_config", ("ok", "missing", "ok"), "version unreadable, need 4.1"),
-        ("list_config", ("ok", "missing", "ok"), "version unreadable, need 4.1"),
+        ("complete", ("ok", "ok", "ok", "ok"), "version 4.1"),
+        ("absent", ("missing",) * 4, "absent: all"),
+        ("wrong_version", ("ok", "missing", "ok", "ok"), "version 4.0, need 4.1"),
+        ("missing_file", ("ok", "missing", "ok", "ok"), "ck_cx_cont_opacities_661.db"),
+        ("short_table", ("ok", "ok", "missing", "ok"), "not 61806680 bytes: H3+_1460"),
+        ("empty_config", ("ok", "missing", "ok", "ok"), "version unreadable, need 4.1"),
+        ("list_config", ("ok", "missing", "ok", "ok"), "version unreadable, need 4.1"),
+        ("no_vega", ("ok", "ok", "ok", "missing"), "alpha_lyr_stis_011.fits"),
     ],
 )
 def test_check_picaso_states(tmp_path, monkeypatch, case, expect, fragment):
     from jwst_tool import instruments as ins, provenance
 
+    monkeypatch.setattr(ins, "PYSYN_CDBS", str(tmp_path / "cdbs"))
+    if case not in ("absent", "no_vega"):
+        vega = tmp_path / "cdbs" / "calspec" / "alpha_lyr_stis_011.fits"
+        vega.parent.mkdir(parents=True)
+        vega.touch()
     py = tmp_path / "python"
     if case == "absent":
         ref = tmp_path / "nowhere"
@@ -185,7 +191,7 @@ def test_check_picaso_states(tmp_path, monkeypatch, case, expect, fragment):
         with open(ref / datacheck.PICASO_CK_DIR / "H3+_1460.hdf5", "r+b") as w:
             w.truncate(1000)
     items = datacheck.check_picaso(python=py, refdata=ref)
-    assert [it.key for it in items] == ["picaso:python", "picaso:refdata", "picaso:ck"]
+    assert [it.key for it in items] == ["picaso:python", "picaso:refdata", "picaso:ck", "picaso:vega"]
     assert tuple(it.status for it in items) == expect
     assert any(fragment in it.detail for it in items)
     assert not any(it.required for it in items)
@@ -225,10 +231,10 @@ def test_full_report_structure_formatting_and_cache_stats():
     rep = datacheck.full_report(base_mols=forward.MOLECULES, extra_mols=forward.EXTRA_MOLECULES)
     items = datacheck.all_items(rep)
     assert items, "report must not be empty"
-    assert all(it.status in (datacheck.OK, datacheck.MISSING, datacheck.AUTO) for it in items)
+    assert all(it.status in (datacheck.OK, datacheck.MISSING) for it in items)
     # consistency of the two summary helpers
     assert datacheck.required_ok(rep) == (not datacheck.missing_required(rep))
-    # every missing/auto item must tell the user how to fix it
+    # every missing item must tell the user how to fix it
     assert all(it.remedy for it in items if it.status != datacheck.OK)
     # the rendered report mentions every item
     text = datacheck.format_report(rep)
@@ -317,6 +323,10 @@ def test_missing_ktables_are_required_items_with_the_fetch_command(tmp_path, mon
     prov = items["ktable:provenance"]
     assert prov.status == datacheck.MISSING and not prov.required
     assert "fetch_exomolop" in prov.remedy
+    # both CIA tables block a run: the RT refuses to build without either
+    for key in ("cia:H2-H2", "cia:H2-He"):
+        assert items[key].status == datacheck.MISSING and items[key].required
+        assert "jwst-tool fetch" in items[key].remedy
 
 
 @needs_engine
@@ -327,3 +337,55 @@ def test_exomolop_path_matches_the_engine_convention():
     from vulcan_forward import exomolop
 
     assert datacheck.exomolop_table_path("H2O") == exomolop.table_path("H2O")
+
+
+def test_engine_config_reports_a_data_root_problem_and_lets_a_defect_through(monkeypatch):
+    """The report explains an unset data root; a bug in the engine's import is not a missing-data row."""
+
+    def raising(exc):
+        def import_module(_name):
+            raise exc
+
+        return import_module
+
+    monkeypatch.setattr(datacheck.importlib, "import_module", raising(RuntimeError("no data root")))
+    assert isinstance(datacheck._engine_config(), RuntimeError)
+    monkeypatch.setattr(datacheck.importlib, "import_module", raising(TypeError("a bug")))
+    with pytest.raises(TypeError, match="a bug"):
+        datacheck._engine_config()
+
+
+def _pandexo_dist(root, direct_url):
+    """An installed-looking pandexo.engine distribution, with or without a direct_url.json."""
+    info = root / "pandexo.engine-1.0.dist-info"
+    info.mkdir(parents=True)
+    (info / "METADATA").write_text("Metadata-Version: 2.1\nName: pandexo.engine\nVersion: 1.0\n")
+    if direct_url is not None:
+        (info / "direct_url.json").write_text(direct_url)
+
+
+@pytest.mark.parametrize(
+    ("direct_url", "engine_seen", "commit"),
+    [
+        ('{"vcs_info": {"commit_id": "abc"}}', True, "abc"),
+        (None, True, None),  # a plain install records no commit: unknown, and true
+        ("{not json", False, None),  # a commit that cannot be read must not pass as "no commit"
+    ],
+    ids=["commit", "no-direct-url", "damaged"],
+)
+def test_the_pandeia_identity_records_the_pandexo_commit_or_says_unavailable(
+    tmp_path, monkeypatch, caplog, direct_url, engine_seen, commit
+):
+    import sys
+
+    from jwst_tool import instruments as ins, provenance
+
+    _pandexo_dist(tmp_path, direct_url)
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+    monkeypatch.setattr(ins, "PANDEIA_PYTHON", sys.executable)
+    rec = provenance._pandeia_python_identity()
+    assert rec["pandexo_commit"] == commit
+    assert (rec["pandexo"] == "1.0") is engine_seen
+    if not engine_seen:
+        assert rec["engine"] == "unavailable"
+        assert "provenance probe" in caplog.text

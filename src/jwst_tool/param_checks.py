@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from jwst_tool.jacobian import fd_stencil
 from jwst_tool.model_defs import (
     ART_PBTM_FRACTION,
     CHEM_PARAM_NAMES,
@@ -27,6 +26,7 @@ from jwst_tool.model_defs import (
     TP_PARAM_NAMES,
     active_molecules,
     co_bounds,
+    fd_stencil,
 )
 
 
@@ -136,7 +136,6 @@ def check_composition(cp: dict, network: str, pic: bool) -> tuple:
 def check_fisher_rows(cp: dict, tp_mode: str, pic: bool, network: str, co_bound: tuple, met_rng: tuple) -> None:
     """Refuse rows the run's modes do not offer, and FD stencils that would solve outside a validated range."""
     climate = tp_mode == "picaso_climate"
-    _co_lo, _co_hi = co_bound
     # Fisher menu: chemistry + the tp_mode's T-P parameters (none in file mode)
     # + the cloud-deck parameters when the deck is in the model.
     if climate and "Tint" in cp["fisher_params"]:

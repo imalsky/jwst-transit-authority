@@ -1,6 +1,6 @@
 """Power-law cloud deck vs petitRADTRANS 3.4.0 on identical inputs.
 
-(clear and cloudy WASP-39 b, same ExoMolOP H2O table), binned to R = 300. The pRT side is cached in
+Clear and cloudy WASP-39 b with the same ExoMolOP H2O table, binned to R = 300. The pRT side is cached in
 validation/data/prt_spectrum_w39b.npz, which carries the shared configuration and the deck parameters in its `meta`
 field.
 

@@ -23,7 +23,7 @@ pytestmark = pytest.mark.skipif(
 if any(i.status != datacheck.OK for i in datacheck.check_picaso()) or importlib.util.find_spec("vulcan3") is None:
     pytest.skip("PICASO environment, its data or the VULCAN stack not installed", allow_module_level=True)
 
-_SP = ("H2O", "CH4", "CO", "CO2", "NH3", "N2", "HCN", "H2S")
+_SEED_SPECIES = ("H2O", "CH4", "CO", "CO2", "NH3", "N2", "HCN", "H2S")
 
 
 @pytest.mark.parametrize("met", [1.0, 10.0, 100.0])
@@ -60,7 +60,7 @@ def test_picaso_chemistry_is_the_vulcan_seed_on_the_same_column(met, tmp_path, m
     y_vul = np.asarray(chem.y0, float)[::-1]
     y_vul = y_vul / y_vul.sum(axis=1, keepdims=True)
     band = (p >= 1e-5) & (p <= 1.0)
-    for sp in _SP:
+    for sp in _SEED_SPECIES:
         a = y_vul[band, chem.sidx[sp]]
         b = y_pic[band, names.index(sp)]
         m = np.maximum(a, b) > 1e-8
@@ -174,12 +174,12 @@ def test_picaso_worker_reproduces_stock_picaso_at_its_own_composition(met, tmp_p
 # v4.0.3 source tag, SiO(s) removed: an amorphous-solid entry from Gail et al.
 # 2013 that picaso's thermo file does not carry), local equilibrium
 # condensation, at pe.composition(Z, 0.55) without Li, Rb and Cs (no species in
-# that set; X/H < 2e-8 at 10x). log10 VMR of _SP.
+# that set; X/H < 2e-8 at 10x). log10 VMR of _FASTCHEM_SPECIES.
 # Every point is settled in FastChem: Mg and Si either > 99% condensed (MgSiO3 +
 # Mg2SiO4 hold 18% of the oxygen, H2O -0.23 dex in the CO regime) or < 1%.
 _P = (1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 0.1, 0.3, 1.0)
 _T = (1100.0, 2000.0, 1200.0, 1750.0, 1250.0, 2200.0, 1000.0, 2000.0, 900.0)
-_SP = ("H2O", "CO", "CO2", "CH4", "NH3", "H2S")
+_FASTCHEM_SPECIES = ("H2O", "CO", "CO2", "CH4", "NH3", "H2S")
 _FASTCHEM = {
     1.0: (
         (-3.6113, -3.2963, -6.8419, -10.3650, -9.6998, -4.6189),
@@ -230,10 +230,10 @@ def test_picaso_metal_oxygen_sink_matches_fastchem(met, tmp_path, monkeypatch):
         lambda s: None,
     )
     names = [str(s) for s in res["gas_names"]]
-    pic = np.log10(np.asarray(res["vmr"])[:, [names.index(s) for s in _SP]])
+    pic = np.log10(np.asarray(res["vmr"])[:, [names.index(s) for s in _FASTCHEM_SPECIES]])
     ref = np.asarray(_FASTCHEM[met])
     err = np.where(np.maximum(pic, ref) > -8.0, np.abs(pic - ref), 0.0)
     i, j = np.unravel_index(int(np.argmax(err)), err.shape)
     assert err[i, j] < 0.05, (
-        f"{_SP[j]} at {_P[i]:g} bar, {_T[i]:g} K: log10 VMR {pic[i, j]:.3f}, FastChem {ref[i, j]:.3f}"
+        f"{_FASTCHEM_SPECIES[j]} at {_P[i]:g} bar, {_T[i]:g} K: log10 VMR {pic[i, j]:.3f}, FastChem {ref[i, j]:.3f}"
     )

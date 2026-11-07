@@ -1,7 +1,7 @@
 """The README example.
 
-The app's summary figure for the default run (WASP-39 b, SO2, one transit per mode), exported exactly as the app's PNG
-download does (200 dpi, tight crop). Runs the app headlessly through Streamlit's AppTest and needs the default model and
+The app's summary figure for the default run (WASP-39 b, SO2, one transit per mode), exported with a tight crop at 200 dpi
+(the app's PNG download uses plotting.FIG_DPI, 300). Runs the app headlessly through Streamlit's AppTest and needs the default model and
 noise caches under output/ (a first run fills them).
 
     python validation/scripts/fig_readme_example.py      # writes assets/w39b_so2_forecast.png

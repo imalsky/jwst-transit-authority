@@ -9,9 +9,13 @@ import contextlib
 import os
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from typing import BinaryIO
 
 TOOL_DIR = Path(__file__).resolve().parent  # pandeia_worker.py lives here
 # parents[2] is the repo root in an editable checkout; the src/jwst_tool
@@ -49,7 +53,7 @@ MODEL_CACHE = OUTPUT_DIR / "model_cache"
 NOISE_CACHE = OUTPUT_DIR / "noise_cache"
 
 
-def atomic_write(path: Path, writer: Any) -> None:
+def atomic_write(path: Path, writer: Callable[[BinaryIO], Any]) -> None:
     """Write ``writer(fh)`` to ``path`` atomically (temp file in the same directory, fsync, ``os.replace``).
 
     The caches under OUTPUT_DIR are shared by concurrent sessions and
@@ -223,7 +227,7 @@ PANDEXO_UNBOUNDED_NGROUP = 65535
 # APPEND-ONLY: MODE_COLOR/MODE_MARKER key by enumeration order and a mode's
 # color is never re-assigned, so a new mode goes at the END of this literal,
 # never inserted mid-registry.
-MODES = {
+MODES: dict[str, dict[str, Any]] = {
     "nirspec_prism": dict(
         label="NIRSpec PRISM",
         instrument="nirspec",

@@ -4,6 +4,7 @@ exercised without any network (urlopen is monkeypatched).
 
 import dataclasses
 import hashlib
+import http.client
 import io
 import json
 import sys
@@ -100,7 +101,7 @@ class _FakeResponse(io.BytesIO):
 def test_download_replaces_atomically_and_refuses_truncation(tmp_path, monkeypatch):
     # full payload: streamed to <name>.part, atomically replaced
     payload = b"x" * 5000
-    monkeypatch.setattr(fetch.urllib.request, "urlopen", lambda req: _FakeResponse(payload))
+    monkeypatch.setattr(fetch.urllib.request, "urlopen", lambda req, timeout: _FakeResponse(payload))
     out = tmp_path / "sub" / "file.bin"
     fetch._download("https://example.invalid/f", out, "test")
     assert out.read_bytes() == payload
@@ -109,7 +110,7 @@ def test_download_replaces_atomically_and_refuses_truncation(tmp_path, monkeypat
     # a body shorter than Content-Length is refused and leaves nothing behind
     short = _FakeResponse(b"abc")
     short.headers = {"Content-Length": "9999"}
-    monkeypatch.setattr(fetch.urllib.request, "urlopen", lambda req: short)
+    monkeypatch.setattr(fetch.urllib.request, "urlopen", lambda req, timeout: short)
     trunc = tmp_path / "trunc.bin"
     with pytest.raises(RuntimeError):
         fetch._download("https://example.invalid/f", trunc, "test")
@@ -119,7 +120,7 @@ def test_download_replaces_atomically_and_refuses_truncation(tmp_path, monkeypat
 def test_pinned_md5_gates_download_and_presence(tmp_path, monkeypatch):
     payload = b"y" * 3000
     good = hashlib.md5(payload).hexdigest()
-    monkeypatch.setattr(fetch.urllib.request, "urlopen", lambda req: _FakeResponse(payload))
+    monkeypatch.setattr(fetch.urllib.request, "urlopen", lambda req, timeout: _FakeResponse(payload))
     out = tmp_path / "t.hdf5"
     with pytest.raises(RuntimeError, match="md5 mismatch"):
         fetch._download("https://example.invalid/t", out, "t", "0" * 32)
@@ -173,6 +174,63 @@ def test_extract_subtree_strips_prefix_and_requires_a_match(tmp_path, monkeypatc
     assert not (tmp_path / "d3" / "cat.fits").exists()
 
 
+def test_a_tarball_without_its_marker_is_refused_before_it_can_read_as_installed(tmp_path, monkeypatch):
+    """Extraction writes the marker last, and _present reads only the marker: a tarball lacking it must fail loudly,
+    not announce success for a dataset the next run reads as missing.
+    """
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tf:
+        info = tarfile.TarInfo("pre/m.fits")
+        info.size = 1
+        tf.addfile(info, io.BytesIO(b"A"))
+    monkeypatch.setattr(fetch.urllib.request, "urlopen", lambda req, timeout: _FakeResponse(buf.getvalue()))
+    dest = tmp_path / "phoenix"
+    spec = fetch.Fetch("t", "https://example.invalid/t", lambda: dest, "1 B", tar_subtree="pre", marker="catalog.fits")
+    with pytest.raises(RuntimeError, match="catalog.fits"):
+        fetch._fetch_one(spec)
+    assert not fetch._present(spec)
+    assert not (dest / "m.fits").exists(), "nothing is written from a tarball that cannot complete"
+
+
+def test_only_the_marker_reads_a_tarball_as_present(tmp_path):
+    dest = tmp_path / "phoenix"
+    spec = fetch.Fetch("t", "https://example.invalid/t", lambda: dest, "1 B", tar_subtree="pre", marker="catalog.fits")
+    assert not fetch._present(spec)  # nothing there
+    dest.mkdir()
+    assert not fetch._present(spec)  # a directory alone
+    (dest / "m.fits").write_bytes(b"A")
+    assert not fetch._present(spec)  # a partial tree
+    (dest / "catalog.fits").write_bytes(b"B")
+    assert fetch._present(spec)
+
+
+def test_a_stalled_download_is_bounded_and_reported_as_that_items_failure(tmp_path, monkeypatch, capsys):
+    """The stall bound reaches urlopen, and a timeout takes the ordinary failure path: the run still tries the rest."""
+    seen = []
+
+    def stalled(req, timeout):
+        seen.append(timeout)
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(fetch.urllib.request, "urlopen", stalled)
+    monkeypatch.setattr(fetch, "_present", lambda f: False)
+    monkeypatch.setattr(
+        fetch,
+        "FETCHES",
+        tuple(fetch.Fetch(n, "https://example.invalid/" + n, lambda n=n: tmp_path / n, "1 B") for n in "ab"),
+    )
+    assert fetch.run_fetch([]) == 1
+    assert seen == [fetch._STALL_TIMEOUT_S] * 2
+    err = capsys.readouterr().err
+    assert "FAILED: a: timed out" in err and "FAILED: b: timed out" in err
+
+
+def test_the_manual_recipe_does_not_recommend_resuming_against_box():
+    """Notes "Do not retry": curl -C - against Box appends a restart to an oversized file that exits 0."""
+    mentions = [line for line in fetch.MANUAL.splitlines() if "-C -" in line]
+    assert mentions and all("do not" in line for line in mentions)
+
+
 def test_extract_subtree_refuses_a_member_escaping_the_destination(tmp_path):
     """The tarball is a remote file: a member whose path climbs out of the
     subtree must never be written outside ``dest``.
@@ -208,7 +266,7 @@ def test_picaso_tree_counts_only_when_datacheck_and_md5_pass(tmp_path, monkeypat
             info = tarfile.TarInfo(f"picaso-4.1/reference/{rel}")
             info.size = len(data)
             tf.addfile(info, io.BytesIO(data))
-    monkeypatch.setattr(fetch.urllib.request, "urlopen", lambda req: _FakeResponse(buf.getvalue()))
+    monkeypatch.setattr(fetch.urllib.request, "urlopen", lambda req, timeout: _FakeResponse(buf.getvalue()))
     ref = tmp_path / "ref"
     tree = dataclasses.replace(fetch.PICASO_FETCHES[0], dest=lambda: ref)
     assert not fetch._present(tree)
@@ -222,3 +280,29 @@ def test_picaso_tree_counts_only_when_datacheck_and_md5_pass(tmp_path, monkeypat
     ):
         fetch._fetch_one(tree)
     assert (ref / "config.json").is_file() and not fetch._present(tree)
+
+
+@pytest.mark.parametrize("failure", [http.client.IncompleteRead(b""), EOFError("truncated gzip")], ids=repr)
+def test_a_failed_download_is_counted_and_a_defect_is_not(monkeypatch, capsys, tmp_path, failure):
+    """Every item is tried past a failed one; a bug in the tool is not one more failed download."""
+    monkeypatch.setattr(fetch, "_present", lambda _f: False)
+    monkeypatch.setattr(
+        fetch,
+        "FETCHES",
+        tuple(fetch.Fetch(n, "https://example.invalid/" + n, lambda n=n: tmp_path / n, "1 B") for n in "ab"),
+    )
+
+    def interrupted(_f):
+        raise failure
+
+    monkeypatch.setattr(fetch, "_fetch_one", interrupted)
+    assert fetch.run_fetch([]) == 1
+    err = capsys.readouterr().err
+    assert "FAILED: a" in err and "FAILED: b" in err
+
+    def defect(_f):
+        raise TypeError("a bug")
+
+    monkeypatch.setattr(fetch, "_fetch_one", defect)
+    with pytest.raises(TypeError, match="a bug"):
+        fetch.run_fetch([])

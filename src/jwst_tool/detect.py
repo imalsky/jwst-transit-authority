@@ -5,11 +5,14 @@ Method and contract: docs/forecast_statistics.md, section `detect`.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from . import binning, certify, instruments as ins, model_defs, noise as noise_mod
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # transits-to-target scan cap: beyond this, effectively unreachable anyway
 N_TRANSITS_CAP = 500
@@ -230,7 +233,7 @@ def _removed_spectrum(model: dict, mols: list[str], target_mol: str | None, orde
             "detect goal (or wo_mols including the target)."
         )
     index = wo.index(target_mol)
-    if str(model.get("science_mode", "transmission")) == "emission":
+    if str(model["science_mode"]) == "emission":
         # FLUX-WEIGHTED, never a min-tau test: a narrow blue-edge notch
         # carrying a thousandth of the emitted flux must not refuse a target.
         # run_model writes this key with every emission model, and _VERSION
@@ -379,36 +382,23 @@ def _usable_pixels(mode_key: str, mode_result: dict) -> tuple:
     return wl, flux, degenerate, usable
 
 
-def _blur_to_response(
+def _response_blur(
     mode_key: str,
-    model: dict,
-    order: np.ndarray,
-    mode_result: dict,
-    wl_model: np.ndarray,
-    depth: np.ndarray,
-    depth_wo: np.ndarray | None,
+    r_native: np.ndarray,
     wl_pix: np.ndarray,
     flux_pix: np.ndarray,
-    degen: Any,
-    lo: float,
-    hi: float,
-) -> tuple:
-    """Return depth, removed-molecule depth and Jacobian rows, blurred to the mode's response R(lambda)."""
-    # blur the model to the native R(lambda), always (a no-op for high-R
-    # modes). Pixel cells extend at most one native pixel past the bin span,
-    # hence the margin.
-    r_nat = np.asarray(mode_result["r_native"], float)
-    jac_rows = None
-    if "jac" in model:
-        jac_rows = [np.asarray(row)[order] for row in model["jac"]]
-    b_lo = max(float(wl_model.min()), lo * _LSF_BAND_MARGIN[0])
-    b_hi = min(float(wl_model.max()), hi * _LSF_BAND_MARGIN[1])
-    # stellar flux weights the LSF so it forms the observed count ratio
-    # L[F d]/L[F], never the flat depth blur L[d]; same weight for depth,
-    # removed-molecule, and Jacobian rows (operator stays linear in depth).
-    # Degenerate (duplicate-wavelength) pixels are masked out of the
-    # operator; the R(lambda) table excludes them too, since a repeated
-    # abscissa is not a strictly ascending curve.
+    degen: np.ndarray,
+    wl_model: np.ndarray,
+    band: tuple,
+) -> Callable[[np.ndarray], np.ndarray]:
+    """Return the blur to the mode's response R(lambda), for depth, removed-molecule and Jacobian rows alike.
+
+    Pixel cells extend at most one native pixel past the bin span, hence the margin. Stellar flux weights the LSF so it
+    forms the observed count ratio L[F d]/L[F], never the flat depth blur L[d], and the operator stays linear in depth.
+    Degenerate (duplicate-wavelength) pixels are masked out of the operator and the R(lambda) table.
+    """
+    b_lo = max(float(wl_model.min()), band[0] * _LSF_BAND_MARGIN[0])
+    b_hi = min(float(wl_model.max()), band[1] * _LSF_BAND_MARGIN[1])
     po = np.flatnonzero(~degen)[np.argsort(wl_pix[~degen])]
     # count DENSITY per d ln(lambda): pandeia's flux is counts per pixel
     # COLUMN, whose widths vary across a band, and smooth_to_native_r
@@ -423,15 +413,8 @@ def _blur_to_response(
     # (instruments.LSF_WIDTH): on the slitless modes the PSF, not the
     # dispersion, sets it.
     wl_r = wl_pix[po]
-    r_curve = ins.lsf_r(mode_key, wl_r, r_nat[po])
-    depth = binning.smooth_to_native_r(wl_model, depth, wl_r, r_curve, b_lo, b_hi, weight=flux_model)
-    if depth_wo is not None:
-        depth_wo = binning.smooth_to_native_r(wl_model, depth_wo, wl_r, r_curve, b_lo, b_hi, weight=flux_model)
-    if jac_rows is not None:
-        jac_rows = [
-            binning.smooth_to_native_r(wl_model, row, wl_r, r_curve, b_lo, b_hi, weight=flux_model) for row in jac_rows
-        ]
-    return depth, depth_wo, jac_rows
+    r_curve = ins.lsf_r(mode_key, wl_r, np.asarray(r_native, float)[po])
+    return lambda y: binning.smooth_to_native_r(wl_model, y, wl_r, r_curve, b_lo, b_hi, weight=flux_model)
 
 
 def _mode_warnings(mode_key: str, mode_result: dict, t_in_s: float, t_out_s: float) -> dict:
@@ -507,14 +490,17 @@ def evaluate_mode(
     hi = min(m["wl_max"], float(wl_model.max()), float(wl_pix[usable].max()))
     if hi <= lo:
         raise ValueError(f"{mode_key}: no overlap between instrument band and model")
-    depth, depth_wo, jac_rows = _blur_to_response(
-        mode_key, model, order, mode_result, wl_model, depth, depth_wo, wl_pix, flux_pix, degen, lo, hi
-    )
+    # the model at the native R(lambda), always (a no-op for high-R modes)
+    blur = _response_blur(mode_key, mode_result["r_native"], wl_pix, flux_pix, degen, wl_model, (lo, hi))
+    depth = blur(depth)
+    if depth_wo is not None:
+        depth_wo = blur(depth_wo)
+    jac_rows = [blur(np.asarray(row)[order]) for row in model["jac"]] if "jac" in model else None
     edges = noise_mod.make_bins(lo, hi, R_bin)
     op = binning.build_operator(
         wl_pix, flux_pix, edges, wl_lo=float(wl_model.min()), wl_hi=float(wl_model.max()), valid=usable
     )
-    if str(model.get("science_mode", "transmission")) == "emission":
+    if str(model["science_mode"]) == "emission":
         # over the support the operator ACTUALLY integrates, not the 1-15 um
         # model band the cached certificate was measured on
         _certify_emission_band(model, order, wl_model, op["cell_lo"], op["cell_hi"], mode_key, target_mol)

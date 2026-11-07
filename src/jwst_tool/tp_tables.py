@@ -4,22 +4,19 @@ from __future__ import annotations
 
 import hashlib
 import re
+import uuid
 from pathlib import Path
 
 import numpy as np
 
-from jwst_tool import planets
-from jwst_tool.instruments import MODEL_CACHE
+from jwst_tool import instruments as _ins, planets
 from jwst_tool.model_defs import CHEM_P_SPAN_DYN, T_WINDOW, TP_FILE_SHIPPED, TP_FILE_UPLOAD
 
 # tp_mode="file" helpers (light path: no vulcan3/jax imports)
 
 
 def shipped_tp_table_name(planet: str) -> str:
-    """Filename of the MEASURED structure table bundled for ``planet``, or "" when that planet has none.
-
-    (planets.PLANETS[...]["tp_table"]).
-    """
+    """Filename of the MEASURED structure table bundled for ``planet`` (its "tp_table"), or "" when it has none."""
     entry = planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS)
     return entry.get("tp_table") or ""
 
@@ -39,8 +36,7 @@ def shipped_tp_file(planet: str) -> Path:
     """Return the path of the shipped T-P/Kzz table for ``planet``, without importing vulcan3.
 
     find_spec only: importing parses the reaction network, far too heavy for the GUI's cache-key path. A planet with
-    no usable
-    table raises the reason, never substitutes another planet's atmosphere.
+    no usable table raises the reason, never substitutes another planet's atmosphere.
     """
     name = shipped_tp_table_name(planet)
     if not name:
@@ -65,7 +61,26 @@ def shipped_tp_file(planet: str) -> Path:
 
 def uploads_dir() -> Path:
     """Content-addressed home for uploaded T-P tables (sibling of model_cache)."""
-    return MODEL_CACHE.parent / "uploads"
+    return _ins.MODEL_CACHE.parent / "uploads"
+
+
+def content_key(raw: bytes) -> str:
+    """Return the content-addressed name of a table's bytes."""
+    return hashlib.sha1(raw).hexdigest()[:16]
+
+
+def stage_upload(raw: bytes) -> tuple[Path, Path]:
+    """Write a table beside its archive entry: (staged file, archive entry). os.replace commits it.
+
+    A unique name, so two sessions staging the same bytes cannot collide, and a rejected table leaves nothing behind
+    once the caller unlinks the staged file.
+    """
+    key = content_key(raw)
+    destination = uploads_dir() / f"{key}.txt"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staged = destination.with_name(f".{key}.{uuid.uuid4().hex}.tmp")
+    _ins.atomic_write(staged, lambda fh: fh.write(raw))
+    return staged, destination
 
 
 def _parse_table(path: Path) -> np.ndarray:
@@ -80,7 +95,7 @@ def _parse_table(path: Path) -> np.ndarray:
         if len(lines) < 6:
             raise ValueError("file is too short for a units line, column header, and four rows")
         tab = np.genfromtxt(path, names=True, dtype=None, skip_header=1)
-    except Exception as e:
+    except (OSError, ValueError, IndexError) as e:  # genfromtxt raises IndexError on a comments-only file
         raise ValueError(
             f"T-P table {path} is not parseable as a VULCAN atm file "
             f"(header comment line, then 'Pressure Temp [Kzz]' columns): {e}"
@@ -198,7 +213,7 @@ def resolve_tp_file(params: dict) -> tuple[Path, str]:
         )
     if not path.exists():
         raise ValueError(f"T-P table not found: {path}")
-    sha1 = hashlib.sha1(path.read_bytes()).hexdigest()[:16]
+    sha1 = content_key(path.read_bytes())
     return path, sha1
 
 
@@ -218,7 +233,7 @@ def tp_file_from_cp(cp: dict) -> Path:
             "content-addressed copy is written by run_model; re-upload the "
             "table if the output directory was cleaned."
         )
-    sha1 = hashlib.sha1(path.read_bytes()).hexdigest()[:16]
+    sha1 = content_key(path.read_bytes())
     if sha1 != cp["tp_file_sha1"]:
         raise RuntimeError(
             f"T-P table {path} content drifted: sha1 {sha1} != canonical "

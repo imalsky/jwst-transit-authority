@@ -412,13 +412,9 @@ def test_only_the_certificate_escalates_an_fd_row():
     point passes raises RuntimeError too -- a backend fault, the element
     budget, the emission tau-bottom gate, the T-P window -- and retrying one of
     those pays a second full stencil and blames photolysis for a failure that
-    is not one. So the certificate raises its own type and the row catches THAT
-    (the row sits inside run_model's closure, unreachable without a full solve,
-    so its handler is pinned by source like the vmap guard above).
+    is not one. So the certificate raises its own type, and the row escalates on
+    that type only (test_run_stages drives the row itself).
     """
-    import ast
-    import importlib.util
-    from pathlib import Path
 
     def _raised(fn, *a, **kw):
         with pytest.raises(RuntimeError) as e:
@@ -458,11 +454,51 @@ def test_only_the_certificate_escalates_an_fd_row():
     ):
         assert not isinstance(exc, certify.NotCertified), exc
 
-    src = Path(importlib.util.find_spec("jwst_tool.jacobian").origin).read_text()
-    rows = [
-        t
-        for t in ast.walk(ast.parse(src))
-        if isinstance(t, ast.Try) and any("_row_points(run_frq)" in ast.unparse(n) for n in t.body)
+
+def _capped(nz):
+    return _diag(conv_normal=False, longdy=0.192, accept=500), _chem(count_max=500, nz=nz)
+
+
+def test_a_coarse_column_at_the_step_cap_names_raising_nz():
+    """A limit cycle does not end with more steps, so the refusal says what can help. At the default grid that remedy
+    does not fit, and the refusal does not offer it.
+    """
+    from jwst_tool import model_defs
+
+    diag, chem = _capped(60)
+    with pytest.raises(certify.NotCertified, match=f"raise nz .default {model_defs.NZ_DEFAULT}"):
+        certify.check_converged(diag, "FD Tirr +1h", SPECIES, chem, lambda _: None)
+    diag, chem = _capped(model_defs.NZ_DEFAULT)
+    with pytest.raises(certify.NotCertified) as refused:
+        certify.check_converged(diag, "FD Tirr +1h", SPECIES, chem, lambda _: None)
+    assert "raise nz" not in str(refused.value)
+
+
+def test_a_column_frozen_at_dt_min_stays_loud_and_is_not_retried():
+    """The engine raises its own RuntimeError when a trial keeps failing at dt_min. That is not a stall a photolysis
+    cadence can fix, so nothing here may retry it, flag it as an escalation or swallow it, and the GUI must show its
+    sentence.
+    """
+    from jwst_tool import proc
+
+    class DtMinFrozenError(RuntimeError):
+        """Stands in for vulcan3.DtMinFrozenError, which the pinned engine may predate."""
+
+    rebuilt = []
+
+    def frozen(th, return_conv_diag):
+        raise DtMinFrozenError("column frozen at dt_min")
+
+    chem = _chem()
+    chem.sidx = {s: i for i, s in enumerate(SPECIES)}
+    chem.converged_y = frozen
+    with pytest.raises(DtMinFrozenError, match="frozen"):
+        certify.certified_solve(chem, np.zeros(3), "baseline solve", rebuild=lambda: rebuilt.append(1))
+    assert rebuilt == []
+
+    lines = [
+        "Traceback (most recent call last):",
+        '  File "x"',
+        "vulcan3.state.DtMinFrozenError: column frozen at dt_min",
     ]
-    assert rows, "the FD row's stencil try moved: re-pin it"
-    assert [ast.unparse(h.type) for t in rows for h in t.handlers] == ["NotCertified"]
+    assert proc.exception_sentence(lines, "no sentence") == "column frozen at dt_min"

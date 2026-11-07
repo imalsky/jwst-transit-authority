@@ -5,12 +5,15 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import logging
 import subprocess
 from functools import lru_cache
 from importlib import metadata
 from pathlib import Path
 
 from jwst_tool import datacheck as dc, instruments as ins, model_defs, noise
+
+logger = logging.getLogger(__name__)
 
 # Repository identity -> the DIRECTORY names it may sit under; the solver's
 # GitHub repo is `VULCAN3` but its working copy is usually `VULCAN-JAX`, so
@@ -101,16 +104,21 @@ def _probe(python: str | Path | None, code: str) -> dict | None:
     """Run ``code`` in another interpreter.
 
     Its last stdout line parsed as a JSON object, or None when that fails in any way (no such file, not executable,
-    hung, bad output): an export records "unavailable" and never fails because a side environment is broken.
+    hung, bad output): an export records "unavailable" and never fails because a side environment is broken. A probe
+    that ran and failed is logged, since the export's word "unavailable" carries no path and so no reason.
     """
+    if not python or not Path(python).is_file():
+        return None
     try:
-        if not python or not Path(python).is_file():
-            return None
         result = subprocess.run([str(python), "-c", code], capture_output=True, text=True, timeout=30, check=False)
         out = json.loads(result.stdout.splitlines()[-1])
-    except (OSError, subprocess.TimeoutExpired, IndexError, ValueError):
+    except (OSError, subprocess.TimeoutExpired, IndexError, ValueError) as exc:
+        logger.warning("provenance probe with %s failed: %r", python, exc)
         return None
-    return out if result.returncode == 0 and isinstance(out, dict) else None
+    if result.returncode != 0 or not isinstance(out, dict):
+        logger.warning("provenance probe with %s failed: exit %d: %s", python, result.returncode, result.stderr[-500:])
+        return None
+    return out
 
 
 def _pandeia_python_identity() -> dict:
@@ -119,11 +127,11 @@ out = {}
 for name in ("pandeia.engine", "pandexo.engine"):
     try: out[name] = m.version(name)
     except m.PackageNotFoundError: out[name] = "not installed"
-commit = None
 try:
     raw = m.distribution("pandexo.engine").read_text("direct_url.json")
-    commit = (json.loads(raw).get("vcs_info") or {}).get("commit_id") if raw else None
-except Exception: pass  # no readable direct_url.json: the commit stays unknown
+except m.PackageNotFoundError:
+    raw = None
+commit = (json.loads(raw).get("vcs_info") or {}).get("commit_id") if raw else None
 print(json.dumps({"engine": out["pandeia.engine"],
                   "pandexo": out["pandexo.engine"],
                   "pandexo_commit": commit}))"""

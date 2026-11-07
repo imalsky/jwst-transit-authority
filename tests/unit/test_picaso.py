@@ -153,3 +153,45 @@ def test_no_picaso_interpreter_is_one_actionable_error(monkeypatch):
     monkeypatch.setattr(ins, "PICASO_PYTHON", None)
     with pytest.raises(RuntimeError, match="JWST_TOOL_PICASO_PYTHON"):
         pe.require_picaso_python()
+
+
+def test_the_worker_refuses_a_climate_table_set_picaso_silently_shortened(monkeypatch):
+    """Picaso drops a missing correlated-k table with only a warning, which would change the climate opacity."""
+    from types import SimpleNamespace
+
+    from jwst_tool import picaso_worker as pw
+
+    monkeypatch.setattr(pw, "_solver_class", lambda: lambda thermo, xh, met: SimpleNamespace())
+    wanted = ["CO2", "H2O"]
+    job = {"refdata": "/ref", "ck_molecules": wanted}
+    request = {
+        "xh": {},
+        "metallicity": 10.0,
+        "p_bar": [0.1, 1.0],
+        "climate": None,
+        "quench_kzz": 1.0e9,
+        "T": [1.0, 1.0],
+    }
+    jdi = SimpleNamespace(opannection=lambda method, preload_gases: SimpleNamespace(molecules=preload_gases[1:]))
+    with pytest.raises(RuntimeError, match="correlated-k tables"):
+        pw._run(jdi, None, job, request)
+
+
+def test_the_worker_refuses_to_run_without_its_offline_vega(tmp_path, monkeypatch):
+    """Without the local file stsynphot goes to the network for Vega; say which path is missing instead."""
+    from jwst_tool import picaso_worker as pw
+
+    for name in ("picaso_refdata", "PYSYN_CDBS"):  # _bootstrap writes them; this restores them
+        monkeypatch.setenv(name, "unset by the test")
+    job = {"refdata": str(tmp_path), "cdbs": str(tmp_path), "versions": {}}
+    with pytest.raises(RuntimeError, match="alpha_lyr_stis_011.fits"):
+        pw._bootstrap(job)
+
+
+def test_a_damaged_cache_file_is_quarantined_and_logged_not_silently_re_solved(tmp_path, caplog):
+    damaged = tmp_path / "entry.npz"
+    damaged.write_bytes(b"not a zip")
+    assert pe._load(damaged, {}, "stage") is None
+    assert not damaged.exists()
+    assert [p.name.split("-")[0] for p in tmp_path.iterdir()] == ["entry.npz.corrupt"]
+    assert "unreadable" in caplog.text

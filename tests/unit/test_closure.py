@@ -9,7 +9,7 @@ import os
 import numpy as np
 import pytest
 
-from jwst_tool import binning, chem_build, model_cache, noise as noise_mod
+from jwst_tool import binning, chem_build, instruments as ins, noise as noise_mod
 
 
 def test_poisson_count_closure():
@@ -46,7 +46,7 @@ def test_poisson_count_closure():
     # mean closes to the true binned depth (ratio-estimator bias ~1/counts,
     # negligible at ~1e7 counts/pixel); variance closes to the analytic value
     assert np.all(np.abs(est.mean(axis=0) - d_true_bin) < 5.0 * se + 1e-7)
-    assert np.allclose(est.var(axis=0), nz["var_phot"], rtol=0.15)
+    assert np.allclose(est.var(axis=0), nz["var_phot"], rtol=0.15, atol=0.0)
 
 
 def _force_cadence_1(monkeypatch, tmp_path, forward):
@@ -66,7 +66,52 @@ def _force_cadence_1(monkeypatch, tmp_path, forward):
     monkeypatch.setattr(forward, "assemble_chem", assemble)
     cache = tmp_path / "model_cache"
     cache.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(model_cache, "MODEL_CACHE", cache)
+    monkeypatch.setattr(ins, "MODEL_CACHE", cache)
+
+
+_SLOW_EMISSION = pytest.mark.skipif(
+    os.environ.get("JWST_TOOL_RUN_SLOW") != "1",
+    reason="slow: ~8 FD stencil solves + 2 AD rows (~30-60 min, JAX required); set JWST_TOOL_RUN_SLOW=1",
+)
+
+
+def _emission_closure(monkeypatch, tmp_path, cadence):
+    """Default WASP-39 b eclipse case, lnZ and dlnCO rows: each warm-jvp AD row
+    must agree with its certified central-difference row to the transmission
+    gate. The AD rows run on the dt-capped build (AD_BUILD_OVERRIDES); a row
+    that does not certify at the configuration's photolysis cadence is
+    re-solved on a cadence-1 build and flagged in photo_escalated, never
+    refused. Two rows, because the cadence-1 build is shared: the first
+    escalation carries the later rows with it.
+    """
+    from jwst_tool import forward
+
+    if cadence == 1:
+        _force_cadence_1(monkeypatch, tmp_path, forward)
+
+    rows = {}
+    for method in ("fd", "ad"):
+        p = dict(planet="wasp39b", science_mode="emission", fisher_params=["lnZ", "dlnCO"], jac_method=method)
+        if forward.load_result(p) is None:
+            forward.run_model(p, log=lambda _s: None)
+        m = forward.load_result(p)
+        names = [str(x) for x in m["jac_names"]]
+        rows[method] = {n: np.asarray(m["jac"][names.index(n)]) for n in ("lnZ", "dlnCO")}
+        if method == "ad":
+            print("AD photo_escalated:", list(m["photo_escalated"]))
+    for n in ("lnZ", "dlnCO"):
+        ad, fd = rows["ad"][n], rows["fd"][n]
+        corr = np.corrcoef(ad, fd)[0, 1]
+        scale = float(np.dot(ad, fd) / np.dot(fd, fd))
+        assert corr > 0.99, n
+        assert scale == pytest.approx(1.0, abs=0.15), n
+
+
+# Apart on purpose: xdist cannot steal the test queued next on a busy worker, so these two, the slow tier's longest,
+# run one after the other when neighbours, past the 90 min limit (notes "Current state").
+@_SLOW_EMISSION
+def test_emission_ad_rows_match_the_certified_fd_rows_at_cadence_1(monkeypatch, tmp_path):
+    _emission_closure(monkeypatch, tmp_path, 1)
 
 
 @pytest.mark.skipif(
@@ -116,40 +161,6 @@ def test_jacobian_row_matches_finite_difference(monkeypatch, tmp_path, cadence):
     assert scale == pytest.approx(1.0, abs=0.15)
 
 
-@pytest.mark.skipif(
-    os.environ.get("JWST_TOOL_RUN_SLOW") != "1",
-    reason="slow: ~8 FD stencil solves + 2 AD rows per cadence "
-    "variant (~30-60 min, JAX required); set "
-    "JWST_TOOL_RUN_SLOW=1",
-)
-@pytest.mark.parametrize("cadence", [None, 1])
-def test_emission_ad_rows_match_the_certified_fd_rows(monkeypatch, tmp_path, cadence):
-    """Default WASP-39 b eclipse case, lnZ and dlnCO rows: each warm-jvp AD row
-    must agree with its certified central-difference row to the transmission
-    gate. The AD rows run on the dt-capped build (AD_BUILD_OVERRIDES); a row
-    that does not certify at the configuration's photolysis cadence is
-    re-solved on a cadence-1 build and flagged in photo_escalated, never
-    refused. Two rows, because the cadence-1 build is shared: the first
-    escalation carries the later rows with it.
-    """
-    from jwst_tool import forward
-
-    if cadence == 1:
-        _force_cadence_1(monkeypatch, tmp_path, forward)
-
-    rows = {}
-    for method in ("fd", "ad"):
-        p = dict(planet="wasp39b", science_mode="emission", fisher_params=["lnZ", "dlnCO"], jac_method=method)
-        if forward.load_result(p) is None:
-            forward.run_model(p, log=lambda _s: None)
-        m = forward.load_result(p)
-        names = [str(x) for x in m["jac_names"]]
-        rows[method] = {n: np.asarray(m["jac"][names.index(n)]) for n in ("lnZ", "dlnCO")}
-        if method == "ad":
-            print("AD photo_escalated:", list(m["photo_escalated"]))
-    for n in ("lnZ", "dlnCO"):
-        ad, fd = rows["ad"][n], rows["fd"][n]
-        corr = np.corrcoef(ad, fd)[0, 1]
-        scale = float(np.dot(ad, fd) / np.dot(fd, fd))
-        assert corr > 0.99, n
-        assert scale == pytest.approx(1.0, abs=0.15), n
+@_SLOW_EMISSION
+def test_emission_ad_rows_match_the_certified_fd_rows(monkeypatch, tmp_path):
+    _emission_closure(monkeypatch, tmp_path, None)

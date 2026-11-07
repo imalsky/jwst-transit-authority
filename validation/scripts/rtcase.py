@@ -130,6 +130,6 @@ def bin_to(wl, y, centers):
 
 
 def r100_grid(lo=3.02, hi=4.98):
-    """Return R = 100 bin edges over a wavelength range."""
+    """Return R = 100 bin centers over a wavelength range (bin_to derives the edges from them)."""
     n = int(np.round(np.log(hi / lo) * 100.0))
     return lo * np.exp(np.arange(n + 1) / 100.0)

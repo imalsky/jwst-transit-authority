@@ -6,7 +6,7 @@ Method and contract: docs/gui_and_sharing.md, section `summary_figure`.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,6 +14,12 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter, LogLocator, MaxNLocator, NullFormatter, NullLocator, ScalarFormatter
 
 from jwst_tool import fisher, plotting
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from matplotlib.axes import Axes
+    from matplotlib.figure import Figure
 
 _STYLE_FILE = Path(__file__).resolve().parent / "science.mplstyle"
 
@@ -37,7 +43,7 @@ def _req(d: dict, key: str, where: str) -> Any:
     return d[key]
 
 
-def _finite_1d(x: np.ndarray, name: str, where: str) -> np.ndarray:
+def _finite_1d(x: Any, name: str, where: str) -> np.ndarray:
     a = np.asarray(x, float)
     if a.ndim != 1 or a.size == 0:
         raise ValueError(f"{where}: {name} must be a non-empty 1-D array, got shape {a.shape}")
@@ -122,8 +128,51 @@ def _validate_spectrum(spectrum: dict) -> dict:
 MAX_POST_PANELS = 3
 
 
-# size-limit-ok: one list of refusals, one per panel field
+def _validate_curve(c: dict, cw: str) -> dict:
+    theta = _finite_1d(_req(c, "theta", cw), "theta", cw)
+    pdf = _finite_1d(_req(c, "pdf", cw), "pdf", cw)
+    if theta.shape != pdf.shape:
+        raise ValueError(f"{cw}: theta {theta.shape} and pdf {pdf.shape} shapes differ")
+    # mu/sigma: the curve's center and 1-sigma width in DISPLAY units. Optional; when present the legend quotes the
+    # width (_width_text) and the automatic x window is sized from them.
+    mu, sg = c.get("mu"), c.get("sigma")
+    if sg is not None:
+        sg = float(sg)
+        if not (np.isfinite(sg) and sg > 0.0):
+            raise ValueError(f"{cw}: sigma must be finite and > 0, got {sg!r}")
+    if mu is not None:
+        mu = float(mu)
+        if not np.isfinite(mu):
+            raise ValueError(f"{cw}: mu must be finite, got {mu!r}")
+    # curve_family "ln_gaussian" marks a multiplicative width (C/O): the panel goes to a log x axis and the automatic
+    # window is taken in ln theta, at the width the curve was BUILT with (sigma_ln), never sigma/mu -- those differ
+    # once a mock draw shifts mu.
+    fam = c.get("curve_family")
+    sln = c.get("sigma_ln")
+    if sln is not None:
+        sln = float(sln)
+        if not (np.isfinite(sln) and sln > 0.0):
+            raise ValueError(f"{cw}: sigma_ln must be finite and > 0, got {sln!r}")
+    if fam == "ln_gaussian" and sln is None:
+        raise ValueError(f"{cw}: an ln_gaussian curve must carry sigma_ln (its multiplicative width)")
+    wt = c.get("width_text")
+    return dict(
+        label=str(_req(c, "label", cw)),
+        theta=theta,
+        pdf=pdf,
+        mu=mu,
+        sigma=sg,
+        sigma_ln=sln,
+        width_text=(None if wt is None else str(wt)),
+        curve_family=(None if fam is None else str(fam)),
+        color=str(c.get("color", "#333333")),
+        ls=str(c.get("ls", "-")),
+        lw=float(c.get("lw", 1.6)),
+    )
+
+
 def _validate_panels(posterior_panels: list | None) -> list[dict]:
+    """Rebuild each panel from the keys read here; any other key a caller passes is dropped."""
     panels = list(posterior_panels or [])
     if len(panels) > MAX_POST_PANELS:
         raise ValueError(
@@ -134,78 +183,20 @@ def _validate_panels(posterior_panels: list | None) -> list[dict]:
         where = f"posterior_panels[{i}]"
         if not isinstance(pan, dict):
             raise ValueError(f"{where}: must be a dict")
-        curves = []
-        for j, c in enumerate(pan.get("curves") or []):
-            cw = f"{where}.curves[{j}]"
-            theta = _finite_1d(_req(c, "theta", cw), "theta", cw)
-            pdf = _finite_1d(_req(c, "pdf", cw), "pdf", cw)
-            if theta.shape != pdf.shape:
-                raise ValueError(f"{cw}: theta {theta.shape} and pdf {pdf.shape} shapes differ")
-            # mu/sigma are the curve's center and 1-sigma width in DISPLAY
-            # units. Optional, but when present the legend entry quotes the
-            # width (_width_text) and the automatic x window is sized from
-            # them -- quoting the width is how a marginalized posterior is
-            # conventionally reported (corner.py annotates the median and 68%
-            # interval above each histogram). Without them the curve's SHAPE
-            # carries no width information at all, because each parameter's
-            # axis is auto-scaled to its own +/-5 sigma grid.
-            _mu, _sg = c.get("mu"), c.get("sigma")
-            if _sg is not None:
-                _sg = float(_sg)
-                if not (np.isfinite(_sg) and _sg > 0.0):
-                    raise ValueError(f"{cw}: sigma must be finite and > 0, got {_sg!r}")
-            if _mu is not None:
-                _mu = float(_mu)
-                if not np.isfinite(_mu):
-                    raise ValueError(f"{cw}: mu must be finite, got {_mu!r}")
-            # curve_family "ln_gaussian" marks a multiplicative width (C/O):
-            # the panel goes to a log x axis and the automatic window is taken
-            # in ln theta, at the width the curve was BUILT with (sigma_ln),
-            # never sigma/mu -- those differ once a mock draw shifts mu.
-            _fam = c.get("curve_family")
-            _sln = c.get("sigma_ln")
-            if _sln is not None:
-                _sln = float(_sln)
-                if not (np.isfinite(_sln) and _sln > 0.0):
-                    raise ValueError(f"{cw}: sigma_ln must be finite and > 0, got {_sln!r}")
-            if _fam == "ln_gaussian" and _sln is None:
-                raise ValueError(f"{cw}: an ln_gaussian curve must carry sigma_ln (its multiplicative width)")
-            _wt = c.get("width_text")
-            curves.append(
-                dict(
-                    label=str(_req(c, "label", cw)),
-                    theta=theta,
-                    pdf=pdf,
-                    mu=_mu,
-                    sigma=_sg,
-                    sigma_ln=_sln,
-                    width_text=(None if _wt is None else str(_wt)),
-                    curve_family=(None if _fam is None else str(_fam)),
-                    color=str(c.get("color", "#333333")),
-                    ls=str(c.get("ls", "-")),
-                    lw=float(c.get("lw", 1.6)),
-                )
-            )
+        curves = [_validate_curve(c, f"{where}.curves[{j}]") for j, c in enumerate(pan.get("curves") or [])]
         center = pan.get("center")
-        # density_label overrides the y axis text. The validator REBUILDS each
-        # panel dict, so any key not listed here is silently dropped -- which is
-        # why this has to be threaded explicitly rather than left to pan.get()
-        # in the plotting function.
-        _dl = pan.get("density_label")
-        _au = pan.get("axis_unit")
+        dl = pan.get("density_label")
+        au = pan.get("axis_unit")
         out.append(
             dict(
                 axis_label=str(_req(pan, "axis_label", where)),
-                # the unit alone, so the legend can quote it AFTER the
-                # error ("[M/H] = 0.88 +- 0.37 dex") instead of leaving
-                # the axis label's "[dex]" token stranded before the "="
-                axis_unit=("" if _au is None else str(_au)),
+                # the unit alone, so the legend can quote it after the error ("[M/H] = 0.88 +- 0.37 dex")
+                axis_unit=("" if au is None else str(au)),
                 curves=curves,
-                density_label=(None if _dl is None else str(_dl)),
+                density_label=(None if dl is None else str(dl)),
                 center=(None if center is None else float(center)),
             )
         )
-
     return out
 
 
@@ -278,20 +269,9 @@ def _visible_ylim(spec: dict, lo: float, hi: float) -> tuple | None:
     if not centers and not whiskers:
         return None  # nothing visible; leave autoscale
     if spec["y_log"]:
-        # A negative WHISKER may be dropped from the limits; a negative CENTER
-        # may not. An eclipse depth of 50 +/- 340 ppm has a 1-sigma lower bound
-        # below zero -- physically ordinary at low S/N -- and letting that set
-        # y0 trips the positive-range guard below, refusing a log axis on data
-        # whose depths are entirely positive and span 1.4 decades (exactly
-        # where a log axis earns its keep). The whisker is then clipped at the
-        # spine and visibly runs off the bottom, which costs far less than
-        # refusing the axis.
-        #
-        # Model depths are NOT filtered: silently dropping part of the plotted
-        # curve is the failure the guard exists to catch. Filtering everything
-        # renders a -400..900 ppm model as its positive 69% with no
-        # indication, so a mixed-sign model must still reach the guard and be
-        # refused.
+        # A negative WHISKER may be dropped from the limits (it clips at the spine), since 50 +/- 340 ppm is ordinary at
+        # low S/N. A negative CENTER may not, and model depths are never filtered: a mixed-sign model must reach the
+        # positive-range guard and be refused rather than render silently cut.
         whiskers = [w[w > 0.0] for w in whiskers]
     allv = np.concatenate([a for a in centers + whiskers if a.size])
     if allv.size == 0:
@@ -307,30 +287,77 @@ def _visible_ylim(spec: dict, lo: float, hi: float) -> tuple | None:
     return (y0 - pad, y1 + pad)
 
 
-# size-limit-ok: one panel drawn top to bottom
-def _plot_spectrum(ax: Any, spec: dict) -> None:
+def _spectrum_window(spec: dict) -> tuple[float, float]:
+    """Return the x window: the caller's, or the data's with a 3 % margin."""
+    if spec["wl_range"] is not None:
+        return spec["wl_range"]
+    wl = spec["wl_um"]
+    lo = float(min(wl.min(), min((p["wl_um"].min() for p in spec["points"]), default=wl.min())))
+    hi = float(max(wl.max(), max((p["wl_um"].max() for p in spec["points"]), default=wl.max())))
+    return lo * 0.97, hi * 1.03
+
+
+def _depth_limits(spec: dict, lo: float, hi: float) -> tuple | None:
+    """Return the y limits, with headroom for the in-axes legend sized from its row count."""
+    ylim = spec["depth_range"] or _visible_ylim(spec, lo, hi)
+    if ylim is None or spec["depth_range"] is not None or not spec["points"]:
+        return ylim
+    rows = len(spec["points"]) + 1 + (spec["depth2_ppm"] is not None)
+    # ~5.5% of the axis per legend row, matched to the data padding. Two columns above 4 entries.
+    frac = min(0.38, 0.055 * (rows if rows <= 4 else np.ceil(rows / 2) + 1))
+    y0, y1 = ylim
+    return (y0, y0 + (y1 - y0) / (1.0 - frac))
+
+
+def _spectrum_legend(ax: Axes, spec: dict) -> None:
+    """Draw the legend in the reserved headroom: model curves in one column, modes in the other.
+
+    matplotlib fills a legend column-major, so the handles run models then modes and the shorter group is padded with
+    invisible entries, or the column break lands mid-group.
+    """
+    handles, labels = ax.get_legend_handles_labels()
+    mode_labels = {str(p["label"]) for p in spec["points"]}
+    models = [(h, lab) for h, lab in zip(handles, labels, strict=True) if lab not in mode_labels]
+    modes = [(h, lab) for h, lab in zip(handles, labels, strict=True) if lab in mode_labels]
+    ncol = 1
+    if models and modes:
+        rows = max(len(models), len(modes))
+        blank = Line2D([], [], linestyle="none", marker="none")
+        models += [(blank, " ")] * (rows - len(models))
+        modes += [(blank, " ")] * (rows - len(modes))
+        handles = [h for h, _ in models + modes]
+        labels = [lab for _, lab in models + modes]
+        ncol = 2
+    # "upper left" into the reserved headroom, not "best": with a wide spectrum every corner touches data.
+    leg = ax.legend(
+        handles,
+        labels,
+        loc="upper left",
+        frameon=True,
+        framealpha=0.82,
+        edgecolor="none",
+        fontsize=_LEG,
+        ncol=ncol,
+        handletextpad=0.5,
+        borderaxespad=0.4,
+        columnspacing=1.0,
+        labelspacing=0.3,
+    )
+    leg.set_zorder(5)
+
+
+def _plot_spectrum(ax: Axes, spec: dict) -> None:
     """Render the model spectrum and each mode's simulated points."""
-    # zorder 4: ABOVE the points (zorder 3). The model is the thing the points
-    # are being compared against, so it must stay continuous wherever a mode
-    # has coverage.
+    # zorder 4: above the points (3), so the model stays continuous wherever a mode has coverage.
     ax.plot(spec["wl_um"], spec["depth_ppm"], color="#444444", lw=1.1, alpha=0.9, zorder=4, label=spec["model_label"])
     if spec["depth2_ppm"] is not None:
-        # zorder 3.5: ABOVE the points (3), below the model (4). It is identical
-        # to the model everywhere outside the target molecule's own bands, so
-        # under the points it reads as absent; above the model it would hide the
-        # solid line wherever the two coincide.
+        # zorder 3.5: identical to the model outside the target's bands, so above it the curve would hide the model.
         ax.plot(
             spec["wl_um"], spec["depth2_ppm"], color="#888888", lw=1.0, ls="--", zorder=3.5, label=spec["depth2_label"]
         )
     for p in spec["points"]:
-        # markeredgecolor is set explicitly: with the rc default a 1 pt dark
-        # edge on a 3.6 pt marker swallows the fill and every mode's marker
-        # renders the same. That color is the series identity
-        # shared with the forecast panels, so it has to read.
-        # ms 3.0: the points crowd at R=100 over a wide band, and smaller
-        # markers keep the model line readable underneath them. The per-mode
-        # SHAPE does not separate at this size: colour plus the legend entry
-        # (which renders the shape at full size) carry mode identity.
+        # The explicit edge color keeps the fill readable: the color is the series identity shared with the forecast
+        # panels, and the rc default's dark edge swallows a 3 pt marker.
         ax.errorbar(
             p["wl_um"],
             p["depth_ppm"],
@@ -349,64 +376,29 @@ def _plot_spectrum(ax: Any, spec: dict) -> None:
             label=p["label"],
         )
     ax.set_xscale("log" if spec["x_log"] else "linear")
-    if spec["wl_range"] is not None:
-        # Caller-chosen window (the GUI defaults it to the span the SELECTED
-        # modes actually cover, so the figure is not mostly empty spectrum).
-        lo, hi = spec["wl_range"]
-    else:
-        lo = float(
-            min(spec["wl_um"].min(), min((p["wl_um"].min() for p in spec["points"]), default=spec["wl_um"].min()))
-        )
-        hi = float(
-            max(spec["wl_um"].max(), max((p["wl_um"].max() for p in spec["points"]), default=spec["wl_um"].max()))
-        )
-        lo, hi = lo * 0.97, hi * 1.03
+    lo, hi = _spectrum_window(spec)
     if spec["x_log"]:
-        # _wl_ticks picks "nice" values for a LOG axis; on a linear axis
-        # matplotlib's own locator is already even-spaced and correct.
         ticks = _wl_ticks(lo, hi)
-        if ticks:
-            ax.set_xticks(ticks)
-            ax.set_xticklabels([f"{t:g}" for t in ticks])
-        # explicit: the log minor formatter would label a lone minor tick
-        # (3 x 10^0) in the axis font; the chosen major ticks are the labels
-        ax.xaxis.set_minor_formatter(NullFormatter())
+        ax.set_xticks(ticks)
+        ax.set_xticklabels([f"{t:g}" for t in ticks])
+        ax.xaxis.set_minor_formatter(NullFormatter())  # a lone minor tick would otherwise get a label
     else:
         ax.xaxis.set_major_locator(MaxNLocator(nbins=7, steps=[1, 2, 5, 10]))
     ax.set_xlim(lo, hi)
-    ylim = spec["depth_range"] or _visible_ylim(spec, lo, hi)
+    ylim = _depth_limits(spec, lo, hi)
     if ylim is not None:
-        if spec["depth_range"] is None and spec["points"]:
-            # Headroom for the IN-AXES legend, applied to the VISIBLE data
-            # range and sized from the legend's actual row count, so it
-            # scales with what is drawn instead of being a fixed fudge -- and
-            # only when a legend will be drawn at all. An explicit
-            # depth_range from the caller is never overridden.
-            _rows = len(spec["points"]) + 1 + (spec["depth2_ppm"] is not None)
-            # ~5.5% of the axis per legend row, matched to the data padding.
-            # Two columns above 4 entries.
-            _frac = min(0.38, 0.055 * (_rows if _rows <= 4 else np.ceil(_rows / 2) + 1))
-            y0, y1 = ylim
-            ylim = (y0, y0 + (y1 - y0) / (1.0 - _frac))
         ax.set_ylim(*ylim)
     if spec["y_log"]:
-        _y0, _y1 = ax.get_ylim()
-        if _y0 <= 0.0:
-            # Fail loudly rather than render an empty panel: matplotlib drops
-            # non-positive data on a log axis without saying so. Eclipse depths
-            # or a jitter draw can go negative at low S/N.
+        y0, _ = ax.get_ylim()
+        if y0 <= 0.0:
+            # matplotlib drops non-positive data on a log axis without saying so
             raise ValueError(
                 f"spectrum: y_log=True needs a positive depth range, but the "
-                f"visible range starts at {_y0:.4g} ppm. Use a linear depth "
+                f"visible range starts at {y0:.4g} ppm. Use a linear depth "
                 "axis for this data, or set depth_range explicitly."
             )
         ax.set_yscale("log")
-        # LOG-SPACED ticks at every span (LogLocator with 1-2-5 subdivisions),
-        # formatted as plain numbers rather than powers of ten. A transit depth
-        # spans a small fraction of a decade, where a bare decade locator puts
-        # every tick outside the view and the axis draws with NO labels;
-        # linearly spaced ticks are not the answer either, since equal label
-        # steps would sit at unequal distances.
+        # 1-2-5 subdivisions as plain numbers: a depth spans a fraction of a decade, where a decade locator draws none.
         ax.yaxis.set_major_locator(LogLocator(base=10.0, subs=(1.0, 2.0, 5.0)))
         ax.yaxis.set_minor_locator(NullLocator())
         ax.yaxis.set_major_formatter(ScalarFormatter())
@@ -416,46 +408,7 @@ def _plot_spectrum(ax: Any, spec: dict) -> None:
     ax.tick_params(labelsize=_TICK)
     ax.grid(alpha=0.25)
     if spec["points"]:
-        # Legend INSIDE the axes, in the headroom reserved above; a
-        # translucent frame keeps it readable over gridlines.
-        # TWO COLUMNS BY GROUP: model curves in the first, instrument modes in
-        # the second. matplotlib fills a legend COLUMN-MAJOR, so the handle list
-        # is ordered models-then-modes and the SHORTER group is padded with
-        # invisible entries -- otherwise the column break lands mid-group and
-        # the grouping is lost.
-        _h, _l = ax.get_legend_handles_labels()
-        _mode_labels = {str(p["label"]) for p in spec["points"]}
-        _models = [(h, lab) for h, lab in zip(_h, _l, strict=True) if lab not in _mode_labels]
-        _modes = [(h, lab) for h, lab in zip(_h, _l, strict=True) if lab in _mode_labels]
-        if _models and _modes:
-            _rows = max(len(_models), len(_modes))
-            _blank = Line2D([], [], linestyle="none", marker="none")
-            _models += [(_blank, " ")] * (_rows - len(_models))
-            _modes += [(_blank, " ")] * (_rows - len(_modes))
-            _h = [h for h, _ in _models + _modes]
-            _l = [lab for _, lab in _models + _modes]
-            _ncol = 2
-        else:
-            _ncol = 1
-        # "upper left" into the reserved headroom, not "best": with a wide
-        # spectrum every corner touches data at some wavelength.
-        # No legend TITLE: the entries carry their own numbers, so a title is
-        # a second caption inside the legend.
-        _leg = ax.legend(
-            _h,
-            _l,
-            loc="upper left",
-            frameon=True,
-            framealpha=0.82,
-            edgecolor="none",
-            fontsize=_LEG,
-            ncol=_ncol,
-            handletextpad=0.5,
-            borderaxespad=0.4,
-            columnspacing=1.0,
-            labelspacing=0.3,
-        )
-        _leg.set_zorder(5)
+        _spectrum_legend(ax, spec)
 
 
 # Golden ratio for the spectrum panel, and the figure's fixed total width.
@@ -508,113 +461,81 @@ def _width_text(pan: dict, c: dict) -> str | None:
     return f"{sym} = {fisher.format_pm(mu, c['sigma'])}" + (f" {unit}" if unit else "")
 
 
-# size-limit-ok: one panel drawn top to bottom
-def _plot_posterior_panel(axp: Any, pan: dict, xlim: tuple | None = None) -> None:
-    """One marginalized forecast density per curve, each width QUOTED in its legend entry.
+def _curve_window(c: dict) -> tuple[float, float]:
+    """Return one curve's +/-_XLIM_SIGMA window."""
+    if c.get("curve_family") != "ln_gaussian":
+        return (c["mu"] - _XLIM_SIGMA * c["sigma"], c["mu"] + _XLIM_SIGMA * c["sigma"])
+    # Multiplicative width, at the sigma_ln the curve was built with. Never past the drawn grid: mu*exp(3.5*sigma_ln)
+    # can overflow to inf (a hard matplotlib error) well before the grid's clip to the range the model solves.
+    with np.errstate(over="ignore"):
+        s_ln = _XLIM_SIGMA * c["sigma_ln"]
+        lo, hi = c["mu"] * float(np.exp(-s_ln)), c["mu"] * float(np.exp(s_ln))
+    th = np.asarray(c["theta"], float)
+    return (max(lo, float(th[0])), min(hi, float(th[-1])))
 
-    ONE PANEL PER PARAMETER, never a merged box with twin x-axes: the curves
-    are peak-normalized and each grid spans its own center +/- 5 sigma, so
-    every parameter draws the SAME outline and one curve hides exactly under
-    the other. The width therefore cannot be read from a curve's shape and is
-    reported as a number against real tick values.
-    """
-    for c in pan["curves"]:
-        theta = np.asarray(c["theta"], dtype=float)
-        pdf = np.asarray(c["pdf"], dtype=float)
-        peak = float(np.max(pdf)) if pdf.size else 0.0
-        if peak > 0.0:
-            pdf = pdf / peak  # unit peak: see the y-axis note
-        # The colour IS the series identity, shared with that series on the
-        # spectrum, so it always comes from the curve (_validate_panels
-        # guarantees one). No shaded 1-sigma band: with one curve per selected
-        # series the overlapping fills muddy the panel. Each ENTRY carries its
-        # own width, so no single source is silently picked.
-        _lab = str(c["label"])
-        _wt = _width_text(pan, c)
-        if _wt:
-            _lab = f"{_lab}: {_wt}"
-        axp.plot(theta, pdf, color=c["color"], ls=c["ls"], lw=c["lw"], zorder=2, label=_lab)
+
+def _auto_xlim(axp: Axes, pan: dict) -> None:
+    """Window the panel on the widest drawn curve, keeping the input-value line in frame. Never a resampling."""
+    spans = [_curve_window(c) for c in pan["curves"] if c["mu"] is not None and c["sigma"] is not None]
+    if not spans:
+        return
+    lo, hi = min(s[0] for s in spans), max(s[1] for s in spans)
     if pan["center"] is not None:
-        # the input value the forecast is centered on: with a jitter draw the
-        # curve sits OFF it, and that offset is the realization's luck
-        axp.axvline(
-            pan["center"], color="#666666", lw=0.8, ls=":", zorder=3, label=f"input value {_fmt_val(pan['center'])}"
-        )
-    # posteriors.gaussian_curve builds its grid as center +/- 5 sigma, where
-    # the curve is visually zero across most of the axis, so the automatic
-    # window clips to the widest drawn curve at +/-_XLIM_SIGMA (still >99.7% of
-    # every curve's mass). The grid itself is untouched, so this is a WINDOW,
-    # never a resampling: an explicit ``xlim`` from the caller shows the same
-    # curve and is used verbatim.
-    if xlim is not None:
-        axp.set_xlim(float(xlim[0]), float(xlim[1]))
-    else:
-        _spans = []
-        for c in pan["curves"]:
-            if c["mu"] is None or c["sigma"] is None:
-                continue
-            if c.get("curve_family") == "ln_gaussian":
-                # multiplicative width: window taken in ln theta at the width
-                # the curve was BUILT with, never sigma/mu (equal only when
-                # the mock draw left the center unmoved)
-                with np.errstate(over="ignore"):
-                    _s_ln = _XLIM_SIGMA * c["sigma_ln"]
-                    _w = (c["mu"] * float(np.exp(-_s_ln)), c["mu"] * float(np.exp(_s_ln)))
-                # NEVER past the curve that was actually drawn. A wide C/O
-                # forecast is built on a grid clipped to the range the model
-                # solves, and mu*exp(3.5*sigma_ln) overflows to inf well
-                # before that -- set_xlim(inf) is a hard matplotlib error,
-                # and a finite 1e62 frames the panel on empty decades.
-                # The additive branch below needs no such clamp: it cannot
-                # overflow, and its window is allowed to run past its grid
-                # (into negative values, which is what ln_gaussian avoids).
-                _th = np.asarray(c["theta"], float)
-                if _th.size:
-                    _w = (max(_w[0], float(_th[0])), min(_w[1], float(_th[-1])))
-            else:
-                _w = (c["mu"] - _XLIM_SIGMA * c["sigma"], c["mu"] + _XLIM_SIGMA * c["sigma"])
-            _spans.append(_w)
-        if _spans:
-            _lo = min(s[0] for s in _spans)
-            _hi = max(s[1] for s in _spans)
-            if pan["center"] is not None:
-                # never crop the input-value line out of frame
-                _lo, _hi = min(_lo, pan["center"]), max(_hi, pan["center"])
-            if _hi > _lo:
-                axp.set_xlim(_lo, _hi)
-    # A multiplicative-width panel shows PHYSICAL values on a LOG axis (house
-    # style: never logged values on a linear axis). The default log locator
-    # emits no tick inside a sub-decade window and dozens across a wide one,
-    # so the subdivisions follow the span. Otherwise: a narrow window needs a
-    # tick count that fits the panel's width.
+        lo, hi = min(lo, pan["center"]), max(hi, pan["center"])
+    if hi > lo:
+        axp.set_xlim(lo, hi)
+
+
+def _posterior_x_axis(axp: Axes, pan: dict) -> None:
+    """Physical values on a log axis for a multiplicative width, subdivided by span; otherwise a count that fits."""
     if pan["curves"] and all(c.get("curve_family") == "ln_gaussian" for c in pan["curves"]):
         axp.set_xscale("log")
-        _lo, _hi = axp.get_xlim()
-        _dec = np.log10(_hi / _lo)
-        _subs = "all" if _dec <= 1.2 else ((1.0, 2.0, 3.0, 5.0) if _dec <= 2.5 else (1.0,))
-        axp.xaxis.set_major_locator(LogLocator(base=10.0, subs=_subs))
+        lo, hi = axp.get_xlim()
+        dec = np.log10(hi / lo)
+        subs: Any = "all" if dec <= 1.2 else ((1.0, 2.0, 3.0, 5.0) if dec <= 2.5 else (1.0,))
+        axp.xaxis.set_major_locator(LogLocator(base=10.0, subs=subs))
         axp.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
         axp.xaxis.set_minor_formatter(NullFormatter())
     else:
         axp.xaxis.set_major_locator(MaxNLocator(nbins=5, steps=[1, 2, 2.5, 5, 10]))
+
+
+def _plot_posterior_panel(axp: Axes, pan: dict, xlim: tuple | None = None) -> None:
+    """One marginalized forecast density per curve, each width QUOTED in its legend entry.
+
+    ONE PANEL PER PARAMETER, never a merged box with twin x-axes: the curves are peak-normalized and each grid spans
+    its own center +/- 5 sigma, so every parameter draws the same outline and the width is reported as a number.
+    """
+    for c in pan["curves"]:
+        theta = np.asarray(c["theta"], dtype=float)
+        pdf = np.asarray(c["pdf"], dtype=float)
+        peak = float(np.max(pdf))
+        if peak > 0.0:
+            pdf = pdf / peak
+        lab = str(c["label"])
+        wt = _width_text(pan, c)
+        if wt:
+            lab = f"{lab}: {wt}"
+        axp.plot(theta, pdf, color=c["color"], ls=c["ls"], lw=c["lw"], zorder=2, label=lab)
+    if pan["center"] is not None:
+        # with a jitter draw the curve sits off the input value, and that offset is the realization's luck
+        axp.axvline(
+            pan["center"], color="#666666", lw=0.8, ls=":", zorder=3, label=f"input value {_fmt_val(pan['center'])}"
+        )
+    if xlim is not None:
+        axp.set_xlim(float(xlim[0]), float(xlim[1]))
+    else:
+        _auto_xlim(axp, pan)
+    _posterior_x_axis(axp, pan)
     axp.set_xlabel(pan["axis_label"], fontsize=_AX_LBL)
     axp.set_yticks([])
     axp.tick_params(labelsize=_TICK)
-    # The y label distinguishes a FORECAST (centered on the input by
-    # construction, "relative forecast density") from a fit to the jitter
-    # realization (whose center moves, plain "relative density"): a forecast
-    # centered anywhere but the input value would be a bug, so the two must
-    # never share a label. The caller passes density_label; the forecast
-    # wording is the default.
+    # A fit to the jitter realization passes its own density_label: a forecast is centered on the input by
+    # construction, so the two must never share a label.
     axp.set_ylabel(pan.get("density_label") or "relative forecast density", fontsize=_AX_LBL)
-    # Headroom for the in-axes legend, sized from the legend's ROW COUNT --
-    # the same rule the spectrum panel uses.
-    # Never a hardcoded fraction: with one curve per selected series the
-    # legend grows with the selection, so a constant only holds by coincidence
-    # (the legend sits upper-left while the curves peak centrally). Curves are
-    # peak-normalized to 1.0, so the top is 1.0 + the legend's share.
-    _rows = len(pan["curves"]) + (pan["center"] is not None)
-    axp.set_ylim(0.0, 1.0 + min(0.85, 0.13 * max(1, _rows)))
+    # Headroom for the in-axes legend, from its row count: curves peak at 1.0, and the legend grows with the selection.
+    rows = len(pan["curves"]) + (pan["center"] is not None)
+    axp.set_ylim(0.0, 1.0 + min(0.85, 0.13 * max(1, rows)))
     axp.grid(alpha=0.15)
     if pan["curves"]:
         leg = axp.legend(
@@ -631,44 +552,7 @@ def _plot_posterior_panel(axp: Any, pan: dict, xlim: tuple | None = None) -> Non
         leg.set_zorder(5)
 
 
-# size-limit-ok: one figure laid out top to bottom
-def compose_summary_figure(
-    spectrum: dict, posterior_panels: list | None = None, panel_xlims: list | None = None, caveats: list = ()
-) -> Any:
-    """Compose the proposal summary figure; returns the Figure.
-
-    ``spectrum``: dict(wl_um, depth_ppm, depth_label, model_label,
-    points=[dict(label, color, marker, wl_um, depth_ppm, sigma_ppm), ...]).
-    Depths in ppm; the model curve is plotted as given (pre-smooth it for
-    display upstream if desired -- this function never alters the data).
-    Per-mode expected performance belongs IN each point label (the caller
-    appends the number), so the legend carries the ranking.
-
-    ``posterior_panels``: up to three dicts, one per parameter:
-    dict(axis_label, curves=[dict(label, theta, pdf, color, ls, lw), ...],
-    center=float|None). An unconstrained direction draws no curve and gets
-    no annotation: the figure carries axis labels, ticks and legends and
-    NOTHING else -- prose about a panel belongs in the page, never on
-    the axes.
-
-    ``panel_xlims``: one entry per forecast panel, each ``(lo, hi)`` in that
-    panel's own parameter units or None for the automatic +/-_XLIM_SIGMA
-    window. A WINDOW on the existing curves, never a resampling. Shorter than
-    the panel list is allowed (the rest stay automatic).
-
-    The spectrum's own axis windows are ``spectrum['wl_range']`` and
-    ``spectrum['depth_range']``; both default to None, meaning auto-fit.
-
-    ``caveats``: the run caveats the page shows. They are footnoted along the
-    bottom MARGIN of the canvas (``plotting.draw_caveats``) so a downloaded
-    figure still carries them -- the panels themselves stay free of prose.
-
-    All inputs are validated loudly (house style); the caller's arrays are
-    never mutated. The caller owns the Figure (close it after saving); a
-    figure that fails part-way is closed here before the error propagates.
-    """
-    spec = _validate_spectrum(spectrum)
-    panels = _validate_panels(posterior_panels)
+def _validate_xlims(panel_xlims: list | None) -> list:
     xlims = list(panel_xlims or [])
     for i, v in enumerate(xlims):
         if v is None:
@@ -682,64 +566,57 @@ def compose_summary_figure(
         if not (np.isfinite(lo) and np.isfinite(hi) and lo < hi):
             raise ValueError(f"compose_summary_figure: panel_xlims[{i}] needs finite lo < hi, got {(lo, hi)}")
         xlims[i] = (lo, hi)
+    return xlims
 
-    # plotting.render_lock covers BOTH hazards here: the style context mutates
-    # global rcParams, and the layout/legend placement below measures mathtext
-    # through matplotlib's process-global parser (plotting.py has the full
-    # argument). Reentrant, so a caller holding it already is fine.
+
+def compose_summary_figure(
+    spectrum: dict, posterior_panels: list | None = None, panel_xlims: list | None = None, caveats: Sequence[str] = ()
+) -> Figure:
+    """Compose the proposal summary figure; returns the Figure, which the caller closes.
+
+    Inputs are validated loudly and never mutated; a figure that fails part-way is closed before the error propagates.
+    The panels carry no prose: ``caveats`` go in the canvas's bottom margin, so a download keeps them. Input formats:
+    docs/gui_and_sharing.md, section `summary_figure`.
+    """
+    spec = _validate_spectrum(spectrum)
+    panels = _validate_panels(posterior_panels)
+    xlims = _validate_xlims(panel_xlims)
+
+    # render_lock covers both hazards: the style context mutates global rcParams, and layout measures mathtext through
+    # the process-global parser (docs/gui_and_sharing.md, section `plotting`). Reentrant.
     with plotting.render_lock, plt.style.context([str(_STYLE_FILE), _STYLE_OVERRIDES]):
-        # The spectrum, then ONE PANEL PER PARAMETER -- never a single merged
-        # twin-axis box (_plot_posterior_panel says why).
-        # ASPECT RATIOS: the spectrum is golden
-        # ratio (PHI:1 wide) and every forecast panel is SQUARE. Both are
-        # enforced twice over -- the figure size is SOLVED so each gridspec
-        # cell already has the target shape, and set_box_aspect pins the axes
-        # regardless of margin drift. Without the solve, box_aspect would
-        # shrink an axes inside an ill-shaped cell and leave dead whitespace;
-        # without box_aspect, a margin tweak would silently skew the ratios.
-        _npan = max(1, len(panels))
-        _top, _bottom = 0.965, 0.135
-        # The y tick labels on each posterior panel set the wspace floor here:
-        # below ~0.13 they start colliding with the panel to their left.
-        _left, _right, _wspace = 0.055, 0.988, 0.16
-        # fig_w = axes_h * sum(width_ratios) * (1 + npan*wspace/ncols)
-        #                / (right - left);  solve for the height that makes
-        # the panels square at a fixed total width.
-        _ncols = 1 + _npan
-        _k = (_PHI + _npan) * (1.0 + _npan * _wspace / _ncols) / (_right - _left)
-        _axes_h = _FIG_W_IN / _k
-        fig = plt.figure(figsize=(_FIG_W_IN, _axes_h / (_top - _bottom)), dpi=plotting.FIG_DPI)
+        # The spectrum is PHI:1 and each panel square. The figure size is solved so each gridspec cell has that shape,
+        # and set_box_aspect pins the axes against margin drift.
+        npan = max(1, len(panels))
+        top, bottom = 0.965, 0.135
+        # The y tick labels on each posterior panel set the wspace floor: below ~0.13 they collide with their neighbor.
+        left, right, wspace = 0.055, 0.988, 0.16
+        # fig_w = axes_h * sum(width_ratios) * (1 + npan*wspace/ncols) / (right - left), solved for the height.
+        ncols = 1 + npan
+        k = (_PHI + npan) * (1.0 + npan * wspace / ncols) / (right - left)
+        axes_h = _FIG_W_IN / k
+        fig = plt.figure(figsize=(_FIG_W_IN, axes_h / (top - bottom)), dpi=plotting.FIG_DPI)
         try:
             gs = fig.add_gridspec(
                 1,
-                _ncols,
-                width_ratios=[_PHI] + [1.0] * _npan,
-                wspace=_wspace,
-                left=_left,
-                right=_right,
-                top=_top,
-                bottom=_bottom,
+                ncols,
+                width_ratios=[_PHI] + [1.0] * npan,
+                wspace=wspace,
+                left=left,
+                right=right,
+                top=top,
+                bottom=bottom,
             )
-
-            # -- LEFT: spectrum with per-mode simulated points --------------
             ax = fig.add_subplot(gs[0, 0])
-            ax.set_box_aspect(1.0 / _PHI)  # PHI:1 wide, golden ratio
+            ax.set_box_aspect(1.0 / _PHI)
             _plot_spectrum(ax, spec)
-
-            # -- RIGHT: one square panel per marginalized forecast ----------
-            for i in range(_npan):
+            for i in range(npan):
                 axp = fig.add_subplot(gs[0, i + 1])
-                # SQUARE. The figure height is solved so a square panel
-                # exactly fills the row, so square and same-height-as-the-
-                # spectrum are the same thing here.
                 axp.set_box_aspect(1.0)
                 if i >= len(panels):
                     axp.set_axis_off()
                     continue
                 _plot_posterior_panel(axp, panels[i], xlim=(xlims[i] if i < len(xlims) else None))
-
-            # Inside the style context so the footnote is set in the house
-            # font.
             plotting.draw_caveats(fig, caveats)
         except BaseException:
             plt.close(fig)

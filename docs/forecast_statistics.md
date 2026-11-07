@@ -20,8 +20,7 @@ atmospheric state: the nested-model chi-square distance between the full
 spectrum and the spectrum with one molecule's opacity removed, with the
 calibration nuisances profiled out --
 
-    chi2 = s^T W s - b^T A^{-1} b,   W = diag(1/sigma^2),
-    b = U W s,  A = U W U^T,         s_b = d_full - d_without_X
+$$\chi^2 = s^T W s - b^T A^{-1} b, \quad W = \mathrm{diag}(1/\sigma^2), \quad b = U W s, \quad A = U W U^T, \quad s_b = d_\mathrm{full} - d_{\mathrm{without}\,X}$$
 
 The rows of U are one constant depth offset and one step per extra detector
 segment (NRS1|NRS2 -- real G395H fits float such offsets). It is NOT a
@@ -31,7 +30,7 @@ under the same model and noise assumptions will usually report a lower
 significance (a best-case comparison under those conditions, not a universal
 bound). When a Fisher Jacobian is available, ``sigma_detect_proj``
 additionally projects out whichever of the T-P, lnR0 and cloud derivative
-directions the run actually built (_NUISANCE_JAC below; still conditional) and
+directions the run actually built (`detect._NUISANCE_JAC`; still conditional) and
 is the number to prefer for narrow margins -- any caption describing it must
 name the rows that were present, which metric_label does.
 
@@ -46,7 +45,7 @@ Fisher-information parameter forecast from the spectrum Jacobian.
 
 Given each mode's binned Jacobian J (n_par, n_bins) and per-bin depth sigma,
 
-    F_ij = sum_b J_ib J_jb / sigma_b^2
+$$F_{ij} = \sum_b \frac{J_{ib} J_{jb}}{\sigma_b^2}$$
 
 and the marginalized 1-sigma forecast on parameter i is sqrt((F^-1)_ii).
 
@@ -76,11 +75,16 @@ the same nuisance-augmented Fisher matrices as the constraint table
 the Gaussian N(theta_input, sigma_marg) with sigma_marg the marginalized
 Cramer-Rao bound in the fitted coordinate. Curves are rendered in DISPLAY
 units (the fisher-table convention:
-dex for lnZ/lnKzz, absolute C/O number ratio for dlnCO via
-``fisher.display_sigma``, K for temperatures; a parameter unknown to
+dex for lnZ/lnKzz, K for temperatures; a parameter unknown to
 ``fisher.PARAM_UNITS`` is already in display units and reports unit "").
 The dlnCO curve is the forecast density in ln(C/O) on a log C/O axis
-(ln_gaussian_curve); its width is quoted in dex via fisher.format_co_width.
+(ln_gaussian_curve); its width is quoted in dex via fisher.format_co_width, never
+as an absolute C/O range. ``fisher.display_sigma``'s absolute dlnCO value is what a
+stored target precision is compared against, and is not for display. The verdict
+line in ``gui_results`` prints it today: an open decision, see todo.md.
+
+`marginalized_posteriors` returns `dict(kind, label, n_modes, co_eval, sigma_marginalized, sigma_conditional, params)`,
+where `params[name]` holds center, sigma_display, sigma_conditional_display, unit, constrained, theta and pdf.
 
 Labeling (every returned record carries ``kind`` and ``label``): these
 are linearized Fisher/Cramer-Rao forecasts around the input model under the

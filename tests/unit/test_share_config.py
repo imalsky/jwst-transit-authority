@@ -20,12 +20,8 @@ def _canon(**over):
     return forward.canonical_params(base)
 
 
-# size-limit-ok: one full configuration, every field round-tripped
-def test_round_trip_restores_the_full_run():
-    """Constrain goal, detect goal, and a bare canonical dict all restore
-    exactly the widget state the download described (widget KEYS are a
-    shipped contract).
-    """
+def test_round_trip_restores_a_constrain_run():
+    """A constrain file restores exactly the widget state the download described (keys are a shipped contract)."""
     canon = _canon(
         met_x_solar=7.0,
         co_ratio=0.6,
@@ -95,7 +91,9 @@ def test_round_trip_restores_the_full_run():
     assert state["n0_floor_nirspec_g395h"] == 15.0
     assert state["n0_infl_nirspec_g395h"] == 1.05
 
-    # a detect goal maps the per-selection molecule widget key
+
+def test_round_trip_maps_a_detect_goal_onto_its_molecule_widget():
+    """A detect goal's target restores onto the per-selection molecule widget key."""
     share = share_config.build_share(
         _canon(extra_mols=["C2H2", "HCN"]),
         goal=dict(
@@ -113,7 +111,8 @@ def test_round_trip_restores_the_full_run():
     assert state["n0_mol_vulcan_sncho2025_C2H2_HCN"] == "SO2"
     assert state["n0_dofish"] is False
 
-    # a bare canonical dict is accepted
+
+def test_a_bare_canonical_dict_restores_without_an_observation():
     state = share_config.widget_state(_canon(), _key)
     assert state["n0_planet"] == "wasp39b"
     assert "n0_modes" not in state  # no observation section to restore
@@ -384,6 +383,8 @@ def test_provenance_block_is_complete_and_portable(tmp_path):
     name, report an unversioned copy as such, and make a missing repository
     explicit.
     """
+    from pathlib import Path
+
     from jwst_tool import provenance
 
     share = share_config.build_share(_canon(), {}, {"seed": 73})
@@ -395,6 +396,7 @@ def test_provenance_block_is_complete_and_portable(tmp_path):
     assert "ktables" in prov["datasets"]
     serialized = __import__("json").dumps(prov)
     assert "/Users/" not in serialized and "\\Users\\" not in serialized
+    assert str(Path.home()) not in serialized  # the two literals above never match on Linux
     repos = prov["repositories"]
     assert set(repos) == set(provenance.REPOSITORIES), "every declared repository must appear, even when absent"
     for name, rec in repos.items():

@@ -17,10 +17,11 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 
-def _make_calc(build_default_calc: Any, m: dict, star: dict, star_spectrum: dict | None = None) -> dict:
+def _make_calc(build_default_calc: Callable[..., dict], m: dict, star: dict, star_spectrum: dict | None = None) -> dict:
     calc = build_default_calc("jwst", m["instrument"], m["mode"])
     for section, kv in m["config"].items():
         calc["configuration"][section].update(kv)
@@ -105,7 +106,7 @@ def _native_r(refdata: str | Path, m: dict, wl: np.ndarray) -> tuple:
     return r_i.tolist(), os.path.basename(hits[0])
 
 
-def _run(perform_calculation: Any, calc: Any, ngroup: int, nint: int = 1) -> Any:
+def _run(perform_calculation: Callable[[dict], dict], calc: dict, ngroup: int, nint: int = 1) -> dict:
     c = copy.deepcopy(calc)
     c["configuration"]["detector"]["ngroup"] = int(ngroup)
     c["configuration"]["detector"]["nint"] = int(nint)
@@ -141,20 +142,10 @@ def _sat_curve(rpt: dict, key: str, n_pix: int) -> np.ndarray:
     return np.nan_to_num(curve, nan=0.0)
 
 
-# size-limit-ok: one mode's calculation in order; a worker edit is reviewed against WORKER_VERSION
-def _one_mode(
-    build_default_calc: Any,
-    perform_calculation: Any,
-    m: dict,
-    star: dict,
-    sat_limit: float,
-    refdata: str | Path,
-    engine_version: str,
-    star_spectrum: dict | None = None,
-) -> dict:
-    calc = _make_calc(build_default_calc, m, star, star_spectrum)
-    ng_min, ng_max = int(m["ngroup_min"]), int(m["ngroup_max"])
-
+def _search_ramp(
+    perform_calculation: Callable[[dict], dict], calc: dict, ng_min: int, ng_max: int, sat_limit: float
+) -> tuple[int, dict, dict, bool, bool]:
+    """Find the largest measured-safe group count: (ngroup, its report, the floor's report, saturated, proven)."""
     probe = _run(perform_calculation, calc, ng_min)
     sat_probe = float(probe["scalar"]["fraction_saturation"])
     sat_ng = probe["scalar"].get("sat_ngroups")
@@ -189,6 +180,48 @@ def _one_mode(
             else:
                 hi = guess
         search_complete = ng_best >= ng_max or (hi is not None and hi <= ng_best + 1)
+    return ng_best, rpt, probe, saturated, search_complete
+
+
+def _native_census(rpt: dict, wl: np.ndarray, good: np.ndarray) -> tuple[np.ndarray, np.ndarray, dict, dict]:
+    """Native-grid saturation counts and masks, taken BEFORE `good`.
+
+    Fully saturated channels have non-finite extracted noise, so `good` removes them and a post-filter count would
+    read zero. Diagnostic only (the parity harness reads the native curves); the estimator still excludes unusable
+    pixels.
+    """
+    n_part = _sat_curve(rpt, "n_partial_saturated", wl.shape[0])
+    n_full = _sat_curve(rpt, "n_full_saturated", wl.shape[0])
+    counts = {
+        "n_pix_native": int(wl.shape[0]),
+        "n_pix_unusable_dropped": int((~good).sum()),
+        "n_pix_part_sat_native": int((n_part > 0).sum()),
+        "n_pix_full_sat_native": int((n_full > 0).sum()),
+    }
+    masks = {
+        "wl_native": wl.tolist(),
+        "usable_native": good.tolist(),
+        "n_part_sat_native_curve": n_part.tolist(),
+        "n_full_sat_native_curve": n_full.tolist(),
+    }
+    return n_part, n_full, counts, masks
+
+
+def _one_mode(
+    build_default_calc: Callable[..., dict],
+    perform_calculation: Callable[[dict], dict],
+    m: dict,
+    star: dict,
+    sat_limit: float,
+    refdata: str | Path,
+    engine_version: str,
+    star_spectrum: dict | None = None,
+) -> dict:
+    calc = _make_calc(build_default_calc, m, star, star_spectrum)
+    ng_best, rpt, probe, saturated, search_complete = _search_ramp(
+        perform_calculation, calc, int(m["ngroup_min"]), int(m["ngroup_max"]), sat_limit
+    )
+    sat_ng = probe["scalar"].get("sat_ngroups")
 
     wl, _sn = rpt["1d"]["sn"]
     flux = np.asarray(rpt["1d"]["extracted_flux"][1], dtype=float)
@@ -196,24 +229,7 @@ def _one_mode(
     wl = np.asarray(wl, dtype=float)
     good = np.isfinite(wl) & np.isfinite(flux) & np.isfinite(noise) & (flux > 0) & (noise > 0)
 
-    # Native-grid saturation counts, taken BEFORE `good`: fully saturated
-    # channels have non-finite extracted noise, so `good` removes them and a
-    # post-filter count would read zero. Diagnostic only (the parity harness
-    # reads the native curves); the estimator still excludes unusable pixels.
-    n_part = _sat_curve(rpt, "n_partial_saturated", wl.shape[0])
-    n_full = _sat_curve(rpt, "n_full_saturated", wl.shape[0])
-    native_counts = {
-        "n_pix_native": int(wl.shape[0]),
-        "n_pix_unusable_dropped": int((~good).sum()),
-        "n_pix_part_sat_native": int((n_part > 0).sum()),
-        "n_pix_full_sat_native": int((n_full > 0).sum()),
-    }
-    native_masks = {
-        "wl_native": wl.tolist(),
-        "usable_native": good.tolist(),
-        "n_part_sat_native_curve": n_part.tolist(),
-        "n_full_sat_native_curve": n_full.tolist(),
-    }
+    n_part, n_full, native_counts, native_masks = _native_census(rpt, wl, good)
 
     if not good.any():
         # pandeia returned no usable pixels (e.g. NIRSpec PRISM on a bright star:
@@ -284,7 +300,7 @@ def _release(version: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _version_file(root: Path, name: str) -> tuple:
+def _version_file(root: str | Path, name: str) -> tuple:
     """Return the release from the first line of ``root/name``.
 
     VERSION_DATA for the refdata tree, VERSION_PSF for the PSF library; neither ever authenticates the other.
@@ -437,7 +453,7 @@ def main() -> None:
             **match,
             "python": sys.version.split()[0],
             "numpy": np.__version__,
-            "worker_version": job.get("worker_version"),
+            "worker_version": job["worker_version"],
         },
     }
     print(

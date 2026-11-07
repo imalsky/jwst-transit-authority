@@ -36,7 +36,8 @@ MARKERS = [
     DATA / "jwst-data" / "pandeia_data-2026.7-jwst" / "VERSION_DATA",
     DATA / "jwst-data" / "pandeia_psfs-2026.7-jwst" / "VERSION_PSF",
     DATA / "retrieval-data" / "cm24_wasp39b",
-    DATA / "retrieval-data" / "opacity_cache",
+    DATA / "retrieval-data" / "opacity_cache" / "H2-H2_2011.cia",
+    DATA / "retrieval-data" / "opacity_cache" / "H2-He_2011.cia",
 ]
 
 

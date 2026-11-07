@@ -27,9 +27,12 @@ from jwst_tool.tp_tables import read_tp_table, tp_file_from_cp
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from types import SimpleNamespace
+
+    from jwst_tool.tool_types import AnyArray, Log
 
 
-def chem_radius_anchor_bar(p_bar: np.ndarray, p_btm_dyn: float, rocky: bool) -> float:
+def chem_radius_anchor_bar(p_bar: AnyArray, p_btm_dyn: float, rocky: bool) -> float:
     """Pressure (bar) VULCAN anchors ``g = G*Mp/Rp**2`` at, for a built grid.
 
     Mirrors ``vulcan3.atm_setup.compute_mu_dz_g``: the grid INTERFACE
@@ -46,7 +49,7 @@ def chem_radius_anchor_bar(p_bar: np.ndarray, p_btm_dyn: float, rocky: bool) -> 
 
 
 def radius_at_anchor(
-    p_bar: np.ndarray, T: np.ndarray, mu: np.ndarray, rp_cm: float, gs_cgs: float, p_ref_bar: float, p_anchor_bar: float
+    p_bar: AnyArray, T: AnyArray, mu: AnyArray, rp_cm: float, gs_cgs: float, p_ref_bar: float, p_anchor_bar: float
 ) -> float:
     """Radius (cm) at ``p_anchor_bar`` given ``rp_cm`` at ``p_ref_bar``.
 
@@ -56,7 +59,7 @@ def radius_at_anchor(
         du/dlnP = k_B T / (mu m_u G M)
 
     so the anchor needs one cumulative integral and no ODE solve. The same
-    identity ``vulcan_forward.exojax_rt._radius_at`` integrates to place the RT
+    identity ``vulcan_forward._rt_geometry._radius_at`` integrates to place the RT
     grid bottom; deeper means smaller radius and stronger gravity. Evaluated at
     the exact anchor pressure, so the partial layer between it and the nearest
     grid point is accounted for rather than snapped away.
@@ -135,7 +138,7 @@ CONDEN_CFG = {
 }
 
 
-def build_tp(cp: dict, gs_cgs: float) -> tuple:
+def build_tp(cp: dict, gs_cgs: float) -> tuple[Any, int, list, list]:
     """(tp_eval, n_tp, tp_values, theta_names) for the chosen T-P mode.
 
     tp_eval(tp_params, p_bar) is pure JAX (differentiable) for the parametric
@@ -150,7 +153,7 @@ def build_tp(cp: dict, gs_cgs: float) -> tuple:
     if mode == "guillot":
         from exojax.atm.atmprof import atmprof_Guillot
 
-        def tp_eval(tp: Any, p_bar: np.ndarray) -> Any:
+        def tp_eval(tp: AnyArray, p_bar: AnyArray) -> AnyArray:
             p = jnp.asarray(p_bar)
             Tirr, Tint = tp[0], tp[1]
             kappa, gamma = 10.0 ** tp[2], 10.0 ** tp[3]
@@ -199,9 +202,8 @@ def rt_profile_common(cp: dict, config: Any) -> dict:
     return profile
 
 
-def _cfg_overrides(cp: dict, rp_cm: float, net_path: str, net_atoms: str, log: Callable[..., None]) -> tuple:
+def _cfg_overrides(cp: dict, rp_cm: float, net_path: str, net_atoms: str, log: Log) -> tuple:
     """Return the chemistry side's config overrides and the T-P table path (None for a parametric profile)."""
-    _net_path, _net_atoms = net_path, net_atoms
     tp_path = None
     ovr = {  # chemistry side (applied pre-pre-loop)
         # VULCAN derives g = G*Mp/Rp^2, so convert gs_cgs to a planet mass
@@ -209,8 +211,8 @@ def _cfg_overrides(cp: dict, rp_cm: float, net_path: str, net_atoms: str, log: C
         # the cfg network must agree with the import-frozen one (the engine
         # raises when it does not); S_H stays in the cfg under ncho, harmless
         # with an S-free atom_list
-        "network": _net_path,
-        "atom_list": _net_atoms.split(","),
+        "network": net_path,
+        "atom_list": net_atoms.split(","),
         "Rp": rp_cm,
         "r_star": cp["rstar_rsun"],
         "orbit_radius": cp["orbit_au"],
@@ -269,7 +271,7 @@ def _cfg_overrides(cp: dict, rp_cm: float, net_path: str, net_atoms: str, log: C
     return ovr, tp_path
 
 
-def _check_cfg_constants(cp: dict, config: Any, tp_path: Path | None, log: Callable[..., None]) -> Any:
+def _check_cfg_constants(cp: dict, config: Any, tp_path: Path | None, log: Log) -> Any:
     """Refuse drift between this tool's constants and the loaded cfg; return the cfg."""
     # CFG_ABUNDANCES must equal the loaded cfg's O_H/C_H/N_H/S_H: a wrong set
     # here mislabels every C/O display and every exported abundance.
@@ -297,7 +299,7 @@ def _check_cfg_constants(cp: dict, config: Any, tp_path: Path | None, log: Calla
         )
     if cp["tp_mode"] == "file":
         # Log the conventional TOP clamp (the bottom is hard-gated at the API)
-        P_tab = read_tp_table(tp_path, span=chem_p_span_dyn(cp))["P_dyn"]
+        P_tab = read_tp_table(tp_path, span=chem_p_span_dyn(cp))["P_dyn"]  # type: ignore[arg-type]  # set in table mode
         p_top_run = chem_p_span_dyn(cp)[0]
         dec = float(np.log10(P_tab.min() / p_top_run))
         if dec > 0.0:
@@ -311,7 +313,7 @@ def _check_cfg_constants(cp: dict, config: Any, tp_path: Path | None, log: Calla
 
 
 def _radius_anchor(
-    cp: dict, theta: Any, probe: Any, rp_cm: float, tp_eval: Any, rocky: bool, log: Callable[..., None]
+    cp: dict, theta: np.ndarray, probe: Any, rp_cm: float, tp_eval: Callable | None, rocky: bool, log: Log
 ) -> tuple:
     """Return (radius, gravity) at the grid level VULCAN anchors g on, given the catalogue's radius at p_ref_bar.
 
@@ -347,8 +349,21 @@ def _radius_anchor(
     return r_anchor, g_anchor
 
 
-# size-limit-ok: the factory closes over the override set and the T-P hook this function rebinds
-def assemble_chem(cp: dict, log: Callable[..., None]) -> Any:
+def _select_network(cp: dict, log: Log) -> tuple[str, str]:
+    """Set the kinetics network before vulcan_chem arrives: the engine freezes it at its first import.
+
+    Set for every network, the default included: skipping it for "sncho" would let a sncho request that follows a
+    sncho2025 run in the same process be served by sncho2025 and cached under the sncho key. A conflicting in-process
+    import raises.
+    """
+    net_path, net_atoms = NETWORKS[cp["network"]]
+    os.environ["VULCAN3_NETWORK"] = net_path
+    os.environ["VULCAN3_ATOM_LIST"] = net_atoms
+    log(f"[fwd] kinetics network: {cp['network']} ({net_path}, atoms {net_atoms})")
+    return net_path, net_atoms
+
+
+def assemble_chem(cp: dict, log: Log) -> SimpleNamespace:
     """Shared heavy-path assembly (run_model AND adjoint_diag).
 
     The resolved run profile with the structural composition pinned into cfg_overrides, the on-graph T-P hook,
@@ -360,16 +375,7 @@ def assemble_chem(cp: dict, log: Callable[..., None]) -> Any:
 
     from jwst_tool import engine_config as config
 
-    # Kinetics network: the engine freezes network/atom_list at ITS first
-    # import, so the selection must land before vulcan_chem arrives; a
-    # conflicting in-process import raises. Set for EVERY network, the default
-    # included: skipping it for "sncho" would let a sncho request that follows
-    # a sncho2025 run in the same process be served by sncho2025 and cached
-    # under the sncho key.
-    net_path, net_atoms = NETWORKS[cp["network"]]
-    os.environ["VULCAN3_NETWORK"] = net_path
-    os.environ["VULCAN3_ATOM_LIST"] = net_atoms
-    log(f"[fwd] kinetics network: {cp['network']} ({net_path}, atoms {net_atoms})")
+    net_path, net_atoms = _select_network(cp, log)
     from vulcan_forward import vulcan_chem
 
     # isort: split
@@ -377,8 +383,8 @@ def assemble_chem(cp: dict, log: Callable[..., None]) -> Any:
 
     # Persistent XLA compile cache, for adjoint_diag's step-VJP: a long cold
     # compile on CPU.
-    jax.config.update("jax_compilation_cache_dir", str(Path.home() / ".cache" / "vulcan3"))
-    jax.config.update("jax_persistent_cache_min_compile_time_secs", 1.0)
+    jax.config.update("jax_compilation_cache_dir", str(Path.home() / ".cache" / "vulcan3"))  # type: ignore[no-untyped-call]  # jax leaves it untyped
+    jax.config.update("jax_persistent_cache_min_compile_time_secs", 1.0)  # type: ignore[no-untyped-call]  # jax leaves it untyped
 
     tp_eval, n_tp, tp_vals, theta_names = build_tp(cp, cp["gs_cgs"])
     # Composition is set STRUCTURALLY in the cfg abundances (below), never as a

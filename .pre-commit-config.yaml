@@ -29,12 +29,14 @@ repos:
     rev: "v2.4.0"
     hooks:
       - id: mypy
-        # Manual: 130-odd findings are left after the annotation pass, so this reports and does not block a commit.
-        stages: [manual]
         files: ^src/
         args: []
         additional_dependencies:
           - numpy
+          - jax==0.6.2
+          - matplotlib
+          - streamlit
+          - pandas-stubs
 
   - repo: https://github.com/jsh9/pydoclint
     rev: "0.12.0"

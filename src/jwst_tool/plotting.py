@@ -7,11 +7,19 @@ from __future__ import annotations
 
 import itertools
 import threading
-from typing import Any
+from typing import TYPE_CHECKING
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import LogLocator, MaxNLocator, NullFormatter, NullLocator
+
+from jwst_tool.model_defs import T_WINDOW
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from matplotlib.axes import Axes
+    from matplotlib.figure import Figure
 
 # Reentrant so a build_* call nested inside a caller's `with render_lock:`
 # block does not deadlock.
@@ -48,7 +56,7 @@ def display_smooth(wl_um: np.ndarray, y_ppm: np.ndarray, r_bin: int) -> np.ndarr
     )
 
 
-def _thin_log_axis(ax: Any, which: str) -> None:
+def _thin_log_axis(ax: Axes, which: str) -> None:
     """Label at most ``MAX_LOG_TICKS`` decades on a log axis; no minor ticks.
 
     ``LogLocator(numticks=)`` picks the decade stride itself, so the labels
@@ -86,7 +94,7 @@ CAVEAT_MAX_CHARS = 180
 CAVEAT_STRIP_IN = 0.20
 
 
-def caveat_line(caveats: list) -> str:
+def caveat_line(caveats: Sequence[str]) -> str:
     """Return the footnote text.
 
     Each caveat cut at its first sentence or first colon, whichever comes first, then to its share of
@@ -103,7 +111,7 @@ def caveat_line(caveats: list) -> str:
     return "Model caveats: " + "; ".join(parts) + "."
 
 
-def draw_caveats(fig: Any, caveats: list) -> None:
+def draw_caveats(fig: Figure, caveats: Sequence[str]) -> None:
     """Footnote ``fig`` with the run's caveats; no-op when there are none.
 
     Grows the canvas by ``CAVEAT_STRIP_IN`` and re-seats every axes at the
@@ -122,7 +130,7 @@ def draw_caveats(fig: Any, caveats: list) -> None:
             # box matplotlib squeezed into the cell, and writing that back
             # would make the next draw squeeze it a second time.
             p = ax.get_position(original=True)
-            ax.set_position([p.x0, (p.y0 * h + CAVEAT_STRIP_IN) / h2, p.width, p.height * h / h2])
+            ax.set_position((p.x0, (p.y0 * h + CAVEAT_STRIP_IN) / h2, p.width, p.height * h / h2))
         fig.text(
             0.5, 0.5 * CAVEAT_STRIP_IN / h2, caveat_line(caveats), ha="center", va="center", fontsize=CAVEAT_FONTSIZE
         )
@@ -162,21 +170,14 @@ VMR_COLORS = {
 VMR_EXTRA_COLORS = ("#332288", "#117733", "#882255", "#AA4499", "#999933", "#44AA99", "#DDCC77", "#661100")
 
 
-# size-limit-ok: one figure laid out top to bottom
-def build_structure_figure(p_bar: np.ndarray, T_K: np.ndarray, columns: Any, caveats: list = ()) -> Any:
+def build_structure_figure(
+    p_bar: np.ndarray, T_K: np.ndarray, columns: list[tuple[str, np.ndarray]], caveats: Sequence[str] = ()
+) -> Figure:
     """T-P profile and mixing-ratio profiles as ONE two-panel figure.
 
-    Left: pressure (log, inverted) vs temperature. Right: VMR (log) vs the
-    SAME pressure axis, shared through ``sharey`` so the two panels cannot
-    disagree about the vertical scale. ``columns`` is the ordered
-    ``[(molecule, vmr_array), ...]`` the caller sorted by peak abundance, so
-    the legend reads top-down.
-
-    Axis windows are the module defaults; this figure carries no per-axis
-    controls (the panel it belongs to has no figure-settings block).
-
-    ``caveats``: the run caveats the page shows, footnoted along the bottom
-    margin so a downloaded figure keeps them (``draw_caveats``).
+    Left: pressure (log, inverted) vs temperature. Right: VMR (log) vs the same pressure axis, through ``sharey``.
+    ``columns`` is ``[(molecule, vmr_array), ...]`` sorted by peak abundance, so the legend reads top-down. ``caveats``
+    are footnoted in the bottom margin, so a download keeps them.
     """
     p = np.asarray(p_bar, dtype=float)
     T = np.asarray(T_K, dtype=float)
@@ -200,7 +201,7 @@ def build_structure_figure(p_bar: np.ndarray, T_K: np.ndarray, columns: Any, cav
 
         ax_t.plot(T, p, color=TP_COLOR, lw=STRUCT_LW)
         # the chemistry grid's validated temperature span
-        for tlim in (320.0, 2980.0):
+        for tlim in T_WINDOW:
             ax_t.axvline(tlim, color="#cccccc", lw=0.8, ls=":")
         ax_t.set_xlim(*TP_XLIM_DEFAULT)
         # 4-digit temperature labels collide on a small box at the default
@@ -219,12 +220,8 @@ def build_structure_figure(p_bar: np.ndarray, T_K: np.ndarray, columns: Any, cav
         _thin_log_axis(ax_v, "x")
         ax_v.set_xlabel("volume mixing ratio")
 
-        # ONE pressure axis for both panels (sharey), inverted once. Tick
-        # labels are drawn on BOTH panels (plt.subplots(sharey=True) hides
-        # the right panel's, which would leave the mixing-ratio panel with no
-        # visible pressure scale across the gap), but the "pressure (bar)"
-        # label appears ONCE, at the far left of the figure -- never between
-        # the panels (maintainer decision).
+        # One pressure axis, inverted once. Tick labels on both panels (sharey hides the right panel's), the "pressure
+        # (bar)" label once, at the far left (maintainer decision).
         ax_t.set_yscale("log")
         ax_t.invert_yaxis()
         _thin_log_axis(ax_t, "y")

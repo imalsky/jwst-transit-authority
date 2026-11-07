@@ -1,6 +1,4 @@
-"""P and volume mixing ratios of six species from the two VULCAN outputs behind the chemistry validation figure.
-
-(VULCAN 2.0 vs VULCAN 3.0 on identical inputs).
+"""Pressure and mixing ratios of six species from VULCAN 2.0 and 3.0 runs on identical inputs, for the chemistry figure.
 
     python validation/scripts/inputs/extract_vul_columns.py <master.vul> <jax.vul>
 

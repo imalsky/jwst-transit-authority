@@ -9,34 +9,9 @@ through it vulcan3), never on vulcan-retrieval.
 Generic rules (code, docs, git, reviews, jobs) are in the maintainer's global rules, and the shared policy is in the
 project-root `CLAUDE.md`. This file holds only what is unique to this repo.
 
-## Maintainer rules (all repos)
+## Maintainer rules
 
-These five rules are identical in the project-root CLAUDE.md and every repo's; change
-them together.
-
-- **Layout.** Keep code, data and generated files apart. Shipped code, tests, inputs,
-  fixtures and validation assets stay where the repo's CLAUDE.md puts them. Work asked
-  for outside the product (analysis, one-off scripts and checks, their figures and
-  results) goes to `scratch/<topic>/`, one folder per question; run results go to
-  `output/`, and vulcan3's own figures to `plot/`. Keep these three top-level folders
-  gitignored and never commit their contents; never put such work in `src/`, `tests/`,
-  `tools/`, `validation/`, `data/` or the repo root. A durable conclusion goes to
-  notes.md; a reusable check becomes a tracked test or validation script.
-- **Figures.** An ad hoc plot request gets 1 to 3 figures, more only when asked, from one
-  script in `scratch/<topic>/`: no helper module, style layer or extra variants.
-- **Branches.** Work in the existing checkout on `main`. Create no branch, worktree or
-  copy of the repo, and switch no branch, unless the maintainer asks.
-- **Behind main.** At the start of work in a checkout, `git fetch origin`, then
-  `git rev-list --count HEAD..origin/main`. If the count is above 0, tell the
-  maintainer at once; if the fetch fails, say the state is unknown. This alerts and does
-  not block; never pull, rebase or reset unasked. Check again before a commit, a push or
-  a job on daw or NAS.
-- **Tests.** After a change, run the tests that cover it (a file or `-k`). Before a
-  push, run the normal tier (under 10 minutes on daw; CI runs it too). Anything longer
-  (the full tier, oracle comparisons, regenerating validation data or figures) runs
-  only before a release or a production run, or when the maintainer asks. When a change
-  touches what such a run covers, name the run and its rough cost in the report; do not
-  start it unasked.
+Layout, Figures, Branches, Behind main and Tests are in the project-root `CLAUDE.md`, under "Maintainer rules".
 
 ## Docs
 
@@ -79,10 +54,12 @@ skill; policy: the project-root `CLAUDE.md`.
   `JAX_PLATFORMS=cpu` and points an unset `JWST_TOOL_OUTPUT_DIR` at a throwaway directory, so it never writes into
   `output/`.
 - Slow tier (`JWST_TOOL_RUN_SLOW=1`, real `output/` caches): the FD/AD closures, the e2e of both engines against
-  `tests/live/data/`, and the PICASO live tests. It runs for hours (notes "Current state"): before a release or when the
-  maintainer asks.
-- Lint: `uvx pre-commit run --all-files` must pass; `python3 tools/check_size_limits.py` holds the size limits, and mypy
-  is a manual hook (`uvx pre-commit run mypy --all-files --hook-stage manual`).
+  `tests/live/data/`, and the PICASO live tests. Parallel, one thread per worker, so its time is its longest test (notes
+  "Current state"): `JWST_TOOL_RUN_SLOW=1 OMP_NUM_THREADS=1 XLA_FLAGS="--xla_cpu_multi_thread_eigen=false
+  intra_op_parallelism_threads=1" taskset -c <15 CPUs> python -m pytest tests -q -n 14 --dist worksteal --durations=25`,
+  as a user unit, before a release or when the maintainer asks.
+- Lint: `uvx pre-commit run --all-files` must pass; `python3 tools/check_size_limits.py` holds the size limits. mypy is a
+  hook, with real stubs for numpy, jax, matplotlib, streamlit and pandas.
 
 ## Rules
 

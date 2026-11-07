@@ -21,13 +21,17 @@ names the code state it was measured on.
   42 min on daw).
 - Tests. Normal suite `python -m pytest tests -q -n 6`; `tests/conftest.py` defaults
   `JAX_PLATFORMS=cpu` and points an unset `JWST_TOOL_OUTPUT_DIR` at a throwaway
-  directory. `tests/unit` on daw (6 pinned cores): 405 passed, 4 skipped in 35-38 s. CI
+  directory. `tests` on daw (6 pinned cores): 482 passed, 18 skipped in 52 s [M]. CI
   runs the unit suite on Python 3.10-3.12 plus a GUI-smoke job; `full-stack-smoke.yml`
-  runs by hand. Slow tier (`JWST_TOOL_RUN_SLOW=1`, serial, 8 cores, v61): 419 passed in
-  3 h 21 min plus the TOI-7169 b test's 48 min re-run (it now solves in a child process:
-  its case is on sncho, the suite's process freezes sncho2025). At tool 0.71.0: 345 in
-  4 h 07 min; longest: emission AD/FD closure 4310 s (config cadence) / 2551 s (cadence
-  1), TOI-7169 b escalation 3498 s, transmission closure 1933 / 1381 s, e2e 512 s per mode.
+  runs by hand. Slow tier (`JWST_TOOL_RUN_SLOW=1`), parallel on 15 CPUs, one thread per
+  worker: `pytest tests -q -n 14 --dist worksteal` (CLAUDE.md), 511 passed, 2 skipped in
+  79 min under load [M, tool 0f6392d, vulcan-forward b1ec05a, vulcan3 0db0361]; nothing
+  requires serial. Longest: emission closure 3635 s (config cadence) / 2602 s (cadence
+  1), TOI-7169 b escalation 2473 s, transmission closure 1693 / 1097 s, PICASO e2e 1403 /
+  1283 s, VULCAN e2e 373 / 240 s. A worker's next test cannot be stolen, so two neighbours
+  add: this run's time is the transmission cadence-1 closure then the emission closure.
+  With the two emission closures as neighbours one worker ran both and passed 90 min, so
+  they sit apart in `test_closure.py`. Alone, on one core: cadence-1 emission 2514 s.
 - Space, at the last Hub API read: `imalsky/jwst-transit-authority` RUNNING on cpu-basic
   (2 vCPU / 16 GB), sleep 48 h. The four live checks (cold transmission run, cold
   emission run, configuration export and reload, out-of-range metallicity refusal with
@@ -347,6 +351,14 @@ gate 0.25.
   (~0.25% of the dlnCO row, invisible to the gate). Only `NotCertified` triggers it; a
   backend fault, the element gate, the emission gate and the T window propagate. A
   chem-cache hit of an escalated column rebuilds at cadence 1.
+- What relies on it, measured on every case below at nz 100, cadence 5, cap 30000, vulcan3 b8e3cef: 0 of 56 finished
+  requests escalate [M]. Eight presets (four planets, both modes) baseline and with AD lnZ + dlnCO rows; WASP-39 b FD
+  rows, transmission lnZ, dlnCO, lnKzz and emission lnZ, dlnCO; C/O ladders 0.1-0.99 on sncho and 0.1-10 on sncho2025 and
+  ncho, photolysis on; metallicity 0.1, 1, 30, 100; Guillot on sncho and ncho in both modes. Steps 854-7892. The one
+  case that fires, sncho2025 C/O 1.03 (the notch in "Composition, C/O bounds and networks"), hits the cap after about
+  34 min at cadence 5 and was still in its cadence-1 solve at the 55 min limit. Known to depend on it: the TOI-7169 b +h
+  point below, and the LP 714-47 b AD lnZ row ("Composition, C/O bounds and networks"), which needs the retry's 30000
+  steps rather than its cadence. The cadence survey's raw outputs are deleted and its record does not count escalations.
 - Escalated FD rows end to end (TOI-7169 b CO case,
   `tests/live/data/toi7169_co_case.json`: C/O 0.55, 10x, FD dlnCO + lnZ; 72 min cold,
   ~52 of them in the two failing cadence-5 solves): h-vs-2h dlnCO 0.084, lnZ 0.034;
@@ -666,6 +678,16 @@ Standing maintainer decisions; the measurements sit in the section named.
 
 None changes a shipped number.
 
+- A certificate says the gates held when the run exited, not that the column stays there.
+  Run on past it at nz 100 on WASP-39 b [M]: 18 of 18 transmission FD points stay steady
+  (default `file` T-P and Guillot `ncho`), and 8 of 8 emission points are neither steady nor
+  periodic: their certificates land in a `dt` dip (1e-7 to 4e-4 of the run-on median),
+  the gates hold in under 1 % of later samples, and the swings sit at 2-3e-6 bar. The answer
+  holds anyway: the binned emission spectrum moves at most 0.25 ppm against an FD signal of
+  25-54 ppm and noise of 76-414 ppm per bin, the certified column is within 0.07 ppm of the
+  run-on mean, and sigma moves within 0.17 % on NIRSpec (MIRI lnZ -1.63 to +0.85 %, where it
+  is unconstrained, sigma 6.5). A persistence check would refuse default emission FD columns
+  [I]. Not measured: Guillot on the sulfur network, HD 189733 b, AD rows.
 - Box transit; one fixed configuration per mode; the LSF no-op on the high-R gratings and
   NIRCam; emission absorption-only (exojax's `ArtEmisScat` needs per-layer albedos the
   deck cannot supply); HSO, S2, CS2 without line lists; the C/O shortfall of the solved
@@ -673,6 +695,12 @@ None changes a shipped number.
   (`p_ref_bar` not re-tuned); HD 189733 b without haze and its eclipse ~130 ppm high;
   photolysis-off chemistry AD refused; the near-unity C/O row read one-sided; the G395M
   noise factor extrapolated from G395H.
+- WASP-39 b Guillot `ncho` at nz 60 has no certified FD Tirr row. The +1h column (Tirr 1650 K) sits in an exact limit
+  cycle at the step cap: longdy 0.192 at cadence 5 and 0.313 at cadence 1, repeating every 50 accepted steps at cadence 5
+  [M]. More steps cannot end it, so the run refuses, with no retry and no early stop, and the refusal names raising `nz`.
+  At nz 100 all four stencil points certify, h-vs-2h 0.184 [M], while the same setup's lnKzz row refuses at h-vs-2h 0.699
+  (gate 0.25) [M]. nz 60 is the floor of `NZ_RANGE`; Guillot and `ncho` are non-default. The -1h column (1630 K) certifies at 2208 steps, but run on, both gates hold in one sample of 10000 steps
+  and it then enters an exact 200-step cycle, longdy 0.19-0.86 [M]: a certificate can pass on a transient (todo).
 - CI skips the slow tier; the parity matrix shares PandExo's stellar spectrum;
   third-party data is not redistributed; cache identity is canonical params +
   hand-bumped versions; the worker ramp is transit-independent; stellar contamination,
@@ -697,7 +725,9 @@ Real, small, and out of todo.md by decision; nothing here changes a shipped numb
 - The archive snapshot carries two unread columns (`st_spectype`, `pl_bmassprov`); drop
   them at the next networked `archive-refresh`.
 - `adjoint_diag.run_adjoint` on the default WASP-39 b state is refused by its own scope
-  audit at every probe step; the module stays (maintainer decision).
+  audit at every probe step; the module stays (maintainer decision). Tightening `yconv_cri`
+  does not help there: 1e-2, 1e-3 and 1e-4 gave a bit-identical converged state, longdy
+  0.0997 in all three [M].
 - `pandexo_worker._pandexo_commit` has no unit test; check it by hand at the next parity
   run.
 - A PICASO Guillot/file configuration for the custom planet restores the registry

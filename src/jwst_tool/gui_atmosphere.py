@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 import streamlit as st
 
 from jwst_tool import model_defs, planets, run_params, share_config, tp_tables
 from jwst_tool.gui_common import K
-from jwst_tool.gui_inputs import Atmosphere, Target
+from jwst_tool.gui_inputs import Atmosphere, Clouds, Mixing, Photochemistry, Profile, Target
 from jwst_tool.gui_sources import KSRC_WARN
+
+if TYPE_CHECKING:
+    from jwst_tool.tool_types import KeyFn
 
 _W = share_config.WIDGET_RANGES
 
@@ -31,7 +33,7 @@ def _engine_section() -> tuple[bool, str]:
                 format_func={
                     "vulcan": "VULCAN-JAX (photochemical kinetics)",
                     "picaso": "PICASO (climate + equilibrium chemistry)",
-                }.get,
+                }.__getitem__,
             )
             == "picaso"
         )
@@ -90,7 +92,7 @@ def _table_source(target: Target) -> tuple:
         format_func={
             model_defs.TP_FILE_SHIPPED: f"Shipped measured profile ({ship_name})",
             model_defs.TP_FILE_UPLOAD: "Upload an array",
-        }.get,
+        }.__getitem__,
     )
     if not ship_name:
         st.warning(
@@ -133,14 +135,8 @@ def _table_source(target: Target) -> tuple:
                 st.error(f"The restored T-P table is not usable: {e} Upload the table again.")
                 tp_file_ok = False
         elif up_tp is not None:
-            raw_tp = up_tp.getvalue()
-            sha_tp = hashlib.sha1(raw_tp).hexdigest()[:16]
-            dst_tp = tp_tables.uploads_dir() / f"{sha_tp}.txt"
-            dst_tp.parent.mkdir(parents=True, exist_ok=True)
-            # staged like share_config: validated BEFORE it enters
-            # the archive, so a rejected upload leaves nothing behind
-            tmp_tp = dst_tp.with_name(f".{sha_tp}.{os.getpid()}.tmp")
-            tmp_tp.write_bytes(raw_tp)
+            # validated BEFORE it enters the archive, so a rejected upload leaves nothing behind
+            tmp_tp, dst_tp = tp_tables.stage_upload(up_tp.getvalue())
             try:  # loud validation, immediate
                 tp_tables.read_tp_table(tmp_tp)
                 os.replace(tmp_tp, dst_tp)  # atomic commit
@@ -156,7 +152,7 @@ def _table_source(target: Target) -> tuple:
     return tp_file, tp_file_path, tp_file_ok
 
 
-def _tp_section(target: Target, pic: bool, chem_provider: str) -> tuple:
+def _tp_section(target: Target, pic: bool, chem_provider: str) -> Profile:
     """Draw the T-P profile; return (tp_mode, its settings, table source, table path, whether a table is usable)."""
     planet_key, pdef, science_mode, k = target.planet_key, target.pdef, target.science_mode, target.k
     with st.expander("Temperature-pressure profile"):
@@ -192,7 +188,7 @@ def _tp_section(target: Target, pic: bool, chem_provider: str) -> tuple:
                 "picaso_climate": "Radiative-convective (PICASO climate)",
                 "guillot": "Guillot (2010)",
                 "file": ("Tabulated table (T-P)" if pic else "Tabulated table (T-P, optional Kzz)"),
-            }.get,
+            }.__getitem__,
         )
         tp_kwargs = {}
         tp_file, tp_file_path, tp_file_ok = "", None, True
@@ -218,7 +214,7 @@ def _tp_section(target: Target, pic: bool, chem_provider: str) -> tuple:
             tp_kwargs = _guillot_boxes(target)
         elif tp_mode == "file":
             tp_file, tp_file_path, tp_file_ok = _table_source(target)
-    return tp_mode, tp_kwargs, tp_file, tp_file_path, tp_file_ok
+    return Profile(tp_mode, tp_kwargs, tp_file, tp_file_path, tp_file_ok)
 
 
 def _pressure_section(science_mode: str, tp_mode: str) -> tuple:
@@ -271,7 +267,7 @@ def _composition_section() -> tuple:
     return met, co_ratio
 
 
-def _kzz_section(k: Any, pic: bool, tp_mode: str) -> tuple:
+def _kzz_section(k: KeyFn, pic: bool, tp_mode: str) -> Mixing:
     with st.expander("Vertical mixing (Kzz)"):
         picaso_quench = False
         if pic:
@@ -304,7 +300,7 @@ def _kzz_section(k: Any, pic: bool, tp_mode: str) -> tuple:
                     "Pfunc": "Power law in P",
                     "JM16": "Moses-type P^-0.5 (JM16)",
                     "file": "Tabulated (Kzz column of the T-P table)",
-                }.get,
+                }.__getitem__,
             )
             kzz_const = kzz_kmax = kzz_plev = kzz_kdeep = 0.0
             kzz_x = 1.0
@@ -320,10 +316,10 @@ def _kzz_section(k: Any, pic: bool, tp_mode: str) -> tuple:
                 )
             if kzz_mode != "const":
                 kzz_x = 10.0 ** st.number_input("Kzz profile multiplier, log10(f)", *_W["kzzx"], 0.05, key=k("kzzx"))
-    return picaso_quench, kzz_mode, kzz_x, kzz_const, kzz_kmax, kzz_plev, kzz_kdeep
+    return Mixing(picaso_quench, kzz_mode, kzz_x, kzz_const, kzz_kmax, kzz_plev, kzz_kdeep)
 
 
-def _photochemistry_section(pic: bool) -> tuple:
+def _photochemistry_section(pic: bool) -> Photochemistry:
     if pic:  # VULCAN-JAX settings; none of them is sent under PICASO
         network, use_photo, use_moldiff, use_vm_mol = "", False, False, False
         sl_angle_deg, f_diurnal = 0.0, 1.0
@@ -337,7 +333,7 @@ def _photochemistry_section(pic: bool) -> tuple:
                     "sncho2025": "S-N-C-H-O 2025 (default)",
                     "sncho": "S-N-C-H-O 2021",
                     "ncho": "N-C-H-O (no sulfur, faster)",
-                }.get,
+                }.__getitem__,
             )
             if K("photo") not in st.session_state:
                 st.session_state[K("photo")] = True
@@ -359,9 +355,7 @@ def _photochemistry_section(pic: bool) -> tuple:
                 "Upwind molecular-diffusion advection", value=False, key=K("vmmol"), disabled=not use_moldiff
             )
 
-    # Opacity settings live in the Atmosphere step so extra_mols is a
-    # live variable by step 3.
-    return network, use_photo, use_moldiff, use_vm_mol, sl_angle_deg, f_diurnal
+    return Photochemistry(network, use_photo, use_moldiff, use_vm_mol, sl_angle_deg, f_diurnal)
 
 
 def _opacity_section(pic: bool, network: str, ksrc: dict, ksrc_err: str | None) -> tuple:
@@ -409,7 +403,7 @@ def _opacity_section(pic: bool, network: str, ksrc: dict, ksrc_err: str | None) 
     return base_set, extra_set, extra_mols
 
 
-def _cloud_section(target: Target) -> tuple:
+def _cloud_section(target: Target) -> Clouds:
     science_mode, g_ms2, rp, teq = target.science_mode, target.g_ms2, target.rp, target.teq
     with st.expander("Clouds & scattering (ExoJAX)"):
         if K("rayl") not in st.session_state:
@@ -438,7 +432,7 @@ def _cloud_section(target: Target) -> tuple:
                 cmode_opts,
                 horizontal=True,
                 key=K("cmode"),
-                format_func={"haze": "Power-law haze", "gray": "Gray cloud"}.get,
+                format_func={"haze": "Power-law haze", "gray": "Gray cloud"}.__getitem__,
             )
         cloud_top_bar = None
         if cloud_on and cloud_mode == "gray":
@@ -455,52 +449,32 @@ def _cloud_section(target: Target) -> tuple:
             alpha_cloud = st.number_input("Cloud spectral slope alpha (kappa ∝ nu^alpha)", *_W["ca"], 0.25, key=K("ca"))
         else:
             log_kappa_cloud, alpha_cloud = -1.0, 0.0
-    return use_rayleigh, cloud_on, cloud_mode, cloud_top_bar, log_kappa_cloud, alpha_cloud
+    return Clouds(use_rayleigh, cloud_on, cloud_mode, cloud_top_bar, log_kappa_cloud, alpha_cloud)
 
 
 def atmosphere_step(target: Target, ksrc: dict, ksrc_err: str | None) -> Atmosphere:
     """Draw step 2 and return its settings."""
     pic, chem_provider = _engine_section()
-    tp_mode, tp_kwargs, tp_file, tp_file_path, tp_file_ok = _tp_section(target, pic, chem_provider)
-    rt_ptop_bar, p_ref_bar, p_btm_bar = _pressure_section(target.science_mode, tp_mode)
+    profile = _tp_section(target, pic, chem_provider)
+    rt_ptop_bar, p_ref_bar, p_btm_bar = _pressure_section(target.science_mode, profile.tp_mode)
     met, co_ratio = _composition_section()
-    picaso_quench, kzz_mode, kzz_x, kzz_const, kzz_kmax, kzz_plev, kzz_kdeep = _kzz_section(target.k, pic, tp_mode)
-    network, use_photo, use_moldiff, use_vm_mol, sl_angle_deg, f_diurnal = _photochemistry_section(pic)
-    base_set, extra_set, extra_mols = _opacity_section(pic, network, ksrc, ksrc_err)
-    use_rayleigh, cloud_on, cloud_mode, cloud_top_bar, log_kappa_cloud, alpha_cloud = _cloud_section(target)
+    mixing = _kzz_section(target.k, pic, profile.tp_mode)
+    photo = _photochemistry_section(pic)
+    base_set, extra_set, extra_mols = _opacity_section(pic, photo.network, ksrc, ksrc_err)
+    clouds = _cloud_section(target)
     return Atmosphere(
-        pic=pic,
-        chem_provider=chem_provider,
-        tp_mode=tp_mode,
-        tp_kwargs=tp_kwargs,
-        tp_file=tp_file,
-        tp_file_path=tp_file_path,
-        tp_file_ok=tp_file_ok,
-        rt_ptop_bar=rt_ptop_bar,
-        p_ref_bar=p_ref_bar,
-        p_btm_bar=p_btm_bar,
-        met=met,
-        co_ratio=co_ratio,
-        picaso_quench=picaso_quench,
-        kzz_mode=kzz_mode,
-        kzz_x=kzz_x,
-        kzz_const=kzz_const,
-        kzz_kmax=kzz_kmax,
-        kzz_plev=kzz_plev,
-        kzz_kdeep=kzz_kdeep,
-        network=network,
-        use_photo=use_photo,
-        use_moldiff=use_moldiff,
-        use_vm_mol=use_vm_mol,
-        sl_angle_deg=sl_angle_deg,
-        f_diurnal=f_diurnal,
-        base_set=base_set,
-        extra_set=extra_set,
-        extra_mols=extra_mols,
-        use_rayleigh=use_rayleigh,
-        cloud_on=cloud_on,
-        cloud_mode=cloud_mode,
-        cloud_top_bar=cloud_top_bar,
-        log_kappa_cloud=log_kappa_cloud,
-        alpha_cloud=alpha_cloud,
+        pic,
+        chem_provider,
+        profile,
+        rt_ptop_bar,
+        p_ref_bar,
+        p_btm_bar,
+        met,
+        co_ratio,
+        mixing,
+        photo,
+        base_set,
+        extra_set,
+        extra_mols,
+        clouds,
     )

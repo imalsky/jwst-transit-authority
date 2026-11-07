@@ -5,7 +5,6 @@ Method and contract: docs/gui_and_sharing.md, section `share_config`.
 
 from __future__ import annotations
 
-import hashlib
 import math
 import os
 import re
@@ -14,7 +13,9 @@ from typing import TYPE_CHECKING, Any
 from jwst_tool import fisher, instruments as ins, model_defs, picaso_engine, planets, provenance, run_params, tp_tables
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Collection
+
+    from jwst_tool.tool_types import KeyFn
 
 SHARE_FORMAT = 1
 
@@ -37,7 +38,7 @@ def reserved_combo_names() -> set:
 # of the two. Values canonical_params range-checks itself (nz, p_btm_bar,
 # rfacv, C/O, metallicity) are refused there, before this check runs, and are
 # not listed.
-WIDGET_RANGES = {
+WIDGET_RANGES: dict[str, tuple[Any, ...]] = {
     **planets.CUSTOM_FIELD_RANGES,
     "tbase": (0.5, 20.0),
     "tirr": (800.0, 2500.0),
@@ -73,7 +74,7 @@ WIDGET_RANGES = {
 }
 
 
-def _check_widget_ranges(state: dict, key: Callable[[str], str], pk: Callable[[str], str]) -> None:
+def _check_widget_ranges(state: dict, key: KeyFn, pk: KeyFn) -> None:
     """Refuse any restored numeric outside its widget's range.
 
     Streamlit does not reject an out-of-range session-state value: it
@@ -151,7 +152,7 @@ def _log10(value: float, name: str) -> float:
     return math.log10(v)
 
 
-def widget_state(cfg: dict, key: Callable[[str], str]) -> dict:
+def widget_state(cfg: dict, key: KeyFn) -> dict:
     """Map a shared configuration onto widget session-state keys.
 
     ``key`` is the app's widget-key namespacer (``gui_common.K``). Returns the
@@ -206,16 +207,12 @@ def _resolve_embedded_tp(cp: dict, cfg: dict) -> tuple:
         text = cfg.get("tp_table_text")
         if text:
             raw = str(text).encode()
-            sha = hashlib.sha1(raw).hexdigest()[:16]
-            destination = tp_tables.uploads_dir() / f"{sha}.txt"
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            if destination.exists():
-                restored = str(destination)
+            existing = tp_tables.uploads_dir() / f"{tp_tables.content_key(raw)}.txt"
+            if existing.exists():
+                restored = str(existing)
             else:
-                temporary = destination.with_name(f".{sha}.{os.getpid()}.tmp")
-                temporary.write_bytes(raw)
-                pending = (temporary, destination)
-                restored = str(temporary)
+                pending = tp_tables.stage_upload(raw)
+                restored = str(pending[0])
         else:
             sha = str(cp.get("tp_file_sha1", ""))
             # an archive KEY (sha1[:16]), never a path: the file is untrusted
@@ -238,9 +235,7 @@ def _resolve_embedded_tp(cp: dict, cfg: dict) -> tuple:
     return canonical, restored, pending
 
 
-def _restore_goal(
-    state: dict, cp: dict, goal: dict, key: Callable[[str], str], tp_mode: str, cloud_mode: str = "haze"
-) -> None:
+def _restore_goal(state: dict, cp: dict, goal: dict, key: KeyFn, tp_mode: str, cloud_mode: str) -> None:
     pic = _is_picaso(cp)
     network = str(cp["network"])
     suffix = goal_suffix(pic, tp_mode, cp["cloud_on"], cloud_mode)
@@ -284,7 +279,7 @@ def _restore_goal(
         state[key(f"fx_{suffix}")] = [p for p in fisher if p != goal_param]
 
 
-def _offered(what: str, values: dict, options: Any) -> None:
+def _offered(what: str, values: list, options: Collection[str]) -> None:
     """Refuse a restored selection the interface does not offer.
 
     Dropping it would run a different setup than the file describes.
@@ -315,9 +310,7 @@ def _restore_combos(obs: dict) -> list[dict]:
     return combos
 
 
-def _restore_observation(
-    state: dict, obs: dict, cfg: dict, key: Callable[[str], str], pk: Callable[[str], str]
-) -> None:
+def _restore_observation(state: dict, obs: dict, cfg: dict, key: KeyFn, pk: KeyFn) -> None:
     if not obs:
         return
     for source, widget, cast in (
@@ -334,7 +327,7 @@ def _restore_observation(
     _offered("instrument mode", modes, ins.MODES)
     if modes:
         state[key("modes")] = modes
-    for source, widget, cast in (
+    for source, widget, cast in (  # type: ignore[assignment]  # float then int: each is a converter
         ("n_transits", "ntr", int),
         ("sat_limit", "sat", float),
         ("r_bin", "rbin", int),
@@ -368,7 +361,7 @@ def _restore_observation(
 
 
 def _restore_system_profile(
-    cp: dict, key: Callable[[str], str], pk: Callable[[str], str], planet: str, tp_mode: str, restored_tp: str | None
+    cp: dict, key: KeyFn, pk: KeyFn, planet: str, tp_mode: str, restored_tp: str | None
 ) -> dict:
     state = {
         key("planet"): planet,
@@ -477,14 +470,14 @@ def free_parameters(pic: bool, tp_mode: str, cloud_on: bool, cloud_mode: str) ->
     return avail
 
 
-def _restore_picaso_physics(state: dict, cp: dict, key: Callable[[str], str], pk: Callable[[str], str]) -> None:
+def _restore_picaso_physics(state: dict, cp: dict, key: KeyFn, pk: KeyFn) -> None:
     quench = bool(cp["picaso_quench"])
     state[key("quench_picaso")] = quench
     if quench:
         state[pk("kzz")] = _log10(cp["kzz_const"], "kzz_const")
 
 
-def _restore_vulcan_physics(state: dict, cp: dict, key: Callable[[str], str], pk: Callable[[str], str]) -> None:
+def _restore_vulcan_physics(state: dict, cp: dict, key: KeyFn, pk: KeyFn) -> None:
     state[key("network")] = str(cp["network"])
     mode = str(cp["kzz_mode"])
     state[pk("kzzmode")] = mode
@@ -511,14 +504,14 @@ def _restore_vulcan_physics(state: dict, cp: dict, key: Callable[[str], str], pk
     _reject_removed_physics(cp)
 
 
-def _restore_rt_state(state: dict, cp: dict, key: Callable[[str], str], cloud_top_bar: float | None = None) -> None:
+def _restore_rt_state(state: dict, cp: dict, key: KeyFn, cloud_top_bar: float | None) -> None:
     state[key("rayl")] = bool(cp["use_rayleigh"])
     state[key("cloud")] = bool(cp["cloud_on"])
     if cp["cloud_on"]:
         gray = cloud_top_bar is not None
         state[key("cmode")] = "gray" if gray else "haze"
         if gray:
-            state[key("cpt")] = _log10(cloud_top_bar, "cloud_top_bar")
+            state[key("cpt")] = _log10(cloud_top_bar, "cloud_top_bar")  # type: ignore[arg-type]  # gray means it is set
         else:
             state[key("ck")] = float(cp["log_kappa_cloud"])
             state[key("ca")] = float(cp["alpha_cloud"])
@@ -535,7 +528,7 @@ def _restore_rt_state(state: dict, cp: dict, key: Callable[[str], str], cloud_to
     )
 
 
-def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key: Callable[[str], str]) -> dict:
+def _widget_state(cp: dict, goal: dict, obs: dict, cfg: dict, key: KeyFn) -> dict:
     # canonical_params refuses the removed opacity keys (mie_condensate,
     # opacity_mode) with their removal message; everything below reads its
     # output, so the restore is the run canonical_params would compute.

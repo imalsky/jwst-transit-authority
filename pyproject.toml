@@ -56,8 +56,8 @@ Homepage = "https://github.com/imalsky/jwst-transit-authority"
 Repository = "https://github.com/imalsky/jwst-transit-authority"
 
 [project.optional-dependencies]
-# streamlit floor: app.py uses the width="stretch" API on st.button/st.pyplot/
-# st.dataframe, introduced for those widgets by 1.49.0.
+# streamlit floor: the GUI uses the width="stretch" API on st.button and st.dataframe,
+# introduced for those widgets by 1.49.0.
 gui = ["streamlit>=1.49", "pandas"]
 dev = ["ruff>=0.11", "build>=1.2", "twine>=5"]
 
@@ -72,7 +72,7 @@ include-package-data = false
 where = ["src"]
 
 [tool.setuptools.package-data]
-# the vendored house figure style app.py loads at startup + the per-release
+# the vendored house figure style the GUI loads at startup + the per-release
 # NASA Exoplanet Archive snapshot behind the custom-planet fill
 jwst_tool = ["science.mplstyle", "exoplanet_archive_pscomppars.csv"]
 
@@ -195,7 +195,11 @@ addopts = ["-ra", "--tb=short", "--strict-markers", "--strict-config"]
 xfail_strict = true
 log_level = "INFO"
 testpaths = ["tests"]
-filterwarnings = ["error"]
+filterwarnings = [
+    "error",
+    # ExoJAX's ArtTransPure warns when built without a grid; vulcan-forward sets it afterwards. Reached only by live solves.
+    "ignore:nu_grid is not given:UserWarning",
+]
 markers = [
     "slow: minutes or more with the real caches; skipped unless JWST_TOOL_RUN_SLOW=1",
     "gpu: needs a GPU; runs locally, never in CI",
@@ -223,8 +227,15 @@ disallow_incomplete_defs = false
 # ndarray type parameters add nothing here: shapes and dtypes are in the comments beside each array.
 disallow_any_generics = false
 ignore_missing_imports = true
+# numpy and the dict payloads return Any at nearly every float(...)-free return; the signature states the value's type.
+warn_return_any = false
 
 [[tool.mypy.overrides]]
 module = "jwst_tool.*"
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+
+# Ranges reach st.number_input splatted from WIDGET_RANGES, which Streamlit's int-or-float overloads cannot match.
+[[tool.mypy.overrides]]
+module = ["jwst_tool.gui_sidebar", "jwst_tool.gui_atmosphere"]
+disable_error_code = ["call-overload"]

@@ -5,7 +5,7 @@ through the symlinked input_data tree), lines only over 3.03-5.17 um. petitRADTR
 neither vulcan_forward nor jwst_tool, so the k-table tree is read straight from the engine's data-root contract
 ($VULCAN_FORWARD_DATA, what vulcan_forward.paths.exomolop_dir() resolves):
 
-    ~/VULCAN_Project/.prt-env/bin/python validation/scripts/inputs/prt_reference.py validation/data/atmos_*.npz
+    <pRT-python> validation/scripts/inputs/prt_reference.py validation/data/atmos_*.npz
 """
 
 import hashlib

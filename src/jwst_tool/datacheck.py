@@ -1,4 +1,4 @@
-"""Detect every external dataset the tool touches and report present, missing or fetched on first use.
+"""Detect every external dataset the tool touches and report it present or missing.
 
 Detection never replaces the loud runtime failures; it makes the state visible up front, with the exact remedy. No jax
 or streamlit at module scope; model_defs and ``jwst_tool.engine_config`` load lazily.
@@ -17,11 +17,10 @@ from pathlib import Path
 from typing import Any
 
 from jwst_tool import instruments as ins, planets
+from jwst_tool.model_defs import NO_EXOMOLOP_TABLE
 
-#: OK = present; MISSING = absent until fetched (``jwst-tool fetch`` or the
-#: item's remedy); AUTO = fetched automatically on first use (network
-#: required then)
-OK, MISSING, AUTO = "ok", "missing", "on-first-use"
+#: OK = present; MISSING = absent until fetched (``jwst-tool fetch`` or the item's remedy)
+OK, MISSING = "ok", "missing"
 
 
 @dataclass
@@ -30,7 +29,7 @@ class Item:
 
     key: str  # stable machine key, e.g. "ktable:NH3"
     label: str  # human name, e.g. "NH3 ExoMolOP k-table"
-    status: str  # OK / MISSING / AUTO
+    status: str  # OK / MISSING
     required: bool  # required for ANY run (vs opt-in feature data)
     detail: str  # what was found / which path is missing
     remedy: str = ""  # exact command / URL / pointer to get it
@@ -80,14 +79,11 @@ def check_python_stack() -> list[Item]:
 
 
 def _engine_config() -> Any:
-    """Return the engine-config view, or an exception instance whose text is the status detail.
-
-    (an unset/wrong $VULCAN_FORWARD_DATA raises here).
-    """
+    """Return the engine-config view, or the exception an unset or wrong $VULCAN_FORWARD_DATA raises, as the detail."""
     try:
         mod = importlib.import_module("jwst_tool.engine_config")
         _ = mod.DATA_DIR  # probe the engine's data-root contract
-    except Exception as e:  # ImportError, or the data-root RuntimeError
+    except (ImportError, RuntimeError) as e:
         return e
     return mod
 
@@ -117,7 +113,7 @@ def exomolop_provenance_path() -> Path | None:
 def exomolop_table_status(mols: list[str]) -> dict[str, str]:
     """{molecule: OK/MISSING} for the ExoMolOP k-tables.
 
-    Never AUTO: the engine NEVER downloads a k-table at run time (a missing
+    The engine NEVER downloads a k-table at run time (a missing
     one raises with the fetch command), so absence means the run will stop.
     """
     out = {}
@@ -127,7 +123,61 @@ def exomolop_table_status(mols: list[str]) -> dict[str, str]:
     return out
 
 
-# size-limit-ok: a linear list of checks
+def _file_item(key: str, label: str, path: Path, absent_status: str, required: bool, remedy: str = "") -> Item:
+    """One data file: found, or absent with its remedy."""
+    return Item(
+        key=key,
+        label=label,
+        status=OK if path.is_file() else absent_status,
+        required=required,
+        detail=_found(path) if path.is_file() else f"absent: {path}",
+        remedy=remedy,
+    )
+
+
+def _ktable_items(base_mols: list[str], extra_mols: list[str]) -> list[Item]:
+    """One item per ExoMolOP k-table, the gas opacity every run reads (~389 MB per species), and their provenance.
+
+    Without this check `jwst-tool data` reports green while the data behind every run is entirely absent. Never AUTO:
+    the engine refuses to download at run time. Species with no published table (model_defs.NO_EXOMOLOP_TABLE, refused
+    by canonical_params) are skipped.
+    """
+    items = []
+    ktable_mols = [m for m in base_mols + extra_mols if m not in NO_EXOMOLOP_TABLE]
+    kstat = exomolop_table_status(ktable_mols)
+    fetch_missing = [m for m in ktable_mols if kstat[m] != OK]
+    for mol in ktable_mols:
+        p = exomolop_table_path(mol)
+        items.append(
+            Item(
+                key=f"ktable:{mol}",
+                label=f"{mol} ExoMolOP k-table",
+                status=kstat[mol],
+                required=mol in base_mols,
+                detail=(_found(p) if kstat[mol] == OK else f"absent: {p}"),
+                remedy=""
+                if kstat[mol] == OK
+                else "python -m vulcan_forward.fetch_exomolop --molecules " + ",".join(fetch_missing),
+            )
+        )
+    prov: Any = exomolop_provenance_path()  # None only with no data root, refused above
+    items.append(
+        _file_item(
+            "ktable:provenance",
+            "ExoMolOP k-table provenance (dataset, isotopologue, URL per species)",
+            prov,
+            MISSING,
+            False,
+            ""
+            if prov.is_file()
+            else "python -m vulcan_forward.fetch_exomolop --molecules "
+            + ",".join(ktable_mols)
+            + " (records tables already on disk without re-downloading)",
+        )
+    )
+    return items
+
+
 def check_engine_data(base_mols: list[str], extra_mols: list[str]) -> list[Item]:
     """Check the opacity, CIA and engine-config data the molecule sets need."""
     cfg = _engine_config()
@@ -159,71 +209,32 @@ def check_engine_data(base_mols: list[str], extra_mols: list[str]) -> list[Item]
 
     h2h2 = Path(cfg.CIA_H2H2_FILE)
     items.append(
-        Item(
-            key="cia:H2-H2",
-            label="H2-H2 collision-induced absorption table",
-            status=OK if h2h2.is_file() else AUTO,
-            required=True,
-            detail=_found(h2h2) if h2h2.is_file() else f"absent: {h2h2}",
-            remedy="ExoJAX fetches it on first use (~24 MB), or download "
-            f"https://hitran.org/data/CIA/main/H2-H2_2011.cia to {h2h2}",
+        _file_item(
+            "cia:H2-H2",
+            "H2-H2 collision-induced absorption table",
+            h2h2,
+            MISSING,
+            True,
+            f"`jwst-tool fetch`, or download https://hitran.org/data/CIA/main/H2-H2_2011.cia (~24 MB) to {h2h2}",
         )
     )
 
     h2he = Path(cfg.CIA_H2HE_FILE)
     items.append(
-        Item(
-            key="cia:H2-He",
-            label="H2-He collision-induced absorption table",
-            status=OK if h2he.is_file() else MISSING,
-            required=True,
-            detail=_found(h2he) if h2he.is_file() else f"absent: {h2he}",
-            remedy="One-time, ~147 MB (the RT refuses to build without it): "
+        _file_item(
+            "cia:H2-He",
+            "H2-He collision-induced absorption table",
+            h2he,
+            MISSING,
+            True,
+            "One-time, ~147 MB (the RT refuses to build without it): "
             "`jwst-tool fetch` downloads it, or download "
             "https://hitran.org/data/CIA/main/H2-He_2011.cia "
             f"to {h2he} (the /main/ path segment is required).",
         )
     )
 
-    # ExoMolOP k-tables: the gas opacity every run reads, ~389 MB per
-    # species. Without this check `jwst-tool data` reports green while the
-    # data behind every run is entirely absent. Never AUTO -- the engine
-    # refuses to download at run time. Species with no published table
-    # (model_defs.NO_EXOMOLOP_TABLE, refused by canonical_params) are skipped.
-    from jwst_tool.model_defs import NO_EXOMOLOP_TABLE
-
-    ktable_mols = [m for m in base_mols + extra_mols if m not in NO_EXOMOLOP_TABLE]
-    kstat = exomolop_table_status(ktable_mols)
-    fetch_missing = [m for m in ktable_mols if kstat[m] != OK]
-    for mol in ktable_mols:
-        p = exomolop_table_path(mol)
-        items.append(
-            Item(
-                key=f"ktable:{mol}",
-                label=f"{mol} ExoMolOP k-table",
-                status=kstat[mol],
-                required=mol in base_mols,
-                detail=(_found(p) if kstat[mol] == OK else f"absent: {p}"),
-                remedy=""
-                if kstat[mol] == OK
-                else "python -m vulcan_forward.fetch_exomolop --molecules " + ",".join(fetch_missing),
-            )
-        )
-    prov = exomolop_provenance_path()
-    items.append(
-        Item(
-            key="ktable:provenance",
-            label="ExoMolOP k-table provenance (dataset, isotopologue, URL per species)",
-            status=OK if prov.is_file() else MISSING,
-            required=False,
-            detail=_found(prov) if prov.is_file() else f"absent: {prov}",
-            remedy=""
-            if prov.is_file()
-            else "python -m vulcan_forward.fetch_exomolop --molecules "
-            + ",".join(ktable_mols)
-            + " (records tables already on disk without re-downloading)",
-        )
-    )
+    items += _ktable_items(base_mols, extra_mols)
     return items
 
 
@@ -290,40 +301,74 @@ def _refdata_version(refdata: Path) -> str | None:
         return None
 
 
-# size-limit-ok: a linear list of checks
+def _python_item(key: str, label: str, python: Path | None, unset: str, remedy: str, required: bool) -> Item:
+    """Report a backend's interpreter: found, absent, or not configured at all (no default: machine-specific)."""
+    found = python is not None and python.exists()
+    detail = _found(python) if found else (f"absent: {python}" if python is not None else unset)
+    return Item(key=key, label=label, status=OK if found else MISSING, required=required, detail=detail, remedy=remedy)
+
+
+def _psf_item(psf_dir: str) -> Item:
+    """Report the PSF library by RELEASE: a mismatch is exactly what the worker refuses, so it must show here."""
+    pv = Path(psf_dir) / "VERSION_PSF"  # worker preflight checks this
+    # an empty setting is a misconfiguration, never "PSFs embedded in refdata"
+    has_pv = bool(psf_dir) and pv.is_file()
+    # report the PSF RELEASE, not just presence: a release mismatch is
+    # exactly what the worker refuses, so it must show here
+    psf_ver = None
+    if has_pv:
+        try:
+            psf_ver = pv.read_text().splitlines()[0].strip() or None
+        except (OSError, IndexError):
+            psf_ver = None
+    psf_matches = (psf_ver or "").startswith(ins.BACKEND_RELEASE)
+    return Item(
+        key="pandeia:psf",
+        label="Pandeia PSF library",
+        status=(OK if (has_pv and psf_matches) else MISSING),
+        required=True,
+        detail=(
+            f"{_found(Path(psf_dir))} (release {psf_ver})"
+            if has_pv and psf_matches
+            else (
+                f"RELEASE MISMATCH: PSF tree is {psf_ver}, backend needs {ins.BACKEND_RELEASE} -- {psf_dir}"
+                if has_pv
+                else "no VERSION_PSF under: " + (psf_dir or "(JWST_TOOL_PANDEIA_PSF_DIR is empty)")
+            )
+        ),
+        remedy=(
+            f"Download pandeia_psfs-{ins.BACKEND_RELEASE}-jwst (~4 GiB), "
+            "the SAME release as the engine and reference data, and "
+            "extract it to the path above (or point "
+            "JWST_TOOL_PANDEIA_PSF_DIR elsewhere). Links are on STScI's "
+            "installation page: https://outerspace.stsci.edu/spaces/PEN/"
+            "pages/77530136/Pandeia%2BEngine%2BInstallation"
+        ),
+    )
+
+
 def check_pandeia_backend(
     python: str | Path | None = None, refdata: str | Path | None = None, psf_dir: str | Path | None = None
 ) -> list[Item]:
     """Return the ACTIVE backend's three path roots (mirrors the worker preflight)."""
-    # an unset backend python is a MISSING item, never a crash: this reports
-    _py = python if python is not None else ins.PANDEIA_PYTHON
-    python = Path(_py) if _py else None
+    # an unset backend python is a MISSING item, never a crash
+    interpreter = python if python is not None else ins.PANDEIA_PYTHON
+    python = Path(interpreter) if interpreter else None
     refdata = Path(refdata if refdata is not None else ins.PANDEIA_REFDATA)
     psf_dir = str(ins.PANDEIA_PSF_DIR if psf_dir is None else psf_dir)
 
-    _py_ok = python is not None and python.exists()
     items = [
-        Item(
-            key="pandeia:python",
-            label="Pandeia engine environment (python)",
-            status=OK if _py_ok else MISSING,
-            required=True,
-            detail=(
-                _found(python)
-                if _py_ok
-                else (
-                    f"absent: {python}"
-                    if python is not None
-                    else "JWST_TOOL_PANDEIA_PYTHON not set (no default: the backend environment is machine-specific)"
-                )
-            ),
-            remedy=(
-                "Create a conda env with the matching engine, e.g.  "
-                f"conda create -n pandeia_{ins.BACKEND_RELEASE.replace('.', '_')} "
-                "python=3.12  then  <env>/bin/pip install "
-                f"pandeia.engine=={ins.BACKEND_RELEASE}  and point "
-                "JWST_TOOL_PANDEIA_PYTHON at its python."
-            ),
+        _python_item(
+            "pandeia:python",
+            "Pandeia engine environment (python)",
+            python,
+            "JWST_TOOL_PANDEIA_PYTHON not set (no default: the backend environment is machine-specific)",
+            "Create a conda env with the matching engine, e.g.  "
+            f"conda create -n pandeia_{ins.BACKEND_RELEASE.replace('.', '_')} "
+            "python=3.12  then  <env>/bin/pip install "
+            f"pandeia.engine=={ins.BACKEND_RELEASE}  and point "
+            "JWST_TOOL_PANDEIA_PYTHON at its python.",
+            True,
         )
     ]
 
@@ -349,43 +394,7 @@ def check_pandeia_backend(
         )
     )
 
-    pv = Path(psf_dir) / "VERSION_PSF"  # worker preflight checks this
-    # an empty setting is a misconfiguration, never "PSFs embedded in refdata"
-    has_pv = bool(psf_dir) and pv.is_file()
-    # report the PSF RELEASE, not just presence: a release mismatch is
-    # exactly what the worker refuses, so it must show here
-    psf_ver = None
-    if has_pv:
-        try:
-            psf_ver = pv.read_text().splitlines()[0].strip() or None
-        except (OSError, IndexError):
-            psf_ver = None
-    _psf_matches = (psf_ver or "").startswith(ins.BACKEND_RELEASE)
-    items.append(
-        Item(
-            key="pandeia:psf",
-            label="Pandeia PSF library",
-            status=(OK if (has_pv and _psf_matches) else MISSING),
-            required=True,
-            detail=(
-                f"{_found(Path(psf_dir))} (release {psf_ver})"
-                if has_pv and _psf_matches
-                else (
-                    f"RELEASE MISMATCH: PSF tree is {psf_ver}, backend needs {ins.BACKEND_RELEASE} -- {psf_dir}"
-                    if has_pv
-                    else "no VERSION_PSF under: " + (psf_dir or "(JWST_TOOL_PANDEIA_PSF_DIR is empty)")
-                )
-            ),
-            remedy=(
-                f"Download pandeia_psfs-{ins.BACKEND_RELEASE}-jwst (~4 GiB), "
-                "the SAME release as the engine and reference data, and "
-                "extract it to the path above (or point "
-                "JWST_TOOL_PANDEIA_PSF_DIR elsewhere). Links are on STScI's "
-                "installation page: https://outerspace.stsci.edu/spaces/PEN/"
-                "pages/77530136/Pandeia%2BEngine%2BInstallation"
-            ),
-        )
-    )
+    items.append(_psf_item(psf_dir))
     return items
 
 
@@ -441,8 +450,6 @@ def check_synphot_cdbs(cdbs: str | Path | None = None) -> list[Item]:
             "existing local copy also works).",
         )
     )
-    # the CALSPEC Vega copy is only an offline pin for the tool-side
-    # synphot/stsynphot; the engine loads its own refdata Vega
     for rel, label, required, remedy in (
         (
             Path("comp") / "nonhst" / "2mass_ks_001_syn.fits",
@@ -456,7 +463,7 @@ def check_synphot_cdbs(cdbs: str | Path | None = None) -> list[Item]:
         ),
         (
             Path("calspec") / "alpha_lyr_stis_011.fits",
-            "Vega spectrum (offline pin for tool-side synphot; the engine uses its own refdata Vega)",
+            "Vega spectrum (offline pin for tool-side synphot and the PICASO worker; Pandeia uses its refdata Vega)",
             False,
             f"Fetch https://ssb.stsci.edu/trds/calspec/alpha_lyr_stis_011.fits (288 KB) to {cdbs / 'calspec'}/",
         ),
@@ -543,40 +550,41 @@ PICASO_ENV_RECIPE = (
 )
 
 
-# size-limit-ok: a linear list of checks
-def check_picaso(python: str | Path | None = None, refdata: str | Path | None = None) -> list[Item]:
-    """Return the PICASO engine's interpreter, reference tree and climate tables.
+def _picaso_vega_item() -> Item:
+    """Return the state of the offline Vega spectrum, which the PICASO worker refuses to run without."""
+    vega = Path(ins.PYSYN_CDBS) / "calspec" / "alpha_lyr_stis_011.fits"
+    return Item(
+        key="picaso:vega",
+        label="Vega spectrum for the PICASO worker",
+        status=OK if vega.is_file() else MISSING,
+        required=False,
+        detail=_found(vega) if vega.is_file() else f"absent: {vega}",
+        remedy="jwst-tool fetch --picaso",
+    )
 
-    All three are optional: a machine without PICASO keeps a clean report
+
+def check_picaso(python: str | Path | None = None, refdata: str | Path | None = None) -> list[Item]:
+    """Return the PICASO engine's interpreter, reference tree, climate tables and offline Vega spectrum.
+
+    All are optional: a machine without PICASO keeps a clean report
     (and banner); a PICASO run stops with its own error.
     """
-    _py = python if python is not None else ins.PICASO_PYTHON
-    python = Path(_py) if _py else None
+    interpreter = python if python is not None else ins.PICASO_PYTHON
+    python = Path(interpreter) if interpreter else None
     refdata = Path(refdata if refdata is not None else ins.PICASO_REFDATA)
     fetch_cmd = (
         "jwst-tool fetch --picaso  (or point JWST_TOOL_PICASO_REFDATA "
         f"at a complete picaso {PICASO_RELEASE} reference tree)"
     )
 
-    py_ok = python is not None and python.exists()
     items = [
-        Item(
-            key="picaso:python",
-            label="PICASO engine environment (python)",
-            status=OK if py_ok else MISSING,
-            required=False,
-            detail=(
-                _found(python)
-                if py_ok
-                else (
-                    f"absent: {python}"
-                    if python is not None
-                    else "JWST_TOOL_PICASO_PYTHON not set (no default: the environment is machine-specific)"
-                )
-            ),
-            remedy=(
-                f"picaso {PICASO_RELEASE} needs numpy >= 2, so it runs in its own environment:  {PICASO_ENV_RECIPE}."
-            ),
+        _python_item(
+            "picaso:python",
+            "PICASO engine environment (python)",
+            python,
+            "JWST_TOOL_PICASO_PYTHON not set (no default: the environment is machine-specific)",
+            f"picaso {PICASO_RELEASE} needs numpy >= 2, so it runs in its own environment:  {PICASO_ENV_RECIPE}.",
+            False,
         )
     ]
 
@@ -628,6 +636,7 @@ def check_picaso(python: str | Path | None = None, refdata: str | Path | None = 
             remedy=fetch_cmd,
         )
     )
+    items.append(_picaso_vega_item())
     return items
 
 
@@ -645,10 +654,7 @@ def probe_picaso_env() -> str:
 
 
 def picaso_missing() -> list[Item]:
-    """MISSING items of a fresh PICASO check.
-
-    (about 40 stat calls, so a PICASO install or fetch unblocks the Run at once).
-    """
+    """MISSING items of a fresh PICASO check: about 40 stat calls, so an install or fetch unblocks the Run at once."""
     return [it for it in check_picaso() if it.status == MISSING]
 
 
@@ -705,7 +711,7 @@ def missing_required(report: dict) -> list[Item]:
     return [it for it in all_items(report) if it.required and it.status == MISSING]
 
 
-_STATUS_TEXT = {OK: "OK", MISSING: "MISSING", AUTO: "downloads on first use"}
+_STATUS_TEXT = {OK: "OK", MISSING: "MISSING"}
 
 
 def format_report(report: dict) -> str:

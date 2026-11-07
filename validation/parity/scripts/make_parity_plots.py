@@ -65,7 +65,7 @@ def load_summary():
 
 
 def require_passing_summary(summary):
-    """Re-validate through the shared gate and return the Pandeia release.
+    """Re-validate through the shared gate.
 
     Runs parity_gate.validate_artifact() rather than trusting the persisted
     `gate.passed` boolean, so a hand-edited artifact cannot get
@@ -83,7 +83,6 @@ def require_passing_summary(summary):
             f"({len(problems)} problems; first: {problems[0]}); refusing to "
             "put current-release labels on an unvalidated artifact"
         )
-    return str(pg.REQUIRED_PANDEIA_RELEASE)
 
 
 def ok_rows(summary, star):
@@ -91,7 +90,7 @@ def ok_rows(summary, star):
 
 
 # Configuration & timing parity: ours vs PandExo on the 1:1 line
-def fig_config_parity(summary, release):
+def fig_config_parity(summary):
     quantities = [
         ("ngroup_pandexo", "ngroup_ours", "groups per integration"),
         ("t_int_pandexo_s", "t_int_ours_s", "integration time (s)"),
@@ -143,35 +142,16 @@ def fig_config_parity(summary, release):
 
 
 # Extracted stellar flux parity (the engine product agreeing 1:1)
-def _require_raw_matches_summary(summary, star, o_all, p_all, of, pf):
-    """Refuse to plot raw per-wavelength data from a DIFFERENT run.
-
-    The raw JSON is git-ignored, so a checkout carries the committed figures
-    beside whatever raw files happen to be on that machine -- possibly from an
-    older experiment. Plotting those silently re-labels stale numbers with the
-    committed artifact's release banner.
-
-    Measured case: raw files from a 7-mode worker-v10 run beside an 8-mode
-    worker-v11 summary drew a 0.9973 binned-median flux ratio over an
-    artifact that records exactly 1.0 (max_abs_dev 2.2e-16). A check that
-    cannot run says so, and a mismatch is a hard error.
-    """
-    s_star = summary["stars"][star]
-    s_modes = {r["key"] for r in s_star["modes"]}
-    problems = []
-    for label, raw, path in (("ours", o_all, of), ("pandexo", p_all, pf)):
-        r_modes = {k for k in raw if not k.startswith("__")}
-        if missing := sorted(s_modes - r_modes):
-            problems.append(
-                f"{path.name}: missing mode(s) {missing} that the summary "
-                f"declares -- this raw file predates the current experiment"
-            )
-        s_prov = s_star.get(f"provenance_{label}", {})
-        r_prov = raw.get("__provenance__", {})
-        for key in ("worker_version", "engine_version", "refdata_version", "psf_version"):
-            if key in s_prov and key in r_prov and s_prov[key] != r_prov[key]:
-                problems.append(f"{path.name}: {key}={r_prov[key]!r} but the summary records {s_prov[key]!r}")
-    if problems:
+def fig_extracted_flux(summary, out_root, mode="nirspec_g395h", star="w39_like"):
+    of = out_root / f"{star}_ours.json"
+    pf = out_root / f"{star}_pandexo.json"
+    if not (of.exists() and pf.exists()):
+        print(f"  [flux fig] raw run outputs not in {out_root} -- skipping (re-run run_parity.py to regenerate them)")
+        return None
+    o_all = json.loads(of.read_text())
+    p_all = json.loads(pf.read_text())
+    # Plotting another run's raw files would re-label stale numbers with the committed artifact's banner.
+    if problems := pg.raw_run_problems(summary["stars"][star], o_all, p_all, mode):
         raise SystemExit(
             "make_parity_plots: the raw run outputs do not belong to the "
             "committed parity_summary.json, so the extracted-flux figure "
@@ -182,17 +162,6 @@ def _require_raw_matches_summary(summary, star, o_all, p_all, of, pf):
             "stale *_ours.json / *_pandexo.json aside and keep the "
             "committed figure."
         )
-
-
-def fig_extracted_flux(summary, out_root, mode="nirspec_g395h", star="w39_like", release="unknown"):
-    of = out_root / f"{star}_ours.json"
-    pf = out_root / f"{star}_pandexo.json"
-    if not (of.exists() and pf.exists()):
-        print(f"  [flux fig] raw run outputs not in {out_root} -- skipping (re-run run_parity.py to regenerate them)")
-        return None
-    o_all = json.loads(of.read_text())
-    p_all = json.loads(pf.read_text())
-    _require_raw_matches_summary(summary, star, o_all, p_all, of, pf)
     o = o_all[mode]
     p = p_all[mode]
     wl_o = np.asarray(o["wl"])
@@ -222,15 +191,15 @@ def fig_extracted_flux(summary, out_root, mode="nirspec_g395h", star="w39_like",
 
 def main():
     summary = load_summary()
-    release = require_passing_summary(summary)
-    fig_config_parity(summary, release)
+    require_passing_summary(summary)
+    fig_config_parity(summary)
     # The flux figure ALSO needs the raw per-wavelength JSON (written by
     # run_parity.py, git-ignored). A stale raw set is refused rather than
     # plotted, but that must not discard the config figure, which is built
     # from the committed summary alone: report both, then exit non-zero.
     stale = None
     try:
-        fig_extracted_flux(summary, OUTPUTS, release=release)
+        fig_extracted_flux(summary, OUTPUTS)
     except SystemExit as exc:
         stale = str(exc)
     if stale:

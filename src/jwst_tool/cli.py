@@ -1,6 +1,6 @@
 """Console entry point: ``jwst-tool`` launches the Streamlit GUI.
 
-Method and contract: docs/gui_and_sharing.md, section `cli`.
+Commands: `jwst-tool --help` and README.
 """
 
 from __future__ import annotations

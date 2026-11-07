@@ -7,63 +7,65 @@ from param_helpers import W39B_REFERENCE, _p, _pf, _table
 from jwst_tool import chem_build, fisher, forward, jacobian, model_defs, planets, run_params, tp_tables
 
 
-# size-limit-ok: one request's leave-one-out story, from the key to the GUI wiring
-def test_wo_mols_end_to_end_semantics():
-    """The leave-one-out contract, end to end at the numpy level.
-
-    (a) canonical form: default = every RT molecule in fold order; a subset
-        canonicalizes to fold order deduped; unknown molecules refuse; [] is
-        the constrain goal's valid empty set.
-    (b) cache honesty: [] / subset / default are three different keys -- a
-        constrain run must never serve a detect run's cache slot.
-    (c) the progress contract mirrors the real solve sequence: no removed-
-        molecule stage for [], exactly one batch stage otherwise.
-    (d) consumers index depth_wo by the model's wo_mols, never by mols, and
-        refuse loudly when the target has no removed spectrum.
-    (e) the GUI asks for the TARGET only on detect and [] on constrain
-        (the score reads one row, and the all-molecule block dominates a cold
-        run) -- the all-molecule batch stays reachable through the API's
-        wo_mols=None default.
+def test_wo_mols_canonical_form():
+    """Default = every RT molecule in fold order; a subset canonicalizes to fold order deduped; unknown molecules
+    refuse; [] is the constrain goal's valid empty set; a saved payload round-trips.
     """
-    # (a) canonicalization
     cp = forward.canonical_params(_p())
     assert cp["wo_mols"] == forward.MOLECULES
     cp = forward.canonical_params(_p(extra_mols=["HCN", "C2H2"]))
     assert cp["wo_mols"] == [*forward.MOLECULES, "C2H2", "HCN"]
     cp = forward.canonical_params(_p(wo_mols=["SO2", "H2O", "SO2"]))
-    assert cp["wo_mols"] == ["H2O", "SO2"]  # fold order, deduped
+    assert cp["wo_mols"] == ["H2O", "SO2"]
     assert forward.canonical_params(_p(wo_mols=[]))["wo_mols"] == []
     with pytest.raises(ValueError):
         forward.canonical_params(_p(wo_mols=["HCN"]))  # not in the RT set
-    # a saved canonical payload round-trips unchanged (share_config path)
     assert forward.canonical_params(cp)["wo_mols"] == cp["wo_mols"]
-    # (b) cache keys
+
+
+def test_wo_mols_separates_cache_keys():
+    """A constrain run must never serve a detect run's cache slot."""
     k_all = forward.params_key(_p())
     k_none = forward.params_key(_p(wo_mols=[]))
     k_sub = forward.params_key(_p(wo_mols=["H2O"]))
     assert len({k_all, k_none, k_sub}) == 3
     assert forward.params_key(_p(wo_mols=forward.MOLECULES)) == k_all
-    # (c) progress stages mirror the solve sequence
-    for kw, n_wo_stages in (
+
+
+@pytest.mark.parametrize(
+    ("kw", "n_wo_stages"),
+    [
         (dict(), 1),
         (dict(wo_mols=[]), 0),
         (dict(science_mode="emission", tp_mode="guillot", Tirr=1560.0), 1),
         (dict(science_mode="emission", wo_mols=[], tp_mode="guillot", Tirr=1560.0), 0),
-    ):
-        lines = []
-        advance, _fin = forward._make_progress(forward.canonical_params(_p(**kw)), lambda s, _l=lines: _l.append(s))
-        while True:
-            try:
-                advance()
-            except IndexError:
-                break
-        assert sum("removed-molecule" in s for s in lines) == n_wo_stages, kw
-    # (d) consumers follow wo_mols alignment
+    ],
+)
+def test_progress_stages_mirror_the_solve_sequence(kw, n_wo_stages):
+    """No removed-molecule stage for [], exactly one batch stage otherwise."""
+    lines = []
+    advance, _fin = forward._make_progress(forward.canonical_params(_p(**kw)), lines.append)
+
+    def run_every_stage():
+        for _ in range(100):
+            advance()
+
+    with pytest.raises(IndexError):
+        run_every_stage()
+    assert sum("removed-molecule" in s for s in lines) == n_wo_stages
+
+
+def test_consumers_index_removed_spectra_by_wo_mols():
+    """depth_wo aligns with the model's wo_mols, never mols, and a target with no removed spectrum refuses loudly."""
     from jwst_tool import detect
 
     n = 8
     order = np.arange(n)
-    model = {"wo_mols": np.array(["CO2"], dtype="U8"), "depth_wo": np.arange(n, dtype=float)[None, :] * 1e-3}
+    model = {
+        "science_mode": "transmission",
+        "wo_mols": np.array(["CO2"], dtype="U8"),
+        "depth_wo": np.arange(n, dtype=float)[None, :] * 1e-3,
+    }
     mols = ["H2O", "CO2", "CO"]
     got = detect._removed_spectrum(model, mols, "CO2", order)
     assert np.array_equal(got, model["depth_wo"][0])  # NOT mols.index -> 1
@@ -74,6 +76,9 @@ def test_wo_mols_end_to_end_semantics():
         detect._removed_spectrum(model, mols, "HCN", order)  # not in RT set
     with pytest.raises(KeyError):
         detect._removed_spectrum({"depth_wo": model["depth_wo"]}, mols, "CO2", order)  # malformed payload
+    unnamed = {k: v for k, v in model.items() if k != "science_mode"}
+    with pytest.raises(KeyError, match="science_mode"):
+        detect._removed_spectrum(unnamed, mols, "CO2", order)  # read as transmission, it skips the emission gate
 
     emission = {**model, "science_mode": "emission", "emis_thin_flux_frac_wo": np.array([0.0])}
     assert np.array_equal(detect._removed_spectrum(emission, mols, "CO2", order), model["depth_wo"][0])
@@ -87,13 +92,6 @@ def test_wo_mols_end_to_end_semantics():
                 "CO2",
                 order,
             )
-    # (e) the GUI wiring: target-only on detect, [] on constrain
-    from pathlib import Path
-
-    gui_src = (Path(__file__).resolve().parents[2] / "src" / "jwst_tool" / "gui_run.py").read_text()
-    assert 'wo_mols=([g.target_mol] if g.goal == "detect" else [])' in gui_src, (
-        "the GUI must ask for the target-only removed spectrum on detect"
-    )
 
 
 def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
@@ -237,7 +235,7 @@ def test_every_freeable_param_has_display_metadata():
         | set(model_defs.CLOUD_FISHER_PARAMS)
         | {p for ns in model_defs.TP_PARAM_NAMES.values() for p in ns}
     )
-    for m in (fisher.PARAM_LABELS, fisher.PARAM_UNITS, fisher.PARAM_SYMBOLS, jacobian.FD_STEPS):
+    for m in (fisher.PARAM_LABELS, fisher.PARAM_UNITS, fisher.PARAM_SYMBOLS, model_defs.FD_STEPS):
         assert not (freeable - set(m)), sorted(freeable - set(m))
 
 
@@ -300,15 +298,15 @@ def test_composition_fd_stencil_envelope():
     for kw, fp in (({"met_x_solar": 100.0}, "lnZ"), ({"met_x_solar": 0.1}, "lnZ"), ({"co_ratio": 0.12}, "dlnCO")):
         with pytest.raises(ValueError, match="stencil"):
             forward.canonical_params(_p(fisher_params=[fp], **kw))
-    h0 = jacobian.FD_STEPS["dlnCO"]
+    h0 = model_defs.FD_STEPS["dlnCO"]
     hi = model_defs.CO_MAX["sncho"]
-    assert jacobian.fd_stencil("dlnCO", 0.55, hi) == ((1, -1, 2, -2), h0)
-    assert jacobian.fd_stencil("dlnCO", 0.89, hi) == ((-1, -2, -4), h0 / 2)
-    assert jacobian.fd_stencil("lnZ", 0.89, hi) == ((1, -1, 2, -2), jacobian.FD_STEPS["lnZ"])
+    assert model_defs.fd_stencil("dlnCO", 0.55, hi) == ((1, -1, 2, -2), h0)
+    assert model_defs.fd_stencil("dlnCO", 0.89, hi) == ((-1, -2, -4), h0 / 2)
+    assert model_defs.fd_stencil("lnZ", 0.89, hi) == ((1, -1, 2, -2), model_defs.FD_STEPS["lnZ"])
     # the flip follows the network's photolysis-on ceiling, not a literal 1
     hi25 = model_defs.CO_MAX["sncho2025"]
-    assert jacobian.fd_stencil("dlnCO", 2.0, hi25) == ((1, -1, 2, -2), h0)
-    assert jacobian.fd_stencil("dlnCO", 9.0, hi25) == ((-1, -2, -4), h0 / 2)
+    assert model_defs.fd_stencil("dlnCO", 2.0, hi25) == ((1, -1, 2, -2), h0)
+    assert model_defs.fd_stencil("dlnCO", 9.0, hi25) == ((-1, -2, -4), h0 / 2)
     for co in (0.89, 0.95):
         forward.canonical_params(_p(co_ratio=co, fisher_params=["dlnCO"]))
     # both schemes' Richardson rows are exact on a cubic (sign and

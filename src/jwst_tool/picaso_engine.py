@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import errno
 import fcntl
+import functools
 import hashlib
 import json
 import os
@@ -16,28 +17,34 @@ import tempfile
 import threading
 import time
 import uuid
-import zipfile
-import zlib
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from jwst_tool import datacheck, instruments as ins, planets, proc as proc_mod
+from jwst_tool import datacheck, instruments as ins, model_defs, planets, proc as proc_mod
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
+    from jwst_tool.tool_types import Log
+
 PICASO_VERSIONS = {"picaso": datacheck.PICASO_RELEASE, "photochem": "0.9.2"}
 WORKER_VERSION = 3  # bump when picaso_worker.py output changes
+# What a PICASO payload is solved by: part of the cache key.
+PICASO_STACK = (
+    f"picaso {PICASO_VERSIONS['picaso']}, photochem "
+    f"{PICASO_VERSIONS['photochem']}, correlated-k zenodo."
+    f"{datacheck.PICASO_CK_RECORD}, worker {WORKER_VERSION}"
+)
 PICASO_CACHE = ins.OUTPUT_DIR / "picaso_cache"
 # flock files stay container-local like runlimit's slots: the output dir may be
 # a network volume without working advisory locks (the Space's bucket)
 LOCK_DIR = Path(tempfile.gettempdir()) / "jwst_tool_picaso_locks"
 # the climate correlated-k set picaso must load, every table of the pinned record
 CK_MOLECULES = sorted(f.split("_1460")[0] for f in datacheck.PICASO_CK_MD5)
-# One worker launch is one request; a climate solve takes ~9 min on one daw
+# One worker launch is one request; a climate solve takes ~9 min on one
 # core (~17 min on the Space) and is not threaded. A waiter on the lock
 # outlasts a holder at its cap.
 WALL_CAP_S = 4.0 * 3600.0
@@ -110,8 +117,6 @@ def composition(met_x_solar: float, co_ratio: float) -> dict:
     C, N, O, S exactly the VULCAN path's (model_defs.elemental_abundances: C/O moves carbon at fixed oxygen), He the
     VULCAN seed's, the other metals Lodders 2020 present-day times Z.
     """
-    from jwst_tool import model_defs
-
     ab = model_defs.elemental_abundances(met_x_solar, co_ratio)
     xh = {k: met_x_solar * 10.0 ** (v - 12.0) for k, v in LODDERS2020_PD.items()}
     xh.update(He=HE_H, C=ab["C_H"], N=ab["N_H"], O=ab["O_H"], S=ab["S_H"])
@@ -157,12 +162,12 @@ def certify(req: dict, res: dict, stage: str) -> dict:
     atoms = np.asarray(res["atoms"], float)
     tgt = np.asarray(res["target"], float)
     err = np.abs((atoms[:, ix] / atoms[:, [i_h]]) / (tgt[ix] / tgt[i_h]) - 1.0)
-    cert = {"element_err": float(err.max())}
+    cert: dict[str, Any] = {"element_err": float(err.max())}
     if not err.max() <= ELEMENT_TOL:  # NaN refuses too
-        k = np.unravel_index(int(np.argmax(err)), err.shape)
+        worst = np.unravel_index(int(np.argmax(err)), err.shape)
         raise RuntimeError(
             f"PICASO {stage}: element budget off by {err.max():.2e} "
-            f"({'CNOS'[k[1]]} at {p[k[0]]:.3g} bar) > {ELEMENT_TOL:g}: the "
+            f"({'CNOS'[worst[1]]} at {p[worst[0]]:.3g} bar) > {ELEMENT_TOL:g}: the "
             "column does not carry the requested composition."
         )
     if req["climate"] is None:
@@ -220,13 +225,11 @@ def _load(path: Path, req: dict, stage: str) -> dict | None:
     One that no longer passes raises here: the solve is reproducible, so a re-solve would only refuse the same way
     after minutes.
     """
-    if not path.is_file():
+    from jwst_tool.model_cache import load_cached_npz  # model_cache imports this module through run_params
+
+    res = load_cached_npz(path)
+    if res is None:
         return None
-    try:
-        with np.load(path, allow_pickle=False) as z:
-            res = {k: z[k] for k in z.files}
-    except (OSError, ValueError, KeyError, EOFError, zipfile.BadZipFile, zlib.error):
-        return None  # unreadable: a miss; the solve rewrites it atomically
     # a cache file under the same WORKER_VERSION may carry an always-empty
     # "error" array; it is not a result field
     res.pop("error", None)
@@ -235,7 +238,7 @@ def _load(path: Path, req: dict, stage: str) -> dict | None:
 
 
 @contextlib.contextmanager
-def _locked(key: str, log: Callable[..., None]) -> Iterator[Any]:
+def _locked(key: str, log: Log) -> Iterator[Any]:
     """Per-key fcntl lock.
 
     The lock FILE is never unlinked (unlinking a path another process may still hold gives two "exclusive" locks).
@@ -269,7 +272,7 @@ def _locked(key: str, log: Callable[..., None]) -> Iterator[Any]:
         fh.close()
 
 
-def _run_worker(req: dict, stage: str, log: Callable[..., None]) -> dict:
+def _run_worker(req: dict, stage: str, log: Log) -> dict:
     py = Path(require_picaso_python())
     if not py.exists():
         raise RuntimeError(f"PICASO python not found at {py} (JWST_TOOL_PICASO_PYTHON).")
@@ -307,7 +310,7 @@ def _run_worker(req: dict, stage: str, log: Callable[..., None]) -> dict:
             killer = threading.Timer(WALL_CAP_S, proc.kill)
             killer.start()
             try:
-                for raw in proc.stdout:
+                for raw in proc.stdout:  # type: ignore[union-attr]  # opened with PIPE
                     line = raw.rstrip()
                     lines.append(line)
                     if line.startswith("[pic]"):
@@ -327,7 +330,7 @@ def _run_worker(req: dict, stage: str, log: Callable[..., None]) -> dict:
         out_path.unlink(missing_ok=True)
 
 
-def solve(req: dict, stage: str, log: Callable[..., None]) -> dict:
+def solve(req: dict, stage: str, log: Log) -> dict:
     """Return the certified result of one request: cache, else lock + worker.
 
     Raises (never degrades) on any failed gate.
@@ -377,28 +380,104 @@ def column(res: dict, n_tool: int) -> SimpleNamespace:
     )
 
 
-def _mu(col: Any) -> np.ndarray:
+def _mu(col: SimpleNamespace) -> np.ndarray:
     y = col.y / col.y.sum(axis=1, keepdims=True)
     return y @ col.species_masses
 
 
-# size-limit-ok: the closures share one run's grid and gravity, and each profile mode is a branch of the same assembly
-def assemble(cp: dict, log: Callable[..., None]) -> SimpleNamespace:
+def _request(cp: dict, p_eval: np.ndarray, met: float, co: float, g: float, T_eval: np.ndarray | None = None) -> dict:
+    """One worker request: a column at a given T, or a climate solve when T_eval is None."""
+    clim = None
+    if T_eval is None:
+        teq = planets.system_teq(cp["star_teff"], cp["rstar_rsun"], cp["orbit_au"])
+        clim = {
+            "tint": float(cp["Tint"]),
+            "rfacv": float(cp["rfacv"]),
+            "teq_guess": float(teq),
+            "nlevel": CLIMATE_N_LEVELS,
+            "p_top_bar": CLIMATE_P_SPAN_BAR[0],
+            "p_bottom_bar": CLIMATE_P_SPAN_BAR[1],
+            "rcb": CLIMATE_RCB,
+            "star": {
+                "teff": cp["star_teff"],
+                "logg": cp["star_logg"],
+                "feh": cp["star_feh"],
+                "rstar_rsun": cp["rstar_rsun"],
+                "orbit_au": cp["orbit_au"],
+            },
+        }
+    # T and g are rounded far below anything physical so the request key
+    # does not move with the last bits of a JAX profile (CPU vs GPU)
+    return {
+        "xh": composition(met, co),
+        "metallicity": float(met),
+        "g_cgs": round(float(g), 4),
+        "p_bar": p_eval.tolist(),
+        "T": (None if T_eval is None else np.round(np.asarray(T_eval, float), 6).tolist()),
+        "quench_kzz": float(cp["kzz_const"]) if cp["picaso_quench"] else None,
+        "climate": clim,
+    }
+
+
+def _abundance_overrides(met_x_solar: float, co_ratio: float) -> dict:
+    return {"met_x_solar": float(met_x_solar), "co_ratio": float(co_ratio)}
+
+
+def _guillot_gravity(
+    cp: dict, tp: np.ndarray, p_tool: np.ndarray, mu: np.ndarray, g_at_anchor: Callable[[np.ndarray, np.ndarray], float]
+) -> float:
+    """Iterate g and the Guillot T (tau = kappa P / g) to their fixed point at one probe mu, as the VULCAN path does."""
+    from jwst_tool import chem_build
+
+    g = cp["gs_cgs"]
+    for _ in range(3):
+        g = g_at_anchor(np.asarray(chem_build.build_tp(cp, g)[0](tp, p_tool)), mu)
+    return g
+
+
+def _climate_gravity(
+    cp: dict,
+    p_eval: np.ndarray,
+    nz: int,
+    p_anchor: float,
+    run: Callable[[dict, str], SimpleNamespace],
+    request: Callable[..., dict],
+    g_at_anchor: Callable[[np.ndarray, np.ndarray], float],
+    log: Log,
+) -> float:
+    """First gravity from a Guillot guess column, then the climate's own, iterated to ANCHOR_TOL."""
+    from jwst_tool import chem_build
+
+    tirr = planets.system_teq(cp["star_teff"], cp["rstar_rsun"], cp["orbit_au"]) * np.sqrt(2.0)
+    tp0 = np.array([tirr, cp["Tint"], -2.0, -1.0])
+    T0 = np.asarray(chem_build.build_tp(dict(cp, tp_mode="guillot"), cp["gs_cgs"])[0](tp0, p_eval))
+    g = g_at_anchor(
+        T0[:nz][::-1], _mu(run(request(cp["met_x_solar"], cp["co_ratio"], cp["gs_cgs"], T0), "geometry probe"))
+    )
+    for k in range(ANCHOR_PASSES):
+        col = run(request(cp["met_x_solar"], cp["co_ratio"], g), f"climate (gravity pass {k + 1})")
+        g_new = g_at_anchor(col.T_base, _mu(col))
+        log(f"[fwd] PICASO gravity anchor pass {k + 1}: g = {g:.2f} -> {g_new:.2f} cm/s2 at {p_anchor:g} bar")
+        if abs(g_new / g - 1.0) <= ANCHOR_TOL:
+            return g
+        g = g_new
+    raise RuntimeError(
+        f"PICASO climate gravity anchor did not settle to {ANCHOR_TOL:g} "
+        f"in {ANCHOR_PASSES} passes (last {g:.2f} -> {g_new:.2f} cm/s2)."
+    )
+
+
+def assemble(cp: dict, log: Log) -> SimpleNamespace:
     """run_model's assembly for chem_provider='picaso' (the counterpart of chem_build.assemble_chem).
 
     RT profile, theta, the T-P hook and a factory whose builds are already-certified columns.
 
-    Gravity: ONE constant g per run for the climate solve, the quench scale
-    height and the Guillot profile -- g at the tool's chemistry anchor (the
-    grid interface nearest 1 bar), as on the VULCAN path. A climate baseline
-    iterates g with its own T and mean molecular weight to ANCHOR_TOL; the
-    composition stencil points of a run reuse that g (``build_chem``).
+    One constant g per run, at the tool's chemistry anchor: docs/picaso_engine.md, section `picaso_engine`.
     """
-    # import order is load-bearing: vulcan_chem (env + x64) before exojax
-    from vulcan_forward import vulcan_chem  # noqa: F401  (imported for its environment and x64 setup)
+    from vulcan_forward import vulcan_chem  # noqa: F401  (env + x64 before exojax: the order is load-bearing)
 
     # isort: split
-    from jwst_tool import chem_build, engine_config as config, model_defs, tp_tables
+    from jwst_tool import chem_build, engine_config as config, tp_tables
 
     profile = chem_build.rt_profile_common(cp, config)
     nz = int(cp["nz"])
@@ -406,13 +485,6 @@ def assemble(cp: dict, log: Callable[..., None]) -> SimpleNamespace:
     p_tool = p_eval[:nz][::-1]  # bottom to top, like a VULCAN build
     p_anchor = chem_build.chem_radius_anchor_bar(p_tool, cp["p_btm_bar"] * 1.0e6, False)
     rp_cm = cp["rp_rjup"] * planets.R_JUP_CM
-    star = {
-        "teff": cp["star_teff"],
-        "logg": cp["star_logg"],
-        "feh": cp["star_feh"],
-        "rstar_rsun": cp["rstar_rsun"],
-        "orbit_au": cp["orbit_au"],
-    }
     mode = cp["tp_mode"]
 
     def g_at_anchor(T_tool: np.ndarray, mu: np.ndarray) -> float:
@@ -420,103 +492,49 @@ def assemble(cp: dict, log: Callable[..., None]) -> SimpleNamespace:
         r = chem_build.radius_at_anchor(p_tool, T_tool, mu, rp_cm, cp["gs_cgs"], cp["p_ref_bar"], p_anchor)
         return cp["gs_cgs"] * (rp_cm / r) ** 2
 
-    def request(met: float, co: float, g: float, T_eval: Any = None) -> dict:
-        clim = None
-        if T_eval is None:
-            teq = planets.system_teq(cp["star_teff"], cp["rstar_rsun"], cp["orbit_au"])
-            clim = {
-                "tint": float(cp["Tint"]),
-                "rfacv": float(cp["rfacv"]),
-                "teq_guess": float(teq),
-                "nlevel": CLIMATE_N_LEVELS,
-                "p_top_bar": CLIMATE_P_SPAN_BAR[0],
-                "p_bottom_bar": CLIMATE_P_SPAN_BAR[1],
-                "rcb": CLIMATE_RCB,
-                "star": star,
-            }
-        # T and g are rounded far below anything physical so the request key
-        # does not move with the last bits of a JAX profile (CPU vs GPU)
-        return {
-            "xh": composition(met, co),
-            "metallicity": float(met),
-            "g_cgs": round(float(g), 4),
-            "p_bar": p_eval.tolist(),
-            "T": (None if T_eval is None else np.round(np.asarray(T_eval, float), 6).tolist()),
-            "quench_kzz": float(cp["kzz_const"]) if cp["picaso_quench"] else None,
-            "climate": clim,
-        }
+    request = functools.partial(_request, cp, p_eval)
 
-    def run(req: dict, stage: str) -> Any:
+    def run(req: dict, stage: str) -> SimpleNamespace:
         res = solve(req, stage, log)
         res["p_eval"] = np.asarray(req["p_bar"])
         return column(res, nz)
 
     tp_eval, theta_tp, names_tp = None, [0.0], ["dT"]
+    base = (cp["met_x_solar"], cp["co_ratio"], cp["gs_cgs"])
     if mode == "guillot":
-        # the VULCAN path's joint iteration: mu from one probe column, then
-        # g and the Guillot T (tau = kappa P / g) to their fixed point
-        tp_eval0 = chem_build.build_tp(cp, cp["gs_cgs"])[0]
         tp = np.array([cp["Tirr"], cp["Tint"], cp["log_kappa"], cp["log_gamma"]])
-        mu = _mu(
-            run(
-                request(cp["met_x_solar"], cp["co_ratio"], cp["gs_cgs"], np.asarray(tp_eval0(tp, p_eval))),
-                "geometry probe",
-            )
-        )
-        g = cp["gs_cgs"]
-        for _ in range(3):
-            g = g_at_anchor(np.asarray(chem_build.build_tp(cp, g)[0](tp, p_tool)), mu)
+        probe_T = np.asarray(chem_build.build_tp(cp, cp["gs_cgs"])[0](tp, p_eval))
+        g = _guillot_gravity(cp, tp, p_tool, _mu(run(request(*base, probe_T), "geometry probe")), g_at_anchor)
         tp_eval = chem_build.build_tp(cp, g)[0]
         theta_tp, names_tp = list(tp), model_defs.TP_PARAM_NAMES["guillot"]
         T_fixed = np.asarray(tp_eval(tp, p_eval))
     elif mode == "file":
-        # canonical_params has refused a table too shallow for the quench search
         tab = tp_tables.read_tp_table(tp_tables.tp_file_from_cp(cp), model_defs.chem_p_span_dyn(cp))
         P_tab, T_tab = tab["P_dyn"] / 1.0e6, tab["T"]
         o = np.argsort(P_tab)
-        # linear in P with the end rows held, as VULCAN-JAX's file mode reads a table
-        T_fixed = np.interp(p_eval, P_tab[o], T_tab[o])
-        mu = _mu(run(request(cp["met_x_solar"], cp["co_ratio"], cp["gs_cgs"], T_fixed), "geometry probe"))
-        g = g_at_anchor(T_fixed[:nz][::-1], mu)
+        T_fixed = np.interp(p_eval, P_tab[o], T_tab[o])  # linear in P, end rows held, as VULCAN-JAX reads a table
+        g = g_at_anchor(T_fixed[:nz][::-1], _mu(run(request(*base, T_fixed), "geometry probe")))
     elif mode == "picaso_climate":  # T_int is a setting, not a theta row
-        # first gravity from a Guillot guess column, then the climate's own
-        tirr = planets.system_teq(cp["star_teff"], cp["rstar_rsun"], cp["orbit_au"]) * np.sqrt(2.0)
-        tp0 = np.array([tirr, cp["Tint"], -2.0, -1.0])
-        T0 = np.asarray(chem_build.build_tp(dict(cp, tp_mode="guillot"), cp["gs_cgs"])[0](tp0, p_eval))
-        g = g_at_anchor(
-            T0[:nz][::-1], _mu(run(request(cp["met_x_solar"], cp["co_ratio"], cp["gs_cgs"], T0), "geometry probe"))
-        )
-        for k in range(ANCHOR_PASSES):
-            col = run(request(cp["met_x_solar"], cp["co_ratio"], g), f"climate (gravity pass {k + 1})")
-            g_new = g_at_anchor(col.T_base, _mu(col))
-            log(f"[fwd] PICASO gravity anchor pass {k + 1}: g = {g:.2f} -> {g_new:.2f} cm/s2 at {p_anchor:g} bar")
-            if abs(g_new / g - 1.0) <= ANCHOR_TOL:
-                break
-            g = g_new
-        else:
-            raise RuntimeError(
-                f"PICASO climate gravity anchor did not settle to {ANCHOR_TOL:g} "
-                f"in {ANCHOR_PASSES} passes (last {g:.2f} -> {g_new:.2f} cm/s2)."
-            )
+        g = _climate_gravity(cp, p_eval, nz, p_anchor, run, request, g_at_anchor, log)
         T_fixed = None  # every build solves its own climate
     else:
         raise ValueError(f"tp_mode {mode!r} is not a PICASO profile")
 
     theta = np.array([0.0, 0.0, 0.0, *list(theta_tp)], dtype=np.float64)
 
-    def build_chem(extra_abun: dict | None = None, tag: str = "baseline", photo_frq: int | None = None) -> Any:  # noqa: ARG001  (the VULCAN build's signature; a PICASO column has no photolysis)
+    def build_chem(
+        extra_abun: dict | None = None,
+        tag: str = "baseline",
+        photo_frq: int | None = None,  # noqa: ARG001  (the VULCAN build's signature; a PICASO column has no photolysis)
+    ) -> SimpleNamespace:
         met = (extra_abun or {}).get("met_x_solar", cp["met_x_solar"])
         co = (extra_abun or {}).get("co_ratio", cp["co_ratio"])
         return run(request(met, co, g, T_fixed), tag)
 
-    def abundance_overrides(met_x_solar: float, co_ratio: float) -> dict:
-        return {"met_x_solar": float(met_x_solar), "co_ratio": float(co_ratio)}
-
+    chemistry = "quench at Kzz " + format(cp["kzz_const"], "g") if cp["picaso_quench"] else "equilibrium"
     log(
-        f"[fwd] PICASO engine: {mode} profile, g = {g:.2f} cm/s2 at the "
-        f"{p_anchor:g} bar anchor (catalogue {cp['gs_cgs']:.1f} at "
-        f"{cp['p_ref_bar']:g} bar), "
-        f"{'quench at Kzz ' + format(cp['kzz_const'], 'g') if cp['picaso_quench'] else 'equilibrium'}"
+        f"[fwd] PICASO engine: {mode} profile, g = {g:.2f} cm/s2 at the {p_anchor:g} bar anchor "
+        f"(catalogue {cp['gs_cgs']:.1f} at {cp['p_ref_bar']:g} bar), {chemistry}"
     )
     return SimpleNamespace(
         profile=profile,
@@ -525,7 +543,7 @@ def assemble(cp: dict, log: Callable[..., None]) -> SimpleNamespace:
         tp_eval=tp_eval,
         n_tp=len(theta_tp) if tp_eval is not None else 0,
         build_chem=build_chem,
-        abundance_overrides=abundance_overrides,
+        abundance_overrides=_abundance_overrides,
         config=config,
         g_anchor=g,
     )

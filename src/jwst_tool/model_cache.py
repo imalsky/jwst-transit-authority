@@ -19,8 +19,6 @@ from jwst_tool.run_params import canonical_params
 if TYPE_CHECKING:
     from pathlib import Path
 
-MODEL_CACHE = _ins.MODEL_CACHE
-
 
 def params_key(params: dict) -> str:
     """Return the hash of the canonical parameters: the spectrum's cache key."""
@@ -30,7 +28,7 @@ def params_key(params: dict) -> str:
 
 def cache_path(params: dict) -> Path:
     """Return the model_cache entry of a run."""
-    return MODEL_CACHE / f"{params_key(params)}.npz"
+    return _ins.MODEL_CACHE / f"{params_key(params)}.npz"
 
 
 # Canonical keys that change the SPECTRUM but never the converged chemistry
@@ -68,7 +66,7 @@ def chem_key(params: dict) -> str:
 
 def chem_cache_path(params: dict) -> Path:
     """Return the chem-cache entry of a run."""
-    return MODEL_CACHE / f"chem-{chem_key(params)}.npz"
+    return _ins.MODEL_CACHE / f"chem-{chem_key(params)}.npz"
 
 
 def load_cached_npz(p: Path) -> dict | None:

@@ -12,7 +12,15 @@ import streamlit as st
 from jwst_tool import plotting, provenance
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import pandas as pd
+    from matplotlib.figure import Figure
+
+
+# EVERY download button is rendered with on_click=ignore. Without it a click
+# queues a rerun, and a queued rerun CANCELS the script run in flight -- on the
+# Run pass that is the forward model itself.
 
 
 def slug(s: str) -> str:
@@ -26,24 +34,13 @@ def slug(s: str) -> str:
 _FIG_DISPLAY_PX = 1100
 
 
-def fig_bytes(fig: Any, fmt: str, tight: bool = True) -> bytes:
+def fig_bytes(fig: Figure, fmt: str, tight: bool = True) -> bytes:
     """Export a figure for download.
 
-    Raster PNG at plotting.FIG_DPI or vector PDF (proposal-ready; text and lines stay vector).
+    Raster PNG at plotting.FIG_DPI (matplotlib takes dpi from the save, not the Figure) or vector PDF.
 
-    This savefig is what sets the resolution of every PNG the app produces:
-    matplotlib takes dpi from the save, not from the Figure, so the dpi passed
-    to plt.figure()/subplots() does not reach the output.
-
-    ``tight=True`` crops to the figure's OWN ink, so two figures on the same
-    canvas come out different sizes when one carries a legend the other lacks;
-    the paired T-P / mixing-ratio panels therefore export with ``tight=False``.
-    bbox_inches=None would NOT mean "no crop" -- matplotlib reads it as "use
-    rcParams['savefig.bbox']", which science.mplstyle sets to `tight` -- so the
-    figure's own bbox is the only way to force the full canvas.
-
-    Under plotting.render_lock: savefig measures text through the
-    process-global mathtext parser (see plotting.py).
+    ``tight=True`` crops to the figure's own ink. The full canvas needs the figure's own bbox: bbox_inches=None reads
+    rcParams['savefig.bbox'], which science.mplstyle sets to `tight`.
     """
     buf = io.BytesIO()
     with plotting.render_lock:
@@ -52,15 +49,13 @@ def fig_bytes(fig: Any, fmt: str, tight: bool = True) -> bytes:
             format=fmt,
             facecolor="white",
             bbox_inches=("tight" if tight else fig.bbox_inches),
-            **({"dpi": plotting.FIG_DPI} if fmt == "png" else {}),
+            **({"dpi": plotting.FIG_DPI} if fmt == "png" else {}),  # type: ignore[arg-type]  # the stub reads the mapping as its other keywords
         )
     return buf.getvalue()
 
 
-def show_fig(fig: Any, png: bytes) -> None:
-    """Show the figure's PNG bytes.
-
-    (the ones its download button carries) at a fixed pixel width, then close the figure under the render lock.
+def show_fig(fig: Figure, png: bytes) -> None:
+    """Show the PNG bytes its download button carries at a fixed pixel width, then close the figure under the lock.
 
     The bytes are the only way to display above 200 dpi (st.pyplot hardcodes
     it). A fixed width stops the figure rescaling on every window resize while
@@ -81,13 +76,13 @@ def axis_range(
     container: Any,
     label: str,
     key: str,
-    warn: Any,
+    warn: Callable[[str], Any],
     *,
     unit: str = "",
     positive: bool = False,
     positive_reason: str = "it is drawn on a log axis",
     step: float | None = None,
-) -> tuple | None:
+) -> tuple[float, float] | None:
     """Draw a plain min/max pair of number boxes for one plot axis.
 
     Every axis control in this app is this widget:

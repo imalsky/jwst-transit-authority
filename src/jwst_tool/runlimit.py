@@ -26,9 +26,13 @@ import threading
 import time
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from jwst_tool import instruments as _ins
+
+if TYPE_CHECKING:
+    from typing import IO
+
 
 #: concurrent heavy subprocesses per instance (one Run holds ONE slot,
 #: covering its forward model and its Pandeia ETC batch, from its first
@@ -48,7 +52,7 @@ class Slot:
     ``release()`` exactly once when the run finishes (the OS also releases it if the holding process dies).
     """
 
-    def __init__(self, fh: Any, index: int) -> None:
+    def __init__(self, fh: IO[str], index: int) -> None:
         self._fh = fh
         self.index = index
 
@@ -101,9 +105,7 @@ def oldest_start() -> float | None:
 
 
 def notify_refused(context: str) -> None:
-    """Mail the maintainer that a visitor was refused.
-
-    (every slot busy, or an illegal parameter set), at most once an hour per instance.
+    """Mail the maintainer that a visitor was refused (every slot busy, or illegal settings), at most hourly.
 
     Off unless ALERT_SMTP_USER, ALERT_SMTP_PASS and ALERT_TO are all set, so
     it is inert locally and in the tests. The send runs in a daemon thread --
@@ -138,7 +140,7 @@ def notify_refused(context: str) -> None:
             with smtplib.SMTP_SSL("smtp.gmail.com", 465) as srv:
                 srv.login(user, password)
                 srv.send_message(msg)
-        except Exception as exc:  # broad: never break a page render
+        except OSError as exc:  # SMTP and TLS failures included; anything else is a defect, reported by the thread
             log.warning("refusal alert failed: %r", exc)
 
     threading.Thread(target=_send, name="refusal-alert", daemon=True).start()

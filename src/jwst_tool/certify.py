@@ -7,10 +7,12 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from jwst_tool.model_defs import T_WINDOW
+from jwst_tool.model_defs import NZ_DEFAULT, T_WINDOW
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
+
+    from jwst_tool.tool_types import AnyArray, Log
 
 # Minimum positivity margin for the AD dlnCO row. The engine's co_bz_bound =
 # ln(1 + min_z(OO_z/OC_z)) is the largest ln C/O increment before some layer's
@@ -32,7 +34,7 @@ CONV_BRANCH = {1: "tight (yconv_cri)", 2: "loose (yconv_min)"}
 ELEMENT_TOL = 0.015
 
 
-def check_elements(y: np.ndarray, chem: Any, stage: str, log: Callable[..., None] = print) -> float:
+def check_elements(y: AnyArray, chem: Any, stage: str, log: Log = print) -> float:
     """Refuse a certified column whose element budget drifted from its build column.
 
     Per layer, every atom column of ``chem.compo_array`` over the H column; the layer median (molecular diffusion
@@ -69,7 +71,9 @@ class NotCertified(RuntimeError):
     """
 
 
-def check_converged(diag: Any, stage: str, species: list, chem: Any, log: Callable[..., None] = print) -> tuple:
+def check_converged(
+    diag: Any, stage: str, species: list[str], chem: Any, log: Log = print
+) -> tuple[str, int, float, float, int, float, str]:
     """Certify one solve against the runner's CANONICAL gate and return its record.
 
     Certification is ``ConvDiag.conv_normal`` AND ``longdy < yconv_min``, recomputed at the exit state -- never
@@ -109,21 +113,29 @@ def check_converged(diag: Any, stage: str, species: list, chem: Any, log: Callab
                 f"{chem.yconv_min:g}); {how}). The derivative at this point "
                 "is not certified; the column is."
             )
+        # A column coarser than the default can settle into an exact limit cycle at the step cap, where more steps or a
+        # retry cannot help: notes "Accepted limitations".
+        nz = int(np.size(chem.p_bar))
+        coarse = (
+            f" At nz={nz} this can be a limit cycle of a coarse column: raise nz (default {NZ_DEFAULT})."
+            if ac >= int(chem.count_max) and nz < NZ_DEFAULT
+            else ""
+        )
         raise NotCertified(
             f"chemistry did NOT converge ({stage}: {detail}; "
             f"gate yconv_min={chem.yconv_min:g}, "
             f"conv_normal={bool(diag.conv_normal)}; {how}). This "
-            "parameter corner has no certified steady state -- adjust "
+            "parameter corner did not pass the convergence gates at exit -- adjust "
             "T-P / Kzz / composition (or the convergence settings) "
-            "rather than trusting an unconverged spectrum."
+            f"rather than trusting an unconverged spectrum.{coarse}"
         )
     log(f"[fwd] {stage}: certified at {ac} accepted steps ({detail})")
     return (stage, ac, longdy, float(diag.longdydt), branch, float(diag.aflux_change), cell)
 
 
 def certified_solve(
-    chem_b: Any, th: np.ndarray, stage: str, rebuild: Any = None, log: Callable[..., None] = print
-) -> tuple:
+    chem_b: Any, th: AnyArray, stage: str, rebuild: Callable[[], Any] | None = None, log: Log = print
+) -> tuple[AnyArray, Any, tuple, bool]:
     """Solve one column and certify it, with ONE escalation.
 
     At the configured photolysis cadence dt can grow by 2^frq between refreshes;
@@ -138,7 +150,7 @@ def certified_solve(
     of being retried as a stall and reported with the escalation caveat.
     """
 
-    def _solve(c: Any) -> tuple:
+    def _solve(c: Any) -> tuple[AnyArray, Any, list[str]]:
         species = [sp for sp, _ in sorted(c.sidx.items(), key=lambda kv: kv[1])]
         y, diag = c.converged_y(th, return_conv_diag=True)
         return y, diag, species
@@ -160,7 +172,7 @@ def certified_solve(
 
 
 def check_ad_co_margin(
-    chem: Any, co_ratio: Any, y: np.ndarray = None, build_margin: Any = None, log: Callable[..., None] | None = None
+    chem: Any, co_ratio: float, y: np.ndarray | None = None, build_margin: float | None = None, log: Log | None = None
 ) -> float:
     """Certify the AD dlnCO row's oxygen-reservoir margin, or raise.
 
@@ -248,12 +260,12 @@ _NOT_A_K_TABLE_ABSORBER = frozenset(
 
 
 def unmodeled_absorbers(
-    species: list,
-    y: np.ndarray,
-    p_bar: np.ndarray,
+    species: list[str],
+    y: AnyArray,
+    p_bar: AnyArray,
     table_species: Iterable[str],
-    floor: np.ndarray = UNMODELED_VMR_WARN,
-) -> list[tuple]:
+    floor: float = UNMODELED_VMR_WARN,
+) -> list[tuple[str, float]]:
     """Network species with no opacity table that are abundant anyway.
 
     Returns [(name, mean VMR over the transmission photosphere), ...] above
@@ -274,19 +286,17 @@ def unmodeled_absorbers(
 
 
 def check_unmodeled(
-    species: list,
-    y: np.ndarray,
-    p_bar: np.ndarray,
+    species: list[str],
+    y: AnyArray,
+    p_bar: AnyArray,
     table_species: Iterable[str],
     stage: str,
-    log: Callable[..., None] = print,
+    log: Log = print,
 ) -> None:
     """Refuse a column whose observable layers carry an absorber with no opacity table, above UNMODELED_VMR_REFUSE.
 
-    Below it the run proceeds
-    and only says so (the warning at the call site). No table can be supplied
-    for these species -- ExoMolOP publishes none -- so the only remedy is a
-    composition that does not make them bulk carriers.
+    Below it the run proceeds and only says so (the warning at the call site). No table can be supplied for these
+    species -- ExoMolOP publishes none -- so the only remedy is a composition that does not make them bulk carriers.
     """
     over = unmodeled_absorbers(species, y, p_bar, table_species, floor=UNMODELED_VMR_REFUSE)
     if not over:
@@ -325,14 +335,13 @@ _TAU_WINDOWS = (
 EMIS_TAU_THIN = 3.0  # per-wavelength "sees through the bottom"
 
 
-EMIS_THIN_FLUX_FRAC = 0.01  # tolerated share of emitted flux from those
+EMIS_THIN_FLUX_FRAC = 0.01  # tolerated share of emitted flux from those wavelengths
 
 
-def tau_bottom_breakdown(wl_um: np.ndarray, tau: np.ndarray, flux: np.ndarray) -> str:
+def tau_bottom_breakdown(wl_um: AnyArray, tau: AnyArray, flux: AnyArray) -> str:
     """Report the per-window minimum bottom optical depth, the band share below the gate and its emission share.
 
-    A single
-    min() cannot tell a shallow column from an opacity gap.
+    A single min() cannot tell a shallow column from an opacity gap.
     """
     wl, tau = np.asarray(wl_um, float), np.asarray(tau, float)
     thin = tau < EMIS_TAU_THIN
@@ -355,7 +364,7 @@ def tau_bottom_breakdown(wl_um: np.ndarray, tau: np.ndarray, flux: np.ndarray) -
     return "\n".join(lines)
 
 
-def thin_flux_fraction(tau: np.ndarray, flux: np.ndarray, nu: np.ndarray) -> float:
+def thin_flux_fraction(tau: AnyArray, flux: AnyArray, nu: AnyArray) -> float:
     """Share of the emitted ENERGY coming from wavelengths whose bottom optical depth is below the gate.
 
     The emission certificate.
@@ -401,7 +410,7 @@ def thin_flux_fraction(tau: np.ndarray, flux: np.ndarray, nu: np.ndarray) -> flo
     return float((flux * w)[tau < EMIS_TAU_THIN].sum() / tot)
 
 
-def check_emission_thin(tau: np.ndarray, flux: np.ndarray, nu: np.ndarray, stage: str, detail: Any = "") -> float:
+def check_emission_thin(tau: AnyArray, flux: AnyArray, nu: AnyArray, stage: str, detail: str = "") -> float:
     """Refuse an emission spectrum whose column bottom leaks too much flux.
 
     The gate ``thin_flux_fraction`` computes, applied to ONE spectrum and
@@ -425,8 +434,12 @@ def check_emission_thin(tau: np.ndarray, flux: np.ndarray, nu: np.ndarray, stage
 
 
 def check_t_window(
-    tp_eval: Any, theta: np.ndarray, p_bar: np.ndarray, log: Callable[..., None], T_base: Any = None
-) -> Any:
+    tp_eval: Callable[[AnyArray, AnyArray], AnyArray] | None,
+    theta: AnyArray,
+    p_bar: AnyArray,
+    log: Log,
+    T_base: AnyArray | None = None,
+) -> np.ndarray:
     """T-P validity on the chemistry grid: REJECT (never clip) out-of-window profiles; returns the evaluated T(P).
 
     In file mode (tp_eval None) the profile IS the structure, so pass T_base (chem.T_base).

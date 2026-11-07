@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -13,7 +13,10 @@ from jwst_tool import fisher as fisher_mod, instruments as ins, posteriors, shar
 from jwst_tool.gui_common import K
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from jwst_tool.gui_results import RunView
+    from jwst_tool.tool_types import Slot
 
 # Display label for the every-usable-mode combination. A saturated mode is
 # unusable data and is excluded from every combination -- that exclusion is
@@ -35,20 +38,13 @@ _UNCONSTRAINED_ABOVE = 1e4
 _LN10 = np.log(10.0)  # ln-coordinate sigma -> dex
 
 
-# The reporting coordinate of a WIDTH, for every surface that prints one.
-# C/O is fitted in ln and reported in log10, so its numbers are dex; the other
-# rows are quoted in their own display units under their own names.
-# fisher.param_axis stays the PHYSICAL C/O the forecast panel's x axis draws
-# -- that is a different thing from the coordinate its width is quoted in,
-# and printing one under the other's name lets the table and the figure
-# legend disagree. The constraint table names its rows the same way (the C/O
-# row is pinned as "log10 C/O"): a bare "Metallicity" row reads as the
-# x-solar number the input widget carries, and the row is in dex.
-def _row_label(n: int) -> str:
+def _row_label(n: str) -> str:
+    # C/O is fitted in ln and reported in log10, so its row is named for that; fisher.param_axis stays the physical C/O
+    # the panel's x axis draws, a different thing from the coordinate its width is quoted in.
     return "log10 C/O" if n == "dlnCO" else fisher_mod.param_axis(n)
 
 
-def width_in_row_units(n: int, s: str) -> float:
+def width_in_row_units(n: str, s: float) -> float:
     """Convert an internal sigma to that row's coordinate: dex for log10 C/O (internal is ln), else display units."""
     return s / _LN10 if n == "dlnCO" else fisher_mod.display_sigma(n, s)
 
@@ -100,21 +96,20 @@ class ComboRecords:
 
 def combo_records(view: RunView) -> ComboRecords:
     """Evaluate the named combinations; one that cannot be evaluated is an error beside the builder."""
-    with_jac, fisher_names, co_eval = view.with_jac, view.fisher_names, view.co_eval
     # Evaluated through posteriors.combo_forecast (the SAME combination math as
     # the all-usable-modes row -- never reimplemented here). A combo that
     # cannot be evaluated (mode not run, all modes saturated) is reported as an
     # error next to the builder; the others still render.
-    results_by_mode = {r["mode_key"]: r for r in with_jac}
+    results_by_mode = {r["mode_key"]: r for r in view.with_jac}
     combos_cfg = st.session_state.get(K("combos")) or []
     combo_names_cfg = [str(c["name"]) for c in combos_cfg]
     combo_recs, combo_errs = [], []
-    if combos_cfg and fisher_names and results_by_mode:
+    if combos_cfg and view.fisher_names and results_by_mode:
         for _c in combos_cfg:
             try:
                 combo_recs.append(
                     posteriors.combo_forecast(
-                        str(_c["name"]), list(_c["modes"]), results_by_mode, fisher_names, co_eval=co_eval
+                        str(_c["name"]), list(_c["modes"]), results_by_mode, view.fisher_names, co_eval=view.co_eval
                     )
                 )
             except ValueError as _e:
@@ -134,14 +129,12 @@ def combo_records(view: RunView) -> ComboRecords:
 
 
 def _combo_builder(view: RunView, combos: ComboRecords) -> None:
-    with_jac = view.with_jac
-    combos_cfg, combo_errs, combo_recs = combos.cfg, combos.errs, combos.recs
     # Custom mode sets (builder)
     # Named combinations of the modes that were run, evaluated through
     # posteriors.combo_forecast (the same combination math as the
     # all-usable-modes row). They add rows to the table below and series
     # to the summary figure.
-    cb_opts = [r["mode_key"] for r in with_jac]
+    cb_opts = [r["mode_key"] for r in view.with_jac]
     # a stored selection can reference a mode absent from this run's results
     # (Streamlit crashes at widget instantiation on off-menu session state)
     cb_stale = st.session_state.get(K("cb_modes"))
@@ -162,15 +155,15 @@ def _combo_builder(view: RunView, combos: ComboRecords) -> None:
     # top of the row and lines up with nothing.
     cba1, _ = st.columns([1.2, 3.6])
     cba1.button("Add combination", key=K("cb_add"), on_click=_combo_add, width="stretch")
-    for i, c in enumerate(combos_cfg):
+    for i, c in enumerate(combos.cfg):
         cc1, cc2 = st.columns([4.0, 1.0])
         cc1.markdown(
             f"- **{c['name']}**: " + ", ".join(ins.MODES[m]["label"] if m in ins.MODES else m for m in c["modes"])
         )
         cc2.button("Remove", key=K(f"cb_rm_{i}"), on_click=_combo_remove, args=(i,))
-    for cname, cerr in combo_errs:
+    for cname, cerr in combos.errs:
         st.error(f"Combination {cname!r} could not be forecast: {cerr}")
-    for rec in combo_recs:
+    for rec in combos.recs:
         if rec["excluded"]:
             st.warning(
                 f"Combination {rec['name']!r}: "
@@ -187,33 +180,34 @@ def _combo_builder(view: RunView, combos: ComboRecords) -> None:
 
 def _constraint_rows(view: RunView, combos: ComboRecords, mode_notes: dict) -> tuple[list, set]:
     """Return the table rows, one per mode and parameter with combinations first, and the combination names."""
-    cpj, fisher_names, tsig = view.canon, view.fisher_names, view.tsig
-    with_jac, usable_jac = view.with_jac, view.usable_jac
-    combo_recs, results_by_mode = combos.recs, combos.by_mode
     row_center = {
         n: (
-            None if (c := posteriors.param_center(n, cpj)) is None else float(np.log10(c)) if n == "dlnCO" else float(c)
+            None
+            if (c := posteriors.param_center(n, view.canon)) is None
+            else float(np.log10(c))
+            if n == "dlnCO"
+            else float(c)
         )
-        for n in fisher_names
+        for n in view.fisher_names
     }
 
-    def _cell(w: Any, center: float | None = None) -> str:
+    def _cell(w: float, center: float | None = None) -> str:
         """One cell at the target significance.
 
         ``w`` is the 1-sigma width in the row's own coordinate. Both columns lead with the input-model value so
         each cell reads as an interval; they share that center and differ only in width.
         """
-        w = tsig * float(w)
+        w = view.tsig * float(w)
         if not np.isfinite(w) or w > _UNCONSTRAINED_ABOVE:
             return "unconstrained"
         return fisher_mod.format_pm(center, w)
 
     # long format, one row per mode x parameter, marginalized and conditional
     # side by side -- both read off the SAME nuisance-augmented Fisher matrix
-    marg_col = f"marginalized at {tsig:g}σ"
-    cond_col = f"conditional at {tsig:g}σ (others fixed)"
+    marg_col = f"marginalized at {view.tsig:g}σ"
+    cond_col = f"conditional at {view.tsig:g}σ (others fixed)"
 
-    def _param_rows(mode_label: str, sig: Any, cond: Any, note: str = "") -> list:
+    def _param_rows(mode_label: str, sig: dict, cond: dict, note: str = "") -> list:
         # the mode's risk notes ride on its first row only
         return [
             {
@@ -223,11 +217,11 @@ def _constraint_rows(view: RunView, combos: ComboRecords, mode_notes: dict) -> t
                 cond_col: _cell(width_in_row_units(n, cond[n]), row_center[n]),
                 "notes": note if i == 0 else "",
             }
-            for i, n in enumerate(fisher_names)
+            for i, n in enumerate(view.fisher_names)
         ]
 
     frows = []
-    for r in with_jac:
+    for r in view.with_jac:
         if r["saturated"]:
             # shown for completeness; a saturated mode contributes no usable
             # data (same exclusion policy as the verdict + combined)
@@ -241,20 +235,20 @@ def _constraint_rows(view: RunView, combos: ComboRecords, mode_notes: dict) -> t
                 }
             )
             continue
-        cond = {}
-        sig = fisher_mod.mode_forecast(r, fisher_names, conditional=cond)
+        cond: dict = {}
+        sig = fisher_mod.mode_forecast(r, view.fisher_names, conditional=cond)
         frows.extend(_param_rows(r["label"], sig, cond, note=mode_notes.get(r["mode_key"], "")))
     # the all-usable row, then each named combination under the user's own
     # name, unprefixed: the same combined_forecast over its usable modes
-    comb_rows = [(ALL_USABLE, usable_jac)] if len(usable_jac) >= 2 else []
-    comb_rows += [(str(rec["name"]), [results_by_mode[k] for k in rec["usable_modes"]]) for rec in combo_recs]
+    comb_rows = [(ALL_USABLE, view.usable_jac)] if len(view.usable_jac) >= 2 else []
+    comb_rows += [(str(rec["name"]), [combos.by_mode[k] for k in rec["usable_modes"]]) for rec in combos.recs]
     for lbl, rl in comb_rows:
         cond = {}
-        sig = fisher_mod.combined_forecast(rl, fisher_names, conditional=cond)
+        sig = fisher_mod.combined_forecast(rl, view.fisher_names, conditional=cond)
         frows.extend(_param_rows(lbl, sig, cond))
     # Custom combinations FIRST: they are what the user built, so they
     # lead the table. Order within each group is preserved.
-    combo_names = {str(rec["name"]) for rec in combo_recs}
+    combo_names = {str(rec["name"]) for rec in combos.recs}
     frows = [_r for _r in frows if _r["mode"] in combo_names] + [_r for _r in frows if _r["mode"] not in combo_names]
     return frows, combo_names
 
@@ -295,7 +289,7 @@ def _constraint_table(frows: list, combo_names: set) -> None:
         st.table(disp_df)
 
 
-def render_forecast_panel(view: RunView, combos: ComboRecords, mode_notes: dict) -> Any:
+def render_forecast_panel(view: RunView, combos: ComboRecords, mode_notes: dict) -> Slot | None:
     """Draw the constraint-forecast panel; return the slot reserved for the forecast-panel selector, if any."""
     post_slot = None
     with st.expander("Parameter constraint forecast (local Fisher)"):
@@ -322,13 +316,13 @@ def render_forecast_panel(view: RunView, combos: ComboRecords, mode_notes: dict)
     return post_slot
 
 
-def _panel_curves(p: str, src_labels_drawn: list, recs_by_src: dict, mock_rec: dict, series_color: Any) -> list:
+def _panel_curves(
+    p: str, src_labels_drawn: list, recs_by_src: dict, mock_rec: dict, series_color: Callable[[str], str]
+) -> list:
     """Return one parameter's curves, one per drawn series, recentred on the mock fit when there is one."""
     curves = []
     for lbl in src_labels_drawn:
-        # one curve per SELECTED SERIES, colored to match its series
-        # on the spectrum so the two halves of the figure read
-        # together (see series_color above for the shared mapping)
+        # one curve per SELECTED SERIES, colored to match its series on the spectrum
         pr = recs_by_src[lbl]["params"].get(p)
         col = series_color(lbl)
         if pr is None:
@@ -367,7 +361,7 @@ def _panel_curves(p: str, src_labels_drawn: list, recs_by_src: dict, mock_rec: d
                     mu=mu,
                     sigma=pr["sigma_display"],
                     sigma_ln=pr["sigma_ln"],
-                    width_text=(fisher_mod.format_co_width(mu, pr["sigma_ln"]) if p == "dlnCO" else None),
+                    width_text=(fisher_mod.format_co_width(mu, pr["sigma_ln"]) if p == "dlnCO" else None),  # type: ignore[arg-type]  # a curve has a center
                     curve_family=pr["curve_family"],
                     color=col,
                     ls="-",
@@ -380,114 +374,98 @@ def _panel_curves(p: str, src_labels_drawn: list, recs_by_src: dict, mock_rec: d
 
 def _forecast_sources(view: RunView, combos: ComboRecords) -> dict:
     """Return the forecast sources: each usable mode, the all-usable combination, and every named combination."""
-    usable_jac = view.usable_jac
-    combo_recs, results_by_mode = combos.recs, combos.by_mode
     # forecast sources: each usable mode, the all-usable combination, and
     # every named combination from the builder above
     sources: dict[str, list] = {}
-    for r in usable_jac:
+    for r in view.usable_jac:
         sources[r["label"]] = [r]
-    if len(usable_jac) >= 2:
-        sources[ALL_USABLE] = list(usable_jac)
-    for rec in combo_recs:
-        sources[str(rec["name"])] = [results_by_mode[k] for k in rec["usable_modes"]]
+    if len(view.usable_jac) >= 2:
+        sources[ALL_USABLE] = list(view.usable_jac)
+    for rec in combos.recs:
+        sources[str(rec["name"])] = [combos.by_mode[k] for k in rec["usable_modes"]]
     return sources
 
 
-# size-limit-ok: one selector, then one panel per parameter, each using what the selector chose
-def forecast_panels(  # noqa: C901  (the same reason)
-    view: RunView, combos: ComboRecords, mock: dict | None, post_slot: Any
-) -> list:
+def _series_color(view: RunView, combos: ComboRecords, label: str) -> str:
+    """Return one color per series, shared by the spectrum and the forecast panels."""
+    if label == ALL_USABLE:
+        return "#444444"
+    if label in combos.names:
+        return COMBO_COLORS[combos.names.index(label) % len(COMBO_COLORS)]
+    return ins.MODE_COLOR[next(r["mode_key"] for r in view.results if r["label"] == label)]
+
+
+def _series_shown(view: RunView, sources: dict) -> dict:
+    """Keep the sources the figure's series multiselect shows, so a panel never shows a mode the spectrum does not.
+
+    The multiselect renders later in the script, so this reads its committed state; absent means every source.
+    """
+    sel_ids = st.session_state.get(K("sum_series"))
+    if not sel_ids:
+        return sources
+    by_key = {r["mode_key"]: r["label"] for r in view.usable_jac}
+    want = []
+    for i in sel_ids:
+        kind, key = i.split(":", 1)
+        if kind == "allusable":
+            want.append(ALL_USABLE)
+        elif kind == "mode" and key in by_key:
+            want.append(by_key[key])  # saturated/Jacobian-less
+        elif kind == "combo":  # modes drop out here
+            want.append(key)
+    return {k: v for k, v in sources.items() if k in want}
+
+
+def forecast_panels(view: RunView, combos: ComboRecords, mock: dict | None, post_slot: Slot | None) -> list:
     """Draw the forecast-panel selector and return the summary figure's panels."""
-    results, usable_jac, fisher_names, cpj, co_eval = (
-        view.results,
-        view.usable_jac,
-        view.fisher_names,
-        view.canon,
-        view.co_eval,
-    )
-    post_panels: list[dict] = []  # summary_figure-compatible panel dicts
+    post_panels: list[dict] = []
     if not view.have_fisher:
         return post_panels
-    combo_names_cfg = combos.names
-    all_usable_color = "#444444"
-
-    def _series_color(label: str) -> str:
-        """Return one color per series, shared by the spectrum and the forecast panels."""
-        if label == ALL_USABLE:
-            return all_usable_color
-        if label in combo_names_cfg:
-            return COMBO_COLORS[combo_names_cfg.index(label) % len(COMBO_COLORS)]
-        return ins.MODE_COLOR[next(r["mode_key"] for r in results if r["label"] == label)]
-
     sources = _forecast_sources(view, combos)
-    if sources:
-        centers_all = {n: posteriors.param_center(n, cpj) for n in fisher_names}
-        pp_key = K("post_params_" + "_".join(fisher_names))
-        # a stored selection can go stale across runs (different free set)
-        if any(p not in fisher_names for p in st.session_state.get(pp_key, [])):
-            st.session_state.pop(pp_key, None)
-        with post_slot:
-            post_sel = st.multiselect(
-                "Marginalized parameters",
-                fisher_names,
-                default=fisher_names[:2],
-                key=pp_key,
-                max_selections=summary_figure.MAX_POST_PANELS,
-                format_func=lambda n: fisher_mod.PARAM_LABELS[n],
+    if not sources:
+        return post_panels
+    centers_all = {n: posteriors.param_center(n, view.canon) for n in view.fisher_names}
+    pp_key = K("post_params_" + "_".join(view.fisher_names))
+    # a stored selection can go stale across runs (different free set)
+    if any(p not in view.fisher_names for p in st.session_state.get(pp_key, [])):
+        st.session_state.pop(pp_key, None)
+    with post_slot:  # type: ignore[union-attr]  # None only for detect runs, which have no fisher_names
+        post_sel = st.multiselect(
+            "Marginalized parameters",
+            view.fisher_names,
+            default=view.fisher_names[:2],
+            key=pp_key,
+            max_selections=summary_figure.MAX_POST_PANELS,
+            format_func=lambda n: fisher_mod.PARAM_LABELS[n],
+        )
+    # record per source (sigmas always; curves for centered params)
+    curve_params = [p for p in post_sel if centers_all.get(p) is not None]
+    centers = {p: centers_all[p] for p in curve_params}
+    recs_by_src = {
+        lbl: posteriors.marginalized_posteriors(
+            rl, view.fisher_names, centers, params=curve_params, co_eval=view.co_eval
+        )
+        for lbl, rl in sources.items()
+    }
+    sources = _series_shown(view, sources)
+    labels = list(sources)
+    mock_rec = {}
+    if mock is not None and post_sel:
+        # linearized single-realization recovery on the same stacked system as the forecast
+        for lbl in labels:
+            mock_rec[lbl] = posteriors.mock_recovery(sources[lbl], view.fisher_names, mock, co_eval=view.co_eval)
+    for p in post_sel:
+        curves = _panel_curves(p, labels, recs_by_src, mock_rec, lambda lbl: _series_color(view, combos, lbl))
+        # A fit to the jitter draw is not a forecast: its center moves with the realization. The y axis says which.
+        fitted = any(c.get("kind") == posteriors.MOCK_RECOVERY_KIND for c in curves)
+        post_panels.append(
+            dict(
+                param=str(p),  # the NAME, so the axis-range widget keys stay stable when the selection reorders
+                axis_label=fisher_mod.param_axis(p),
+                axis_unit=fisher_mod.PARAM_UNITS.get(p, ""),
+                density_label=("relative density" if fitted else "relative forecast density"),
+                curves=curves,
+                center=centers_all.get(p),
             )
-        # record per source (sigmas always; curves for centered params)
-        curve_params = [p for p in post_sel if centers_all.get(p) is not None]
-        centers = {p: centers_all[p] for p in curve_params}
-        recs_by_src = {}
-        for lbl, rl in sources.items():
-            recs_by_src[lbl] = posteriors.marginalized_posteriors(
-                rl, fisher_names, centers, params=curve_params, co_eval=co_eval
-            )
-
-        # The figure's series multiselect drives both halves of the figure, so
-        # the panels can never show a mode the spectrum is not displaying. It
-        # renders later in the script, so read its committed state here;
-        # absent on the first render means every source, its own default.
-        sel_ids = st.session_state.get(K("sum_series"))
-        if sel_ids:
-            by_key = {r["mode_key"]: r["label"] for r in usable_jac}
-            want = []
-            for i in sel_ids:
-                kind, key = i.split(":", 1)
-                if kind == "allusable":
-                    want.append(ALL_USABLE)
-                elif kind == "mode" and key in by_key:
-                    want.append(by_key[key])  # saturated/Jacobian-less
-                elif kind == "combo":  # modes drop out here
-                    want.append(key)
-            sources = {k: v for k, v in sources.items() if k in want}
-        src_labels_drawn = list(sources)
-
-        mock_rec = {}
-        if mock is not None and post_sel:
-            # linearized single-realization recovery on the SAME stacked
-            # system as the forecast (posteriors.mock_recovery), per source
-            for lbl in src_labels_drawn:
-                mock_rec[lbl] = posteriors.mock_recovery(sources[lbl], fisher_names, mock, co_eval=co_eval)
-        for _p in post_sel:
-            curves = _panel_curves(_p, src_labels_drawn, recs_by_src, mock_rec, _series_color)
-            # A panel whose curves are FITS to the jitter draw is not a
-            # forecast: its centers move with the realization, while a
-            # forecast's center is the input value by construction. The y-axis
-            # name says which of the two the reader is looking at.
-            fitted = any(c.get("kind") == posteriors.MOCK_RECOVERY_KIND for c in curves)
-            post_panels.append(
-                dict(
-                    # the parameter NAME, so the axis-range widget keys below stay
-                    # stable when the selection reorders (compose_summary_figure
-                    # rebuilds each panel and drops keys it does not use)
-                    param=str(_p),
-                    axis_label=fisher_mod.param_axis(_p),
-                    axis_unit=fisher_mod.PARAM_UNITS.get(_p, ""),
-                    density_label=("relative density" if fitted else "relative forecast density"),
-                    curves=curves,
-                    center=centers_all.get(_p),
-                )
-            )
+        )
     return post_panels

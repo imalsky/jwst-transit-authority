@@ -14,12 +14,14 @@ idempotent.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import os
 import shutil
 import sys
 import tarfile
 import tempfile
 import urllib.request
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -27,12 +29,17 @@ from urllib.parse import quote
 
 from jwst_tool import datacheck as dc, instruments as ins
 
+# What a failed item raises: a network or disk error, an interrupted read, a refused payload or a broken tarball
+# (a truncated gzip stream raises EOFError or zlib.error).
+_FETCH_ERRORS = (OSError, RuntimeError, tarfile.TarError, http.client.HTTPException, EOFError, zlib.error)
+
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
 _UA = {"User-Agent": "jwst-transit-authority data fetcher"}
 _CHUNK = 1 << 20  # 1 MiB read chunks
 _PROGRESS_EVERY = 100  # progress line every N chunks
+_STALL_TIMEOUT_S = 120.0  # a connect or read silent this long fails that item; the transfer itself has no limit
 
 
 def _engine_cfg() -> Any:
@@ -133,7 +140,7 @@ PICASO_FETCHES = (
         Fetch(
             f"PICASO climate table {name}",
             f"https://zenodo.org/records/{dc.PICASO_CK_RECORD}/files/{quote(name)}?download=1",
-            lambda name=name: Path(ins.PICASO_REFDATA) / dc.PICASO_CK_DIR / name,
+            lambda name=name: Path(ins.PICASO_REFDATA) / dc.PICASO_CK_DIR / name,  # type: ignore[misc]  # the default binds the loop value
             "62 MB",
             md5=md5,
         )
@@ -166,9 +173,10 @@ and its exact "size"; feeding the first two to
   https://stsci.app.box.com/index.php?rm=box_download_shared_file\\
       &shared_name=<sharedName>&file_id=f_<id>
 
-serves the tarball. The 4 GB transfer is cut short repeatedly, so loop with
-curl -C - until the byte count on disk equals that "size". CHECK THE BYTE
-COUNT: a truncated transfer still exits 0.
+serves the tarball. The 4 GB transfer is often cut short. Restart it from zero:
+do not resume with curl -C -, since Box can restart the file and curl appends
+it, leaving an oversized file that still exits 0. CHECK THE BYTE COUNT against
+that "size": a truncated transfer exits 0 too.
 
 The Pandeia engine runs in its own conda environment (once):
   conda create -n pandeia_{env_suffix} python=3.12
@@ -206,7 +214,7 @@ def _download(url: str, out: Path, label: str, md5: str = "") -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(out.suffix + ".part")
     req = urllib.request.Request(url, headers=_UA)
-    with urllib.request.urlopen(req) as r, open(tmp, "wb") as w:
+    with urllib.request.urlopen(req, timeout=_STALL_TIMEOUT_S) as r, open(tmp, "wb") as w:
         total = int(r.headers.get("Content-Length") or 0)
         done = 0
         for i, chunk in enumerate(iter(lambda: r.read(_CHUNK), b"")):
@@ -235,6 +243,10 @@ def _extract_subtree(tar_path: Path, subtree: str, dest: Path, marker: str = "")
     n = 0
     with tarfile.open(tar_path) as tf:
         members = [m for m in tf if m.name.startswith(prefix) and m.isfile()]
+        if marker and not any(m.name == prefix + marker for m in members):
+            raise RuntimeError(
+                f"{tar_path}: no {marker!r} under {subtree!r}, so the extraction could never read complete"
+            )
         members.sort(key=lambda m: m.name == prefix + marker)
         for m in members:
             rel = m.name[len(prefix) :]
@@ -248,7 +260,7 @@ def _extract_subtree(tar_path: Path, subtree: str, dest: Path, marker: str = "")
             # truncated file, above all an empty marker, under its real name
             part = target.with_name(target.name + ".part")
             with open(part, "wb") as w:
-                shutil.copyfileobj(tf.extractfile(m), w)
+                shutil.copyfileobj(tf.extractfile(m), w)  # type: ignore[arg-type]  # m is a regular member
             os.replace(part, target)
             n += 1
     if n == 0:
@@ -281,7 +293,7 @@ def _fetch_one(f: Fetch) -> None:
         tar_path.unlink(missing_ok=True)
 
 
-def run_fetch(argv: list[str] = ()) -> int:
+def run_fetch(argv: Sequence[str] = ()) -> int:
     """Fetch every missing direct-URL dataset (``--picaso``: also the PICASO engine's).
 
     Returns a shell exit code.
@@ -303,7 +315,7 @@ def run_fetch(argv: list[str] = ()) -> int:
                 print(f"  already present: {f.label}")
                 continue
             _fetch_one(f)
-        except Exception as e:  # try every item; the exit code reports any failure
+        except _FETCH_ERRORS as e:  # try every item; the exit code reports any failure
             failures.append((f, e))
             print(f"  FAILED: {f.label}: {e}", file=sys.stderr, flush=True)
     print()

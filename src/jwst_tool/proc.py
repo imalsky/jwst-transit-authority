@@ -17,7 +17,7 @@ import contextlib
 import re
 import subprocess
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -31,7 +31,7 @@ TERM_GRACE_S = 10.0
 _EXC_LINE = re.compile(r"^[A-Za-z_][\w.]*: ")
 
 
-def exception_sentence(lines: list, default: str) -> str:
+def exception_sentence(lines: list[str], default: str) -> str:
     """Return the user-facing sentence of a failed worker.
 
     The message of the exception that closes the last traceback in its merged stdout/stderr, else ``default`` (a
@@ -51,11 +51,11 @@ def worker_prologue() -> None:
     BLOCK-buffer library prints, so progress lines would sit invisible in the
     buffer while the GUI shows nothing.
     """
-    sys.stdout.reconfigure(line_buffering=True)
+    sys.stdout.reconfigure(line_buffering=True)  # type: ignore[union-attr]  # a worker's stdout is a TextIOWrapper
 
 
 @contextlib.contextmanager
-def terminating(proc: subprocess.Popen, grace_s: float = TERM_GRACE_S) -> Iterator[Any]:
+def terminating(proc: subprocess.Popen, grace_s: float = TERM_GRACE_S) -> Iterator[subprocess.Popen]:
     """Yield ``proc``, guaranteeing it is dead and reaped on the way out.
 
     A child that exited normally is left alone, and its stdout pipe is closed either way. One still running when the

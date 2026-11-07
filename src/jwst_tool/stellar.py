@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from jwst_tool.tool_types import Log
 
 # CGS constants (CODATA; match exojax's planck.py values to float precision)
 _H = 6.62607015e-27  # erg s
@@ -20,7 +20,7 @@ _C = 2.99792458e10  # cm/s
 _KB = 1.380649e-16  # erg/K
 
 # numpy 2 renamed trapz -> trapezoid (and removed trapz); support both
-_trapz = getattr(np, "trapezoid", None) or np.trapz  # noqa: NPY201  (numpy 1 has only this name)
+_trapz = getattr(np, "trapezoid", None) or np.trapz  # type: ignore[attr-defined]  # noqa: NPY201  (numpy 1 has only this name)
 
 
 def _pi_planck_nu(nu_cm: np.ndarray, teff: float) -> np.ndarray:
@@ -32,9 +32,7 @@ def _pi_planck_nu(nu_cm: np.ndarray, teff: float) -> np.ndarray:
     return np.pi * 2.0 * _H * _C**2 * nu_cm**3 / np.expm1(x)
 
 
-def phoenix_surface_flux(
-    nu_grid: np.ndarray, teff: float, logg: float, feh: float, log: Callable[..., None] = print
-) -> np.ndarray:
+def phoenix_surface_flux(nu_grid: np.ndarray, teff: float, logg: float, feh: float, log: Log = print) -> np.ndarray:
     """PHOENIX stellar surface flux (erg s^-1 cm^-2 / cm^-1) on ``nu_grid``.
 
     Parameters: nu_grid (cm^-1, any order), teff (K), logg (log10 cgs),

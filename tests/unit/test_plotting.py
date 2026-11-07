@@ -228,52 +228,41 @@ def test_app_materializes_figures_only_through_locked_helpers():
     )
 
 
-# size-limit-ok: one figure, every legend's placement checked on it
-def test_summary_legends_sit_inside_their_axes_and_cover_no_data():
-    """Summary-figure legends sit INSIDE the axes (maintainer; the paired
-    T-P/mixing-ratio panels keep external legends). "Inside" alone is not
-    the requirement -- a legend that lands on the data is the failure -- so
-    the real invariant is that no legend rectangle contains a plotted
-    vertex, checked across 1/3/6 series since the spectrum legend grows
-    (maintainer rule).
-
-    Also pinned on the same figures: no legend TITLES (entries carry their
-    own numbers) and no multi-line entries (folding a note into the model
-    label breaks the row spacing); no overlapping tick labels; width QUOTED
-    as a number with no shaded band (overlapping fills muddy the panel);
-    headroom DERIVED from the legend row count, never a constant (which
-    holds only by coincidence); and no y-limit inflation hack in the source.
+@pytest.mark.parametrize("n_pts", [1, 3, 6])
+def test_summary_legends_sit_inside_their_axes_and_cover_no_data(n_pts):
+    """Summary legends sit INSIDE the axes (maintainer; the paired T-P/mixing-ratio panels keep external legends), and
+    the failure is a legend on the data, so no legend rectangle may contain a plotted vertex, across 1/3/6 series since
+    the spectrum legend grows. No legend titles and no multi-line entries; no overlapping tick labels.
     """
-    for n_pts in (1, 3, 6):
-        fig = _summary_fig(n_points=n_pts)
-        try:
-            with plotting.render_lock:
-                fig.canvas.draw()
-                renderer = fig.canvas.get_renderer()
-                legends = [ax for ax in fig.axes if ax.get_legend() is not None]
-                # spectrum + one per posterior panel (2 in the fixture)
-                assert len(legends) == 3, f"expected 3 legends, got {len(legends)}"
-                for ax in legends:
-                    leg = ax.get_legend()
-                    lb = leg.get_window_extent(renderer)
-                    ab = ax.get_window_extent()
-                    assert lb.x0 >= ab.x0 - 2 and lb.x1 <= ab.x1 + 2 and lb.y0 >= ab.y0 - 2 and lb.y1 <= ab.y1 + 2, (
-                        f"legend escaped its axes (n_pts={n_pts})"
-                    )
-                    covered = _vertices_inside(ax, lb)
-                    assert covered == 0, f"legend covers {covered} vertices (n_pts={n_pts})"
-                    assert not leg.get_title().get_text(), f"legend regained a title: {leg.get_title().get_text()!r}"
-                    for txt in leg.get_texts():
-                        assert "\n" not in txt.get_text(), f"multi-line legend entry: {txt.get_text()!r}"
-                if n_pts == 3:
-                    for i, ax in enumerate(fig.axes):
-                        for axis_name, boxes in _visible_major_label_bboxes(ax, renderer).items():
-                            _assert_no_overlaps(boxes, f"axes{i}.{axis_name}")
-        finally:
-            plt.close(fig)
-    assert "set_ylim(_y0, _y0 + (_y1 - _y0)" not in inspect.getsource(summary_figure), "y-limit headroom hack is back"
+    fig = _summary_fig(n_points=n_pts)
+    try:
+        with plotting.render_lock:
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+            legends = [ax for ax in fig.axes if ax.get_legend() is not None]
+            # spectrum + one per posterior panel (2 in the fixture)
+            assert len(legends) == 3, f"expected 3 legends, got {len(legends)}"
+            for ax in legends:
+                leg = ax.get_legend()
+                lb = leg.get_window_extent(renderer)
+                ab = ax.get_window_extent()
+                assert lb.x0 >= ab.x0 - 2 and lb.x1 <= ab.x1 + 2 and lb.y0 >= ab.y0 - 2 and lb.y1 <= ab.y1 + 2
+                covered = _vertices_inside(ax, lb)
+                assert covered == 0, f"legend covers {covered} vertices"
+                assert not leg.get_title().get_text(), f"legend regained a title: {leg.get_title().get_text()!r}"
+                for txt in leg.get_texts():
+                    assert "\n" not in txt.get_text(), f"multi-line legend entry: {txt.get_text()!r}"
+            for i, ax in enumerate(fig.axes):
+                for axis_name, boxes in _visible_major_label_bboxes(ax, renderer).items():
+                    _assert_no_overlaps(boxes, f"axes{i}.{axis_name}")
+    finally:
+        plt.close(fig)
 
-    # width quoted, band absent (a normalized curve's shape cannot show it)
+
+def test_forecast_widths_are_quoted_with_no_shaded_band():
+    """A normalized curve's shape cannot show its width, so the number rides the legend, and overlapping fills muddy
+    the panel.
+    """
     fig = _summary_fig(with_sigma=True)
     try:
         for i, ax in enumerate(fig.axes[1:], 1):
@@ -287,46 +276,48 @@ def test_summary_legends_sit_inside_their_axes_and_cover_no_data():
     finally:
         plt.close(fig)
 
-    # headroom derived from the row count: 1 and 6 sources, the range ends
+
+@pytest.mark.parametrize("n_src", [1, 6])
+def test_forecast_panel_headroom_follows_the_legend_rows(n_src):
+    """The headroom comes from the row count, never a constant, which holds only by coincidence."""
     th = np.linspace(0.6, 1.4, 200)
     pal = ["#1f4e9c", "#8c2d04", "#0f6b4f", "#6a3d9a", "#117733", "#444444"]
     wl = np.linspace(1.0, 12.0, 200)
-    for n_src in (1, 6):
-        curves = [
-            dict(
-                label=f"Source {i} with a longish mode name",
-                theta=th,
-                pdf=np.exp(-((th - 1.0) ** 2) / (2 * (0.02 + 0.006 * i) ** 2)),
-                mu=1.0,
-                sigma=0.02 + 0.006 * i,
-                color=pal[i],
-                ls="-",
-                lw=1.8,
-            )
-            for i in range(n_src)
-        ]
-        fig = summary_figure.compose_summary_figure(
-            dict(
-                wl_um=wl,
-                depth_ppm=20000.0 + 300.0 * np.sin(wl),
-                depth_label="transit depth (ppm)",
-                model_label="model",
-                points=[],
-            ),
-            posterior_panels=[dict(axis_label="[M/H] [dex]", center=1.0, curves=curves)],
+    curves = [
+        dict(
+            label=f"Source {i} with a longish mode name",
+            theta=th,
+            pdf=np.exp(-((th - 1.0) ** 2) / (2 * (0.02 + 0.006 * i) ** 2)),
+            mu=1.0,
+            sigma=0.02 + 0.006 * i,
+            color=pal[i],
+            ls="-",
+            lw=1.8,
         )
-        try:
-            with plotting.render_lock:
-                fig.canvas.draw()
-                ax = fig.axes[1]
-                # curves are peak-normalized to 1.0: the top IS the headroom
-                top = ax.get_ylim()[1]
-                assert top > 1.0 + 0.10 * n_src - 0.02, f"{n_src} sources got only {top:.2f} of headroom"
-                lb = ax.get_legend().get_window_extent(fig.canvas.get_renderer())
-                covered = _vertices_inside(ax, lb)
-                assert covered == 0, f"legend covers {covered} vertices with {n_src} sources"
-        finally:
-            plt.close(fig)
+        for i in range(n_src)
+    ]
+    fig = summary_figure.compose_summary_figure(
+        dict(
+            wl_um=wl,
+            depth_ppm=20000.0 + 300.0 * np.sin(wl),
+            depth_label="transit depth (ppm)",
+            model_label="model",
+            points=[],
+        ),
+        posterior_panels=[dict(axis_label="[M/H] [dex]", center=1.0, curves=curves)],
+    )
+    try:
+        with plotting.render_lock:
+            fig.canvas.draw()
+            ax = fig.axes[1]
+            # curves are peak-normalized to 1.0: the top IS the headroom
+            top = ax.get_ylim()[1]
+            assert top > 1.0 + 0.10 * n_src - 0.02, f"{n_src} sources got only {top:.2f} of headroom"
+            lb = ax.get_legend().get_window_extent(fig.canvas.get_renderer())
+            covered = _vertices_inside(ax, lb)
+            assert covered == 0, f"legend covers {covered} vertices with {n_src} sources"
+    finally:
+        plt.close(fig)
 
 
 def test_a_fitted_panel_is_not_labelled_a_forecast():

@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 from param_helpers import W39B_REFERENCE, _p, _pf, _table
 
-from jwst_tool import forward, jacobian, model_cache, model_defs, planets, run_params, tp_tables
+from jwst_tool import forward, model_cache, model_defs, picaso_engine, planets, run_params, tp_tables
 
 
 def test_condensation_detection_only_with_full_refusal_matrix():
@@ -309,7 +309,7 @@ _PIC = dict(planet="wasp39b", chem_provider="picaso")
 def test_picaso_payloads_are_idempotent_and_carry_their_own_keys(kw):
     cp = forward.canonical_params({**_PIC, **kw})
     assert forward.canonical_params(cp) == cp
-    assert cp["picaso_stack"] == model_defs.PICASO_STACK and cp["network"] == ""
+    assert cp["picaso_stack"] == picaso_engine.PICASO_STACK and cp["network"] == ""
     assert cp["use_photo"] is False and cp["kzz_mode"] == "const"
     climate = cp["tp_mode"] == "picaso_climate"
     assert (cp["rfacv"] > 0) == climate and (cp["star_teff"] > 0) == (climate or cp["science_mode"] == "emission")
@@ -320,8 +320,8 @@ def test_picaso_payloads_are_idempotent_and_carry_their_own_keys(kw):
 
 def test_picaso_lnz_stencil_turns_one_sided_at_the_metallicity_cap():
     # the 10x default keeps its lnZ row; VULCAN's stencil is unchanged
-    assert jacobian.fd_stencil("lnZ", 10.0, 0.99, model_defs.PICASO_MET_RANGE[1])[0] == (-1, -2, -4)
-    assert jacobian.fd_stencil("lnZ", 10.0, 0.99)[0] == (1, -1, 2, -2)
+    assert model_defs.fd_stencil("lnZ", 10.0, 0.99, model_defs.PICASO_MET_RANGE[1])[0] == (-1, -2, -4)
+    assert model_defs.fd_stencil("lnZ", 10.0, 0.99)[0] == (1, -1, 2, -2)
     forward.canonical_params({**_PIC, "fisher_params": ["lnZ"]})
 
 
@@ -561,8 +561,8 @@ def test_photo_off_carbon_rich_fd_dlnco_row_is_accepted():
         _p(network="sncho", use_photo=False, co_ratio=5.0, jac_method="fd", fisher_params=["dlnCO"])
     )
     assert cp["co_ratio"] == 5.0 and cp["use_photo"] is False
-    offs, h = jacobian.fd_stencil("dlnCO", 5.0, model_defs.CO_MAX["sncho"])
-    assert offs == (-1, -2, -4) and h == jacobian.FD_STEPS["dlnCO"] / 2
+    offs, h = model_defs.fd_stencil("dlnCO", 5.0, model_defs.CO_MAX["sncho"])
+    assert offs == (-1, -2, -4) and h == model_defs.FD_STEPS["dlnCO"] / 2
     # every stencil point stays inside the photolysis-aware envelope
     lo, hi = model_defs.co_bounds("sncho", False)
     assert all(lo <= 5.0 * math.exp(s * h) <= hi for s in offs)
@@ -571,3 +571,27 @@ def test_photo_off_carbon_rich_fd_dlnco_row_is_accepted():
         forward.canonical_params(
             _p(network="sncho", use_photo=True, co_ratio=5.0, jac_method="fd", fisher_params=["dlnCO"])
         )
+
+
+@pytest.mark.filterwarnings("ignore:genfromtxt:UserWarning")
+def test_a_t_p_table_that_cannot_be_read_is_a_value_error_and_a_defect_is_not(tmp_path, monkeypatch):
+    comments_only = tmp_path / "comments.txt"
+    comments_only.write_text("#\n" * 7)  # genfromtxt raises IndexError here
+    with pytest.raises(ValueError, match="not parseable"):
+        tp_tables._parse_table(comments_only)
+    with pytest.raises(ValueError, match="not parseable"):
+        tp_tables._parse_table(tmp_path / "absent.txt")
+
+    def defect(*_a, **_k):
+        raise TypeError("a bug")
+
+    table = tmp_path / "table.txt"
+    table.write_text("# units\nPressure Temp\n" + "1 2\n" * 5)
+    monkeypatch.setattr(tp_tables.np, "genfromtxt", defect)
+    with pytest.raises(TypeError, match="a bug"):
+        tp_tables._parse_table(table)
+
+
+def test_the_molecule_set_needs_the_network_named():
+    with pytest.raises(KeyError, match="network"):
+        model_defs.active_molecules({"extra_mols": []})

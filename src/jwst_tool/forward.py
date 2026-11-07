@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -15,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from jwst_tool import instruments as _ins, picaso_engine as _pe
+from jwst_tool import instruments as _ins, picaso_engine as _pe, provenance as _prov
 from jwst_tool.certify import (
     PHOTOSPHERE_BAR,
     certified_solve,
@@ -26,19 +27,20 @@ from jwst_tool.certify import (
     unmodeled_absorbers,
 )
 from jwst_tool.chem_build import assemble_chem
+from jwst_tool.instruments import MODEL_CACHE
 from jwst_tool.jacobian import (
-    FD_COMP_PARAMS,
     Baseline,
     Rows,
     build_jacobian,
 )
-from jwst_tool.model_cache import MODEL_CACHE, cache_path, chem_cache_path, load_cached_npz, load_result, params_key
+from jwst_tool.model_cache import cache_path, chem_cache_path, load_cached_npz, load_result, params_key
 from jwst_tool.model_defs import (
     _VERSION,
     CHEM_PARAM_NAMES,
     CLOUD_FISHER_PARAMS,
     EXTRA_MOLECULES,
     EXTRA_MOLECULES_DEFAULT,
+    FD_COMP_PARAMS,
     MOLECULES,
     NETWORKS,
     NO_EXOMOLOP_TABLE,
@@ -57,10 +59,12 @@ from jwst_tool.spectrum import (
     gas_mask,
     transmission_spectra,
 )
-from jwst_tool.tp_tables import resolve_tp_file, uploads_dir
+from jwst_tool.tp_tables import resolve_tp_file, stage_upload, uploads_dir
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from jwst_tool.tool_types import AnyArray, Log
 
 _NO_EXOMOLOP_TABLE = NO_EXOMOLOP_TABLE  # the deployed Space's scripts read this name, at a pinned tool commit
 
@@ -80,16 +84,16 @@ __all__ = [
 ]
 
 
-def _make_progress(cp: dict, log: Callable[..., None]) -> tuple:
+def _make_progress(cp: dict, log: Log) -> tuple[Callable[[], None], Callable[[], None]]:
     """Sequential stage tracker: emits "[fwd] PROG <frac> <label>" lines.
 
     The stage list MUST mirror run_model's actual stage order (same
     conditionals); weights are rough wall-clock seconds. advance() is called
     at the START of each stage.
     """
-    emis = cp.get("science_mode") == "emission"
+    emis = cp["science_mode"] == "emission"
     pic = cp["chem_provider"] == "picaso"
-    # a PICASO climate solve is ~550 s on one daw core (two for the baseline's
+    # a PICASO climate solve is ~550 s on one core (two for the baseline's
     # gravity fixed point); its equilibrium chemistry alone is seconds
     clim_s = (
         PICASO_CLIMATE_SOLVE_S
@@ -127,7 +131,7 @@ def _make_progress(cp: dict, log: Callable[..., None]) -> tuple:
     # RT-only, ad = one warm jvp per chemistry row (one stage for all)
     ad = cp["jac_method"] == "ad"
 
-    def _row_stage(n: int) -> tuple:
+    def _row_stage(n: str) -> tuple:
         if n in CLOUD_FISHER_PARAMS:
             return (f"{'AD' if ad else 'FD'} Jacobian d/d({n})", 8.0)
         if pic:
@@ -144,7 +148,7 @@ def _make_progress(cp: dict, log: Callable[..., None]) -> tuple:
     if cp["fisher_params"]:
         stages += [(("AD" if ad else "FD") + " Jacobian d/d(lnR0)", 8.0)]
     total = sum(w for _, w in stages)
-    state = {"i": 0, "done": 0.0}
+    state: dict[str, Any] = {"i": 0, "done": 0.0}
 
     def advance() -> None:
         label, w = stages[state["i"]]
@@ -172,35 +176,42 @@ class _Column:
     solved_here: bool
 
 
-def _archive_uploaded_table(params: dict, cp: dict, log: Callable[..., None]) -> None:
+@dataclass
+class _RunResult:
+    """What a run computed on top of its column, ready to store."""
+
+    T_check: np.ndarray
+    depth: np.ndarray
+    depth_wo: np.ndarray | None
+    evidence: EmissionEvidence | None
+    rows: Rows | None
+    unmodeled: list
+    rate_ex: dict
+    bz_build: float
+    wo_list: list
+
+
+def _archive_uploaded_table(params: dict, cp: dict, log: Log) -> None:
     # Uploaded T-P tables become a CONTENT-ADDRESSED copy under
     # <output>/uploads/<sha1>.txt before anything heavy runs, so canonical
     # params alone re-resolve the exact bytes later.
     if cp["tp_mode"] == "file" and cp["tp_file"] == TP_FILE_UPLOAD:
         src_path, sha1 = resolve_tp_file(params)
-        dst = uploads_dir() / f"{sha1}.txt"
-        if not dst.exists():
-            uploads_dir().mkdir(parents=True, exist_ok=True)
+        if not (uploads_dir() / f"{sha1}.txt").exists():
             # atomic: the exists() guard would make a torn copy permanent and
             # tp_file_from_cp would then refuse this sha1 forever
-            _ins.atomic_write(dst, lambda fh: fh.write(src_path.read_bytes()))
+            staged, dst = stage_upload(src_path.read_bytes())
+            os.replace(staged, dst)
             log(f"[fwd] uploaded T-P table archived -> {dst}")
 
 
 def _column_from_cache(
-    chem_art: dict,
-    chem_out: Path,
-    theta: Any,
-    species_now: list,
-    chem: Any,
-    build_chem: Any,
-    setup: RtSetup,
-    log: Callable[..., None],
+    chem_art: dict, chem_out: Path, A: Any, species_now: list, chem: Any, setup: RtSetup, log: Log
 ) -> _Column:
     """Validate a chem-cache entry loudly and rebind the run to its cadence."""
     import jax.numpy as jnp
 
-    depth_from_y = ColumnSpectrum(setup, chem)
+    column = ColumnSpectrum(setup, chem)
     escalated: list[str] = []
     run_frq = None
     # validate loudly: a mismatched entry raises, never silently re-solves
@@ -211,7 +222,7 @@ def _column_from_cache(
             "different chemistry configurations. Delete the entry and "
             "report this; do not ignore it."
         )
-    if not np.array_equal(np.asarray(chem_art["theta"]), theta):
+    if not np.array_equal(np.asarray(chem_art["theta"]), A.theta):
         raise RuntimeError(
             f"chem-cache {chem_out.name}: stored theta differs from "
             "this run's theta under an equal chem_key -- the key is "
@@ -239,26 +250,17 @@ def _column_from_cache(
         # path below; the rebuild costs a model build, not a solve.
         escalated.append("baseline solve (whole run at photolysis cadence 1)")
         run_frq = 1
-        chem = build_chem(tag="baseline [photo cadence 1]", photo_frq=1)
-        depth_from_y = ColumnSpectrum(setup, chem)
+        chem = A.build_chem(tag="baseline [photo cadence 1]", photo_frq=1)
+        column = ColumnSpectrum(setup, chem)
     log(f"[fwd] chemistry column from chem-cache ({chem_out.name}, {ac} accepted steps at write); solve skipped")
-    return _Column(y_sol, y_np, chem, depth_from_y, species_now, escalated, run_frq, False)
+    return _Column(y_sol, y_np, chem, column, species_now, escalated, run_frq, False)
 
 
 def _solve_cold(
-    chem: Any,
-    th0: Any,
-    theta: Any,
-    theta_names: list,
-    species_now: list,
-    chem_out: Path,
-    build_chem: Any,
-    setup: RtSetup,
-    t0: float,
-    log: Callable[..., None],
+    chem: Any, A: Any, th0: AnyArray, species_now: list, chem_out: Path, setup: RtSetup, t0: float, log: Log
 ) -> _Column:
     """Solve the baseline cold, certify it and persist the raw column."""
-    depth_from_y = ColumnSpectrum(setup, chem)
+    column = ColumnSpectrum(setup, chem)
     escalated: list[str] = []
     run_frq = None
     log("[fwd] solving photochemistry (cold, certified) ...")
@@ -267,12 +269,12 @@ def _solve_cold(
         th0,
         "baseline solve",
         log=log,
-        rebuild=lambda: build_chem(tag="baseline [photo cadence 1]", photo_frq=1),
+        rebuild=lambda: A.build_chem(tag="baseline [photo cadence 1]", photo_frq=1),
     )
     if esc:  # the model was rebuilt: rebind what binds it
         escalated.append("baseline solve (whole run at photolysis cadence 1)")
         run_frq = 1
-        depth_from_y = ColumnSpectrum(setup, chem)
+        column = ColumnSpectrum(setup, chem)
     y_np = np.asarray(y_sol)
     if not np.all(np.isfinite(y_np)):
         raise RuntimeError(
@@ -285,8 +287,8 @@ def _solve_cold(
     chem_arrays = dict(
         y_raw=y_np,
         species=np.array(species_now, dtype="U16"),
-        theta=theta,
-        theta_names=np.array(theta_names, dtype="U16"),
+        theta=A.theta,
+        theta_names=np.array(A.theta_names, dtype="U16"),
         p_bar=np.asarray(chem.p_bar),
         conv_accept=np.array([ac], dtype=np.int64),
         conv_longdy=np.array([ld], dtype=np.float64),
@@ -296,10 +298,10 @@ def _solve_cold(
         conv_cell=np.array([cell], dtype="U48"),
         photo_escalated=np.array([1 if esc else 0], dtype=np.int64),
     )
-    MODEL_CACHE.mkdir(parents=True, exist_ok=True)
+    chem_out.parent.mkdir(parents=True, exist_ok=True)
     _ins.atomic_write(chem_out, lambda fh: np.savez_compressed(fh, **chem_arrays))
     log(f"[fwd] chem column cached -> {chem_out.name}")
-    return _Column(y_sol, y_np, chem, depth_from_y, species_now, escalated, run_frq, True)
+    return _Column(y_sol, y_np, chem, column, species_now, escalated, run_frq, True)
 
 
 def _baseline_column(
@@ -307,10 +309,10 @@ def _baseline_column(
     cp: dict,
     chem: Any,
     A: Any,
-    th0: Any,
+    th0: AnyArray,
     setup: RtSetup,
     advance: Callable[[], None],
-    log: Callable[..., None],
+    log: Log,
 ) -> _Column:
     """Return the baseline column: certified cold, unless an identical chemistry-relevant set already solved.
 
@@ -327,11 +329,11 @@ def _baseline_column(
     chem_out = chem_cache_path(params)
     chem_art = load_cached_npz(chem_out)
     if chem_art is not None:
-        return _column_from_cache(chem_art, chem_out, A.theta, species_now, chem, A.build_chem, setup, log)
-    return _solve_cold(chem, th0, A.theta, A.theta_names, species_now, chem_out, A.build_chem, setup, t0, log)
+        return _column_from_cache(chem_art, chem_out, A, species_now, chem, setup, log)
+    return _solve_cold(chem, A, th0, species_now, chem_out, setup, t0, log)
 
 
-def _opacity_advisory(col: _Column, config: Any, log: Callable[..., None]) -> list:
+def _opacity_advisory(col: _Column, config: Any, log: Log) -> list:
     # Missing opacity: a species the network solves but the RT cannot see is
     # missing absorption, not a missing trace. Loud, never silent. The error it
     # leaves is UNSIGNED: the tool scores depth - depth_wo, which in the
@@ -359,7 +361,7 @@ def _opacity_advisory(col: _Column, config: Any, log: Callable[..., None]) -> li
     return unmodeled
 
 
-def _rate_advisory(cp: dict, T_check: np.ndarray, log: Callable[..., None]) -> dict:
+def _rate_advisory(cp: dict, T_check: np.ndarray, log: Log) -> dict:
     # Rate-law temperature-range exposure of this run's network on this run's
     # T grid: ADVISORY, never a gate -- VULCAN evaluates every rate everywhere
     # and parity requires the same. The engine prints its own advisory to the
@@ -384,89 +386,68 @@ def _rate_advisory(cp: dict, T_check: np.ndarray, log: Callable[..., None]) -> d
 
 
 # size-limit-ok: one flat table of what the entry holds
-def _write_result(
-    params: dict,
-    cp: dict,
-    A: Any,
-    setup: Any,
-    col: Any,
-    T_check: np.ndarray,
-    depth: np.ndarray,
-    depth_wo: np.ndarray | None,
-    evidence: EmissionEvidence | None,
-    rows: Rows | None,
-    unmodeled: list,
-    rate_ex: dict,
-    bz_build: Any,
-    wo_list: list,
-) -> Path:
+def _write_result(params: dict, cp: dict, A: Any, setup: RtSetup, col: _Column, res: _RunResult) -> Path:
     """Write the run's model_cache entry atomically; every gate has passed by now."""
-    y_np, chem, species_now, escalated = col.y_np, col.chem, col.species, col.escalated
-    rt, emis, fs_j = setup.rt, setup.emis, setup.fs_j
     pic = cp["chem_provider"] == "picaso"
-    theta, theta_names, mols_active = A.theta, A.theta_names, list(A.profile["molecules"])
-    _unmodeled, _rate_ex = unmodeled, rate_ex
-    _bz_build, bz_warm = bz_build, rows.bz_warm if rows is not None else float("nan")
+    mols_active = list(A.profile["molecules"])
+    bz_warm = res.rows.bz_warm if res.rows is not None else float("nan")
     out = cache_path(params)
     out.parent.mkdir(parents=True, exist_ok=True)
-    # lazy: provenance imports this module
-    from jwst_tool import provenance as _prov
-
     # npz ymix must use the SAME gas normalization the RT applies (condensate
     # columns excluded), or the saved ymix disagrees with the spectra.
-    y_gas_np = y_np * gas_mask(chem)[None, :]
+    y_gas_np = col.y_np * gas_mask(col.chem)[None, :]
     ymix_np = y_gas_np / y_gas_np.sum(axis=1, keepdims=True)
     arrays = dict(
-        wl_um=np.asarray(rt.wl_um, dtype=np.float64),
-        depth=depth,
-        depth_wo=depth_wo,
+        wl_um=np.asarray(setup.rt.wl_um, dtype=np.float64),
+        depth=res.depth,
+        depth_wo=res.depth_wo,
         mols=np.array(mols_active, dtype="U8"),
         # the set depth_wo (and the emis_*_wo certificates) align with: a
         # subset of mols in fold order. Readers index by THIS array, not mols.
-        wo_mols=np.array(wo_list, dtype="U8"),
+        wo_mols=np.array(res.wo_list, dtype="U8"),
         ymix=ymix_np,
-        p_bar=np.asarray(chem.p_bar),
+        p_bar=np.asarray(col.chem.p_bar),
         # THE COLUMN NAMES OF ymix, which is the FULL network state while
         # `mols` is the shorter RT list. Never infer these from `mols`.
-        ymix_species=np.array(species_now, dtype="U16"),
-        T=np.asarray(T_check),
-        theta=theta,
-        theta_names=np.array(theta_names, dtype="U16"),
+        ymix_species=np.array(col.species, dtype="U16"),
+        T=np.asarray(res.T_check),
+        theta=A.theta,
+        theta_names=np.array(A.theta_names, dtype="U16"),
         # auto-sized U dtype: a fixed width silently truncates long JSON
         params_json=np.array(json.dumps(cp)),
         # Network species with no k-table (unmodeled_absorbers). Stored, not
         # just logged: a model-cache hit never solves, so the GUI has no other
         # way to say the contrast carries an unsigned opacity error.
-        unmodeled=np.array([f"{sp}|{v:.3e}" for sp, v in _unmodeled], dtype="U32"),
+        unmodeled=np.array([f"{sp}|{v:.3e}" for sp, v in res.unmodeled], dtype="U32"),
         # Rate-law T-range advisory, this network on this T grid (above).
-        rate_rows_outside=np.array([_rate_ex["any_outside"]], dtype=np.int64),
-        rate_rows_total=np.array([_rate_ex["thermal_rows"]], dtype=np.int64),
+        rate_rows_outside=np.array([res.rate_ex["any_outside"]], dtype=np.int64),
+        rate_rows_total=np.array([res.rate_ex["thermal_rows"]], dtype=np.int64),
         # AD dlnCO oxygen-reservoir margin on the build column and on the
         # converged column the tangent starts from (NaN when no AD dlnCO row)
-        co_bz_margin=np.array([_bz_build, bz_warm], dtype=np.float64),
+        co_bz_margin=np.array([res.bz_build, bz_warm], dtype=np.float64),
         science_mode=np.array(cp["science_mode"], dtype="U16"),
         chem_provider=np.array(cp["chem_provider"], dtype="U16"),
         # Stages that needed the photolysis-cadence escalation to certify;
         # empty on the normal path. See certified_solve.
         # auto-sized U dtype: a fixed width truncates the longest label
-        photo_escalated=np.array(escalated),
+        photo_escalated=np.array(col.escalated),
     )
     if col.solved_here:
         # what SOLVED this column; exports read it, the cache key does not.
         # A chem-cache hit was solved by an unrecorded stack: no stamp, and
         # the export says "installed now" instead of asserting one.
         arrays["producer"] = np.array(
-            _prov.producer_commits() + ([f"{k}={v}" for k, v in sorted(chem.versions.items())] if pic else [])
+            _prov.producer_commits() + ([f"{k}={v}" for k, v in sorted(col.chem.versions.items())] if pic else [])
         )
     if pic:
         arrays["picaso_cert"] = np.array(
-            json.dumps({"cert": chem.cert, "quench_bar": chem.quench, "g_anchor_cgs": A.g_anchor})
+            json.dumps({"cert": col.chem.cert, "quench_bar": col.chem.quench, "g_anchor_cgs": A.g_anchor})
         )
-    if emis is not None:
-        depth_norm_em0 = evidence.depth_norm
-        arrays["fs_flux"] = np.asarray(fs_j, dtype=np.float64)
+    if setup.emis is not None:
+        depth_norm_em0 = res.evidence.depth_norm  # type: ignore[union-attr]  # set in an emission run
+        arrays["fs_flux"] = np.asarray(setup.fs_j, dtype=np.float64)
         # Fp derived exactly from the stored eclipse depth (lnR0 = 0 baseline)
-        arrays["fp_flux"] = depth * np.asarray(fs_j) / depth_norm_em0
+        arrays["fp_flux"] = res.depth * np.asarray(setup.fs_j) / depth_norm_em0
         # ... and the same scalar lets detect recover every removed-molecule
         # Fp from its stored depth, which the band-restricted gate needs.
         arrays["emis_depth_norm"] = np.array([depth_norm_em0])
@@ -475,26 +456,26 @@ def _write_result(
         # the emitted energy amplifies a local leak ~12x -- so detect
         # re-evaluates the gate over the wavelengths its operator actually
         # covers, which needs tau, not a reduction of it.
-        arrays["emis_tau_bottom"] = evidence.tau_bottom
-        arrays["emis_tau_bottom_wo"] = evidence.tau_bottom_wo
+        arrays["emis_tau_bottom"] = res.evidence.tau_bottom  # type: ignore[union-attr]  # set in an emission run
+        arrays["emis_tau_bottom_wo"] = res.evidence.tau_bottom_wo  # type: ignore[union-attr]  # set in an emission run
         # the BAND-GLOBAL per-molecule certificate detect enforces per target
-        arrays["emis_thin_flux_frac_wo"] = evidence.thin_flux_frac_wo
-    if rows is not None:
-        arrays["jac"] = rows.jac
-        arrays["jac_names"] = np.array(rows.names, dtype="U16")
+        arrays["emis_thin_flux_frac_wo"] = res.evidence.thin_flux_frac_wo  # type: ignore[union-attr]  # set in an emission run
+    if res.rows is not None:
+        arrays["jac"] = res.rows.jac
+        arrays["jac_names"] = np.array(res.rows.names, dtype="U16")
         # Per-row provenance. fd_err NaN = unmeasured (AD rows, and the
         # single-difference RT rows with no h-vs-2h check), never 0; 0.0
         # means a zero-response row.
-        arrays["jac_row_method"] = np.array(rows.method, dtype="U16")
-        arrays["fd_h"] = np.array(rows.fd_h, dtype=np.float64)
-        arrays["fd_err"] = np.array(rows.fd_err, dtype=np.float64)
+        arrays["jac_row_method"] = np.array(res.rows.method, dtype="U16")
+        arrays["fd_h"] = np.array(res.rows.fd_h, dtype=np.float64)
+        arrays["fd_err"] = np.array(res.rows.fd_err, dtype=np.float64)
     # atomic: two same-key runs can write at once and a direct savez would let
     # a reader see a partial zip, or poison the key on a kill mid-write
     _ins.atomic_write(out, lambda fh: np.savez_compressed(fh, **arrays))
     return out
 
 
-def run_model(params: dict, log: Callable[..., None] = print) -> Path:
+def run_model(params: dict, log: Log = print) -> Path:
     """Run the heavy pipeline for ``params`` and write its model_cache entry; returns the npz path.
 
     Every certificate and gate raises before that entry is written: an uncertified spectrum or Jacobian row is never
@@ -555,9 +536,8 @@ def run_model(params: dict, log: Callable[..., None] = print) -> Path:
             log=log,
         )
         rows = build_jacobian(baseline, depth.shape[0])
-    out = _write_result(
-        params, cp, A, setup, col, T_check, depth, depth_wo, evidence, rows, unmodeled, rate_ex, bz_build, wo_list
-    )
+    res = _RunResult(T_check, depth, depth_wo, evidence, rows, unmodeled, rate_ex, bz_build, wo_list)
+    out = _write_result(params, cp, A, setup, col, res)
     finish()
     log(f"[fwd] cached -> {out.name}")
     return out

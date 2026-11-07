@@ -117,10 +117,10 @@ def _whitened_solve(F: np.ndarray, b: np.ndarray, n_report: int) -> np.ndarray:
 
 
 def _conditional_sigmas(F: np.ndarray, n_report: int) -> np.ndarray:
-    """Conditional sigmas 1/sqrt(F_ii) for the first n_report parameters.
+    """Conditional sigmas 1/sqrt(F_ii) for the first n_report parameters, every other one held fixed.
 
-    (every other parameter and nuisance held fixed). Always <= marginalized; a large gap flags degeneracy, not
-    missing spectral response. F_ii == 0 reads inf. Pure diagonal read-off, no inversion.
+    Always <= marginalized; a large gap flags degeneracy, not missing spectral response. F_ii == 0 reads inf. Pure
+    diagonal read-off, no inversion.
     """
     d = np.asarray(np.diag(np.asarray(F, float)), float)[:n_report]
     out = np.full(n_report, np.inf)
@@ -256,9 +256,9 @@ def mode_forecast(
 
 
 def _combined_system(results: list[dict], n_f: int) -> tuple[int, list]:
-    """Return the combined stacked design shared by combined_forecast and the linearized mock recovery.
+    """Return the combined stacked design shared by combined_forecast and posteriors.mock_recovery.
 
-    (posteriors.mock_recovery): global parameter layout [free..., shared lnR0, per-mode per-segment offsets...].
+    Global parameter layout: [free..., shared lnR0, per-mode per-segment offsets...].
 
     Every segment gets its own offset, segment 0 included: lnR0 is a
     physical derivative, not a constant in wavelength, so it never stands
@@ -270,7 +270,7 @@ def _combined_system(results: list[dict], n_f: int) -> tuple[int, list]:
     what guarantees the recovery offsets are consistent with the
     marginalized sigmas -- never re-derive the layout elsewhere.
     """
-    segs = [np.asarray(r.get("seg", np.zeros(np.asarray(r["sigma"]).size, int)), int) for r in results]
+    segs = [np.asarray(r["seg"], int) for r in results]
     seg_counts = [int(seg.max()) + 1 if seg.size else 1 for seg in segs]
     n_tot = n_f + 1 + sum(seg_counts)  # free + lnR0 + offsets
     out = []

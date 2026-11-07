@@ -20,6 +20,10 @@ from jwst_tool.certify import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    import jax
+
+    from jwst_tool.tool_types import AnyArray, Log
+
 
 @dataclass(frozen=True)
 class RtSetup:
@@ -38,11 +42,11 @@ class RtSetup:
 
 
 def gas_mask(chem_b: Any) -> np.ndarray:
+    """Return 0 for the network's condensate columns and 1 for the gas, per species."""
     # GAS-phase normalization: the network's condensate columns (*_l_s,
     # *_l, *s: vulcan3's conden.GAS_TO_CONDENSATE) are particles,
     # not gas -- counting them dilutes every gas VMR and inflates the RT
     # mean molecular weight. Aerosol OPACITY stays excluded (cloud deck).
-    """Return 0 for the network's condensate columns and 1 for the gas, per species."""
     mask = np.ones(int(np.asarray(chem_b.species_masses).size))
     for s, i in chem_b.sidx.items():
         if s.endswith(("_l_s", "_l", "_s")):
@@ -50,7 +54,7 @@ def gas_mask(chem_b: Any) -> np.ndarray:
     return mask
 
 
-def _t_art_from(rt: Any, chem_b: Any) -> Any:
+def _t_art_from(rt: Any, chem_b: Any) -> jax.Array:
     """Tabulated-mode RT temperature: the build's T_base interpolated in ln P onto the ART grid.
 
     The chemistry grid covers the RT grid, so np.interp's edge clamp is inert.
@@ -64,7 +68,7 @@ def _t_art_from(rt: Any, chem_b: Any) -> Any:
 
 
 def build_rt_setup(
-    cp: dict, profile: dict, tp_eval: Any, config: Any, chem: Any, advance: Callable[[], None], log: Callable[..., None]
+    cp: dict, profile: dict, tp_eval: Any, config: Any, chem: Any, advance: Callable[[], None], log: Log
 ) -> RtSetup:
     """Build the RT and, in emission, the eclipse model and stellar SED; verify the engine echoed every RT setting."""
     import jax.numpy as jnp
@@ -145,7 +149,7 @@ class ColumnSpectrum:
         self._h2, self._he = chem_b.sidx["H2"], chem_b.sidx["He"]
         self._gas_mask = jnp.asarray(gas_mask(chem_b))
 
-    def _art_t(self, th: Any) -> Any:
+    def _art_t(self, th: AnyArray) -> AnyArray:
         setup = self._setup
         if self._tp_eval_b is not None:
             return self._tp_eval_b(th[3:], setup.p_art_j)
@@ -153,7 +157,7 @@ class ColumnSpectrum:
             return self._t_art_build
         return setup.art_t_const if setup.tp_eval is None else setup.tp_eval(th[3:], setup.p_art_j)
 
-    def art_profiles(self, y: Any, th: Any) -> tuple:
+    def art_profiles(self, y: AnyArray, th: AnyArray) -> tuple:
         """Return (VMRs, H2 VMR, T, mean molecular weight, He VMR) on the RT grid."""
         import jax.numpy as jnp
 
@@ -166,7 +170,13 @@ class ColumnSpectrum:
         return (vmr, to_art(ymix[:, self._h2]), t_art, mmw_art, to_art(ymix[:, self._he]))
 
     def depth(
-        self, y: Any, th: Any, lnR0: Any = 0.0, cloud: Any = None, wo_mols: list | None = None, return_tau: bool = False
+        self,
+        y: AnyArray,
+        th: AnyArray,
+        lnR0: float | jax.Array = 0.0,
+        cloud: AnyArray | None = None,
+        wo_mols: list | None = None,
+        return_tau: bool = False,
     ) -> Any:
         """Return the depth, or (depth, bottom optical depth) with return_tau in emission.
 
@@ -185,9 +195,9 @@ class ColumnSpectrum:
         if emis is not None:
             if wo_mols is not None:
                 raise ValueError(
-                    "depth_fn(wo_mols=...) is transmission-only; emission "
+                    "ColumnSpectrum.depth(wo_mols=...) is transmission-only; emission "
                     "removed-molecule spectra come from "
-                    "emis.eclipse_flux_tau (run_model owns that call)."
+                    "emis.eclipse_flux_tau (emission_spectra owns that call)."
                 )
             fp, tau = emis.eclipse_flux_tau(vmr, vmr_h2, T_art, mmw_art, vmr_he=vmr_he, cloud=cl, lnR0=lnR0)
             rp_em = emis.emission_radius(T_art, mmw_art, lnR0=lnR0)
@@ -211,27 +221,26 @@ class EmissionEvidence:
     thin_flux_frac_wo: np.ndarray
 
 
-def _certify_baseline_bottom(setup: RtSetup, tau_b: np.ndarray, fp_j: Any, log: Callable[..., None]) -> None:
+def _certify_baseline_bottom(setup: RtSetup, tau_b: np.ndarray, fp_j: AnyArray, log: Log) -> None:
     """Refuse a baseline whose column bottom leaks flux, and report where the column sees through."""
-    cp, rt, emis = setup.cp, setup.rt, setup.emis
     emis_tau_min = float(tau_b.min())
-    wl_thin = float(rt.wl_um[int(np.argmin(tau_b))])
+    wl_thin = float(setup.rt.wl_um[int(np.argmin(tau_b))])
     # FLUX-WEIGHTED, not min() over the band: the column being transparent
     # somewhere only matters to the extent the planet emits there.
     fp = np.asarray(fp_j)
-    report = tau_bottom_breakdown(rt.wl_um, tau_b, flux=fp)
+    report = tau_bottom_breakdown(setup.rt.wl_um, tau_b, flux=fp)
     emis_thin_frac = check_emission_thin(
         tau_b,
         fp,
-        rt.nu_grid,
-        f"baseline, column bottom {emis.art_pbtm_bar:g} bar",
+        setup.rt.nu_grid,
+        f"baseline, column bottom {setup.emis.art_pbtm_bar:g} bar",
         detail="\n\n" + report + "\n\nThin only at the SHORT-wavelength edge means missing "
         "opacity, not a shallow column: below ~2 um the continuum "
         "that fills the window in a real hot atmosphere (H- bound-free "
         "and free-free, the Na and K wings, TiO/VO) is not modeled "
         "here, and deepening p_btm_bar would hide that rather than fix "
         "it. Thin across the band means the column really is too "
-        f"shallow -- raise p_btm_bar (now {cp['p_btm_bar']:g} bar).",
+        f"shallow -- raise p_btm_bar (now {setup.cp['p_btm_bar']:g} bar).",
     )
     log("[fwd] " + report.replace("\n", "\n[fwd] "))
     if emis_thin_frac > 0.0:
@@ -245,10 +254,9 @@ def _certify_baseline_bottom(setup: RtSetup, tau_b: np.ndarray, fp_j: Any, log: 
 
 
 def _removed_molecule_gates(
-    setup: RtSetup, wo_list: list, fp_wo_j: Any, tau_wo_j: Any, log: Callable[..., None]
+    setup: RtSetup, wo_list: list, fp_wo_j: AnyArray, tau_wo_j: AnyArray, log: Log
 ) -> np.ndarray:
     """Return each removed-molecule spectrum's thin-bottom fraction; only that molecule's detection is at stake."""
-    rt = setup.rt
     emis_thin_wo = np.full(len(wo_list), np.nan)
     emis_tau_min_wo = np.full(len(wo_list), np.nan)
     # Each removed-molecule optical depth (from the batch above) feeds
@@ -258,9 +266,9 @@ def _removed_molecule_gates(
     for i, mol in enumerate(wo_list):
         tau_i = np.asarray(tau_wo_j[i])
         emis_tau_min_wo[i] = float(tau_i.min())
-        wl_i = float(rt.wl_um[int(np.argmin(tau_i))])
+        wl_i = float(setup.rt.wl_um[int(np.argmin(tau_i))])
         # flux-weighted, same reasoning as the baseline gate above
-        emis_thin_wo[i] = thin_flux_fraction(tau_i, np.asarray(fp_wo_j[i]), rt.nu_grid)
+        emis_thin_wo[i] = thin_flux_fraction(tau_i, np.asarray(fp_wo_j[i]), setup.rt.nu_grid)
         if emis_thin_wo[i] > EMIS_THIN_FLUX_FRAC:
             # Per-molecule, never whole-run: only THIS molecule's
             # detection is unreliable, and detect refuses that target.
@@ -286,11 +294,11 @@ def _removed_molecule_gates(
 def emission_spectra(
     setup: RtSetup,
     column: ColumnSpectrum,
-    y_sol: Any,
-    th0: Any,
+    y_sol: AnyArray,
+    th0: AnyArray,
     wo_list: list,
     advance: Callable[[], None],
-    log: Callable[..., None],
+    log: Log,
 ) -> tuple:
     """Return (depth, depth_wo, evidence) from one optical-depth build, certifying the column bottom."""
     from vulcan_forward import constants as _vfc
@@ -319,10 +327,10 @@ def emission_spectra(
     tau_b = np.asarray(tau_j)
     _certify_baseline_bottom(setup, tau_b, fp_j, log)
 
-    # the stored depth via depth_fn's expression at lnR0 = 0
+    # the stored depth via ColumnSpectrum.depth's expression at lnR0 = 0
     rp_em = emis.emission_radius(prof0[2], prof0[3])
 
-    def _emis_depth(fp: np.ndarray) -> np.ndarray:
+    def _emis_depth(fp: AnyArray) -> np.ndarray:
         return np.asarray((fp / fs_j) * (rp_em**2 / rstar_cm_sq))
 
     depth = _emis_depth(fp_j)
@@ -341,7 +349,7 @@ def emission_spectra(
 
 
 def transmission_spectra(
-    column: ColumnSpectrum, y_sol: Any, th0: Any, wo_list: list, advance: Callable[[], None], log: Callable[..., None]
+    column: ColumnSpectrum, y_sol: AnyArray, th0: AnyArray, wo_list: list, advance: Callable[[], None], log: Log
 ) -> tuple:
     """Return (depth, depth_wo): the full spectrum and the leave-one-out batch."""
     t0 = time.time()

@@ -6,10 +6,14 @@ Method and contract: docs/forecast_statistics.md, section `posteriors`.
 from __future__ import annotations
 
 import zlib
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from jwst_tool import fisher
+
+if TYPE_CHECKING:
+    from typing import Any
 
 # Auto curve grid: +/- _AUTO_SIGMA widths, _AUTO_POINTS samples. Shared by
 # both curve builders and by the off-scale test in mock_center_co.
@@ -159,32 +163,43 @@ def ln_gaussian_curve(center: float, sigma_ln: float, bounds: tuple | None = Non
     return dict(theta=theta, pdf=pdf)
 
 
-# size-limit-ok: one record built in order, most of the length is its docstring
+def _marginal_record(name: str, center: float, s_int: float, c_int: float, co_eval: float | None) -> dict:
+    """One parameter's record; a null Fisher direction (inf sigma) is explicitly unconstrained, with no curve."""
+    s_disp = fisher.display_sigma(name, s_int, co_eval=co_eval)
+    rec: dict[str, Any] = dict(
+        center=float(center),
+        sigma_display=float(s_disp),
+        sigma_conditional_display=float(fisher.display_sigma(name, c_int, co_eval=co_eval)),
+        unit=_param_unit(name),
+    )
+    if not np.isfinite(s_disp):
+        rec.update(constrained=False, theta=None, pdf=None, curve_family=None, sigma_ln=None)
+        return rec
+    if name == "dlnCO":
+        # the density in its OWN coordinate, for the panel's log C/O axis; sigma_display stays the absolute-C/O width
+        # that meta["target_prec"] is compared against
+        curve = ln_gaussian_curve(rec["center"], s_int, bounds=co_curve_bounds())
+        rec.update(curve_family="ln_gaussian", sigma_ln=s_int)
+    else:
+        curve = gaussian_curve(rec["center"], s_disp)
+        rec.update(curve_family="gaussian", sigma_ln=None)
+    rec.update(constrained=True, theta=curve["theta"], pdf=curve["pdf"])
+    return rec
+
+
 def marginalized_posteriors(
-    results: list, free_names: list[str], centers: dict, params: list[str] | None = None, co_eval: float | None = None
+    results: dict | list[dict],
+    free_names: list[str],
+    centers: dict,
+    params: list[str] | None = None,
+    co_eval: float | None = None,
 ) -> dict:
     """1D marginalized Fisher-Gaussian forecast densities for chosen parameters.
 
-    ``results``: one mode result dict, or a list of them (>= 1) treated as
-    a combination. Everything goes through ``fisher.combined_forecast``
-    (``fisher.mode_forecast`` is its single-mode case). Each result needs
-    ``jac_bins`` (rows [free..., lnR0]), ``sigma``, and optionally ``seg``.
-
-    ``centers``: {param: theta_input in DISPLAY units} -- the input-model
-    value each Gaussian is centered on (e.g. lnZ: log10(met_x_solar) in dex;
-    dlnCO: the atmosphere's absolute C/O, i.e. co_eval). Required for every
-    requested parameter; must be finite.
-
-    ``params``: subset of free_names to render (default: all).
-    ``co_eval``: the atmosphere's C/O at the evaluation point; REQUIRED when
-    dlnCO is requested (fisher.display_sigma raises without it).
-
-    Returns dict(kind, label, n_modes, co_eval, sigma_marginalized,
-    sigma_conditional, params) where params[name] is a record with
-    center / sigma_display / sigma_conditional_display / unit /
-    constrained / theta / pdf. An unconstrained direction (inf sigma from
-    the rank-aware inversion) has constrained=False and theta=pdf=None --
-    explicitly flagged, never a fake finite curve.
+    ``results`` is one mode result dict or a list treated as a combination, through ``fisher.combined_forecast``.
+    ``centers`` maps every requested parameter to its finite input value in DISPLAY units. ``co_eval`` is the
+    atmosphere's C/O, required when dlnCO is requested. Returned record: docs/forecast_statistics.md, section
+    `posteriors`.
     """
     rlist = [results] if isinstance(results, dict) else list(results)
     if not rlist:
@@ -208,35 +223,10 @@ def marginalized_posteriors(
     cond: dict = {}
     sig = fisher.combined_forecast(rlist, list(free_names), conditional=cond)
 
-    out_params = {}
-    for name in params:
-        s_int = float(sig[name])
-        c_int = float(cond[name])
-        s_disp = fisher.display_sigma(name, s_int, co_eval=co_eval)
-        c_disp = fisher.display_sigma(name, c_int, co_eval=co_eval)
-        rec = dict(
-            center=float(centers[name]),
-            sigma_display=float(s_disp),
-            sigma_conditional_display=float(c_disp),
-            unit=_param_unit(name),
-        )
-        if np.isfinite(s_disp):
-            if name == "dlnCO":
-                # the forecast density in its OWN coordinate, for the panel's
-                # log C/O axis; sigma_display stays the absolute-C/O width
-                # that meta["target_prec"] is compared against
-                curve = ln_gaussian_curve(rec["center"], s_int, bounds=co_curve_bounds())
-                rec["curve_family"] = "ln_gaussian"
-                rec["sigma_ln"] = s_int
-            else:
-                curve = gaussian_curve(rec["center"], s_disp)
-                rec["curve_family"] = "gaussian"
-                rec["sigma_ln"] = None
-            rec.update(constrained=True, theta=curve["theta"], pdf=curve["pdf"])
-        else:
-            # null Fisher direction: explicitly unconstrained, no curve
-            rec.update(constrained=False, theta=None, pdf=None, curve_family=None, sigma_ln=None)
-        out_params[name] = rec
+    out_params = {
+        name: _marginal_record(name, float(centers[name]), float(sig[name]), float(cond[name]), co_eval)
+        for name in params
+    }
 
     return dict(
         kind=FORECAST_KIND,
@@ -275,7 +265,7 @@ def combo_forecast(
     """
     from jwst_tool import instruments as ins  # data-root resolution stays lazy
 
-    if not isinstance(name, str) or not name.strip():
+    if not isinstance(name, str) or not name.strip():  # type: ignore[redundant-expr]  # a runtime guard for untyped callers
         raise ValueError(f"combo_forecast: combo name must be a non-empty string, got {name!r}")
     mode_keys = list(mode_keys)
     if not mode_keys:
@@ -296,7 +286,7 @@ def combo_forecast(
     usable, excluded = [], []
     for k in mode_keys:
         r = results_by_mode[k]
-        if bool(r.get("saturated", False)):
+        if bool(r["saturated"]):
             excluded.append(dict(mode_key=k, reason=_SATURATED_REASON))
         else:
             usable.append(k)
@@ -433,7 +423,9 @@ def mock_realization(results: list, seed: int) -> dict:
     )
 
 
-def mock_recovery(results: list, free_names: list[str], realization: dict, co_eval: float | None = None) -> dict:
+def mock_recovery(
+    results: dict | list[dict], free_names: list[str], realization: dict, co_eval: float | None = None
+) -> dict:
     """Linearized parameter recovery for ONE mock realization.
 
     Under the tool's linearization a noise draw ``n`` shifts the recovered
@@ -458,7 +450,7 @@ def mock_recovery(results: list, free_names: list[str], realization: dict, co_ev
         raise ValueError("mock_recovery: results is empty")
     if not free_names:
         raise ValueError("mock_recovery: free_names is empty")
-    if not isinstance(realization, dict) or "modes" not in realization:
+    if not isinstance(realization, dict) or "modes" not in realization:  # type: ignore[redundant-expr]  # a runtime guard for untyped callers
         raise ValueError("mock_recovery: realization must be a mock_realization record (with 'modes')")
     n_f = len(free_names)
     for i, r in enumerate(rlist):
@@ -483,7 +475,9 @@ def mock_recovery(results: list, free_names: list[str], realization: dict, co_ev
         b += Jg @ (noise / np.asarray(r["sigma"], float) ** 2)
     delta = fisher._whitened_solve(F, b, n_f)
 
-    out_delta, out_disp, recovered = {}, {}, {}
+    out_delta: dict[str, float | None] = {}
+    out_disp: dict[str, float | None] = {}
+    recovered: dict[str, bool] = {}
     for i, name in enumerate(free_names):
         d_i = float(delta[i])
         if np.isfinite(d_i):
@@ -508,9 +502,9 @@ def mock_recovery(results: list, free_names: list[str], realization: dict, co_ev
 
 
 def param_center(name: str, cpj: dict) -> float | None:
-    """Input-model value of ``name`` in DISPLAY units.
+    """Input-model value of ``name`` in DISPLAY units, the Gaussian's center.
 
-    (the Gaussian's center), or None when the run's stored parameters define no single value (lnKzz under a
+    None when the run's stored parameters define no single value (lnKzz under a
     non-constant or zero mixing profile, or a T-P/cloud parameter the run does not carry). A None center draws no
     curve -- the panel says so explicitly instead of guessing a center. The canonical payload always carries
     met_x_solar, co_ratio, kzz_mode and kzz_const.
@@ -520,8 +514,8 @@ def param_center(name: str, cpj: dict) -> float | None:
     if name == "dlnCO":
         return float(cpj["co_ratio"])
     if name == "lnKzz":
-        v = float(cpj["kzz_const"])
-        return float(np.log10(v)) if cpj["kzz_mode"] == "const" and v > 0 else None
+        kzz = float(cpj["kzz_const"])
+        return float(np.log10(kzz)) if cpj["kzz_mode"] == "const" and kzz > 0 else None
     v = cpj.get(name)
     return None if v is None else float(v)
 

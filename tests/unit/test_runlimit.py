@@ -100,3 +100,26 @@ def test_refusal_alert_is_opt_in_and_hourly(tmp_path, monkeypatch):
     runlimit.notify_refused("ctx-third")
     _join()
     assert len(bodies) == 1
+
+
+def test_a_failed_alert_is_logged_and_a_defect_in_the_alert_is_not_swallowed(monkeypatch, tmp_path, caplog):
+    def send_with(exc):
+        def raising(*_a, **_k):
+            raise exc
+
+        monkeypatch.setattr(smtplib, "SMTP_SSL", raising)
+        (tmp_path / "alert_last_sent").unlink(missing_ok=True)
+        runlimit.notify_refused("ctx")
+        for t in threading.enumerate():
+            if t.name == "refusal-alert":
+                t.join(30)
+
+    seen = []
+    monkeypatch.setattr(threading, "excepthook", lambda args: seen.append(args.exc_type))
+    monkeypatch.setattr(ins, "OUTPUT_DIR", tmp_path)
+    for k, v in (("ALERT_SMTP_USER", "u"), ("ALERT_SMTP_PASS", "p"), ("ALERT_TO", "m@example.com")):
+        monkeypatch.setenv(k, v)
+    send_with(smtplib.SMTPAuthenticationError(535, b"no"))
+    assert "refusal alert failed" in caplog.text and seen == []
+    send_with(TypeError("a bug"))
+    assert seen == [TypeError]

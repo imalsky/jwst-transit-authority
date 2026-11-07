@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import select
@@ -13,7 +14,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 import streamlit as st
@@ -22,7 +23,6 @@ from jwst_tool import (
     datacheck,
     detect,
     instruments as ins,
-    jacobian,
     model_cache,
     model_defs,
     noise as noise_mod,
@@ -37,17 +37,19 @@ from jwst_tool.gui_sources import data_label
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from contextlib import AbstractContextManager
 
     from jwst_tool.gui_inputs import Atmosphere, Goal, Observation, Solver, Target
+    from jwst_tool.tool_types import Slot
 
-# The VULCAN wall-time constants below were measured on the maintainer's
-# laptop; the HF Space (SPACE_ID set there and only there) is slower, so the
+# The VULCAN wall-time constants below were measured on a laptop; the HF Space
+# (SPACE_ID set there and only there) is slower, so the
 # progress-bar prior is scaled by this factor. The forward model's PROG weights are
 # relative fractions and need no scaling.
 _RUNTIME_SCALE = 2.5 if os.environ.get("SPACE_ID") else 1.0
 
 
-# PICASO Guillot/file run, measured on daw: 94 s with three FD rows
+# PICASO Guillot/file run, measured on one workstation: 94 s with three FD rows
 _PICASO_BASE_S, _PICASO_ROW_S = 40.0, 18.0
 
 
@@ -152,7 +154,7 @@ def _watch_proc(proc: subprocess.Popen, on_line: Callable[[str], None], on_tick:
     Selects on the raw pipe fd (os.read chunking) so the clock ticks through silent solver stages; never use a
     blocking readline loop (it freezes the readout).
     """
-    fd = proc.stdout.fileno()
+    fd = proc.stdout.fileno()  # type: ignore[union-attr]  # opened with PIPE
     tail = b""
     while True:
         ready, _, _ = select.select([fd], [], [], 1.0)
@@ -170,7 +172,7 @@ def _watch_proc(proc: subprocess.Popen, on_line: Callable[[str], None], on_tick:
             on_line(raw.decode(errors="replace").rstrip())
 
 
-def _managed_proc(cmd: Any) -> Any:
+def _managed_proc(cmd: list[str]) -> AbstractContextManager[subprocess.Popen]:
     """``proc.terminating`` over a stdout-piped child.
 
     The worker must not outlive the script run that started it (see jwst_tool.proc).
@@ -195,8 +197,8 @@ def _record_refusal(message: str) -> None:
     try:
         with open(Path(ins.OUTPUT_DIR) / "refusals.log", "a") as fh:
             fh.write(f"{stamp} {message}\n")
-    except OSError:
-        pass
+    except OSError as exc:
+        logging.getLogger(__name__).warning("could not record a refusal in refusals.log: %s", exc)
     runlimit.notify_refused(f"parameter refused: {message}")
 
 
@@ -219,7 +221,7 @@ def _model_params(t: Target, a: Atmosphere, g: Goal, s: Solver) -> dict:
     params = dict(
         planet=t.planet_key,
         science_mode=t.science_mode,
-        network=a.network,
+        network=a.photo.network,
         star_teff=t.teff,
         star_logg=t.logg,
         star_feh=t.feh,
@@ -233,30 +235,30 @@ def _model_params(t: Target, a: Atmosphere, g: Goal, s: Solver) -> dict:
         sflux=t.sflux,
         met_x_solar=a.met,
         co_ratio=float(a.co_ratio),
-        kzz_mode=a.kzz_mode,
-        kzz_x=a.kzz_x,
-        kzz_const=a.kzz_const,
-        kzz_kmax=a.kzz_kmax,
-        kzz_plev=a.kzz_plev,
-        kzz_kdeep=a.kzz_kdeep,
-        tp_mode=a.tp_mode,
-        tp_file=a.tp_file,
-        tp_file_path=a.tp_file_path,
+        kzz_mode=a.mixing.kzz_mode,
+        kzz_x=a.mixing.kzz_x,
+        kzz_const=a.mixing.kzz_const,
+        kzz_kmax=a.mixing.kzz_kmax,
+        kzz_plev=a.mixing.kzz_plev,
+        kzz_kdeep=a.mixing.kzz_kdeep,
+        tp_mode=a.profile.tp_mode,
+        tp_file=a.profile.tp_file,
+        tp_file_path=a.profile.tp_file_path,
         fisher_params=g.fisher_params,
         jac_method=g.jac_method,
-        use_photo=a.use_photo,
-        sl_angle_deg=a.sl_angle_deg,
-        f_diurnal=a.f_diurnal,
-        use_moldiff=a.use_moldiff,
-        use_vm_mol=a.use_vm_mol and a.use_moldiff,
-        use_rayleigh=a.use_rayleigh,
+        use_photo=a.photo.use_photo,
+        sl_angle_deg=a.photo.sl_angle_deg,
+        f_diurnal=a.photo.f_diurnal,
+        use_moldiff=a.photo.use_moldiff,
+        use_vm_mol=a.photo.use_vm_mol and a.photo.use_moldiff,
+        use_rayleigh=a.clouds.use_rayleigh,
         rt_ptop_bar=float(a.rt_ptop_bar),
         rt_integration=s.rt_integration,
         p_ref_bar=float(a.p_ref_bar),
         p_btm_bar=float(a.p_btm_bar),
-        cloud_on=a.cloud_on,
-        log_kappa_cloud=a.log_kappa_cloud,
-        alpha_cloud=a.alpha_cloud,
+        cloud_on=a.clouds.cloud_on,
+        log_kappa_cloud=a.clouds.log_kappa_cloud,
+        alpha_cloud=a.clouds.alpha_cloud,
         # Detect computes the removed-molecule spectrum for the TARGET
         # only; the score reads exactly one row. wo_mols is cache-keyed,
         # so switching the detection target is a real re-run; API callers
@@ -264,11 +266,11 @@ def _model_params(t: Target, a: Atmosphere, g: Goal, s: Solver) -> dict:
         # of them and skips the block entirely.
         wo_mols=([g.target_mol] if g.goal == "detect" else []),
         extra_mols=a.extra_mols,
-        **a.tp_kwargs,
+        **a.profile.tp_kwargs,
     )
     if a.pic:
         # VULCAN-JAX settings are omitted, never sent at a neutral value; rfacv
-        # rides a.tp_kwargs (climate only)
+        # rides a.profile.tp_kwargs (climate only)
         for vk in (
             "network",
             "yconv_cri",
@@ -285,7 +287,7 @@ def _model_params(t: Target, a: Atmosphere, g: Goal, s: Solver) -> dict:
             "use_vm_mol",
         ):
             del params[vk]
-        params.update(chem_provider="picaso", picaso_quench=a.picaso_quench)
+        params.update(chem_provider="picaso", picaso_quench=a.mixing.picaso_quench)
     return params
 
 
@@ -298,7 +300,7 @@ def _validate(params: dict, a: Atmosphere) -> tuple[dict | None, str | None]:
     except (ValueError, RuntimeError) as e:  # stale widget combo mid-rerun, or a
         params_error = str(e)  # missing/invalid T-P table
         _record_refusal(params_error)
-    if a.tp_mode == "file" and not a.tp_file_ok and params_error is None:
+    if a.profile.tp_mode == "file" and not a.profile.tp_file_ok and params_error is None:
         params_error = "file-mode T-P selected but no valid table is loaded"
     # A PICASO run needs its own environment and data (datacheck's optional
     # PICASO section).
@@ -323,7 +325,9 @@ def _estimate_total_min(t: Target, a: Atmosphere, g: Goal, s: Solver) -> float:
         base_min += 0.5
     base_min += 0.25 * len(a.extra_mols)  # k-table load + one more overlap fold
     # cool columns (<~900 K) converge much more slowly
-    t_char = {"guillot": a.tp_kwargs.get("Tirr", 1560.0) / np.sqrt(2.0), "file": float(t.teq)}.get(a.tp_mode, 1100.0)
+    t_char = {"guillot": a.profile.tp_kwargs.get("Tirr", 1560.0) / np.sqrt(2.0), "file": float(t.teq)}.get(
+        a.profile.tp_mode, 1100.0
+    )
     if t_char < 900.0:
         base_min += 2.5
 
@@ -337,7 +341,7 @@ def _estimate_total_min(t: Target, a: Atmosphere, g: Goal, s: Solver) -> float:
     n_cloud_rows = sum(1 for n in g.fisher_params if n in rt_only)
     cloud_min = 0.2 * n_cloud_rows  # RT-only rows, either engine
     solve_rows = [n for n in g.fisher_params if n not in rt_only]
-    n_fd_comp = sum(1 for n in solve_rows if n in jacobian.FD_COMP_PARAMS)
+    n_fd_comp = sum(1 for n in solve_rows if n in model_defs.FD_COMP_PARAMS)
     n_fd_theta = len(solve_rows) - n_fd_comp
     if g.jac_method == "ad":
         fd_min = 1.5 * n_fd_comp * solve_min + n_fd_theta * 4 * solve_min + cloud_min
@@ -357,9 +361,9 @@ def _estimate_total_min(t: Target, a: Atmosphere, g: Goal, s: Solver) -> float:
         # climate FD row four; the measured figures include the k-table loads.
         base_s, row_s = (
             (2 * model_defs.PICASO_CLIMATE_SOLVE_S, 4 * model_defs.PICASO_CLIMATE_SOLVE_S)
-            if a.tp_mode == "picaso_climate"
+            if a.profile.tp_mode == "picaso_climate"
             else (2 * model_defs.PICASO_QUENCH_COLUMN_S, 4 * model_defs.PICASO_QUENCH_COLUMN_S)
-            if a.picaso_quench
+            if a.mixing.picaso_quench
             else (_PICASO_BASE_S, _PICASO_ROW_S)
         )
         est_total_min = ((base_s + row_s * len(solve_rows)) / 60.0 + cloud_min + wo_min) * _RUNTIME_SCALE
@@ -369,7 +373,7 @@ def _estimate_total_min(t: Target, a: Atmosphere, g: Goal, s: Solver) -> float:
 def _run_records(t: Target, g: Goal, o: Observation) -> tuple[dict, dict, dict]:
     """Return (goal record, observation record, staleness signature)."""
     # ONE description of everything a run consumes OUTSIDE the canonical model
-    # parameters: the science g.goal and the observation setup. Built once and used
+    # parameters: the science goal and the observation setup. Built once and used
     # three times -- the shareable config, the stored run meta, and the staleness
     # guard -- so a new setting joins all three at once. The guard compares the
     # whole block minus display_only below, never a hand-picked subset: a
@@ -390,7 +394,7 @@ def _run_records(t: Target, g: Goal, o: Observation) -> tuple[dict, dict, dict]:
         t14=float(t.t14),
         t_base=float(o.t_base),
         # the Pandeia star, recorded HERE for both science modes: the canonical
-        # block zeroes star_teff/t.logg/t.feh in transmission (cache hygiene), so a
+        # block zeroes star_teff/star_logg/star_feh in transmission (cache hygiene), so a
         # share file without these could not reproduce the noise simulation
         star_teff=float(t.teff),
         star_logg=float(t.logg),
@@ -399,18 +403,18 @@ def _run_records(t: Target, g: Goal, o: Observation) -> tuple[dict, dict, dict]:
         modes=list(o.mode_keys),
         n_transits=int(o.n_transits),
         r_bin=int(o.r_bin),
-        floor_mode=o.floor_mode,
+        floor_mode=o.noise.floor_mode,
         # a 2-D table is recorded by CONTENT: the staleness guard reads this
         # block, and a fixed label would make two different uploaded tables
         # look like one run
         floors={
             k: (
                 None
-                if o.floors[k] is None
+                if o.noise.floors[k] is None
                 else (
-                    float(o.floors[k])
-                    if np.isscalar(o.floors[k])
-                    else "table:" + hashlib.sha1(np.ascontiguousarray(o.floors[k]).tobytes()).hexdigest()[:16]
+                    float(o.noise.floors[k])
+                    if np.isscalar(o.noise.floors[k])
+                    else "table:" + hashlib.sha1(np.ascontiguousarray(o.noise.floors[k]).tobytes()).hexdigest()[:16]
                 )
             )
             for k in o.mode_keys
@@ -419,7 +423,7 @@ def _run_records(t: Target, g: Goal, o: Observation) -> tuple[dict, dict, dict]:
         # recorded separately below, and share_config restores noise_infl into the
         # per-mode widgets -- writing the product here would re-multiply by the
         # global scale on every restore.
-        noise_infl={k: float(o.infl_mode[k]) for k in o.mode_keys},
+        noise_infl={k: float(o.noise.infl_mode[k]) for k in o.mode_keys},
         noise_scale=float(o.noise_scale),
         show_noise=bool(o.show_noise),
         seed=int(o.seed),
@@ -429,7 +433,7 @@ def _run_records(t: Target, g: Goal, o: Observation) -> tuple[dict, dict, dict]:
         ],
     )
     # Observation fields that change only what is DRAWN from the cached run (the
-    # mock draw, its o.seed, the named mode sets). They stay in obs_meta -- the
+    # mock draw, its seed, the named mode sets). They stay in obs_meta -- the
     # shareable config and floor_selected read it -- but the staleness guard
     # ignores them: they recompute nothing, so they can never make a result stale.
     display_only = ("show_noise", "seed", "combos")
@@ -457,43 +461,36 @@ def build_request(t: Target, a: Atmosphere, g: Goal, o: Observation, s: Solver) 
     )
 
 
-def render_run_row(run_slot: Any, req: RunRequest, a: Atmosphere, o: Observation) -> bool:
+def render_run_row(run_slot: Slot, req: RunRequest, a: Atmosphere, o: Observation) -> bool:
     """Draw the validation messages, the Run button and the configuration download; return whether Run was clicked."""
-    params_error = req.params_error
-    mode_keys, floor_choice_made = o.mode_keys, o.floor_choice_made
     # Run row: validation messages, run button, review summary
     with run_slot:
-        if params_error:
-            st.error(f"Cannot run with the current settings: {params_error}")
+        if req.params_error:
+            st.error(f"Cannot run with the current settings: {req.params_error}")
         still_needs = []
-        if not mode_keys:
+        if not o.mode_keys:
             still_needs.append("an instrument mode (step 4 · Observation)")
-        if not floor_choice_made:
+        if not o.noise.floor_choice_made:
             still_needs.append("a minimum noise floor type (step 4 · Observation, Noise model)")
         if still_needs:
             st.error("This run still needs: " + "; ".join(still_needs) + ".")
-        # The config download sits BESIDE Run, in a column filled further down
-        # (it needs _canon and the goal/observation blocks, which are built
-        # below). Streamlit columns accept deferred writes, so the slot is
-        # reserved here and the button lands in the right place on the page.
+        # The config download sits BESIDE Run: reserve its column here, write the button into it below.
         col_btn, cfg_col, _ = st.columns([1, 1.4, 1.6])
         run_clicked = col_btn.button(
             "Run",
             type="primary",
             width="stretch",
-            disabled=(bool(params_error) or not mode_keys or not floor_choice_made),
+            disabled=(bool(req.params_error) or not o.mode_keys or not o.noise.floor_choice_made),
         )
-    # The shareable configuration: built here (it needs req.canon and the g.goal /
-    # observation blocks above) and rendered into the slot reserved beside the
-    # Run button.
+    # The shareable configuration, rendered into the column reserved beside the Run button.
     if req.canon is not None:
         share = share_config.build_share(
             canon=req.canon,
             goal=req.goal_meta,
             observation=req.obs_meta,
-            tp_table_text=(Path(a.tp_file_path).read_text() if a.tp_file_path else None),
-            floor_table=(np.asarray(o.floor_table).tolist() if o.floor_table is not None else None),
-            cloud_top_bar=a.cloud_top_bar,
+            tp_table_text=(Path(a.profile.tp_file_path).read_text() if a.profile.tp_file_path else None),
+            floor_table=(np.asarray(o.noise.floor_table).tolist() if o.noise.floor_table is not None else None),
+            cloud_top_bar=a.clouds.cloud_top_bar,
         )
         with cfg_col:
             st.download_button(
@@ -507,33 +504,40 @@ def render_run_row(run_slot: Any, req: RunRequest, a: Atmosphere, o: Observation
     return run_clicked
 
 
+@dataclass
+class _HeavySlot:
+    """The run's one concurrency slot, empty until its first heavy launch."""
+
+    held: runlimit.Slot | None = None
+
+
 def compute(req: RunRequest, a: Atmosphere, t: Target, o: Observation) -> dict | None:
+    """Run the request, holding at most one heavy slot, released on the way out."""
     # Run is disabled while params_error is set or no mode is selected.
     # Heavy subprocesses (forward + ETC) hold ONE concurrency slot from the
     # first heavy launch to the end of the run; when every slot is busy that
     # launch is declined. A fully cached run holds no slot -- it starts
     # nothing -- and every heavy call site goes through _take_slot, so a cache
     # MISS can still never start chemistry or Pandeia outside the limiter.
-    """Run the request, holding at most one heavy slot, released on the way out."""
-    slot = []
+    slot = _HeavySlot()
     try:
-        return _compute_locked(slot, req, a, t, o)
+        return _run_and_evaluate(slot, req, a, t, o)
     finally:
-        for s in slot:
-            s.release()
+        if slot.held is not None:
+            slot.held.release()
 
 
-def _take_slot(slot: list, req: RunRequest, a: Atmosphere, o: Observation) -> bool:
+def _take_slot(slot: _HeavySlot, req: RunRequest, a: Atmosphere, o: Observation) -> bool:
     """Return true once this run holds a heavy-computation slot, acquiring one on the first heavy launch.
 
     Otherwise declines the launch and says so.
     """
-    if not slot:
+    if slot.held is None:
         s = runlimit.acquire("forward+etc")
         if s is None:
             runlimit.notify_refused(
                 f"instance busy: {req.planet_label}, engine={a.chem_provider}, "
-                f"tp_mode={a.tp_mode}, modes={list(o.mode_keys)}"
+                f"tp_mode={a.profile.tp_mode}, modes={list(o.mode_keys)}"
             )
             t0 = runlimit.oldest_start()
             since = (
@@ -548,30 +552,29 @@ def _take_slot(slot: list, req: RunRequest, a: Atmosphere, o: Observation) -> bo
                 "later -- previously computed results stay instant."
             )
             return False
-        slot.append(s)
+        slot.held = s
     return True
 
 
-def _run_forward_model(slot: list, req: RunRequest, a: Atmosphere, o: Observation) -> dict | None:
+def _run_forward_model(slot: _HeavySlot, req: RunRequest, a: Atmosphere, o: Observation) -> dict | None:
     """Return the cached model, solving it in a worker first on a miss; None when the run was declined or failed."""
-    params, pic, est_total_min = req.params, a.pic, req.est_total_min
-    model = model_cache.load_result(params)
+    model = model_cache.load_result(req.params)
     if model is None:
         if not _take_slot(slot, req, a, o):
             return None
         with st.status(
-            f"Running {'PICASO' if pic else 'VULCAN-JAX'} + ExoJAX forward model …", expanded=True
+            f"Running {'PICASO' if a.pic else 'VULCAN-JAX'} + ExoJAX forward model …", expanded=True
         ) as status:
             # prior = the rough pre-run estimate (est_total_min, never
             # shown as text); the bar's remaining time converges to the
             # measured pace
-            bar = _TimedBar(prior_total_s=est_total_min * 60.0, text="starting …")
+            bar = _TimedBar(prior_total_s=req.est_total_min * 60.0, text="starting …")
             # unique per launch: a key-only name is SHARED between two
             # same-key runs, and one visitor's rewrite can truncate the file
             # under the other's subprocess mid-read
-            pfile = model_cache.MODEL_CACHE / (f"{model_cache.params_key(params)}.params.{uuid.uuid4().hex[:8]}.json")
-            model_cache.MODEL_CACHE.mkdir(parents=True, exist_ok=True)
-            pfile.write_text(json.dumps(run_params.canonical_params(params)))
+            pfile = ins.MODEL_CACHE / (f"{model_cache.params_key(req.params)}.params.{uuid.uuid4().hex[:8]}.json")
+            ins.MODEL_CACHE.mkdir(parents=True, exist_ok=True)
+            pfile.write_text(json.dumps(run_params.canonical_params(req.params)))
             box = st.empty()
             lines = []
 
@@ -603,7 +606,7 @@ def _run_forward_model(slot: list, req: RunRequest, a: Atmosphere, o: Observatio
                 return None
             bar.done()
             status.update(label="Forward model done", state="complete")
-        model = model_cache.load_result(params)
+        model = model_cache.load_result(req.params)
         if model is None:
             st.error(
                 "The forward model finished but produced no cache file. Re-run; if this repeats, report it as a bug."
@@ -612,17 +615,16 @@ def _run_forward_model(slot: list, req: RunRequest, a: Atmosphere, o: Observatio
     return model
 
 
-def _run_etc(slot: list, req: RunRequest, a: Atmosphere, o: Observation) -> dict | None:
+def _run_etc(slot: _HeavySlot, req: RunRequest, a: Atmosphere, o: Observation) -> dict | None:
     """Return the selected modes' ETC results, computing the missing ones; None when declined or failed."""
-    star, mode_keys, sat_limit = req.star, o.mode_keys, o.sat_limit
     # ETC: ONLY the selected modes, cached per mode -- a later selection
     # change computes exactly the newly added modes.
-    etc_missing = noise_mod.missing_modes(star, list(mode_keys), sat_limit=sat_limit)
+    etc_missing = noise_mod.missing_modes(req.star, list(o.mode_keys), sat_limit=o.sat_limit)
     # launch=False: an entry that vanished between the two cache reads must
     # not start Pandeia without a slot; it falls into the slot path below
-    etc = None if etc_missing else noise_mod.run_modes(star, list(mode_keys), sat_limit=sat_limit, launch=False)
+    etc = None if etc_missing else noise_mod.run_modes(req.star, list(o.mode_keys), sat_limit=o.sat_limit, launch=False)
     if etc is None:
-        etc_missing = etc_missing or list(mode_keys)
+        etc_missing = etc_missing or list(o.mode_keys)
         if not _take_slot(slot, req, a, o):
             return None
         with st.status(f"Running Pandeia ETC ({ins.BACKEND_STATUS.split(' /')[0]}) …", expanded=True) as status:
@@ -646,7 +648,7 @@ def _run_etc(slot: list, req: RunRequest, a: Atmosphere, o: Observation) -> dict
                     bar.tick()
 
             try:
-                etc = noise_mod.run_modes(star, list(mode_keys), sat_limit=sat_limit, progress=_cb)
+                etc = noise_mod.run_modes(req.star, list(o.mode_keys), sat_limit=o.sat_limit, progress=_cb)
             except RuntimeError as _e:
                 status.update(label="Pandeia ETC failed", state="error")
                 # same handling as the forward model above: the first line is
@@ -661,13 +663,12 @@ def _run_etc(slot: list, req: RunRequest, a: Atmosphere, o: Observation) -> dict
     return etc
 
 
-def _evaluate_modes(model: dict, etc: Any, req: RunRequest, t: Target, o: Observation) -> dict:
+def _evaluate_modes(model: dict, etc: dict, req: RunRequest, t: Target, o: Observation) -> dict:
     """Score every selected mode; one bad mode is reported and the rest still evaluate."""
-    mode_keys, r_bin, n_transits, floors, infl = o.mode_keys, o.r_bin, o.n_transits, o.floors, o.infl
-    target_mol, t14, t_base = req.goal_meta["target_mol"], t.t14, o.t_base
-    t_in_s, t_out_s = t14 * 3600.0, t_base * 3600.0
+    target_mol = req.goal_meta["target_mol"]
+    t_in_s, t_out_s = t.t14 * 3600.0, o.t_base * 3600.0
     results, failed, unusable = [], [], []
-    for k in mode_keys:
+    for k in o.mode_keys:
         if "error" in etc[k]:
             failed.append((k, etc[k]["error"]))
         elif etc[k].get("unusable") or not etc[k].get("wl"):
@@ -680,12 +681,12 @@ def _evaluate_modes(model: dict, etc: Any, req: RunRequest, t: Target, o: Observ
                         etc[k],
                         model,
                         target_mol,
-                        r_bin,
+                        o.r_bin,
                         t_in_s,
                         t_out_s,
-                        n_transits,
-                        floors[k],
-                        noise_inflation=infl[k],
+                        o.n_transits,
+                        o.noise.floors[k],
+                        noise_inflation=o.noise.infl[k],
                     )
                 )
             except detect.ModeUnusable as e:
@@ -708,7 +709,7 @@ def _evaluate_modes(model: dict, etc: Any, req: RunRequest, t: Target, o: Observ
     return dict(model=model, results=results, failed=failed, unusable=unusable)
 
 
-def _compute_locked(slot: list, req: RunRequest, a: Atmosphere, t: Target, o: Observation) -> dict | None:
+def _run_and_evaluate(slot: _HeavySlot, req: RunRequest, a: Atmosphere, t: Target, o: Observation) -> dict | None:
     model = _run_forward_model(slot, req, a, o)
     if model is None:
         return None
@@ -720,10 +721,6 @@ def _compute_locked(slot: list, req: RunRequest, a: Atmosphere, t: Target, o: Ob
 
 def handle_run_click(req: RunRequest, t: Target, a: Atmosphere, g: Goal, o: Observation) -> None:
     """Run and store the result, or clear the previous one when the Run produced nothing."""
-    goal, target_mol, goal_param = g.goal, g.target_mol, g.goal_param
-    target_prec, target_sig = g.target_prec, g.target_sig
-    n_transits, r_bin = o.n_transits, o.r_bin
-    planet_label, obs_meta, run_sig = req.planet_label, req.obs_meta, req.run_sig
     out = compute(req, a, t, o)
     if out is None:
         # a Run that produced nothing leaves nothing stale on screen
@@ -732,17 +729,17 @@ def handle_run_click(req: RunRequest, t: Target, a: Atmosphere, g: Goal, o: Obse
     else:
         st.session_state["out"] = out
         st.session_state["out_meta"] = dict(
-            goal=goal,
-            target=target_mol,
-            goal_param=goal_param,
-            target_prec=target_prec,
-            target_sig=target_sig,
-            n_transits=n_transits,
-            r_bin=r_bin,
-            planet=planet_label,
+            goal=g.goal,
+            target=g.target_mol,
+            goal_param=g.goal_param,
+            target_prec=g.target_prec,
+            target_sig=g.target_sig,
+            n_transits=o.n_transits,
+            r_bin=o.r_bin,
+            planet=req.planet_label,
             # the limit the ramp search actually ran at, so the per-mode
             # saturation advisory is measured against THIS run
-            sat_limit=obs_meta["sat_limit"],
+            sat_limit=req.obs_meta["sat_limit"],
             # the COMPLETE non-canonical input set, for the staleness guard
-            run_sig=run_sig,
+            run_sig=req.run_sig,
         )

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from jwst_tool import picaso_engine as _pe, planets
 from jwst_tool.model_defs import (
@@ -18,7 +20,6 @@ from jwst_tool.model_defs import (
     P_BTM_RANGE,
     PICASO_NO_SPECIES,
     PICASO_P_BTM_MAX,
-    PICASO_STACK,
     RFACV_DEFAULT,
     RFACV_RANGE,
     RT_PTOP_DEFAULT,
@@ -41,6 +42,9 @@ from jwst_tool.param_checks import (
     check_rt_settings,
 )
 from jwst_tool.tp_tables import read_tp_table, resolve_tp_file, shipped_tp_table_is_default
+
+if TYPE_CHECKING:
+    from typing import Any
 
 
 def default_p_btm_bar(params: dict) -> float:
@@ -248,8 +252,29 @@ def _engine_settings(params: dict) -> tuple[str, str, bool, str]:
     return tp_mode, provider, pic, network
 
 
-def _column_settings(params: dict, tp_mode: str, pic: bool) -> tuple:
-    """Return (science_mode, p_btm_bar, tp_file, tp_file_sha1, tp_table), validating the T-P table on this column."""
+@dataclass(frozen=True)
+class _ColumnSettings:
+    """The science mode, the column bottom and the T-P table behind it."""
+
+    science_mode: str
+    p_btm_bar: float
+    tp_file: str
+    tp_file_sha1: str
+    tp_table: Any
+
+
+@dataclass(frozen=True)
+class _SolverSettings:
+    """The layer count, the convergence gates and the UV spectrum."""
+
+    nz: int
+    yconv_cri: float
+    yconv_min: float
+    sflux: str
+
+
+def _column_settings(params: dict, tp_mode: str, pic: bool) -> _ColumnSettings:
+    """Return the science mode, the column bottom and the T-P table, validating the table on this path."""
     # tp_mode="file": resolve + validate the table NOW (numpy parse + hash, no
     # engine imports) so a bad upload fails at the API and the cache key is
     # content-addressed, never path-addressed.
@@ -280,15 +305,19 @@ def _column_settings(params: dict, tp_mode: str, pic: bool) -> tuple:
             f"unknown science_mode {science_mode!r}: choose 'transmission' "
             "(transit depth) or 'emission' (secondary-eclipse depth)"
         )
-    return science_mode, p_btm_bar, tp_file, tp_file_sha1, tp_table
+    return _ColumnSettings(science_mode, p_btm_bar, tp_file, tp_file_sha1, tp_table)
 
 
-def _planet_and_solver(params: dict) -> tuple:
-    """Return (planet, its registry entry, nz, yconv_cri, yconv_min, UV spectrum), refusing out-of-range values."""
+def _planet(params: dict) -> tuple[str, dict]:
+    """Return the planet and its registry entry, refusing an unknown name."""
     planet = str(params.get("planet", "wasp39b"))
     if planet not in planets.PLANETS and planet != "custom":
         raise ValueError(f"unknown planet {planet!r}")
-    sysd = planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS)
+    return planet, planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS)
+
+
+def _solver_settings(params: dict, sysd: dict) -> _SolverSettings:
+    """Return the grid, the convergence gates and the UV spectrum, refusing out-of-range values."""
     nz = int(params.get("nz", NZ_DEFAULT))
     if not NZ_RANGE[0] <= nz <= NZ_RANGE[1]:
         raise ValueError(
@@ -314,48 +343,48 @@ def _planet_and_solver(params: dict) -> tuple:
     sflux = str(params.get("sflux", sysd["sflux"]))
     if sflux not in planets.SFLUX_CHOICES:
         raise ValueError(f"unknown stellar UV spectrum {sflux!r} (choose from {list(planets.SFLUX_CHOICES)})")
-    return planet, sysd, nz, yconv_cri, yconv_min, sflux
+    return _SolverSettings(nz, yconv_cri, yconv_min, sflux)
+
+
+@dataclass(frozen=True)
+class _Resolved:
+    """What the checks settled before the payload is filled."""
+
+    tp_mode: str
+    provider: str
+    pic: bool
+    network: str
+    planet: str
+    sysd: dict
+    column: _ColumnSettings
+    solver: _SolverSettings
 
 
 # size-limit-ok: one flat dict, one line per canonical key
-def _filled_payload(
-    params: dict,
-    planet: str,
-    sysd: dict,
-    science_mode: str,
-    solver: tuple,
-    table: tuple,
-    tp_mode: str,
-    pic: bool,
-    p_btm_bar: float,
-    network: str,
-    provider: str,
-) -> dict:
+def _filled_payload(params: dict, r: _Resolved) -> dict:
     """Return the canonical key set with every default filled and every value rounded."""
-    nz, yconv_cri, yconv_min, sflux = solver
-    tp_file, tp_file_sha1, tp_table = table
-    star_ref = planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS)["star"]
+    star_ref = planets.PLANETS.get(r.planet, planets.CUSTOM_DEFAULTS)["star"]
     # before the literal: the custom planet's Tirr default derives from these
     # three (planets.system_teq)
     teff = round(float(params.get("star_teff", star_ref["teff"])), 1)
-    rstar = round(float(params.get("rstar_rsun", sysd["rstar_rsun"])), 4)
-    orbit = round(float(params.get("orbit_au", sysd["orbit_au"])), 5)
+    rstar = round(float(params.get("rstar_rsun", r.sysd["rstar_rsun"])), 4)
+    orbit = round(float(params.get("orbit_au", r.sysd["orbit_au"])), 5)
     return {
-        "planet": planet,
-        "science_mode": science_mode,
+        "planet": r.planet,
+        "science_mode": r.column.science_mode,
         # Star identity for the eclipse normalization Fp/Fs: part of the MODEL
         # only in emission (zeroed in transmission, where it is noise-side).
         "star_teff": teff,
         "star_logg": round(float(params.get("star_logg", star_ref["log_g"])), 2),
         "star_feh": round(float(params.get("star_feh", star_ref["metallicity"])), 2),
-        "nz": nz,
-        "yconv_cri": round(yconv_cri, 6),
-        "yconv_min": round(yconv_min, 6),
-        "rp_rjup": round(float(params.get("rp_rjup", sysd["rp_rjup"])), 4),
-        "gs_cgs": round(float(params.get("gs_cgs", sysd["gs_cgs"])), 1),
+        "nz": r.solver.nz,
+        "yconv_cri": round(r.solver.yconv_cri, 6),
+        "yconv_min": round(r.solver.yconv_min, 6),
+        "rp_rjup": round(float(params.get("rp_rjup", r.sysd["rp_rjup"])), 4),
+        "gs_cgs": round(float(params.get("gs_cgs", r.sysd["gs_cgs"])), 1),
         "rstar_rsun": rstar,
         "orbit_au": orbit,
-        "sflux": sflux,
+        "sflux": r.solver.sflux,
         "met_x_solar": round(float(params.get("met_x_solar", 10.0)), 4),
         "co_ratio": round(float(params.get("co_ratio", CO_DEFAULT)), 6),
         # Kzz default follows the structure: a tabulated T-P with a Kzz column
@@ -364,22 +393,27 @@ def _filled_payload(
             params.get(
                 "kzz_mode",
                 "file"
-                if (not pic and tp_mode == "file" and tp_table is not None and tp_table["Kzz"] is not None)
+                if (
+                    not r.pic
+                    and r.tp_mode == "file"
+                    and r.column.tp_table is not None
+                    and r.column.tp_table["Kzz"] is not None
+                )
                 else "const",
             )
         ),
         "kzz_x": round(float(params.get("kzz_x", 1.0)), 4),
         "kzz_const": round(float(params.get("kzz_const", 1.0e9)), 1),
         # parametric Kzz profiles: Pfunc (kzz_kmax cm^2/s, kzz_plev bar) and
-        # JM16 (kzz_kdeep); unused knobs are zeroed below for cache hygiene
+        # JM16 (kzz_kdeep); param_checks zeroes the unused ones for cache hygiene
         "kzz_kmax": round(float(params.get("kzz_kmax", 1.0e5)), 1),
         "kzz_plev": float(f"{float(params.get('kzz_plev', 0.1)):.6e}"),
         "kzz_kdeep": round(float(params.get("kzz_kdeep", 1.0e5)), 1),
-        "tp_mode": tp_mode,
+        "tp_mode": r.tp_mode,
         # file-mode identity: source label + content hash, so two tables can
         # never share a cache entry ("" outside file mode)
-        "tp_file": tp_file,
-        "tp_file_sha1": tp_file_sha1,
+        "tp_file": r.column.tp_file,
+        "tp_file_sha1": r.column.tp_file_sha1,
         # sqrt(2) * T_eq of the SELECTED planet (the DAYSIDE T_eq in
         # emission), via planets.default_tirr so API and GUI cannot diverge
         "Tirr": round(
@@ -387,9 +421,9 @@ def _filled_payload(
                 params.get(
                     "Tirr",
                     default_tirr(
-                        planet,
+                        r.planet,
                         system=dict(star_teff=teff, rstar_rsun=rstar, orbit_au=orbit),
-                        science_mode=science_mode,
+                        science_mode=r.column.science_mode,
                     ),
                 )
             ),
@@ -398,17 +432,17 @@ def _filled_payload(
         # the planet's published interior temperature where the registry
         # carries one (WASP-107 b), via planets.default_tint like Tirr
         "Tint": round(
-            float(params.get("Tint", planets.default_tint(planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS)))), 2
+            float(params.get("Tint", planets.default_tint(planets.PLANETS.get(r.planet, planets.CUSTOM_DEFAULTS)))), 2
         ),
         # 0.01 cm^2/g, Guillot (2010); the sidebar's default must agree
         "log_kappa": round(float(params.get("log_kappa", -2.0)), 3),
         "log_gamma": round(float(params.get("log_gamma", -1.0)), 3),
         # physical VULCAN knobs (all flow through cfg_overrides; the defaults
         # are the W39b cfg values)
-        "use_photo": bool(params.get("use_photo", not pic)),
+        "use_photo": bool(params.get("use_photo", not r.pic)),
         "sl_angle_deg": round(float(params.get("sl_angle_deg", 83.0)), 1),
         "f_diurnal": round(float(params.get("f_diurnal", 1.0)), 3),
-        "use_moldiff": bool(params.get("use_moldiff", not pic)),
+        "use_moldiff": bool(params.get("use_moldiff", not r.pic)),
         # Upwind molecular-diffusion advection: PINNED explicitly, never
         # inherited from the engine. False is the validated baseline here.
         "use_vm_mol": bool(params.get("use_vm_mol", False)),
@@ -425,11 +459,11 @@ def _filled_payload(
         # bottom exojax defaults to; anchoring it there inflates every depth.
         "p_ref_bar": float(f"{float(params.get('p_ref_bar', 1.0e-3)):.6e}"),
         # chemistry + RT column bottom (model_defs.P_BTM_RANGE)
-        "p_btm_bar": round(p_btm_bar, 4),
+        "p_btm_bar": round(r.column.p_btm_bar, 4),
         "cloud_on": bool(params.get("cloud_on", False)),
         "log_kappa_cloud": round(float(params.get("log_kappa_cloud", -1.0)), 3),
         "alpha_cloud": round(float(params.get("alpha_cloud", 0.0)), 2),
-        # Detection-only condensation: the raises below refuse ANY derivative
+        # Detection-only condensation: param_checks refuses ANY derivative
         "use_condense": bool(params.get("use_condense", False)),
         # removed and refused above; pinned off so the cache key is unchanged
         "use_settling": False,
@@ -438,20 +472,19 @@ def _filled_payload(
         "bot_flux": [],
         "extra_mols": sorted({str(m) for m in (params.get("extra_mols") or [])}),
         # Leave-one-out spectrum set: None = every RT molecule (the detect
-        # default), [] skips the block. Canonicalized to fold order below.
-        "wo_mols": (None if params.get("wo_mols") is None else [str(m) for m in params.get("wo_mols")]),
+        # default), [] skips the block. param_checks puts it in fold order.
+        "wo_mols": None if params.get("wo_mols") is None else [str(m) for m in params["wo_mols"]],
         "fisher_params": sorted({str(p) for p in (params.get("fisher_params") or [])}),
         # Jacobian method: "fd" (certified FD, the default) or "ad" (one
-        # warm-started jvp per chemistry row, photo-on and VULCAN only; module
-        # docstring).
+        # warm-started jvp per chemistry row, photo-on and VULCAN only; docs/forward_model.md).
         "jac_method": str(params.get("jac_method", "fd")),
-        "chem_provider": provider,
-        "network": network,
+        "chem_provider": r.provider,
+        "network": r.network,
         "version": _VERSION,
     }
 
 
-def _picaso_fields(cp: dict, params: dict, tp_table: dict | None, science_mode: str, tp_mode: str, nz: int) -> None:
+def _picaso_fields(cp: dict, params: dict, tp_table: Any, science_mode: str, tp_mode: str, nz: int) -> None:
     """Add the PICASO-only keys, which exist only in PICASO payloads, so no VULCAN cache key moves."""
     climate = tp_mode == "picaso_climate"
     # PICASO-only keys exist only in PICASO payloads, so no VULCAN cache
@@ -459,7 +492,7 @@ def _picaso_fields(cp: dict, params: dict, tp_table: dict | None, science_mode: 
     # profiles); kzz_const keys only a quenched column.
     cp["rfacv"] = round(float(params.get("rfacv", RFACV_DEFAULT[science_mode])), 3) if climate else 0.0
     cp["picaso_quench"] = bool(params.get("picaso_quench", False))
-    cp["picaso_stack"] = PICASO_STACK
+    cp["picaso_stack"] = _pe.PICASO_STACK
     if climate and not RFACV_RANGE[0] <= cp["rfacv"] <= RFACV_RANGE[1]:
         raise ValueError(
             f"rfacv={cp['rfacv']:g} outside {list(RFACV_RANGE)} (climate "
@@ -544,30 +577,29 @@ def canonical_params(params: dict) -> dict:
     """
     _check_request_keys(params)
     tp_mode, provider, pic, network = _engine_settings(params)
-    science_mode, p_btm_bar, tp_file, tp_file_sha1, tp_table = _column_settings(params, tp_mode, pic)
-    planet, sysd, nz, yconv_cri, yconv_min, sflux = _planet_and_solver(params)
-    cp = _filled_payload(
-        params,
-        planet,
-        sysd,
-        science_mode,
-        (nz, yconv_cri, yconv_min, sflux),
-        (tp_file, tp_file_sha1, tp_table),
-        tp_mode,
-        pic,
-        p_btm_bar,
-        network,
-        provider,
+    column = _column_settings(params, tp_mode, pic)
+    planet, sysd = _planet(params)
+    solver = _solver_settings(params, sysd)
+    r = _Resolved(
+        tp_mode=tp_mode,
+        provider=provider,
+        pic=pic,
+        network=network,
+        planet=planet,
+        sysd=sysd,
+        column=column,
+        solver=solver,
     )
+    cp = _filled_payload(params, r)
     if pic:
-        _picaso_fields(cp, params, tp_table, science_mode, tp_mode, nz)
+        _picaso_fields(cp, params, column.tp_table, column.science_mode, tp_mode, solver.nz)
     check_rt_settings(cp)
     check_molecules(cp, network)
     co_bound, met_range = check_composition(cp, network, pic)
     check_fisher_rows(cp, tp_mode, pic, network, co_bound, met_range)
     check_condensation(cp, network)
-    _zero_inert_settings(cp, sysd, science_mode, tp_mode)
-    check_kzz(cp, tp_mode, tp_table, pic)
+    _zero_inert_settings(cp, sysd, column.science_mode, tp_mode)
+    check_kzz(cp, tp_mode, column.tp_table, pic)
     # Science-data identity. Every key above describes the MODEL; none of them
     # moves when a k-table or CIA file is corrected under the same filename.
     # It stays out of CHEM_IRRELEVANT_PARAMS on purpose: an extra chemistry

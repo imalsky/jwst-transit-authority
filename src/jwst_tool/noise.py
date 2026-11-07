@@ -22,9 +22,9 @@ import numpy as np
 from . import binning, instruments as ins, proc as proc_mod
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from jwst_tool.tool_types import Log
 
-_BACKEND_FINGERPRINT = None
+_BACKEND_FINGERPRINT: dict | None = None
 
 # The production Pandeia-worker version: part of every noise-cache key AND
 # the identity the parity gate (validation/parity/scripts/parity_gate.py) requires
@@ -194,9 +194,9 @@ def run_modes(
     star: dict,
     mode_keys: list[str],
     sat_limit: float = 0.80,
-    progress: Callable[[str], None] | None = None,
+    progress: Log | None = None,
     launch: bool = True,
-) -> dict:
+) -> dict | None:
     """Run the production ETC path: per-mode cache, one worker batch.
 
     Each mode is cached under its own single-mode job key, so a run computes
@@ -220,12 +220,12 @@ def run_modes(
             todo.append(k)
             continue
         out[k] = cached[k]
-        out.setdefault("__provenance__", cached.get("__provenance__"))
+        out.setdefault("__provenance__", cached["__provenance__"])
     if todo and not launch:
         return None
     if todo:
         result = _run_worker(noise_job(star, todo, sat_limit=sat_limit), progress)
-        prov = result.get("__provenance__")
+        prov = result["__provenance__"]
         for k in todo:
             out[k] = result[k]
             # A per-mode pandeia failure comes back as {"error": traceback}.
@@ -235,13 +235,13 @@ def run_modes(
             single = {k: result[k], "__provenance__": prov}
             ins.atomic_write(
                 ins.NOISE_CACHE / f"{_mode_key(star, k, sat_limit)}.json",
-                lambda fh, s=single: fh.write(json.dumps(s).encode()),
+                lambda fh, s=single: fh.write(json.dumps(s).encode()),  # type: ignore[misc]  # the default binds the loop value
             )
         out["__provenance__"] = prov
     return out
 
 
-def run_pandeia(job: dict, progress: Callable[[str], None] | None = None) -> dict:
+def run_pandeia(job: dict, progress: Log | None = None) -> dict:
     """Run the worker on a whole job (or return the whole-job cached result).
 
     The parity harness's path: its artifact identity is the complete job.
@@ -262,7 +262,7 @@ def run_pandeia(job: dict, progress: Callable[[str], None] | None = None) -> dic
     return result
 
 
-def _run_worker(job: dict, progress: Callable[[str], None] | None = None) -> dict:
+def _run_worker(job: dict, progress: Log | None = None) -> dict:
     """Run pandeia_worker.py on ``job`` in the backend env; no caching."""
     ins.NOISE_CACHE.mkdir(parents=True, exist_ok=True)
     py = Path(ins.require_pandeia_python())
@@ -292,7 +292,7 @@ def _run_worker(job: dict, progress: Callable[[str], None] | None = None) -> dic
         # drain stderr on a thread while streaming stdout: reading only stdout
         # deadlocks once the worker fills the ~64 KB stderr pipe buffer
         err_buf = io.StringIO()
-        t_err = threading.Thread(target=lambda: err_buf.write(proc.stderr.read()), daemon=True)
+        t_err = threading.Thread(target=lambda: err_buf.write(proc.stderr.read()), daemon=True)  # type: ignore[union-attr]  # opened with PIPE
         t_err.start()
         # ``progress`` can raise Streamlit's cancel exception (a BaseException);
         # the worker must not outlive the run that started it
@@ -300,7 +300,7 @@ def _run_worker(job: dict, progress: Callable[[str], None] | None = None) -> dic
             killer = threading.Timer(PANDEIA_WALL_CAP_S, proc.kill)
             killer.start()
             try:
-                for line in proc.stdout:
+                for line in proc.stdout:  # type: ignore[union-attr]  # opened with PIPE
                     if progress:
                         progress(line.rstrip())
                 proc.wait()
@@ -308,7 +308,7 @@ def _run_worker(job: dict, progress: Callable[[str], None] | None = None) -> dic
                 killer.cancel()
         t_err.join(timeout=30)
         if not t_err.is_alive():
-            proc.stderr.close()
+            proc.stderr.close()  # type: ignore[union-attr]  # opened with PIPE
         if proc.returncode != 0 or not out_json.exists():
             err = err_buf.getvalue()
             raise RuntimeError(f"pandeia worker failed (rc={proc.returncode}):\n{err[-3000:]}")

@@ -17,6 +17,7 @@ from pathlib import Path
 import jax.numpy as jnp
 import numpy as np
 from vulcan_forward import (
+    _rt_geometry,
     constants,
     exojax_rt,
     interp_map,
@@ -118,7 +119,7 @@ if mode == "transmission":
 else:
     emis2 = exojax_rt.build_emis_model(rt2, prof2)
     f2 = np.asarray(emis2.emission_flux(vmr_j, z, J(T_art), J(mmw), vmr_he=z))
-    r_em2, g_em = exojax_rt._radius_at(
+    r_em2, g_em = _rt_geometry._radius_at(
         jnp.log(J(p_art)),
         J(T_art),
         J(mmw),

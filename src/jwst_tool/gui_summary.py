@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -13,7 +14,10 @@ from jwst_tool.gui_common import K, axis_range, fig_bytes, show_fig
 from jwst_tool.gui_forecast import ALL_USABLE, COMBO_COLORS, ComboRecords, width_in_row_units
 
 if TYPE_CHECKING:
+    from matplotlib.figure import Figure
+
     from jwst_tool.gui_results import RunView
+    from jwst_tool.tool_types import Slot
 
 
 def _binned_series(r: dict, mock: dict | None = None) -> tuple:
@@ -30,68 +34,61 @@ def _binned_series(r: dict, mock: dict | None = None) -> tuple:
     )
 
 
-def _legend_scores(view: RunView, fig_box: Any) -> dict:
+def _legend_scores(view: RunView, fig_box: Slot) -> dict:
     """Return each mode's expected performance for its legend label."""
-    results, usable_jac, fisher_names, tsig, meta = (
-        view.results,
-        view.usable_jac,
-        view.fisher_names,
-        view.tsig,
-        view.meta,
-    )
-    goal_r, have_fisher = view.goal, view.have_fisher
     # Per-mode expected performance, rendered IN the legend label of each
     # point series: the conditional template S/N for a detection goal, the
     # expected ± on a chosen parameter for a constraint/Fisher run.
     leg_num: dict = {}
-    if goal_r == "detect":
+    if view.goal == "detect":
         # saturated modes carry no usable data anywhere else (rankings,
         # combinations, forecasts); they get no score in the legend either
-        for r in results:
+        for r in view.results:
             score, _ = detect.detection_metric(r)
             if not r["saturated"] and np.isfinite(score):
                 leg_num[r["mode_key"]] = f"S/N {score:.1f}σ"
-    elif have_fisher:
-        rk_key = K("sum_rank_param_" + "_".join(fisher_names))
-        if st.session_state.get(rk_key) not in fisher_names:
+    elif view.have_fisher:
+        rk_key = K("sum_rank_param_" + "_".join(view.fisher_names))
+        if st.session_state.get(rk_key) not in view.fisher_names:
             st.session_state.pop(rk_key, None)
-        gp_default = meta.get("goal_param")
+        gp_default = view.meta.get("goal_param")
         with fig_box:
             rk_param = st.selectbox(
                 "Legend parameter (per-mode Fisher ±)",
-                fisher_names,
-                index=(fisher_names.index(gp_default) if gp_default in fisher_names else 0),
+                view.fisher_names,
+                index=(view.fisher_names.index(gp_default) if gp_default in view.fisher_names else 0),
                 key=rk_key,
                 format_func=lambda n: fisher_mod.PARAM_LABELS[n],
             )
-        for r in usable_jac:
+        for r in view.usable_jac:
             # width_in_row_units, not display_sigma: this number sits on the same page as the
             # constraint table and must be in the same coordinate (dex for C/O).
-            v = tsig * width_in_row_units(rk_param, fisher_mod.mode_forecast(r, fisher_names)[rk_param])
+            v = view.tsig * width_in_row_units(rk_param, fisher_mod.mode_forecast(r, view.fisher_names)[rk_param])
             if np.isfinite(v):
                 leg_num[r["mode_key"]] = f"±{v:.3g}"
     return leg_num
 
 
-def _series_controls(view: RunView, combos: ComboRecords, fig_ctx: Any) -> tuple[list, dict]:
+def _series_controls(view: RunView, combos: ComboRecords, fig_ctx: Slot) -> tuple[list, dict]:
     """Draw the series selector; return the selection and each combination's usable members."""
-    ok, combos_cfg = view.ok, combos.cfg
     # Figure controls
     # The figure re-renders from the CACHED run: which series are drawn and what
     # wavelength window is shown are display choices, so none of this recomputes
     # a spectrum or an ETC job. model_cache.params_key excludes the mode selection
     # and the Pandeia cache is per-mode, so re-rendering is free.
-    series_opts = [("mode", r["mode_key"], r["label"]) for r in ok]
+    series_opts = [("mode", r["mode_key"], r["label"]) for r in view.ok]
     # custom sets from the combination builder: scored through Fisher, with no
     # spectrum of their own, so a combo's series is its members' points merged
     # onto one line (disclosed in the label).
-    combo_members = {str(c["name"]): [m for m in c["modes"] if any(r["mode_key"] == m for r in ok)] for c in combos_cfg}
+    combo_members = {
+        str(c["name"]): [m for m in c["modes"] if any(r["mode_key"] == m for r in view.ok)] for c in combos.cfg
+    }
     series_opts += [("combo", n, f"{n} (combined)") for n, mem in combo_members.items() if mem]
     # The all-usable row is a FORECAST source, not a distinct spectrum: selecting
     # it draws every usable mode's points (which is what those modes already
     # draw), and its value is that its combined posterior can appear in the
     # panels. Labelled so that redundancy is not a surprise.
-    if len(ok) >= 2:
+    if len(view.ok) >= 2:
         series_opts.append(("allusable", "all", f"{ALL_USABLE} (forecast only)"))
     series_ids = [f"{kind}:{key}" for kind, key, _ in series_opts]
     series_lbl = {f"{kind}:{key}": lbl for kind, key, lbl in series_opts}
@@ -109,7 +106,6 @@ def _series_controls(view: RunView, combos: ComboRecords, fig_ctx: Any) -> tuple
 
 def _default_window(view: RunView, sel_series: list, combo_members: dict, wl_s: np.ndarray) -> tuple[float, float]:
     """Return the span the selected modes cover, so the figure is not mostly empty spectrum."""
-    ok = view.ok
 
     def _series_modes(i: str) -> list:
         """Mode keys a series id covers (the all-usable entry: every usable mode)."""
@@ -117,7 +113,7 @@ def _default_window(view: RunView, sel_series: list, combo_members: dict, wl_s: 
         if kind == "mode":
             return [key]
         if kind == "allusable":
-            return [r["mode_key"] for r in ok]
+            return [r["mode_key"] for r in view.ok]
         return combo_members.get(key, [])
 
     cov = [
@@ -131,8 +127,19 @@ def _default_window(view: RunView, sel_series: list, combo_members: dict, wl_s: 
     return fit
 
 
-def _figure_settings(fig_ctx: Any, fig_box: Any, post_panels: list, fit: tuple) -> tuple:
-    """Draw the axis controls; return (wavelength range, depth range, log x, log y, panel x limits)."""
+@dataclass(frozen=True)
+class _FigureSettings:
+    """The window and scales the summary figure is drawn with."""
+
+    wl_range: tuple
+    depth_range: tuple | None
+    x_log: bool
+    y_log: bool
+    post_xlims: list
+
+
+def _figure_settings(fig_ctx: Slot, fig_box: Slot, post_panels: list, fit: tuple) -> _FigureSettings:
+    """Draw the axis controls and return what they chose."""
     # Figure settings. These move the WINDOW and the SCALES the figure is drawn
     # with and never the data, so
     # nothing downstream reads them -- the scores, the CSVs and the forecast are
@@ -174,16 +181,15 @@ def _figure_settings(fig_ctx: Any, fig_box: Any, post_panels: list, fit: tuple) 
     # choosing modes remains a wavelength control on its own.
     if wl_range is None:
         wl_range = fit
-    return wl_range, depth_range, x_log, y_log, post_xlims
+    return _FigureSettings(wl_range, depth_range, x_log, y_log, post_xlims)
 
 
 def _points(
     view: RunView, combos: ComboRecords, sel_series: list, combo_members: dict, leg_num: dict, mock: dict | None
 ) -> list:
     """Return the summary figure's point series: each selected mode, then each combination's merged points."""
-    results, ok, combo_names_cfg = view.results, view.ok, combos.names
     sum_points = []
-    for r in results:
+    for r in view.results:
         # saturated modes are excluded from every ranking, combination and
         # forecast; plotting simulated points for one would give unusable data
         # scientific weight. The saturation itself is disclosed in the
@@ -216,7 +222,7 @@ def _points(
         cw, cd, cs = (
             np.concatenate(a)
             for a in zip(
-                *(_binned_series(next(x for x in ok if x["mode_key"] == mk), mock) for mk in members), strict=True
+                *(_binned_series(next(x for x in view.ok if x["mode_key"] == mk), mock) for mk in members), strict=True
             )
         )
         o = np.argsort(cw)
@@ -224,7 +230,7 @@ def _points(
             dict(
                 label=f"{cname} (combined)",
                 marker="d",
-                color=COMBO_COLORS[combo_names_cfg.index(cname) % len(COMBO_COLORS)],
+                color=COMBO_COLORS[combos.names.index(cname) % len(COMBO_COLORS)],
                 wl_um=cw[o],
                 depth_ppm=cd[o],
                 sigma_ppm=cs[o],
@@ -233,21 +239,11 @@ def _points(
     return sum_points
 
 
-def _downloads(
-    view: RunView,
-    fig_sum: Any,
-    fig_box: Any,
-    wl_s: np.ndarray,
-    d_s: np.ndarray,
-    d_wo_s: np.ndarray | None,
-    mock: dict | None,
-    seed: int,
-) -> None:
+def _downloads(view: RunView, fig_sum: Figure, fig_box: Slot, native: dict, mock: dict | None, seed: int) -> None:
     """Show the figure and offer it and its numbers for download."""
-    results, meta, fname_base = view.results, view.meta, view.fname_base
     # plotted/binned numbers for the downloads under the summary figure
     bin_rows = []
-    for r in results:
+    for r in view.results:
         bwl, bd, bs = _binned_series(r)
         bin_rows.append(
             pd.DataFrame(
@@ -263,9 +259,6 @@ def _downloads(
             )
         )
     bin_df = pd.concat(bin_rows, ignore_index=True)
-    native = {"wl_um": wl_s, "depth_ppm": d_s}
-    if d_wo_s is not None:
-        native[f"depth_{meta['target']}_opacity_removed_ppm"] = d_wo_s
     sum_png = fig_bytes(fig_sum, "png")
     sum_pdf = fig_bytes(fig_sum, "pdf")
     with fig_box:
@@ -274,7 +267,7 @@ def _downloads(
     s1.download_button(
         "Figure (PDF, vector)",
         sum_pdf,
-        f"{fname_base}_proposal_summary.pdf",
+        f"{view.fname_base}_proposal_summary.pdf",
         "application/pdf",
         key=K("dl_summary_pdf"),
         on_click="ignore",
@@ -282,7 +275,7 @@ def _downloads(
     s2.download_button(
         "Figure (PNG)",
         sum_png,
-        f"{fname_base}_proposal_summary.png",
+        f"{view.fname_base}_proposal_summary.png",
         "image/png",
         key=K("dl_summary_png"),
         on_click="ignore",
@@ -290,7 +283,7 @@ def _downloads(
     s3.download_button(
         "Binned points (CSV)",
         view.csv(bin_df),
-        f"{fname_base}_binned_points.csv",
+        f"{view.fname_base}_binned_points.csv",
         "text/csv",
         key=K("dl_spec_bins"),
         on_click="ignore",
@@ -298,7 +291,7 @@ def _downloads(
     s4.download_button(
         "Native model (CSV)",
         view.csv(pd.DataFrame(native)),
-        f"{fname_base}_model_spectrum.csv",
+        f"{view.fname_base}_model_spectrum.csv",
         "text/csv",
         key=K("dl_spec_native"),
         on_click="ignore",
@@ -307,12 +300,10 @@ def _downloads(
         _mock_download(view, s5, mock, seed)
 
 
-def _mock_download(view: RunView, s5: Any, mock: dict | None, seed: int) -> None:
+def _mock_download(view: RunView, s5: Slot, mock: dict, seed: int) -> None:
     """Offer the seeded mock realization, only under a name that says what it is; the result CSVs stay noiseless."""
-    results, fname_base = view.results, view.fname_base
-    # is (a seeded mock realization) -- the result CSVs above stay noiseless
     mock_rows = []
-    for r in results:
+    for r in view.results:
         # wl_eff is the PLOTTED x coordinate: the figure must be reproducible
         # from this file alone
         mwl, md, ms = _binned_series(r, mock)
@@ -336,7 +327,7 @@ def _mock_download(view: RunView, s5: Any, mock: dict | None, seed: int) -> None
     s5.download_button(
         "Mock observation (CSV)",
         view.csv(mock_df),
-        f"{fname_base}_mock_realization_seed{seed}.csv",
+        f"{view.fname_base}_mock_realization_seed{seed}.csv",
         "text/csv",
         key=K("dl_spec_mock"),
         on_click="ignore",
@@ -346,27 +337,26 @@ def _mock_download(view: RunView, s5: Any, mock: dict | None, seed: int) -> None
 
 def render_summary(view: RunView, combos: ComboRecords, post_panels: list, mock: dict | None, seed: int) -> None:
     """Draw the summary figure from the stored run; nothing here recomputes a spectrum or an ETC job."""
-    model, meta, goal_r, emis, ev = view.model, view.meta, view.goal, view.emission, view.event
-    wl = model["wl_um"]
+    wl = view.model["wl_um"]
     order = np.argsort(wl)
-    wl_s, d_s = wl[order], model["depth"][order] * 1e6
+    wl_s, d_s = wl[order], view.model["depth"][order] * 1e6
 
     def _display_smooth(y_ppm: np.ndarray) -> np.ndarray:
-        return plotting.display_smooth(wl_s, y_ppm, int(meta["r_bin"]))
+        return plotting.display_smooth(wl_s, y_ppm, int(view.meta["r_bin"]))
 
     d_plot = _display_smooth(d_s)
     d_wo_s = None
-    if goal_r == "detect":
+    if view.goal == "detect":
         # depth_wo rows align with the model's wo_mols set, not mols
-        wo_mols_r = [str(x) for x in model["wo_mols"]]
-        d_wo_s = model["depth_wo"][wo_mols_r.index(meta["target"])][order] * 1e6
-    depth_lbl = f"{ev} depth (ppm)"
+        wo_mols_r = [str(x) for x in view.model["wo_mols"]]
+        d_wo_s = view.model["depth_wo"][wo_mols_r.index(view.meta["target"])][order] * 1e6
+    depth_lbl = f"{view.event} depth (ppm)"
     # An EXPANDER like every other results section. Expanded by DEFAULT: it
     # holds the figure the whole page builds toward, so it should be visible on
     # arrival, unlike the supporting sections above it.
     fig_box = st.expander(
         "Simulated eclipse emission spectrum & forecast summary"
-        if emis
+        if view.emission
         else "Simulated transmission spectrum & forecast summary",
         expanded=True,
     )
@@ -374,7 +364,7 @@ def render_summary(view: RunView, combos: ComboRecords, post_panels: list, mock:
     fig_ctx = fig_box.container()
     sel_series, combo_members = _series_controls(view, combos, fig_ctx)
     fit = _default_window(view, sel_series, combo_members, wl_s)
-    wl_range, depth_range, x_log, y_log, post_xlims = _figure_settings(fig_ctx, fig_box, post_panels, fit)
+    settings = _figure_settings(fig_ctx, fig_box, post_panels, fit)
     sum_points = _points(view, combos, sel_series, combo_members, leg_num, mock)
 
     sum_spectrum = dict(
@@ -382,23 +372,23 @@ def render_summary(view: RunView, combos: ComboRecords, post_panels: list, mock:
         depth_ppm=d_plot,
         depth_label=depth_lbl,
         model_label="model",
-        wl_range=wl_range,
-        depth_range=depth_range,
-        x_log=x_log,
-        y_log=y_log,
+        wl_range=settings.wl_range,
+        depth_range=settings.depth_range,
+        x_log=settings.x_log,
+        y_log=settings.y_log,
         points=sum_points,
     )
     if d_wo_s is not None:
         # detect goal: the without-target comparison curve, smoothed identically
         # to the model curve for display
         sum_spectrum["depth2_ppm"] = _display_smooth(d_wo_s)
-        sum_spectrum["depth2_label"] = f"No {meta['target']}"
+        sum_spectrum["depth2_label"] = f"No {view.meta['target']}"
 
-    def _compose(spec: dict) -> Any:
+    def _compose(spec: dict) -> Figure:
         # No in-figure title: the section header above already names the figure;
         # the exported PNG/PDF carry the planet name in their FILENAME.
         return summary_figure.compose_summary_figure(
-            spec, posterior_panels=post_panels or None, panel_xlims=post_xlims, caveats=view.caveats
+            spec, posterior_panels=post_panels or None, panel_xlims=settings.post_xlims, caveats=view.caveats
         )
 
     try:
@@ -413,4 +403,7 @@ def render_summary(view: RunView, combos: ComboRecords, post_panels: list, mock:
         fig_box.warning("Log depth axis needs a positive visible range; showing a linear axis.")
         sum_spectrum["y_log"] = False
         fig_sum = _compose(sum_spectrum)
-    _downloads(view, fig_sum, fig_box, wl_s, d_s, d_wo_s, mock, seed)
+    native = {"wl_um": wl_s, "depth_ppm": d_s}
+    if d_wo_s is not None:
+        native[f"depth_{view.meta['target']}_opacity_removed_ppm"] = d_wo_s
+    _downloads(view, fig_sum, fig_box, native, mock, seed)

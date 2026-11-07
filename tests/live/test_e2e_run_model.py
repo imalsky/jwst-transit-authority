@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from jwst_tool import model_cache
+from jwst_tool import instruments as ins
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("JWST_TOOL_RUN_SLOW") != "1", reason="full-chain e2e (~5 min): set JWST_TOOL_RUN_SLOW=1"
@@ -113,7 +113,7 @@ def test_full_chain_reproduces_the_verified_reference(mode, engine, tmp_path, mo
     # An empty model cache: no cached spectrum AND no cached chemistry column
     # (a cached column would re-run only the RT), and the real cache that the
     # GUI's default run reads is left alone.
-    monkeypatch.setattr(model_cache, "MODEL_CACHE", tmp_path / "model_cache")
+    monkeypatch.setattr(ins, "MODEL_CACHE", tmp_path / "model_cache")
 
     out = np.load(forward.run_model(params, log=lambda *a: None), allow_pickle=False)
     got_cp = json.loads(str(out["params_json"]))

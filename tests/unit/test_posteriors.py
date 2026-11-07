@@ -113,7 +113,7 @@ def test_null_directions_are_flagged_never_faked():
     rng = np.random.default_rng(3)
     row = rng.standard_normal(50)
     J = np.stack([row, row, rng.standard_normal(50)])  # [p0, p1, lnR0]
-    r = dict(jac_bins=J, sigma=np.full(50, 1e-4), mode_key=k1, depth=np.full(50, 0.02))
+    r = dict(jac_bins=J, sigma=np.full(50, 1e-4), seg=np.zeros(50, int), mode_key=k1, depth=np.full(50, 0.02))
     out = posteriors.marginalized_posteriors(r, ["p0", "p1"], {"p0": 0.0, "p1": 0.0})
     real = posteriors.mock_realization([r], seed=0)
     rec = posteriors.mock_recovery([r], ["p0", "p1"], real)
@@ -360,6 +360,9 @@ def test_mock_center_co_refuses_an_off_scale_draw():
     assert posteriors.mock_center_co(CO, 506.0, -3.0) is None  # -> 0.027
     inside = posteriors.mock_center_co(CO, 506.0, 1.0)
     assert inside is not None and lo <= inside <= hi
+    # inside the model's range, outside the forecast window: only the width rule can refuse this one
+    assert lo <= 0.55 * np.exp(1.0) <= hi
+    assert posteriors.mock_center_co(0.55, 0.01, 1.0) is None
 
 
 def test_scoring_modules_never_reference_the_mock_layer():
@@ -453,3 +456,10 @@ def test_ln_gaussian_curve_is_a_normalized_density_per_dln():
         theta = posteriors.ln_gaussian_curve(edge, 920.0, bounds=(lo, hi))["theta"]
         assert np.all(np.isfinite(theta)) and np.all(np.diff(theta) > 0.0)
         assert theta[0] >= lo and theta[-1] <= hi
+
+
+def test_a_result_without_its_saturation_flag_is_refused_rather_than_summed():
+    (key,) = _registry_keys(1)
+    result = dict(jac_bins=np.ones((3, 5)), sigma=np.ones(5), seg=np.zeros(5, int), mode_key=key)
+    with pytest.raises(KeyError, match="saturated"):
+        posteriors.combo_forecast("c", [key], {key: result}, ["p0"])

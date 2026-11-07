@@ -6,6 +6,7 @@ Method and contract: docs/forward_model.md, section `planets`.
 from __future__ import annotations
 
 import math
+from typing import Any
 
 # IAU 2015 Resolution B3 nominal values (R_jup equatorial, R_sun, and
 # M_jup = nominal GM_J / CODATA G), the IAU 2012 exact au, and CODATA 2018 G
@@ -20,7 +21,7 @@ M_JUP_G = 1.89813e30  # Jupiter mass (g); for archive mass -> surface gravity
 # atm/stellar_flux/, all same two-column surface-flux format), labeled by type.
 SFLUX_CHOICES = {
     "sflux-W39b_Tsai2023.txt": "WASP-39 (G8V, Tsai 2023)",
-    "Gueymard_solar.txt": "Sun (G2V, Gueymard 2003)",
+    "Gueymard_solar.txt": "Sun (G2V, Gueymard 2004)",
     "sflux-HD189_Moses11.txt": "HD 189733 (K1.5V, Moses 2011)",
     "sflux-epseri.txt": "eps Eridani (K2V, StarCAT)",
     "sflux-GJ436.txt": "GJ 436 (M2.5V, MUSCLES)",
@@ -75,7 +76,7 @@ SFLUX_SOURCES["sflux-GJ1214.txt"] = SFLUX_SOURCES["sflux-GJ436.txt"]
 # the top follows rt_ptop_bar); HD 209458 b's thermosphere is already inside
 # the shipped span, which disqualifies it, and HD 189733 b's enters the grid
 # below 1e-7 bar, so its file mode needs rt_ptop_bar >= 1e-7.
-PLANETS = {
+PLANETS: dict[str, dict[str, Any]] = {
     "wasp39b": dict(
         label="WASP-39 b",
         star=dict(teff=5485.0, log_g=4.5, metallicity=0.0, ks_mag=10.20),
@@ -231,7 +232,7 @@ def default_tirr(planet: dict, system: dict | None = None, science_mode: str = "
 # Gray cloud: opacity <-> the pressure it blocks down to.
 #
 # The engine's cloud is a uniformly mixed per-gram opacity, dtau = kappa dP/g
-# (vulcan_forward.exojax_rt._ckd_continuum), so the SLANT optical depth through
+# (vulcan_forward._rt_opacity._ckd_continuum), so the SLANT optical depth through
 # an exponential atmosphere is tau(P) = kappa (P/g) sqrt(2 pi Rp/H) -- the
 # closed form vulcan-forward gates its own RT against (its
 # tests/test_cloud_deck.py, Heng & Kitzmann 2017; worst case 1.04e-2 H). Setting

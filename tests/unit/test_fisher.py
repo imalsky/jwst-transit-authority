@@ -125,6 +125,7 @@ def test_wide_co_width_is_reported_not_hidden():
     base = dict(
         jac_bins=rng.standard_normal((3, nb)),  # [dlnCO, lnZ, lnR0]
         sigma=np.full(nb, 1e-4),
+        seg=np.zeros(nb, int),
         mode_key="nirspec_prism",
         depth=np.full(nb, 0.02),
     )
@@ -173,7 +174,7 @@ def test_combined_forecast_structure_and_order_invariance():
 
 
 def test_single_segment_offset_and_diag():
-    """A single-segment mode and a no-seg call agree: both carry exactly one
+    """A result with no segment layout is refused; a single-segment mode carries exactly one
     constant-offset nuisance, because lnR0 is a physical derivative, not a
     constant, and never stands in for the offset. Diag dimension = free +
     lnR0 + the always-present constant offset.
@@ -181,16 +182,17 @@ def test_single_segment_offset_and_diag():
     rng = np.random.default_rng(7)
     nb = 45
     jac = rng.standard_normal((3, nb))  # 2 free + lnR0
-    r1 = dict(jac_bins=jac, sigma=np.full(nb, 1e-4))
-    a1 = fisher.mode_forecast(dict(r1), ["p0", "p1"])
-    r2 = dict(jac_bins=jac, sigma=np.full(nb, 1e-4), seg=np.zeros(nb, int))
-    a2 = fisher.mode_forecast(dict(r2), ["p0", "p1"])
-    for k in ("p0", "p1"):
-        assert a2[k] == pytest.approx(a1[k], rel=1e-12)
+    # the segment layout is a result's own: a result without one is refused, not read as a single segment
+    with pytest.raises(KeyError, match="seg"):
+        fisher.mode_forecast(dict(jac_bins=jac, sigma=np.full(nb, 1e-4)), ["p0", "p1"])
     # diag passthrough on a minimal mode
     diag = {}
     out = fisher.mode_forecast(
-        dict(jac_bins=np.array([[1.0, 2.0, 0.5], [0.2, 0.1, 0.9]]), sigma=np.array([1e-4, 1e-4, 1e-4])),
+        dict(
+            jac_bins=np.array([[1.0, 2.0, 0.5], [0.2, 0.1, 0.9]]),
+            sigma=np.array([1e-4, 1e-4, 1e-4]),
+            seg=np.zeros(3, int),
+        ),
         ["p0"],
         diag=diag,
     )
@@ -209,11 +211,13 @@ def test_constant_science_derivative_unconstrained():
     nb = 40
     x = np.linspace(0.0, 1.0, nb)
     jac = np.stack([np.ones(nb), 0.3 + 0.2 * x])  # [free=const, lnR0 nonconst]
-    r = dict(jac_bins=jac, sigma=np.full(nb, 1e-4))
+    r = dict(jac_bins=jac, sigma=np.full(nb, 1e-4), seg=np.zeros(nb, int))
     assert np.isinf(fisher.mode_forecast(r, ["p0"])["p0"])
     # a science derivative with real shape stays constrained
     jac2 = np.stack([np.sin(6 * x), 0.3 + 0.2 * x])
-    assert np.isfinite(fisher.mode_forecast(dict(jac_bins=jac2, sigma=np.full(nb, 1e-4)), ["p0"])["p0"])
+    assert np.isfinite(
+        fisher.mode_forecast(dict(jac_bins=jac2, sigma=np.full(nb, 1e-4), seg=np.zeros(nb, int)), ["p0"])["p0"]
+    )
     # per-segment constant derivative (general step pattern)
     seg = np.array([0] * 20 + [1] * 20)
     jac3 = np.stack([np.where(seg == 0, 0.7, -0.2), np.linspace(1, 2, nb)])
@@ -222,7 +226,7 @@ def test_constant_science_derivative_unconstrained():
     # a pure detector step: well constrained WITHOUT segment info, absorbed
     # (unconstrained) as soon as the two segment offsets are floated
     jac4 = np.stack([(seg == 1).astype(float), np.ones(nb)])
-    base = dict(jac_bins=jac4, sigma=np.full(nb, 1e-4))
+    base = dict(jac_bins=jac4, sigma=np.full(nb, 1e-4), seg=np.zeros(nb, int))
     assert np.isfinite(fisher.mode_forecast(dict(base), ["p0"])["p0"])
     assert np.isinf(fisher.mode_forecast(dict(base, seg=seg), ["p0"])["p0"])
 
@@ -276,7 +280,7 @@ def test_conditional_sigmas():
     rng = np.random.default_rng(7)
     nb = 40
     jac = np.vstack([rng.standard_normal((2, nb)), rng.standard_normal(nb) + 1.0])  # p0, p1, lnR0
-    r = dict(jac_bins=jac, sigma=np.full(nb, 1e-4))
+    r = dict(jac_bins=jac, sigma=np.full(nb, 1e-4), seg=np.zeros(nb, int))
     cond = {}
     marg = fisher.mode_forecast(r, ["p0", "p1"], conditional=cond)
     for n in ("p0", "p1"):
@@ -288,7 +292,7 @@ def test_conditional_sigmas():
     p0 = np.array([1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0])
     p1 = np.array([1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0])
     ln_r0 = np.array([1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0])
-    r2 = dict(jac_bins=np.vstack([p0, p1, ln_r0]), sigma=np.ones(8))
+    r2 = dict(jac_bins=np.vstack([p0, p1, ln_r0]), sigma=np.ones(8), seg=np.zeros(8, int))
     cond2 = {}
     marg2 = fisher.mode_forecast(r2, ["p0", "p1"], conditional=cond2)
     for n in ("p0", "p1"):
@@ -296,12 +300,12 @@ def test_conditional_sigmas():
     # a dead parameter (zero response) reads inf
     jac3 = np.vstack([np.zeros(10), np.ones(10)])  # p0 dead, lnR0 alive
     cond3 = {}
-    fisher.mode_forecast(dict(jac_bins=jac3, sigma=np.ones(10)), ["p0"], conditional=cond3)
+    fisher.mode_forecast(dict(jac_bins=jac3, sigma=np.ones(10), seg=np.zeros(10, int)), ["p0"], conditional=cond3)
     assert cond3["p0"] == np.inf
     # two modes must beat (or match) either alone, conditionally too
     rng = np.random.default_rng(3)
-    ra = dict(jac_bins=rng.standard_normal((2, 25)), sigma=np.full(25, 1e-4))
-    rb = dict(jac_bins=rng.standard_normal((2, 20)), sigma=np.full(20, 1e-4))
+    ra = dict(jac_bins=rng.standard_normal((2, 25)), sigma=np.full(25, 1e-4), seg=np.zeros(25, int))
+    rb = dict(jac_bins=rng.standard_normal((2, 20)), sigma=np.full(20, 1e-4), seg=np.zeros(20, int))
     c1, c12 = {}, {}
     fisher.combined_forecast([ra], ["p0"], conditional=c1)
     fisher.combined_forecast([ra, rb], ["p0"], conditional=c12)

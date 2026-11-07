@@ -37,21 +37,20 @@ class Target:
 
 
 @dataclass(frozen=True)
-class Atmosphere:
-    """Step 2: chemistry engine, structure, composition, mixing, opacity and clouds."""
+class Profile:
+    """The T-P profile: its mode, settings and table source."""
 
-    pic: bool
-    chem_provider: str
     tp_mode: str
     tp_kwargs: dict
     tp_file: str
     tp_file_path: str | None
     tp_file_ok: bool
-    rt_ptop_bar: float
-    p_ref_bar: float
-    p_btm_bar: float
-    met: float
-    co_ratio: float
+
+
+@dataclass(frozen=True)
+class Mixing:
+    """Vertical mixing, and PICASO's quench that stands in for it."""
+
     picaso_quench: bool
     kzz_mode: str
     kzz_x: float
@@ -59,21 +58,50 @@ class Atmosphere:
     kzz_kmax: float
     kzz_plev: float
     kzz_kdeep: float
+
+
+@dataclass(frozen=True)
+class Photochemistry:
+    """The kinetics network and what drives it."""
+
     network: str
     use_photo: bool
     use_moldiff: bool
     use_vm_mol: bool
     sl_angle_deg: float
     f_diurnal: float
-    base_set: list
-    extra_set: list
-    extra_mols: list
+
+
+@dataclass(frozen=True)
+class Clouds:
+    """Rayleigh scattering and the cloud deck."""
+
     use_rayleigh: bool
     cloud_on: bool
     cloud_mode: str
     cloud_top_bar: float | None
     log_kappa_cloud: float
     alpha_cloud: float
+
+
+@dataclass(frozen=True)
+class Atmosphere:
+    """Step 2: chemistry engine, structure, composition, mixing, opacity and clouds."""
+
+    pic: bool
+    chem_provider: str
+    profile: Profile
+    rt_ptop_bar: float
+    p_ref_bar: float
+    p_btm_bar: float
+    met: float
+    co_ratio: float
+    mixing: Mixing
+    photo: Photochemistry
+    base_set: list
+    extra_set: list
+    extra_mols: list
+    clouds: Clouds
 
 
 @dataclass(frozen=True)
@@ -92,6 +120,18 @@ class Goal:
 
 
 @dataclass(frozen=True)
+class NoiseModel:
+    """The noise floor and the per-mode multipliers."""
+
+    floor_mode: str
+    floor_table: np.ndarray | None
+    floors: dict
+    floor_choice_made: bool
+    infl_mode: dict
+    infl: dict
+
+
+@dataclass(frozen=True)
 class Observation:
     """Step 4: modes, event count, mock draw, timing, binning and noise."""
 
@@ -103,12 +143,7 @@ class Observation:
     t_base: float
     sat_limit: float
     r_bin: int
-    floor_mode: str
-    floor_table: np.ndarray | None
-    floors: dict
-    floor_choice_made: bool
-    infl_mode: dict
-    infl: dict
+    noise: NoiseModel
 
 
 @dataclass(frozen=True)

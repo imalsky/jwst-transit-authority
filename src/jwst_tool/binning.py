@@ -187,7 +187,7 @@ def _validate_operator_inputs(
     return wl_pix, w_pix, edges
 
 
-# size-limit-ok: one convolution in order, a third of it the docstring
+# size-limit-ok: one convolution in order, its stages share the local grid
 def smooth_to_native_r(
     wl_model: np.ndarray,
     y: np.ndarray,
@@ -199,30 +199,14 @@ def smooth_to_native_r(
 ) -> np.ndarray:
     """Blur a depth model to the Gaussian LSF of R(lambda) over [band_lo, band_hi]; returns a full-length copy.
 
-    Only bites where the MODEL grid resolves the kernel, i.e. model R >=
-    2.3548 x the smallest R in the band (MIRI LRS, PRISM and SOSS on the
-    correlated-k R = 1000 grid); on higher-R modes (NIRCam, the M gratings)
-    the kernel is unresolved and the input is returned unchanged.
+    Where the model grid does not resolve the kernel, the input is returned unchanged.
 
-    ``wl_r``/``r_curve`` are the native resolving-power table. ``wl_r`` MUST
-    be strictly ascending and is validated: the kernel width comes from
-    ``np.interp(lambda, wl_r, r_curve)``, which silently returns the last
-    entry everywhere on a descending table. The pandeia pixel grid is
-    DISPERSION order, not wavelength order (MIRI LRS ships it 13.86 -> 5.02
-    um), so sort it before calling.
+    ``wl_r`` must be strictly ascending (validated): the pandeia pixel grid is in dispersion order, and ``np.interp`` on
+    a descending table silently returns its last entry, so sort it first.
 
-    ``weight`` is the stellar flux at ``wl_model``. The instrument measures
-    LSF-averaged COUNTS, so d_obs = L[F d] / L[F], the flux-weighted LSF mean
-    -- never the flat L[d] blur. ``None`` or a constant weight
-    reduces exactly to the flat blur. F is only pixel-resolved (sub-pixel
-    stellar lines are a documented limit). The operator is LINEAR in d for
-    fixed F, so a Jacobian row blurs with the SAME weight as the depth.
-
-    Implementation: cell-average model and weight onto a uniform ln-lambda
-    grid finer than the narrowest kernel, convolve with the
-    wavelength-dependent Gaussian, interpolate back inside the band. The
-    working band extends 5 sigma past the edges so one-sided kernels never
-    touch the returned region.
+    ``weight`` is the stellar flux at ``wl_model``. The instrument measures LSF-averaged counts, so
+    d_obs = L[F d] / L[F], and ``None`` or a constant weight is the flat blur. The operator is linear in d for fixed F,
+    so a Jacobian row blurs with the same weight as the depth.
     """
     wl, yv = _validate_model(wl_model, y, "smooth_to_native_r")
     wl_r_v, r_v = _validate_native_r(wl, wl_r, r_curve, weight)
@@ -424,10 +408,7 @@ def bin_variance(op: dict, var_pix: np.ndarray) -> np.ndarray:
 
 
 def _validate_model(wl: np.ndarray, y: np.ndarray, name: str) -> tuple[np.ndarray, np.ndarray]:
-    """Strictly ascending finite wavelength grid + finite values, or ValueError.
-
-    (a NaN model value would propagate into every bin).
-    """
+    """Strictly ascending finite wavelength grid + finite values, or ValueError: a NaN would reach every bin."""
     wl = _validate_wl(wl, f"{name}: wl_model")
     if wl.size < 2 or np.any(np.diff(wl) <= 0.0):
         raise ValueError(
@@ -452,9 +433,7 @@ def _pl_cumint(x: np.ndarray, y: np.ndarray) -> np.ndarray:
 
 
 def _pl_antideriv(xq: np.ndarray, x: np.ndarray, y: np.ndarray, icum: np.ndarray) -> np.ndarray:
-    """EXACT antiderivative of the piecewise-linear.
-
-    (x, y) at query points xq, given its node integrals ``icum`` (from _pl_cumint).
+    """EXACT antiderivative of the piecewise-linear (x, y) at query points xq, given node integrals from _pl_cumint.
 
     The antiderivative is piecewise-QUADRATIC: never np.interp ``icum`` to
     cell edges -- only O(h^2), ~1-2 ppm off for edges between model nodes.

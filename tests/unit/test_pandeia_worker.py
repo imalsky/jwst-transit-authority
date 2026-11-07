@@ -154,7 +154,7 @@ def test_no_backend_carries_a_personal_absolute_path():
         f"{f.name}: {ln.strip()}"
         for f in sorted(pathlib.Path(ins.__file__).parent.glob("*.py"))
         for ln in f.read_text().splitlines()
-        if "/Users/" in ln and not ln.strip().startswith("#")
+        if ("/Users/" in ln or "/home/" in ln) and not ln.strip().startswith("#")
     ]
     assert not offenders, offenders
 
@@ -197,6 +197,7 @@ def _run_one_mode(
     ngroup_min=2,
     ngroup_max=10,
     call_log=None,
+    nint_log=None,
 ):
     """Drive `_one_mode` with stub pandeia callables (no engine involved).
 
@@ -232,6 +233,8 @@ def _run_one_mode(
         frac = float(sat_by_ngroup(ng)) if sat_by_ngroup else sat_frac
         if call_log is not None and det.get("nint", 1) == 1:
             call_log.append(ng)
+        if nint_log is not None:
+            nint_log.append((ng, det.get("nint", 1)))
         t = 100.0 + 10.0 * (det.get("nint", 1) - 1)
         return _stub_report(frac, wl, flux, noise, n_full, n_part, t_exp=t, sat_ngroups=sat_ngroups)
 
@@ -355,6 +358,17 @@ def test_group_search_selects_largest_measured_safe(case):
     for ng in in_log:
         assert ng in log  # the choice/disproof was MEASURED
     assert not log or max(log) <= 30
+
+
+def test_the_cycle_time_is_the_engines_nint_two_minus_nint_one_at_the_chosen_ramp():
+    """A nint=1 total misses the between-integration reset when nreset1 != nreset2 (MIRI FASTR1), making sigma
+    optimistic by up to ~9 %. The stub's exposures are 100 s and 110 s, so the cycle is 10 s, not 100 s.
+    """
+    calls = []
+    out = _run_one_mode(**_CLEAN, sat_frac=0.5, sat_ngroups=None, ngroup_min=4, ngroup_max=4, nint_log=calls)
+    assert out["t_cycle_s"] == pytest.approx(10.0)
+    assert calls[-1] == (out["ngroup"], 2)
+    assert all(nint == 1 for _, nint in calls[:-1])
 
 
 def test_budget_exhaustion_is_reported_not_hidden():

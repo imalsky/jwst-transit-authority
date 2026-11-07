@@ -93,7 +93,7 @@ def h2o_spectrum():
     o = np.argsort(wl)
     ours_k = (np.exp(ours_lk).T @ gw)[o]
     assert np.allclose(wl[o], EK["h2o_wl_um"][o], rtol=1e-12)
-    assert np.allclose(ours_k, EK["h2o_sigma_ours_venv"][o], rtol=1e-12)
+    assert np.allclose(ours_k, EK["h2o_sigma_ours_venv"][o], rtol=1e-12, atol=0.0)
     return wl[o], ours_k, (np.exp(his_lk).T @ gw)[o], np.asarray(EK["h2o_sigma_exok"])[o]
 
 

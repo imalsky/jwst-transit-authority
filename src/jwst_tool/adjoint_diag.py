@@ -10,6 +10,7 @@ import json
 import logging
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -19,6 +20,8 @@ from jwst_tool import certify, chem_build, instruments as _ins, model_cache, run
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from jwst_tool.tool_types import AnyArray, Log
 
 ADJOINT_CACHE = _ins.OUTPUT_DIR / "adjoint_cache"
 _ADJ_VERSION = 4  # bump to invalidate cached adjoint diagnostics
@@ -58,10 +61,7 @@ def cache_path(params: dict, species: str) -> Path:
 
 
 def load_result(params: dict, species: str) -> dict | None:
-    """Return cached adjoint diagnostics dict or None.
-
-    (unreadable entries are quarantined and recompute, same policy as model_cache.load_result).
-    """
+    """Return cached adjoint diagnostics or None; an unreadable entry is quarantined, as in model_cache.load_result."""
     return model_cache.load_cached_npz(cache_path(params, species))
 
 
@@ -91,24 +91,70 @@ def _pair_physical(g: np.ndarray, network: Any) -> list[dict]:
                 "photolysis" if photo else "photoionization" if ion else "condensation" if fwd >= conden else "one-way"
             )
             rows.append(dict(fwd=fwd, S=float(g[fwd]), kind=kind, label=formula))
-    rows.sort(key=lambda r: -abs(r["S"]))
+    rows.sort(key=lambda r: -abs(r["S"]))  # type: ignore[arg-type]  # S is a float
     return rows
 
 
-# size-limit-ok: the scan, then the one refusal sentence built from what the scan saw
-def _audit_scope(
-    ssg: Any,
-    y_star: Any,
-    k_arr: Any,
-    atm_step: Any,
-    net: Any,
-    integ: Any,
-    final: Any,
-    loss_fn: Any,
-    recompute_k: Any,
-    body_terms: Any,
-    log: Callable[..., None],
-) -> tuple:
+@dataclass(frozen=True)
+class _Converged:
+    """The converged state both sensitivity stages read."""
+
+    ssg: Any
+    y_star: AnyArray
+    k_arr: AnyArray
+    atm_step: Any
+    net: Any
+    integ: Any
+    final: Any
+    loss_fn: Callable[[AnyArray], AnyArray]
+    recompute_k: Any
+    body_terms: Any
+    log: Log
+
+
+def _audit_refusal(a: dict, audit_trail: list, findings: list) -> str:
+    """Say which cells block the audit and whether they are creeping or oscillating.
+
+    A genuine fixed point has G(y) -> y as body_dt -> 0, so a defect that does not fall with the probe step is
+    oscillation: never relax the gate to get past it. Measured basis: notes "Known and deliberately untracked".
+    """
+    errors = [f for f in findings if str(f.get("severity", "")).lower() == "error"]
+    worst = [
+        f"{w['species']} layer {w['layer']} (defect {w['rel_defect']:.2f}, ymix {w['ymix']:.1e})"
+        for w in (a.get("worst_cells") or [])[:3]
+    ]
+    by_dt = sorted(audit_trail, key=lambda r: r["body_dt"])
+    falls = len(by_dt) > 1 and by_dt[0]["max_rel_defect"] < 0.5 * by_dt[-1]["max_rel_defect"]
+    diag = (
+        "the defect FALLS with the probe step, so these cells are still "
+        "creeping at the forward tolerance -- converging y_star tighter "
+        "(lower yconv_cri) may certify them"
+        if falls
+        else "the defect does NOT fall with the probe step, so no probe step "
+        "certifies this state, and tightening yconv_cri is unlikely to help "
+        "either. Do not relax this gate to get past it"
+    )
+    dead = a.get("n_clip_dead_excluded")
+    dead_txt = (
+        ""
+        if not dead
+        else f" ({dead} zero-clip-dead cell(s) were already excluded as solver noise, so these are real abundances.)"
+    )
+    return (
+        "adjoint scope audit REFUSED this state at every sanctioned "
+        "probe step -- the gradient would drop a live process or "
+        "differentiate a defective fixed point. Worst cells: "
+        + ("; ".join(worst) if worst else "(none reported)")
+        + f". Diagnosis: {diag}.{dead_txt} "
+        "The forward model and the Fisher path are unaffected -- this "
+        "gate is specific to the reverse-mode adjoint. Scan: "
+        + json.dumps(audit_trail)
+        + "; findings at the last step: "
+        + json.dumps(errors or findings)
+    )
+
+
+def _audit_scope(c: _Converged) -> tuple:
     """Audit the scope at the sanctioned probe steps, refusing if none passes; return (audit, step, scan, findings)."""
     # Scope audit FIRST: refuse on errors
     # Near-zero trace cells OSCILLATE under small probe steps, so scan the
@@ -116,18 +162,18 @@ def _audit_scope(
     # audit passes -- for BOTH the audit and the gradient solves; if none
     # passes, refuse. The scan trail is cached.
     audit, body_dt, audit_trail = None, None, []
-    for dt in sorted(ssg.BODY_MAP_DT_CANDIDATES):
-        log(f"[adj] PROG 0.35 adjoint scope audit (body_dt {dt:.0e})")
-        a = ssg.audit_adjoint_scope(
-            y_star,
-            k_arr,
-            atm_step,
-            net,
-            cfg=integ.config,
-            final_state=final,
-            loss_fn=loss_fn,
-            photo_recompute_k=recompute_k,
-            body_terms=body_terms,
+    for dt in sorted(c.ssg.BODY_MAP_DT_CANDIDATES):
+        c.log(f"[adj] PROG 0.35 adjoint scope audit (body_dt {dt:.0e})")
+        a = c.ssg.audit_adjoint_scope(
+            c.y_star,
+            c.k_arr,
+            c.atm_step,
+            c.net,
+            cfg=c.integ.config,
+            final_state=c.final,
+            loss_fn=c.loss_fn,
+            photo_recompute_k=c.recompute_k,
+            body_terms=c.body_terms,
             body_dt=dt,
             print_report=False,
         )
@@ -139,7 +185,7 @@ def _audit_scope(
                 loss_footprint_defect=float(a["loss_footprint_defect"]),
             )
         )
-        log(
+        c.log(
             f"[adj] audit at body_dt {dt:.0e}: ok={a['ok']}, "
             f"max_rel_defect {a['max_rel_defect']:.3g}, "
             f"loss_footprint {a['loss_footprint_defect']:.3g}"
@@ -149,49 +195,8 @@ def _audit_scope(
             break
     findings = a["findings"]
     if audit is None:
-        errors = [f for f in findings if str(f.get("severity", "")).lower() == "error"]
-        # Say whether the blocking cells are CREEPING or OSCILLATING: a
-        # genuine fixed point has G(y) -> y as body_dt -> 0, so a defect that
-        # does not fall with the probe step is oscillation -- never relax the
-        # gate to get past it.
-        worst = [
-            f"{w['species']} layer {w['layer']} (defect {w['rel_defect']:.2f}, ymix {w['ymix']:.1e})"
-            for w in (a.get("worst_cells") or [])[:3]
-        ]
-        _by_dt = sorted(audit_trail, key=lambda r: r["body_dt"])
-        _falls = len(_by_dt) > 1 and _by_dt[0]["max_rel_defect"] < 0.5 * _by_dt[-1]["max_rel_defect"]
-        _diag = (
-            "the defect FALLS with the probe step, so these cells are still "
-            "creeping at the forward tolerance -- converging y_star tighter "
-            "(lower yconv_cri) may certify them"
-            if _falls
-            else "the defect does NOT fall with the probe step, so no probe step "
-            "certifies this state. Tightening yconv_cri is unlikely to help "
-            "either: on the W39b reference case 1e-2 / 1e-3 / 1e-4 were "
-            "MEASURED to give a bit-identical converged state (longdy "
-            "plateaus at 0.0997 in all three), so the tolerance knob is inert "
-            "there. Do not relax this gate to get past it"
-        )
-        _dead = a.get("n_clip_dead_excluded")
-        _dead_txt = (
-            ""
-            if not _dead
-            else f" ({_dead} zero-clip-dead cell(s) were already excluded "
-            "as solver noise, so these are real abundances.)"
-        )
-        raise RuntimeError(
-            "adjoint scope audit REFUSED this state at every sanctioned "
-            "probe step -- the gradient would drop a live process or "
-            "differentiate a defective fixed point. Worst cells: "
-            + ("; ".join(worst) if worst else "(none reported)")
-            + f". Diagnosis: {_diag}.{_dead_txt} "
-            "The forward model and the Fisher path are unaffected -- this "
-            "gate is specific to the reverse-mode adjoint. Scan: "
-            + json.dumps(audit_trail)
-            + "; findings at the last step: "
-            + json.dumps(errors or findings)
-        )
-    log(
+        raise RuntimeError(_audit_refusal(a, audit_trail, findings))
+    c.log(
         f"[adj] audit ok at body_dt {body_dt:.0e}: max_rel_defect "
         f"{audit['max_rel_defect']:.3g}, loss_footprint_defect "
         f"{audit['loss_footprint_defect']:.3g}"
@@ -199,79 +204,56 @@ def _audit_scope(
     return audit, body_dt, audit_trail, findings
 
 
-def _temperature_sensitivity(
-    cp: dict,
-    integ: Any,
-    network: Any,
-    net: Any,
-    atm_step: Any,
-    k_arr: Any,
-    ssg: Any,
-    y_star: Any,
-    loss_fn: Any,
-    sens_kwargs: dict,
-    log: Callable[..., None],
-) -> tuple:
+def _temperature_sensitivity(c: _Converged, cp: dict, network: Any, sens_kwargs: dict) -> tuple:
     """Return dL/dT per layer (the chemistry path) and the rebuild-consistency metric."""
     import jax.numpy as jnp
 
     # dL/dT per layer (input sensitivity, chemistry path)
-    log("[adj] PROG 0.80 per-layer temperature sensitivity dL/dT")
+    c.log("[adj] PROG 0.80 per-layer temperature sensitivity dL/dT")
     t1 = time.time()
     from vulcan3 import rates_jax
     from vulcan3.gibbs import load_nasa9
     from vulcan3.phy_const import kb
 
-    cfg = integ.config
+    cfg = c.integ.config
     nasa9, _present = load_nasa9(network.species, rates_jax.thermo_dir(cfg.network))
     nasa9_j = jnp.asarray(nasa9)
     remove_list = cfg.remove_list
     use_caps = bool(cfg.use_lowT_limit_rates)
     # frozen hydrostatic pressures: rebuild(T) varies T at fixed P (the
     # upstream-validated d/dT recipe; photolysis rows spliced in FROZEN)
-    pco_j = jnp.asarray(np.asarray(atm_step.M) * kb * np.asarray(atm_step.Tco))
+    pco_j = jnp.asarray(np.asarray(c.atm_step.M) * kb * np.asarray(c.atm_step.Tco))
     photo_rows = jnp.asarray(np.asarray(network.is_photo, dtype=bool))
-    k_arr_j = jnp.asarray(k_arr)
+    k_arr_j = jnp.asarray(c.k_arr)
 
-    def rebuild(T: np.ndarray) -> tuple:
+    def rebuild(T: AnyArray) -> tuple:
         M = pco_j / (kb * T)
-        k = rates_jax.build_rate_array(net, T, M, nasa9_j, remove_list, use_lowT_caps=use_caps)
+        k = rates_jax.build_rate_array(c.net, T, M, nasa9_j, remove_list, use_lowT_caps=use_caps)
         if cp["use_photo"]:
             k = jnp.where(photo_rows[:, None], k_arr_j, k)
-        return k, atm_step._replace(Tco=T, Ti=0.5 * (T[:-1] + T[1:]), M=M)
+        return k, c.atm_step._replace(Tco=T, Ti=0.5 * (T[:-1] + T[1:]), M=M)
 
-    dLdT, info_T = ssg.steady_state_input_sensitivity(
-        loss_fn,
-        y_star,
-        k_arr,
-        atm_step,
-        net,
-        jnp.asarray(np.asarray(atm_step.Tco)),
+    dLdT, info_T = c.ssg.steady_state_input_sensitivity(
+        c.loss_fn,
+        c.y_star,
+        c.k_arr,
+        c.atm_step,
+        c.net,
+        jnp.asarray(np.asarray(c.atm_step.Tco)),
         rebuild,
         **sens_kwargs,
         return_info=True,
     )
     dLdT_np = np.asarray(dLdT, dtype=float)
     rc_worst = float(max(info_T["rebuild_consistency"].values()))
-    log(
+    c.log(
         f"[adj] dL/dT in {time.time() - t1:.0f} s: rebuild consistency "
         f"{rc_worst:.2e}, resid_median {info_T['resid_median']:.3g}"
     )
     return dLdT_np, info_T, rc_worst
 
 
-# size-limit-ok: one analysis in order, each stage reading the converged state the last one built
-def run_adjoint(params: dict, species: str, log: Callable[..., None] = print) -> Path:
-    """One reverse-mode adjoint analysis of the CURRENT forward model state.
-
-    Builds the identical chemistry (chem_build.assemble_chem), re-converges it
-    cold on an extended step budget, and certifies the fixed point on the
-    runner's own conv_normal at the exit state plus longdy < yconv_min -- NOT
-    run_model's check_converged/check_elements gate. Then runs the scope audit
-    (refusing on audit errors), computes dL/dlnk (all reactions) and dL/dT
-    (all layers) with full certification info, and caches the lot.
-    """
-    cp = run_params.canonical_params(params)
+def _refuse_unsupported(cp: dict) -> None:
     if cp["chem_provider"] != "vulcan":
         raise RuntimeError(
             "adjoint diagnostics differentiate VULCAN-JAX's reaction network; "
@@ -288,16 +270,10 @@ def run_adjoint(params: dict, species: str, log: Callable[..., None] = print) ->
             "(not validated for this tool). Turn condensation off to run "
             "the adjoint diagnostics."
         )
-    A = chem_build.assemble_chem(cp, log)  # also arms the XLA compile cache
-    # Solve to the TIGHTEST reachable state: extended step budget. longdy
-    # itself floors at ~0.09 from relative creep of near-zero trace cells
-    # (physically steady), so the gate stays the runner's canonical one and
-    # per-cell tightness is judged by the scope audit below.
-    # (cfg_overrides is the same dict A.build_chem closes over -- update in
-    # place.)
-    A.profile["cfg_overrides"].update({"count_max": 8000})
-    import jax.numpy as jnp
 
+
+def _target_species(A: Any, species: str) -> str:
+    """Return the network's name for an RT molecule, refusing anything else."""
     mol_map = A.config.MOLECULES
     if species not in mol_map:
         raise ValueError(
@@ -305,37 +281,48 @@ def run_adjoint(params: dict, species: str, log: Callable[..., None] = print) ->
             f"({sorted(mol_map)}) -- the chemistry solves many more species, "
             "but the tool's science goals are phrased on these."
         )
-    vulcan_sp = mol_map[species]["vulcan"]
+    return mol_map[species]["vulcan"]
 
-    t0 = time.time()
-    log("[adj] PROG 0.02 building chemistry model")
-    chem = A.build_chem(tag="adjoint baseline")
-    certify.check_t_window(A.tp_eval, A.theta, chem.p_bar, log, T_base=chem.T_base)
-    if chem.sidx.get(vulcan_sp) is None:
-        raise RuntimeError(f"species {vulcan_sp} not in the solved network")
-    sp = int(chem.sidx[vulcan_sp])
 
-    log("[adj] PROG 0.15 solving photochemistry (cold, certified)")
-    final, _init, atm_T = chem.run_diag(jnp.asarray(A.theta, dtype=jnp.float64), return_atm=True)
+def _certified_final(chem: Any, theta: AnyArray) -> tuple[Any, Any, float]:
+    """Solve cold and require the runner's canonical certificate: (final state, its T, longdy).
+
+    longdy alone would accept a budget-exhausted exit whose photolysis flux still drifts; conv_normal is the runner's
+    own gate recomputed at the exit state.
+    """
+    import jax.numpy as jnp
+
+    final, _init, atm_T = chem.run_diag(jnp.asarray(theta, dtype=jnp.float64), return_atm=True)
     longdy = float(final.longdy)
-    # Canonical certification: longdy alone would accept a budget-exhausted
-    # exit whose photolysis flux still drifts; conv_normal is the runner's
-    # own gate recomputed at the exit state.
-    _cn = chem.conv_normal_at_exit
-    if not (bool(_cn(final)) and longdy < chem.yconv_min):
+    converged = bool(chem.conv_normal_at_exit(final))
+    if not (converged and longdy < chem.yconv_min):
         raise RuntimeError(
             f"chemistry did NOT converge (longdy={longdy:.3g}, gate "
-            f"yconv_min={chem.yconv_min:g}, conv_normal={bool(_cn(final))}): "
+            f"yconv_min={chem.yconv_min:g}, conv_normal={converged}): "
             "the adjoint requires a canonically certified fixed point. "
             "Tighten yconv_cri or move the parameters."
         )
-    y_star = final.y
-    k_arr = final.k_arr
-    y_np = np.asarray(y_star)
-    log(f"[adj] converged in {time.time() - t0:.0f} s (longdy {longdy:.3g})")
+    return final, atm_T, longdy
 
-    # Loss: log10 VMR of the target at its peak-VMR photosphere layer
-    p_bar = np.asarray(chem.p_bar)
+
+def _reaction_sensitivity(c: _Converged, sens_kwargs: dict) -> tuple[np.ndarray, dict]:
+    """Return dL/dlnk over every reaction (one adjoint solve ensemble) and its diagnostics."""
+    c.log("[adj] PROG 0.45 reaction sensitivities dL/dlnk (first call compiles the step-VJP; ~10-20 min cold)")
+    t1 = time.time()
+    dLdlnk, info = c.ssg.steady_state_reaction_sensitivity(
+        c.loss_fn, c.y_star, c.k_arr, c.atm_step, c.net, **sens_kwargs, return_info=True
+    )
+    c.log(
+        f"[adj] dL/dlnk in {time.time() - t1:.0f} s: fp_err "
+        f"{info['fp_err']:.2e}, resid_median {info['resid_median']:.3g}, "
+        f"spread {info['ensemble_spread']:.3g}, "
+        f"pair_antisym {info['pair_antisym']:.3g}"
+    )
+    return np.asarray(dLdlnk, dtype=float), info
+
+
+def _loss_layer(y_np: np.ndarray, sp: int, p_bar: np.ndarray, species: str) -> tuple[int, float]:
+    """Return the loss layer and value: log10 VMR of the target at its peak-VMR photosphere layer."""
     vmr = y_np[:, sp] / y_np.sum(axis=1)
     win = (p_bar >= PHOTOSPHERE_P_BAR[0]) & (p_bar <= PHOTOSPHERE_P_BAR[1])
     if not win.any():
@@ -346,10 +333,67 @@ def run_adjoint(params: dict, species: str, log: Callable[..., None] = print) ->
             "photosphere -- there is no signal for the adjoint to explain."
         )
     Lz = int(np.flatnonzero(win)[np.argmax(vmr[win])])
-    loss_value = float(np.log10(vmr[Lz]))
+    return Lz, float(np.log10(vmr[Lz]))
+
+
+def _write_adjoint(out: Path, arrays: dict[str, Any], phys: list, contrib: np.ndarray) -> None:
+    """Write the cache entry, with the top reactions; atomic, since a torn npz poisons this key for every load."""
+    n_top = min(25, len(phys))
+    top: dict[str, Any] = dict(
+        top_fwd=np.array([r["fwd"] for r in phys[:n_top]], dtype=np.int64),
+        top_S=np.array([r["S"] for r in phys[:n_top]], dtype=np.float64),
+        top_kind=np.array([r["kind"] for r in phys[:n_top]], dtype="U16"),
+        top_label=np.array([r["label"] for r in phys[:n_top]], dtype="U64"),
+        uq_top_frac=np.float64(contrib[:n_top].sum() / contrib.sum() if contrib.sum() > 0 else 0.0),
+    )
+    _ins.atomic_write(out, lambda fh: np.savez_compressed(fh, **arrays, **top))
+
+
+# size-limit-ok: the stages are their own functions; the length left is the entry's flat table
+def run_adjoint(params: dict, species: str, log: Log = print) -> Path:
+    """One reverse-mode adjoint analysis of the CURRENT forward model state.
+
+    Builds the identical chemistry (chem_build.assemble_chem), re-converges it
+    cold on an extended step budget, and certifies the fixed point on the
+    runner's own conv_normal at the exit state plus longdy < yconv_min -- NOT
+    run_model's check_converged/check_elements gate. Then runs the scope audit
+    (refusing on audit errors), computes dL/dlnk (all reactions) and dL/dT
+    (all layers) with full certification info, and caches the lot.
+    """
+    cp = run_params.canonical_params(params)
+    _refuse_unsupported(cp)
+    A = chem_build.assemble_chem(cp, log)  # also arms the XLA compile cache
+    # Solve to the TIGHTEST reachable state: extended step budget. longdy
+    # itself floors at ~0.09 from relative creep of near-zero trace cells
+    # (physically steady), so the gate stays the runner's canonical one and
+    # per-cell tightness is judged by the scope audit below.
+    # (cfg_overrides is the same dict A.build_chem closes over -- update in
+    # place.)
+    A.profile["cfg_overrides"].update({"count_max": 8000})
+    import jax.numpy as jnp
+
+    vulcan_sp = _target_species(A, species)
+
+    t0 = time.time()
+    log("[adj] PROG 0.02 building chemistry model")
+    chem = A.build_chem(tag="adjoint baseline")
+    certify.check_t_window(A.tp_eval, A.theta, chem.p_bar, log, T_base=chem.T_base)
+    if chem.sidx.get(vulcan_sp) is None:
+        raise RuntimeError(f"species {vulcan_sp} not in the solved network")
+    sp = int(chem.sidx[vulcan_sp])
+
+    log("[adj] PROG 0.15 solving photochemistry (cold, certified)")
+    final, atm_T, longdy = _certified_final(chem, A.theta)
+    y_star = final.y
+    k_arr = final.k_arr
+    y_np = np.asarray(y_star)
+    log(f"[adj] converged in {time.time() - t0:.0f} s (longdy {longdy:.3g})")
+
+    p_bar = np.asarray(chem.p_bar)
+    Lz, loss_value = _loss_layer(y_np, sp, p_bar, species)
     log(f"[adj] loss: log10 VMR({species}) at layer {Lz} (P = {p_bar[Lz]:.2e} bar), value {loss_value:.3f}")
 
-    def loss_fn(y: np.ndarray) -> Any:
+    def loss_fn(y: AnyArray) -> AnyArray:
         return jnp.log10(y[Lz, sp] / jnp.sum(y[Lz]))
 
     # Adjoint machinery (VULCAN-JAX)
@@ -365,33 +409,13 @@ def run_adjoint(params: dict, species: str, log: Callable[..., None] = print) ->
     # vm_mol choice and boundary pins) -- never the manual 5-field splice.
     atm_step, body_terms = ssg.make_body_terms(integ, final, atm_T)
     recompute_k = ssg.make_photo_recompute_k(integ.photo_static, final) if cp["use_photo"] else None
-    audit, body_dt, audit_trail, findings = _audit_scope(
-        ssg, y_star, k_arr, atm_step, net, integ, final, loss_fn, recompute_k, body_terms, log
-    )
+    converged = _Converged(ssg, y_star, k_arr, atm_step, net, integ, final, loss_fn, recompute_k, body_terms, log)
+    audit, body_dt, audit_trail, findings = _audit_scope(converged)
 
-    # dL/dlnk over every reaction (one adjoint solve ensemble)
-    log("[adj] PROG 0.45 reaction sensitivities dL/dlnk (first call compiles the step-VJP; ~10-20 min cold)")
-    t1 = time.time()
-    dLdlnk, info = ssg.steady_state_reaction_sensitivity(
-        loss_fn,
-        y_star,
-        k_arr,
-        atm_step,
-        net,
-        compo_array=compo_j,
-        dz=dz_j,
-        body_dt=body_dt,
-        photo_recompute_k=recompute_k,
-        body_terms=body_terms,
-        return_info=True,
+    sens_kwargs = dict(
+        compo_array=compo_j, dz=dz_j, body_dt=body_dt, photo_recompute_k=recompute_k, body_terms=body_terms
     )
-    g = np.asarray(dLdlnk, dtype=float)
-    log(
-        f"[adj] dL/dlnk in {time.time() - t1:.0f} s: fp_err "
-        f"{info['fp_err']:.2e}, resid_median {info['resid_median']:.3g}, "
-        f"spread {info['ensemble_spread']:.3g}, "
-        f"pair_antisym {info['pair_antisym']:.3g}"
-    )
+    g, info = _reaction_sensitivity(converged, sens_kwargs)
 
     phys = _pair_physical(g, network)
     trust = float(info["resid_median"]) <= RESID_MEDIAN_TRUST and float(info["ensemble_spread"]) <= SPREAD_TRUST
@@ -400,48 +424,25 @@ def run_adjoint(params: dict, species: str, log: Callable[..., None] = print) ->
     sigma_lnk = np.log(10.0) * UQ_CLASS_DEX
     contrib = np.array([(r["S"] * sigma_lnk) ** 2 for r in phys])
     sigma_uq = float(np.sqrt(contrib.sum()))
-    dLdT_np, info_T, rc_worst = _temperature_sensitivity(
-        cp,
-        integ,
-        network,
-        net,
-        atm_step,
-        k_arr,
-        ssg,
-        y_star,
-        loss_fn,
-        dict(compo_array=compo_j, dz=dz_j, body_dt=body_dt, photo_recompute_k=recompute_k, body_terms=body_terms),
-        log,
-    )
+    dLdT_np, info_T, rc_worst = _temperature_sensitivity(converged, cp, network, sens_kwargs)
 
-    # Cache
     ADJOINT_CACHE.mkdir(parents=True, exist_ok=True)
     out = cache_path(params, species)
-    n_top = min(25, len(phys))
-    # atomic (via the temp+rename helper): a kill mid-write must not leave a
-    # torn npz that poisons this key for every later load_result
-    _ins.atomic_write(
+    _write_adjoint(
         out,
-        lambda fh: np.savez_compressed(
-            fh,
+        dict(
             species=np.array(species, dtype="U8"),
             vulcan_species=np.array(vulcan_sp, dtype="U16"),
             loss_layer=np.int64(Lz),
             loss_p_bar=np.float64(p_bar[Lz]),
             loss_log10_vmr=np.float64(loss_value),
             dLdlnk=g,
-            top_fwd=np.array([r["fwd"] for r in phys[:n_top]], dtype=np.int64),
-            top_S=np.array([r["S"] for r in phys[:n_top]], dtype=np.float64),
-            top_kind=np.array([r["kind"] for r in phys[:n_top]], dtype="U16"),
-            top_label=np.array([r["label"] for r in phys[:n_top]], dtype="U64"),
             uq_sigma_log10=np.float64(sigma_uq),
             uq_class_dex=np.float64(UQ_CLASS_DEX),
-            uq_top_frac=np.float64(contrib[:n_top].sum() / contrib.sum() if contrib.sum() > 0 else 0.0),
             fp_err=np.float64(info["fp_err"]),
             resid_median=np.float64(info["resid_median"]),
             ensemble_spread=np.float64(info["ensemble_spread"]),
-            # Diagnostic only, NOT a trust gate (reads ~1 for the accurate renorm
-            # default). Never enters `trust`.
+            # Diagnostic only, NOT a trust gate (reads ~1 for the accurate renorm default). Never enters `trust`.
             pair_antisym=np.float64(info["pair_antisym"]),
             n_solves=np.int64(info["n_solves"]),
             magnitudes_trusted=np.bool_(trust),
@@ -449,8 +450,7 @@ def run_adjoint(params: dict, species: str, log: Callable[..., None] = print) ->
             solver_map=np.array(str(info["solver_map"]), dtype="U16"),
             audit_max_rel_defect=np.float64(audit["max_rel_defect"]),
             audit_loss_footprint_defect=np.float64(audit["loss_footprint_defect"]),
-            # JSON payloads take the auto-sized U dtype; a fixed width truncates
-            # silently
+            # JSON payloads take the auto-sized U dtype; a fixed width truncates silently
             audit_findings_json=np.array(json.dumps(findings)),
             body_dt=np.float64(body_dt),
             audit_trail_json=np.array(json.dumps(audit_trail)),
@@ -463,6 +463,8 @@ def run_adjoint(params: dict, species: str, log: Callable[..., None] = print) ->
             params_json=np.array(json.dumps(cp)),
             adjoint_version=np.int64(_ADJ_VERSION),
         ),
+        phys,
+        contrib,
     )
     log("[adj] PROG 1.000 done")
     log(f"[adj] cached -> {out.name}")

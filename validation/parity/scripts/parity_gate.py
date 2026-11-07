@@ -18,6 +18,8 @@ import re
 import sys
 from pathlib import Path
 
+import numpy as np
+
 _HERE = Path(__file__).resolve().parent  # validation/parity/scripts
 sys.path.insert(0, str(_HERE.parents[2] / "src"))
 
@@ -82,6 +84,18 @@ REQUIRED_PANDEIA_RELEASE = _ins._SUPPORTED_PANDEIA_RELEASE
 # exact reviewed tree rather than merely recording whichever commit happened
 # to be installed on the machine that ran the gate.
 REQUIRED_PANDEXO_COMMIT = "34e42d81f782c8358bb30fc6e8cdf4b87e488263"
+
+# What identifies a raw run. The two sides name the engine field differently.
+_RAW_IDENTITY_OURS = ("worker_version", "engine_version", "refdata_version", "psf_version")
+_RAW_IDENTITY_PANDEXO = (
+    "pandeia_engine_version",
+    "refdata_version",
+    "psf_version",
+    "pandexo_version",
+    "pandexo_commit",
+)
+# Raw JSON round-trips exactly, so a stored statistic reproduces to round-off from another numpy build.
+RAW_STATS_RTOL = 1e-12
 
 # Thresholds. Relaxing any of them belongs in the report with a reason,
 # never in a silent edit to make a run go green.
@@ -149,9 +163,14 @@ SIGMA_RATIO_MEDIAN_BAND = (0.8, 2.0)
 
 
 def _release_of(version):
-    """Leading dotted-numeric release segment ("2026.7.1" -> "2026.7")."""
+    """Leading dotted-numeric release segment ("2026.7.1-rc1" -> "2026.7.1")."""
     m = re.match(r"(\d+(?:\.\d+)*)", str(version or "").strip())
     return m.group(1) if m else None
+
+
+def _finite(value) -> bool:
+    """Tell a real, finite number: NaN compares false against every threshold, so it must be refused first."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def gate_thresholds() -> dict:
@@ -182,19 +201,91 @@ def gate_block(problems: list[str]) -> dict:
     }
 
 
-# size-limit-ok: one gate: a linear list of refusals, each answering its own question
-def validate(summary: dict) -> list[str]:  # noqa: C901  (the same list)
-    """Return a list of gate failures; empty means the artifact is a PASS.
+def match_pixels(wl_ours: np.ndarray, wl_pandexo: np.ndarray, err_pandexo: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Pair pixels by wavelength on sorted ``wl_ours``: (our indices, PandExo indices).
 
-    Every check answers "would a reader of this artifact be misled?", not
-    "did the code run?".
+    The two sides run one engine, so the extraction grids should agree exactly. PandExo NaNs fully saturated pixels.
+    """
+    ok_p = np.isfinite(err_pandexo) & (err_pandexo > 0)
+    ii = np.clip(np.searchsorted(wl_ours, wl_pandexo[ok_p]), 0, wl_ours.size - 1)
+    exact = np.abs(wl_ours[ii] - wl_pandexo[ok_p]) < WL_MATCH_RTOL * np.maximum(wl_pandexo[ok_p], WL_MATCH_RTOL)
+    return ii[exact], np.where(ok_p)[0][exact]
+
+
+def ratio_stats(ratio: np.ndarray) -> dict:
+    """Summary statistics of a per-pixel ratio, over its finite values."""
+    r = ratio[np.isfinite(ratio)]
+    if r.size == 0:
+        return dict(n=0)
+    return dict(
+        n=int(r.size),
+        median=float(np.median(r)),
+        p05=float(np.percentile(r, 5)),
+        p95=float(np.percentile(r, 95)),
+        max_abs_dev=float(np.max(np.abs(r - 1.0))),
+    )
+
+
+def flux_ratio_stats(ours: dict, px: dict) -> dict:
+    """Extracted-flux ratio ours / PandExo, like for like.
+
+    PandExo's remove_QY divided the detector quantum yield out of e_rate_out (photon convention for its shot-noise
+    formula), so the recorded curve is multiplied back: both sides are then Pandeia's extracted electron rate.
+    """
+    wl_o, flux_o = np.asarray(ours["wl"], float), np.asarray(ours["flux"], float)
+    order = np.argsort(wl_o)  # MIRI LRS disperses red-to-blue
+    wl_o, flux_o = wl_o[order], flux_o[order]
+    io, ip = match_pixels(wl_o, np.asarray(px["wave"], float), np.asarray(px["error"], float))
+    electrons = np.asarray(px["e_rate_out"], float)[ip] * np.asarray(px["qy_on_grid"], float)[ip]
+    return ratio_stats(flux_o[io] / electrons)
+
+
+def raw_run_problems(summary_star: dict, ours: dict, pandexo: dict, mode: str) -> list[str]:
+    """Why the raw per-wavelength files do not belong to the gated run; empty when they do.
+
+    The raw JSON is git-ignored, so a checkout can hold files from an older experiment beside the committed summary.
+    Every identity field is required on both sides, and the mode to be used must reproduce its stored flux ratio.
     """
     problems = []
-    stars = summary.get("stars")
-    if not isinstance(stars, dict) or not stars:
-        return ["summary contains no stars"]
+    declared = {r["key"] for r in summary_star["modes"]}
+    for label, raw, identity in (
+        ("ours", ours, _RAW_IDENTITY_OURS),
+        ("pandexo", pandexo, _RAW_IDENTITY_PANDEXO),
+    ):
+        if missing := sorted(declared - {k for k in raw if not k.startswith("__")}):
+            problems.append(f"{label}: missing mode(s) {missing} that the summary declares")
+        stored = summary_star.get(f"provenance_{label}", {})
+        recorded = raw.get("__provenance__", {})
+        for key in identity:
+            if key not in stored or key not in recorded:
+                problems.append(f"{label}: identity field {key} is absent, so the run cannot be attributed")
+            elif stored[key] != recorded[key]:
+                problems.append(f"{label}: {key}={recorded[key]!r} but the summary records {stored[key]!r}")
+    row = next((r for r in summary_star["modes"] if r["key"] == mode), None)
+    if row is None or mode not in ours or mode not in pandexo:
+        return [*problems, f"mode {mode!r} is not in both raw files and the summary"]
+    stored_flux = row.get("flux_ratio") or {}
+    if not stored_flux.get("n"):
+        return [*problems, f"{mode}: the summary row records no flux ratio to compare against"]
+    if isinstance(ours[mode].get("error"), str) or isinstance(pandexo[mode].get("error"), str):
+        return [*problems, f"{mode}: a raw file records a failed calculation"]
+    try:
+        got = flux_ratio_stats(ours[mode], pandexo[mode])
+    except KeyError as exc:
+        return [*problems, f"{mode}: raw file lacks {exc.args[0]!r}"]
+    if got.get("n") != stored_flux["n"]:
+        problems.append(f"{mode}: {got.get('n')} matched pixels but the summary records {stored_flux['n']}")
+    else:
+        for stat in ("median", "max_abs_dev"):
+            if not math.isclose(got[stat], stored_flux[stat], rel_tol=RAW_STATS_RTOL):
+                problems.append(
+                    f"{mode}: flux ratio {stat} {got[stat]!r} but the summary records {stored_flux[stat]!r}"
+                )
+    return problems
 
-    # --- the artifact must contain the whole declared experiment ------------
+
+def _check_declared(problems: list[str], stars: dict, summary: dict) -> None:
+    """Refuse an artifact that does not contain the whole declared experiment."""
     for sname in sorted(set(STARS) - set(stars)):
         problems.append(
             f"declared star {sname!r} is missing from the artifact; a "
@@ -215,277 +306,288 @@ def validate(summary: dict) -> list[str]:  # noqa: C901  (the same list)
                 f"artifact config {name}={cfg.get(name)!r} does not match the declared experiment ({want!r})"
             )
 
-    for sname, star in stars.items():
-        po = star.get("provenance_ours") or {}
-        pp = star.get("provenance_pandexo") or {}
 
-        # --- worker version -------------------------------------------------
-        wv = po.get("worker_version")
-        if wv != PRODUCTION_WORKER_VERSION:
+def _check_provenance(problems: list[str], sname: str, star: dict) -> None:
+    """Worker version, engine / refdata / PSF on both sides, and the PandExo identity."""
+    po = star.get("provenance_ours") or {}
+    pp = star.get("provenance_pandexo") or {}
+
+    wv = po.get("worker_version")
+    if wv != PRODUCTION_WORKER_VERSION:
+        problems.append(
+            f"{sname}: artifact worker_version={wv!r} but production runs "
+            f"worker v{PRODUCTION_WORKER_VERSION}; this artifact does not "
+            "describe the shipping code"
+        )
+
+    ours_triple = {
+        "engine": _release_of(po.get("engine_version")),
+        "refdata": _release_of(po.get("refdata_version")),
+        "psf": _release_of(po.get("psf_version")),
+    }
+    px_triple = {
+        "engine": _release_of(pp.get("pandeia_engine_version")),
+        "refdata": _release_of(pp.get("refdata_version")),
+        "psf": _release_of(pp.get("psf_version")),
+    }
+    for comp in ("engine", "refdata", "psf"):
+        a, b = ours_triple[comp], px_triple[comp]
+        if a is None or b is None:
             problems.append(
-                f"{sname}: artifact worker_version={wv!r} but production runs "
-                f"worker v{PRODUCTION_WORKER_VERSION}; this artifact does not "
-                "describe the shipping code"
+                f"{sname}: {comp} release unknown on "
+                f"{'our' if a is None else 'the PandExo'} side "
+                f"(ours={a!r}, pandexo={b!r}); an unattributable "
+                "comparison cannot gate a release"
+            )
+        elif a != b:
+            problems.append(
+                f"{sname}: {comp} release differs across the two sides "
+                f"(ours={a}, pandexo={b}); this compares two engines, not "
+                "two estimators"
+            )
+        elif a != REQUIRED_PANDEIA_RELEASE:
+            problems.append(f"{sname}: {comp} release {a} is not the supported {REQUIRED_PANDEIA_RELEASE}")
+
+    pandexo_commit = pp.get("pandexo_commit")
+    if not pandexo_commit:
+        problems.append(
+            f"{sname}: PandExo git commit not recorded. PandExo is used "
+            "from master, whose behavior moves without a version bump, so "
+            "the version string alone does not identify what ran"
+        )
+    elif pandexo_commit != REQUIRED_PANDEXO_COMMIT:
+        problems.append(
+            f"{sname}: PandExo commit {pandexo_commit!r} is not the "
+            f"reviewed {REQUIRED_PANDEXO_COMMIT}; a different or dirty "
+            "master tree cannot satisfy this release gate"
+        )
+    if str(pp.get("pandexo_version", "unknown")).lower() in ("unknown", "none", ""):
+        problems.append(f"{sname}: PandExo version is unknown in the provenance block")
+
+
+def _check_mode_matrix(problems: list[str], sname: str, rows: list) -> None:
+    """Exactly one row per declared mode."""
+    keys = [row.get("key") for row in rows]
+    for k in MODE_KEYS:
+        n = keys.count(k)
+        if n == 0:
+            problems.append(f"{sname}: declared mode {k!r} has no row")
+        elif n > 1:
+            problems.append(f"{sname}: mode {k!r} appears {n} times; duplicate rows cannot be attributed")
+    for k in sorted({k for k in keys if k not in MODE_KEYS}):
+        problems.append(f"{sname}: row key {k!r} is not part of the declared experiment")
+
+
+def _check_saturation_mask(problems: list[str], tag: str, row: dict) -> None:
+    sm = row.get("saturation_mask") or {}
+    if sm.get("error"):
+        problems.append(f"{tag}: {sm['error']}")
+    else:
+        mf = sm.get("matched_frac")
+        pe = sm.get("partial_equal_frac")
+        fe = sm.get("full_equal_frac")
+        if not _finite(mf) or mf < MIN_SAT_MASK_MATCHED_PIXEL_FRAC:
+            problems.append(
+                f"{tag}: native saturation grids matched fraction {mf!r} < {MIN_SAT_MASK_MATCHED_PIXEL_FRAC:.0%}"
+            )
+        if not _finite(pe) or pe < MIN_SAT_MASK_EQUAL_FRAC:
+            problems.append(
+                f"{tag}: partial-saturation mask agreement {pe!r}; the per-pixel exclusion evidence differs"
+            )
+        if not _finite(fe) or fe < MIN_SAT_MASK_EQUAL_FRAC:
+            problems.append(f"{tag}: full-saturation mask agreement {fe!r}; the per-pixel exclusion evidence differs")
+
+
+def _check_saturated_row(problems: list[str], tag: str, status: str, row: dict) -> None:
+    """Never a numerical validation row, but the saturation CLAIM itself is gated.
+
+    Let these rows bypass every check and a false-saturated result passes while an unsaturated row elsewhere keeps
+    coverage green.
+    """
+    sat = row.get("sat_frac_ours")
+    if not _finite(sat) or sat <= SAT_LIMIT:
+        problems.append(
+            f"{tag}: labeled {status} but the measured sat_frac is {sat!r}; the label must come from the measurement"
+        )
+    fw = str((row.get("pandexo_warnings") or {}).get("% full well high?", ""))
+    if not fw:
+        problems.append(
+            f"{tag}: {status} row carries no PandExo full-well verdict; saturation-status agreement cannot be checked"
+        )
+    elif fw.startswith("All good"):
+        gp = row.get("ngroup_pandexo", row.get("pandexo_ngroup"))
+        problems.append(
+            f"{tag}: this tool reports the configuration "
+            f"saturated but PandExo reports {fw!r} at ngroup "
+            f"{gp} -- saturation-status disagreement"
+        )
+    # both-saturated rows sit at their floors: when both group
+    # counts exist and are low, they must agree exactly
+    go = row.get("ngroup_ours")
+    gp = row.get("ngroup_pandexo", row.get("pandexo_ngroup"))
+    if (go is not None and not _finite(go)) or (gp is not None and not _finite(gp)):
+        problems.append(f"{tag}: {status} row with a non-finite ngroup (ours={go!r}, pandexo={gp!r})")
+    elif go is not None and gp is not None and (go <= LOW_NGROUP_EXACT or gp <= LOW_NGROUP_EXACT) and go != gp:
+        problems.append(
+            f"{tag}: {status} row ngroup {go} vs {gp} on a "
+            "short ramp; the floors the two tools saturate at "
+            "must agree exactly"
+        )
+
+
+def _check_ok_identity(problems: list[str], tag: str, key: str, row: dict) -> None:
+    """Check the measured saturation, the pixel grid and the submitted instrument configuration."""
+    # Saturation is judged from the MEASURED fraction, not the
+    # worker's `unusable` flag alone: the flag can pass a row above
+    # the limit as OK (one measured at 7.31x the saturation level,
+    # Pandeia's per-mode value, not the physical full well).
+    sat = row.get("sat_frac_ours")
+    if not _finite(sat):
+        problems.append(f"{tag}: OK row with no measured sat_frac (got {sat!r})")
+    elif sat > SAT_LIMIT:
+        problems.append(
+            f"{tag}: labeled OK with measured saturation "
+            f"{float(sat):.4f} above the {SAT_LIMIT} limit; a "
+            "saturated configuration may be reported but cannot "
+            "contribute a validation row"
+        )
+
+    # pixel-grid identity
+    npix_p, matched = row.get("npix_pandexo"), row.get("npix_matched")
+    if not (_finite(npix_p) and npix_p > 0 and _finite(matched)):
+        problems.append(f"{tag}: missing pixel-match counts (matched={matched!r}, pandexo={npix_p!r})")
+    elif matched < MIN_MATCHED_PIXEL_FRAC * npix_p:
+        problems.append(
+            f"{tag}: only {matched}/{npix_p} usable pixels matched at "
+            f"rtol {WL_MATCH_RTOL:g} "
+            f"(< {MIN_MATCHED_PIXEL_FRAC:.0%})"
+        )
+
+    # Submitted instrument configuration must be identical. The one
+    # reviewed representation exception is MIRI LRS: our registry
+    # leaves its sole p750l disperser implicit while PandExo reports it.
+    # A blanket "ignore whenever either side is None" rule would also
+    # hide a genuinely missing subarray/readout/filter on every mode.
+    co, cp = row.get("config_ours") or {}, row.get("config_pandexo") or {}
+    for field in ("subarray", "readout", "filter", "disperser"):
+        a, b = co.get(field), cp.get(field)
+        implicit_miri_disperser = key == "miri_lrs" and field == "disperser" and a is None and b == "p750l"
+        if not implicit_miri_disperser and a != b:
+            problems.append(f"{tag}: submitted {field} differs (ours={a!r}, pandexo={b!r})")
+
+
+def _check_ngroup(problems: list[str], tag: str, sname: str, row: dict) -> None:
+    """Group counts (see the threshold comments for the either/or rule)."""
+    go, gp = row.get("ngroup_ours"), row.get("ngroup_pandexo")
+    if not (_finite(go) and _finite(gp)):
+        problems.append(f"{tag}: missing ngroup on one side (ours={go!r}, pandexo={gp!r})")
+    elif go <= LOW_NGROUP_EXACT or gp <= LOW_NGROUP_EXACT:
+        # short-ramp regime: every group is a large slice of the
+        # integration, so the optimizers must agree exactly
+        if go != gp:
+            problems.append(
+                f"{tag}: ngroup {go} vs {gp} on a short ramp "
+                f"(either side <= {LOW_NGROUP_EXACT}); short-ramp "
+                "group choices must agree exactly -- a one-group "
+                "difference here is a ramp-policy divergence, not "
+                "rounding"
+            )
+    elif sname in FAINT_STARS:
+        diff = abs(go - gp)
+        if diff > MAX_NGROUP_ABS_DIFF_FAINT and diff > MAX_NGROUP_REL_DIFF * max(go, gp):
+            problems.append(
+                f"{tag}: ngroup {go} vs {gp} differs by {diff}, beyond "
+                f"both {MAX_NGROUP_ABS_DIFF_FAINT} groups absolute and "
+                f"{MAX_NGROUP_REL_DIFF:.0%} relative"
+            )
+    elif abs(go - gp) > MAX_NGROUP_ABS_DIFF:
+        problems.append(f"{tag}: ngroup {go} vs {gp} differs by more than {MAX_NGROUP_ABS_DIFF}")
+
+
+def _check_ok_numbers(problems: list[str], tag: str, row: dict) -> None:
+    """Per-integration time, the sigma-ratio anomaly ceiling and the extracted flux."""
+    # Per-integration time inherits the group choice; a passing group
+    # diff must not hide a large timing gap. Missing/non-finite
+    # fields on an OK row are a FAILURE, never a skipped check:
+    # absent data must never fail open.
+    to, tp = row.get("t_int_ours_s"), row.get("t_int_pandexo_s")
+    if (
+        to is None
+        or tp is None
+        or not (math.isfinite(float(to)) and float(to) > 0)
+        or not (math.isfinite(float(tp)) and float(tp) > 0)
+    ):
+        problems.append(
+            f"{tag}: OK row with missing or non-positive "
+            f"per-integration times (ours={to!r}, pandexo={tp!r}); "
+            "the timing gate cannot run, which is a failure"
+        )
+    else:
+        rel = abs(float(to) - float(tp)) / max(float(to), float(tp))
+        if rel > MAX_TINT_REL_DIFF:
+            problems.append(
+                f"{tag}: per-integration time {to:.3f}s vs {tp:.3f}s differs by {rel:.0%} (> {MAX_TINT_REL_DIFF:.0%})"
             )
 
-        # --- engine / refdata / PSF on BOTH sides ---------------------------
-        ours_triple = {
-            "engine": _release_of(po.get("engine_version")),
-            "refdata": _release_of(po.get("refdata_version")),
-            "psf": _release_of(po.get("psf_version")),
-        }
-        px_triple = {
-            "engine": _release_of(pp.get("pandeia_engine_version")),
-            "refdata": _release_of(pp.get("refdata_version")),
-            "psf": _release_of(pp.get("psf_version")),
-        }
-        for comp in ("engine", "refdata", "psf"):
-            a, b = ours_triple[comp], px_triple[comp]
-            if a is None or b is None:
-                problems.append(
-                    f"{sname}: {comp} release unknown on "
-                    f"{'our' if a is None else 'the PandExo'} side "
-                    f"(ours={a!r}, pandexo={b!r}); an unattributable "
-                    "comparison cannot gate a release"
-                )
-            elif a != b:
-                problems.append(
-                    f"{sname}: {comp} release differs across the two sides "
-                    f"(ours={a}, pandexo={b}); this compares two engines, not "
-                    "two estimators"
-                )
-            elif a != REQUIRED_PANDEIA_RELEASE:
-                problems.append(f"{sname}: {comp} release {a} is not the supported {REQUIRED_PANDEIA_RELEASE}")
-
-        # --- PandExo identity -----------------------------------------------
-        pandexo_commit = pp.get("pandexo_commit")
-        if not pandexo_commit:
+    # sigma-ratio ANOMALY ceiling (not a parity-to-unity requirement;
+    # see the SIGMA_RATIO_MEDIAN_BAND comment); a missing median on
+    # an OK row is likewise a failure, not a skipped check
+    sr = (row.get("sigma_ratio_matched") or {}).get("median")
+    if sr is None or not math.isfinite(float(sr)) or float(sr) <= 0:
+        problems.append(
+            f"{tag}: OK row with missing or non-positive matched "
+            f"sigma-ratio median ({sr!r}); the anomaly gate cannot "
+            "run, which is a failure"
+        )
+    else:
+        lo_b, hi_b = SIGMA_RATIO_MEDIAN_BAND
+        if not (lo_b <= float(sr) <= hi_b):
             problems.append(
-                f"{sname}: PandExo git commit not recorded. PandExo is used "
-                "from master, whose behavior moves without a version bump, so "
-                "the version string alone does not identify what ran"
+                f"{tag}: matched sigma-ratio median {float(sr):.3f} "
+                f"is outside the anomaly band [{lo_b}, {hi_b}]; the "
+                "documented noise-model envelope cannot explain "
+                "this -- investigate before shipping the artifact"
             )
-        elif pandexo_commit != REQUIRED_PANDEXO_COMMIT:
-            problems.append(
-                f"{sname}: PandExo commit {pandexo_commit!r} is not the "
-                f"reviewed {REQUIRED_PANDEXO_COMMIT}; a different or dirty "
-                "master tree cannot satisfy this release gate"
-            )
-        if str(pp.get("pandexo_version", "unknown")).lower() in ("unknown", "none", ""):
-            problems.append(f"{sname}: PandExo version is unknown in the provenance block")
 
-        # --- the mode matrix: exactly one row per declared mode --------------
-        rows = star.get("modes", [])
-        keys = [row.get("key") for row in rows]
-        for k in MODE_KEYS:
-            n = keys.count(k)
-            if n == 0:
-                problems.append(f"{sname}: declared mode {k!r} has no row")
-            elif n > 1:
-                problems.append(f"{sname}: mode {k!r} appears {n} times; duplicate rows cannot be attributed")
-        for k in sorted({k for k in keys if k not in MODE_KEYS}):
-            problems.append(f"{sname}: row key {k!r} is not part of the declared experiment")
+    # extracted flux (median-gated; see the threshold comment)
+    fr = row.get("flux_ratio") or {}
+    dev = fr.get("max_abs_dev")
+    med = fr.get("median")
+    if not _finite(med):
+        problems.append(f"{tag}: no extracted-flux ratio recorded (got {med!r})")
+    elif abs(med - 1.0) > MAX_FLUX_RATIO_DEV:
+        problems.append(
+            f"{tag}: extracted-flux median ratio {med:.4f} is more "
+            f"than {MAX_FLUX_RATIO_DEV:.0%} from unity "
+            f"(max|dev| {dev})"
+        )
 
-        # --- per-mode rows ---------------------------------------------------
-        for row in rows:
-            key = row.get("key")
-            tag = f"{sname}/{key}"
-            status = row.get("status")
 
-            if status not in VALID_STATUSES:
-                problems.append(
-                    f"{tag}: unknown status {status!r}; a status the gate does not know is a row the gate cannot judge"
-                )
-                continue
-            if status == "ERROR":
-                problems.append(f"{tag}: error row (ours={row.get('ours_error', '')[:120]!r})")
-                continue
+def _check_row(problems: list[str], sname: str, row: dict) -> None:
+    """One mode's row of one star."""
+    key = row.get("key")
+    tag = f"{sname}/{key}"
+    status = row.get("status")
 
-            sm = row.get("saturation_mask") or {}
-            if sm.get("error"):
-                problems.append(f"{tag}: {sm['error']}")
-            else:
-                mf = sm.get("matched_frac")
-                pe = sm.get("partial_equal_frac")
-                fe = sm.get("full_equal_frac")
-                if mf is None or float(mf) < MIN_SAT_MASK_MATCHED_PIXEL_FRAC:
-                    problems.append(
-                        f"{tag}: native saturation grids matched fraction "
-                        f"{mf!r} < {MIN_SAT_MASK_MATCHED_PIXEL_FRAC:.0%}"
-                    )
-                if pe is None or float(pe) < MIN_SAT_MASK_EQUAL_FRAC:
-                    problems.append(
-                        f"{tag}: partial-saturation mask agreement {pe!r}; the per-pixel exclusion evidence differs"
-                    )
-                if fe is None or float(fe) < MIN_SAT_MASK_EQUAL_FRAC:
-                    problems.append(
-                        f"{tag}: full-saturation mask agreement {fe!r}; the per-pixel exclusion evidence differs"
-                    )
-            if status in ("SATURATED", "SATURATED_ABOVE_LIMIT"):
-                # Never a numerical validation row, but the saturation CLAIM
-                # itself is gated: let these rows bypass every check and a
-                # false-saturated result passes while an unsaturated row
-                # elsewhere keeps coverage green.
-                sat = row.get("sat_frac_ours")
-                if sat is None or float(sat) <= SAT_LIMIT:
-                    problems.append(
-                        f"{tag}: labeled {status} but the measured sat_frac "
-                        f"is {sat!r}; the label must come from the "
-                        "measurement"
-                    )
-                fw = str((row.get("pandexo_warnings") or {}).get("% full well high?", ""))
-                if not fw:
-                    problems.append(
-                        f"{tag}: {status} row carries no PandExo full-well "
-                        "verdict; saturation-status agreement cannot be "
-                        "checked"
-                    )
-                elif fw.startswith("All good"):
-                    gp = row.get("ngroup_pandexo", row.get("pandexo_ngroup"))
-                    problems.append(
-                        f"{tag}: this tool reports the configuration "
-                        f"saturated but PandExo reports {fw!r} at ngroup "
-                        f"{gp} -- saturation-status disagreement"
-                    )
-                # both-saturated rows sit at their floors: when both group
-                # counts exist and are low, they must agree exactly
-                go = row.get("ngroup_ours")
-                gp = row.get("ngroup_pandexo", row.get("pandexo_ngroup"))
-                if (
-                    go is not None
-                    and gp is not None
-                    and (go <= LOW_NGROUP_EXACT or gp <= LOW_NGROUP_EXACT)
-                    and go != gp
-                ):
-                    problems.append(
-                        f"{tag}: {status} row ngroup {go} vs {gp} on a "
-                        "short ramp; the floors the two tools saturate at "
-                        "must agree exactly"
-                    )
-                continue
+    if status not in VALID_STATUSES:
+        problems.append(
+            f"{tag}: unknown status {status!r}; a status the gate does not know is a row the gate cannot judge"
+        )
+        return
+    if status == "ERROR":
+        problems.append(f"{tag}: error row (ours={row.get('ours_error', '')[:120]!r})")
+        return
+    _check_saturation_mask(problems, tag, row)
+    if status in ("SATURATED", "SATURATED_ABOVE_LIMIT"):
+        _check_saturated_row(problems, tag, status, row)
+        return
+    _check_ok_identity(problems, tag, key, row)
+    _check_ngroup(problems, tag, sname, row)
+    _check_ok_numbers(problems, tag, row)
 
-            # Saturation is judged from the MEASURED fraction, not the
-            # worker's `unusable` flag alone: the flag can pass a row above
-            # the limit as OK (one measured at 7.31x the saturation level,
-            # Pandeia's per-mode value, not the physical full well).
-            sat = row.get("sat_frac_ours")
-            if sat is None:
-                problems.append(f"{tag}: OK row with no measured sat_frac")
-            elif float(sat) > SAT_LIMIT:
-                problems.append(
-                    f"{tag}: labeled OK with measured saturation "
-                    f"{float(sat):.4f} above the {SAT_LIMIT} limit; a "
-                    "saturated configuration may be reported but cannot "
-                    "contribute a validation row"
-                )
 
-            # pixel-grid identity
-            npix_p, matched = row.get("npix_pandexo"), row.get("npix_matched")
-            if not npix_p or matched is None:
-                problems.append(f"{tag}: missing pixel-match counts")
-            elif matched < MIN_MATCHED_PIXEL_FRAC * npix_p:
-                problems.append(
-                    f"{tag}: only {matched}/{npix_p} usable pixels matched at "
-                    f"rtol {WL_MATCH_RTOL:g} "
-                    f"(< {MIN_MATCHED_PIXEL_FRAC:.0%})"
-                )
-
-            # Submitted instrument configuration must be identical. The one
-            # reviewed representation exception is MIRI LRS: our registry
-            # leaves its sole p750l disperser implicit while PandExo reports it.
-            # A blanket "ignore whenever either side is None" rule would also
-            # hide a genuinely missing subarray/readout/filter on every mode.
-            co, cp = row.get("config_ours") or {}, row.get("config_pandexo") or {}
-            for field in ("subarray", "readout", "filter", "disperser"):
-                a, b = co.get(field), cp.get(field)
-                implicit_miri_disperser = key == "miri_lrs" and field == "disperser" and a is None and b == "p750l"
-                if not implicit_miri_disperser and a != b:
-                    problems.append(f"{tag}: submitted {field} differs (ours={a!r}, pandexo={b!r})")
-
-            # group counts (see the threshold comments for the either/or rule)
-            go, gp = row.get("ngroup_ours"), row.get("ngroup_pandexo")
-            if go is None or gp is None:
-                problems.append(f"{tag}: missing ngroup on one side")
-            elif go <= LOW_NGROUP_EXACT or gp <= LOW_NGROUP_EXACT:
-                # short-ramp regime: every group is a large slice of the
-                # integration, so the optimizers must agree exactly
-                if go != gp:
-                    problems.append(
-                        f"{tag}: ngroup {go} vs {gp} on a short ramp "
-                        f"(either side <= {LOW_NGROUP_EXACT}); short-ramp "
-                        "group choices must agree exactly -- a one-group "
-                        "difference here is a ramp-policy divergence, not "
-                        "rounding"
-                    )
-            elif sname in FAINT_STARS:
-                diff = abs(go - gp)
-                if diff > MAX_NGROUP_ABS_DIFF_FAINT and diff > MAX_NGROUP_REL_DIFF * max(go, gp):
-                    problems.append(
-                        f"{tag}: ngroup {go} vs {gp} differs by {diff}, beyond "
-                        f"both {MAX_NGROUP_ABS_DIFF_FAINT} groups absolute and "
-                        f"{MAX_NGROUP_REL_DIFF:.0%} relative"
-                    )
-            elif abs(go - gp) > MAX_NGROUP_ABS_DIFF:
-                problems.append(f"{tag}: ngroup {go} vs {gp} differs by more than {MAX_NGROUP_ABS_DIFF}")
-
-            # Per-integration time inherits the group choice; a passing group
-            # diff must not hide a large timing gap. Missing/non-finite
-            # fields on an OK row are a FAILURE, never a skipped check:
-            # absent data must never fail open.
-            to, tp = row.get("t_int_ours_s"), row.get("t_int_pandexo_s")
-            if (
-                to is None
-                or tp is None
-                or not (math.isfinite(float(to)) and float(to) > 0)
-                or not (math.isfinite(float(tp)) and float(tp) > 0)
-            ):
-                problems.append(
-                    f"{tag}: OK row with missing or non-positive "
-                    f"per-integration times (ours={to!r}, pandexo={tp!r}); "
-                    "the timing gate cannot run, which is a failure"
-                )
-            else:
-                rel = abs(float(to) - float(tp)) / max(float(to), float(tp))
-                if rel > MAX_TINT_REL_DIFF:
-                    problems.append(
-                        f"{tag}: per-integration time {to:.3f}s vs {tp:.3f}s "
-                        f"differs by {rel:.0%} (> {MAX_TINT_REL_DIFF:.0%})"
-                    )
-
-            # sigma-ratio ANOMALY ceiling (not a parity-to-unity requirement;
-            # see the SIGMA_RATIO_MEDIAN_BAND comment); a missing median on
-            # an OK row is likewise a failure, not a skipped check
-            sr = (row.get("sigma_ratio_matched") or {}).get("median")
-            if sr is None or not math.isfinite(float(sr)) or float(sr) <= 0:
-                problems.append(
-                    f"{tag}: OK row with missing or non-positive matched "
-                    f"sigma-ratio median ({sr!r}); the anomaly gate cannot "
-                    "run, which is a failure"
-                )
-            else:
-                lo_b, hi_b = SIGMA_RATIO_MEDIAN_BAND
-                if not (lo_b <= float(sr) <= hi_b):
-                    problems.append(
-                        f"{tag}: matched sigma-ratio median {float(sr):.3f} "
-                        f"is outside the anomaly band [{lo_b}, {hi_b}]; the "
-                        "documented noise-model envelope cannot explain "
-                        "this -- investigate before shipping the artifact"
-                    )
-
-            # extracted flux (median-gated; see the threshold comment)
-            fr = row.get("flux_ratio") or {}
-            dev = fr.get("max_abs_dev")
-            med = fr.get("median")
-            if med is None:
-                problems.append(f"{tag}: no extracted-flux ratio recorded")
-            elif abs(med - 1.0) > MAX_FLUX_RATIO_DEV:
-                problems.append(
-                    f"{tag}: extracted-flux median ratio {med:.4f} is more "
-                    f"than {MAX_FLUX_RATIO_DEV:.0%} from unity "
-                    f"(max|dev| {dev})"
-                )
-
-    # --- coverage: every mode needs at least one valid unsaturated row -------
+def _check_coverage(problems: list[str], stars: dict) -> None:
+    """Every mode needs at least one valid unsaturated row."""
     validated = {
         row.get("key")
         for star in stars.values()
@@ -502,6 +604,25 @@ def validate(summary: dict) -> list[str]:  # noqa: C901  (the same list)
             + " -- the artifact does not cover the modes it claims to"
         )
 
+
+def validate(summary: dict) -> list[str]:
+    """Return a list of gate failures; empty means the artifact is a PASS.
+
+    Every check answers "would a reader of this artifact be misled?", not
+    "did the code run?".
+    """
+    problems: list[str] = []
+    stars = summary.get("stars")
+    if not isinstance(stars, dict) or not stars:
+        return ["summary contains no stars"]
+    _check_declared(problems, stars, summary)
+    for sname, star in stars.items():
+        _check_provenance(problems, sname, star)
+        rows = star.get("modes", [])
+        _check_mode_matrix(problems, sname, rows)
+        for row in rows:
+            _check_row(problems, sname, row)
+    _check_coverage(problems, stars)
     return problems
 
 
