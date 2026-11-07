@@ -73,7 +73,6 @@ def _guillot_boxes(target: Target) -> dict:
     return tp_kwargs
 
 
-# size-limit-ok: one radio's two branches, drawn top to bottom
 def _table_source(target: Target) -> tuple:
     """Draw the table source and upload; return (source, table path, whether a table is usable)."""
     planet_key, pdef, k = target.planet_key, target.pdef, target.k

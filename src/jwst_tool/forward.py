@@ -385,7 +385,6 @@ def _rate_advisory(cp: dict, T_check: np.ndarray, log: Log) -> dict:
     return rate_ex
 
 
-# size-limit-ok: one flat table of what the entry holds
 def _write_result(params: dict, cp: dict, A: Any, setup: RtSetup, col: _Column, res: _RunResult) -> Path:
     """Write the run's model_cache entry atomically; every gate has passed by now."""
     pic = cp["chem_provider"] == "picaso"

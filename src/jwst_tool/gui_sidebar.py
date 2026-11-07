@@ -192,7 +192,7 @@ def _configuration_step() -> None:
     st.divider()
 
 
-def _target_step() -> Target:  # size-limit-ok: a linear widget layout, read top to bottom like the sidebar it draws
+def _target_step() -> Target:
     """Draw step 1 and return its settings."""
     pic = st.session_state.get(K("provider"), "vulcan") == "picaso"
 

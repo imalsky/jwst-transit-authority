@@ -187,7 +187,6 @@ def _validate_operator_inputs(
     return wl_pix, w_pix, edges
 
 
-# size-limit-ok: one convolution in order, its stages share the local grid
 def smooth_to_native_r(
     wl_model: np.ndarray,
     y: np.ndarray,

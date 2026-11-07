@@ -360,7 +360,6 @@ class _Resolved:
     solver: _SolverSettings
 
 
-# size-limit-ok: one flat dict, one line per canonical key
 def _filled_payload(params: dict, r: _Resolved) -> dict:
     """Return the canonical key set with every default filled and every value rounded."""
     star_ref = planets.PLANETS.get(r.planet, planets.CUSTOM_DEFAULTS)["star"]

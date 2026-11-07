@@ -148,7 +148,6 @@ def test_every_download_button_is_plain_and_click_safe():
     assert "Download this example" in {b.label for b in at2.get("download_button")}
 
 
-# size-limit-ok: AppTest boots are the expensive part, so one booted app carries the whole story
 def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
     """One fresh boot, three gating behaviors.
 
@@ -235,7 +234,6 @@ def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
     assert at.number_input(key="n0_wasp39b_tbase").value == 5.0
 
 
-# size-limit-ok: one round trip across the engine switch, in order
 def test_engine_switch_keeps_each_engines_settings(monkeypatch):
     """PICASO is the second engine beside VULCAN (the default). Switching
     shows PICASO's own widgets (climate T-P with heat redistribution, a

@@ -438,7 +438,6 @@ def _mode_warnings(mode_key: str, mode_result: dict, t_in_s: float, t_out_s: flo
     return warnings
 
 
-# size-limit-ok: one mode's measurement in order, through one operator
 def evaluate_mode(
     mode_key: str,
     mode_result: dict,

@@ -349,7 +349,6 @@ def _write_adjoint(out: Path, arrays: dict[str, Any], phys: list, contrib: np.nd
     _ins.atomic_write(out, lambda fh: np.savez_compressed(fh, **arrays, **top))
 
 
-# size-limit-ok: the stages are their own functions; the length left is the entry's flat table
 def run_adjoint(params: dict, species: str, log: Log = print) -> Path:
     """One reverse-mode adjoint analysis of the CURRENT forward model state.
 

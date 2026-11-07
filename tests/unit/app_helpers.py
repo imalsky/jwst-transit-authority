@@ -17,7 +17,6 @@ def run_app():
     return at
 
 
-# size-limit-ok: one literal payload
 def synthetic_out(science_mode="transmission", saturated=False, sigma_detect=0.0, n_transits=1, with_jac=False):
     """Minimal cached-result pair (out, out_meta) for post-run rendering.
 

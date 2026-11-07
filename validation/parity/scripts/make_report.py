@@ -154,7 +154,6 @@ def _sigma_envelope(summary) -> dict:
     }
 
 
-# size-limit-ok: one report written top to bottom
 def main():
     """Write REPORT.md from the parity artifact."""
     summary = json.loads((OUTPUTS / "parity_summary.json").read_text())

@@ -13,7 +13,6 @@ from app_helpers import APP, run_app, run_with_result, synthetic_out
 from streamlit.testing.v1 import AppTest
 
 
-# size-limit-ok: one post-run render, every download checked on it
 def test_results_render_and_below_target_is_warning_not_error(monkeypatch):
     """Full post-Run render path on a synthetic result: every figure and
     table offers a download, and a run that works but finds no signal is a
@@ -237,7 +236,6 @@ def test_custom_archive_fill_and_uv_menu_never_moves():
     assert at.selectbox(key="n0_custom_sflux").value == "sflux-W39b_Tsai2023.txt"
 
 
-# size-limit-ok: one booted app carries the combination story
 def test_combo_builder_fisher_table_naming_and_reset():
     """One booted app with Jacobians carries the whole combo story: every
     results section is an expander (renames pinned); a primed
