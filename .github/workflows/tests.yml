@@ -88,7 +88,7 @@ jobs:
           python-version: "3.12"
       - name: Install GUI deps (streamlit + pandas on top of the unit set)
         run: |
-          pip install "jax>=0.6" numpy scipy matplotlib pytest streamlit pandas pyarrow
+          pip install "jax>=0.6" numpy scipy matplotlib pyyaml pytest streamlit pandas pyarrow
           source deploy/pins.env
           pip install --no-deps "vulcan3 @ git+https://github.com/imalsky/VULCAN3.git@${VULCAN3_SHA}"
           pip install --no-deps "vulcan-forward @ git+https://github.com/imalsky/vulcan-forward.git@${VULCAN_FORWARD_SHA}"
