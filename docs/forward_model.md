@@ -27,6 +27,9 @@ structure (T, mmw): the standard nested-model comparison.
 
 ## The stages
 
+`forward` runs the stages below, then `jacobian` builds the rows. It re-exports, in `__all__`, the names the deploy scripts
+and the research note's scripts read.
+
 - `run_params`, `param_checks`: `canonical_params` fills every default, rounds, zeroes settings inert for the chosen
   modes so one physics maps to one key, and refuses unknown keys, out-of-range values and conflicts. A refusal costs no
   solve. The output maps to itself, so a saved payload validates by feeding it back in.

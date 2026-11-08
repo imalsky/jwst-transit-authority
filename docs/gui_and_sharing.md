@@ -7,6 +7,9 @@ Atmosphere, 3 Science goal, 4 Observation) plus "More settings", then the shortf
 physical structure, the constraint forecast and the summary figure. Widget keys never change (tests and cached session
 state rely on them); only placement, labels and help text may move.
 
+`gui_sidebar` and `gui_atmosphere` draw the steps and return `gui_inputs` records; `gui_run` validates a request and
+launches the forward model and Pandeia runs; `gui_results`, `gui_forecast`, `gui_summary` and `gui_sources` draw the page.
+
 ## `plotting`
 
 Pure figure builders and the process-wide render lock. Importable without Streamlit: every figure the GUI shows is built
