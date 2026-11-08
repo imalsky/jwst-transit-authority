@@ -40,14 +40,9 @@ skill; policy: the project-root `CLAUDE.md`.
 - PICASO runs `picaso_worker.py` in its own environment at `JWST_TOOL_PICASO_PYTHON`, built from
   `deploy/picaso-conda-lock.txt` + `deploy/requirements-picaso-lock.txt`; its reference data is
   `data/picaso_refdata-4.1` (`JWST_TOOL_PICASO_REFDATA`).
-- Layout of the forward model: `forward` runs the stages (`python -m jwst_tool.forward params.json`, the GUI's worker);
-  `model_defs` holds what the model offers, `run_params` and `param_checks` validate a request, `tp_tables` reads T-P files,
-  `model_cache` owns keys and cache reads, `chem_build` assembles the chemistry, `spectrum` the RT and depths, `certify` the
-  gates, `jacobian` the rows. `forward` re-exports the names the deploy scripts and the note's scripts read (`__all__`).
-- Layout of the GUI: `app.py` is the Streamlit script and reads as the page; `gui_sidebar` and `gui_atmosphere` draw the
-  steps and return `gui_inputs` records; `gui_run` validates and launches; `gui_results`, `gui_forecast`, `gui_summary` and
-  `gui_sources` draw the page. A module outlives one script run and is shared between sessions, so run state goes in
-  arguments or the session, never in a module global.
+- Module layout: the forward model in `docs/forward_model.md` "The stages", the GUI in `docs/gui_and_sharing.md` "`app`".
+  `python -m jwst_tool.forward params.json` is the GUI's worker. A GUI module outlives one script run and is shared
+  between sessions, so run state goes in arguments or the session, never in a module global.
 - Commands: `jwst-tool` launches the GUI after preflight checks; `jwst-tool fetch [--picaso]` downloads missing data,
   including the machine-local PHOENIX grid `data/cdbs/grid/phoenix`; `jwst-tool data [--deep]` prints the data report.
 - Normal tier: `python -m pytest tests -q -n 6` (on daw `unset PYTHONSAFEPATH` first). `tests/conftest.py` sets
@@ -58,8 +53,7 @@ skill; policy: the project-root `CLAUDE.md`.
   "Current state"): `JWST_TOOL_RUN_SLOW=1 OMP_NUM_THREADS=1 XLA_FLAGS="--xla_cpu_multi_thread_eigen=false
   intra_op_parallelism_threads=1" taskset -c <15 CPUs> python -m pytest tests -q -n 14 --dist worksteal --durations=25`,
   as a user unit, before a release or when the maintainer asks.
-- Lint: `uvx pre-commit run --all-files` must pass; `python3 tools/check_size_limits.py` holds the size limits. mypy is a
-  hook, with real stubs for numpy, jax, matplotlib, streamlit and pandas.
+- Lint: `uvx pre-commit run --all-files` must pass; `python3 tools/check_size_limits.py` holds the size limits.
 
 ## Rules
 
