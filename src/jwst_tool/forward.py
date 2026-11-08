@@ -475,10 +475,22 @@ def _write_result(params: dict, cp: dict, A: Any, setup: RtSetup, col: _Column, 
 
 
 def run_model(params: dict, log: Log = print) -> Path:
-    """Run the heavy pipeline for ``params`` and write its model_cache entry; returns the npz path.
+    """Run the heavy pipeline for ``params`` and write its model_cache entry.
 
     Every certificate and gate raises before that entry is written: an uncertified spectrum or Jacobian row is never
-    cached. Contents: ``model_cache.load_result``.
+    cached.
+
+    Parameters
+    ----------
+    params : dict
+        Run settings; ``canonical_params`` refuses unknown keys and fills the rest.
+    log : Log
+        Receives progress lines in the "[fwd] PROG" protocol.
+
+    Returns
+    -------
+    Path
+        The written npz; ``model_cache.load_result`` reads it.
     """
     cp = canonical_params(params)
     _archive_uploaded_table(params, cp, log)
