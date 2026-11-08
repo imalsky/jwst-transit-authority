@@ -673,6 +673,8 @@ Standing maintainer decisions; the measurements sit in the section named.
   caveats live in README or notes ("GUI, figures and copy", "Do not retry").
 - Capacity is one Space and its slot limit: no self-scaler, queue or overflow Space
   ("Hugging Face Space", "Ideas not adopted", "Superseded designs").
+- The photolysis-cadence escalation stays: a retry is allowed when the result records it,
+  as `photo_escalated` does ("Jacobians and Fisher").
 
 ## Accepted limitations
 
