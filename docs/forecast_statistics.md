@@ -80,8 +80,8 @@ dex for lnZ/lnKzz, K for temperatures; a parameter unknown to
 The dlnCO curve is the forecast density in ln(C/O) on a log C/O axis
 (ln_gaussian_curve); its width is quoted in dex via fisher.format_co_width, never
 as an absolute C/O range. ``fisher.display_sigma``'s absolute dlnCO value is what a
-stored target precision is compared against, and is not for display. The verdict
-line in ``gui_results`` prints it today: an open decision, see todo.md.
+stored target precision is compared against, and is not for display. The constraint
+verdict (``gui_results._constrain_verdict``) still prints it, an open decision recorded in todo.md.
 
 `marginalized_posteriors` returns `dict(kind, label, n_modes, co_eval, sigma_marginalized, sigma_conditional, params)`,
 where `params[name]` holds center, sigma_display, sigma_conditional_display, unit, constrained, theta and pdf.

@@ -89,7 +89,7 @@ Two faces: the light cache API (no JAX imports) and the heavy script mode
 (``python -m jwst_tool.adjoint_diag params.json SO2``).
 Condensation is refused up front: the pinned reservoir is a
 step-sequence-dependent transient (tangents through it are ~91% wrong, see
-run_params.canonical_params). The PICASO engine is refused too: it has no
+param_checks.check_condensation). The PICASO engine is refused too: it has no
 reaction network to differentiate.
 
 ## `stellar`
@@ -136,8 +136,8 @@ Kzz is const / Pfunc / JM16 / the table's own column.
 Values are literature defaults for PLANNING (all editable in the GUI):
 WASP-39b Mancini+2018/Tsai+2023; HD 189733b Torres+2008 (a: Bouchy+2005);
 HD 209458b Torres+2008 (a, gs from Southworth+2010); WASP-107b Piaulet+2021.
-Stellar UV: shipped VULCAN spectra, nearest available spectral type (shown in
-the GUI, never silently swapped).
+Stellar UV: one shipped VULCAN spectrum per planet, its own host's where one ships,
+else the closest shipped spectral type; the GUI shows which, and no run swaps it.
 
 ``star["metallicity"]`` is DELIBERATELY 0.0 for every host, not a literature
 value: it only selects the PHOENIX node for the noise SED, both consumers

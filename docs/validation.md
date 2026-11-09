@@ -258,8 +258,8 @@ This closes that at the consumer boundary: CI installs the siblings at the
 pinned commits, so an incompatible pair fails HERE. It is deliberately a
 signature check, not a run -- it needs no data, no k-tables and no solve.
 
-The sibling repository carries the mirror of this test for its own calls into
-VULCAN-JAX's private API (`vulcan-forward/tests/test_vulcan3_private_api.py`).
+The sibling repository keeps no mirror of this test: its own build exercises its calls into VULCAN-JAX's private
+API.
 
 ## `test_shared_constants_pin`
 

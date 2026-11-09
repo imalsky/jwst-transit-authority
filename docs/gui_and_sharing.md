@@ -44,11 +44,14 @@ One-figure proposal summary, taking plain dicts and arrays so it renders without
 
 `compose_summary_figure` takes:
 
-- `spectrum`: `wl_um`, `depth_ppm` (ppm), `depth_label`, `model_label`, `points=[dict(label, color, marker, wl_um, depth_ppm,
-  sigma_ppm), ...]`, and optional `wl_range` and `depth_range` axis windows, None to auto-fit. Per-mode performance
-  belongs in each point's label.
-- `posterior_panels`: up to three dicts, one per parameter: `axis_label`, `curves=[dict(label, theta, pdf, color, ls,
-  lw), ...]`, `center`.
+- `spectrum`: `wl_um` (um), `depth_ppm` (ppm), `depth_label`, `model_label`, `points=[dict(label, color, marker, wl_um,
+  depth_ppm, sigma_ppm), ...]`, optional `wl_range` and `depth_range` axis windows (None to auto-fit), `x_log` and
+  `y_log` scales, and an optional comparison curve `depth2_ppm` with `depth2_label`. Per-mode performance belongs in
+  each point's label.
+- `posterior_panels`: up to three dicts, one per parameter: `axis_label`, `axis_unit`, `density_label`, `center` and
+  `curves=[dict(label, theta, pdf, color, ls, lw), ...]`. A curve may add `mu` and `sigma` (display units: the legend
+  quotes the width and the automatic window is sized from them), `width_text` (a caller-built width string, as for
+  C/O), and `curve_family="ln_gaussian"` with `sigma_ln` for a multiplicative width on a log axis.
 - `panel_xlims`: one `(lo, hi)` in the panel's own units or None per panel, a window on the existing curves, never a
   resampling. Shorter than the panel list is allowed.
 - `caveats`: the run caveats the page shows.
