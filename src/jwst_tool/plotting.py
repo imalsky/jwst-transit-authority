@@ -221,7 +221,7 @@ def build_structure_figure(
         ax_v.set_xlabel("volume mixing ratio")
 
         # One pressure axis, inverted once. Tick labels on both panels (sharey hides the right panel's), the "pressure
-        # (bar)" label once, at the far left (maintainer decision).
+        # (bar)" label once, at the far left.
         ax_t.set_yscale("log")
         ax_t.invert_yaxis()
         _thin_log_axis(ax_t, "y")

@@ -248,9 +248,30 @@ _M_U_CGS = 1.66053907e-24  # g
 
 
 def gray_cloud_log_kappa(p_top_bar: float, gs_cgs: float, rp_rjup: float, t_eq_k: float) -> float:
-    """log10 kappa (cm^2/g) of the gray cloud whose slant tau reaches 1 at ``p_top_bar``.
+    """Return log10 kappa of the gray cloud whose slant tau reaches 1 at ``p_top_bar``.
 
-    Log10(kappa * P_top_bar) is the constant of the mapping.
+    log10(kappa * P_top_bar) is the constant of the mapping (the section comment above derives it).
+
+    Parameters
+    ----------
+    p_top_bar : float
+        Pressure the cloud blocks down to, bar.
+    gs_cgs : float
+        Surface gravity, cm s^-2.
+    rp_rjup : float
+        Planet radius, R_jup.
+    t_eq_k : float
+        Temperature of the scale height, K.
+
+    Returns
+    -------
+    float
+        log10 of the cloud opacity, cm^2/g.
+
+    Raises
+    ------
+    ValueError
+        An input is not positive.
     """
     if not float(p_top_bar) > 0.0:
         raise ValueError(f"cloud top pressure must be > 0 bar (got {p_top_bar!r})")

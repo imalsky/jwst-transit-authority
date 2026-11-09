@@ -107,15 +107,15 @@ JAC_METHODS = ("fd", "ad")  # certified-FD default / warm-jvp opt-in
 # ceiling; the bound is deliberately permissive and the convergence certificate
 # refuses the cases that do not converge. "sncho" is held at 0.99: across
 # 0.99-1.02 the FD dlnCO row fails its h-vs-2h gate and the AD row is refused
-# at build (maintainer decision).
+# at build (notes "Decision records").
 CO_MIN = 0.1
 
 CO_MAX = {"sncho": 0.99, "sncho2025": 10.0, "ncho": 10.0}  # photolysis ON
 
 CO_MAX_PHOTO_OFF = 10.0
 
-# Accepted met_x_solar range, inclusive. The top is a maintainer decision
-# under the demonstrated envelope: the default case certifies through 300x
+# Accepted met_x_solar range, inclusive. The top is a decision (notes
+# "Decision records") under the demonstrated envelope: the default case certifies through 300x
 # and the lnZ stencil's 122x sits under the certified 150x.
 # Convergence is certified per run; a value outside is refused before any
 # solve.
@@ -138,8 +138,8 @@ TINT_RANGE = (50.0, 500.0)
 PICASO_P_BTM_MAX = 100.0
 
 # PICASO metallicity: its thermochemical data are stated for +-1 dex and its
-# climate continuum lacks H2O/CO2 self-CIA, so the top is 10x (maintainer
-# decision); the lnZ stencil turns one-sided at the cap (fd_stencil).
+# climate continuum lacks H2O/CO2 self-CIA, so the top is set at 10x; the lnZ
+# stencil turns one-sided at the cap (fd_stencil).
 PICASO_MET_RANGE = (0.1, 10.0)
 
 # One WASP-39 b climate solve: 497-570 s on one core across nine variants

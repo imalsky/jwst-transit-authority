@@ -350,7 +350,7 @@ def _psf_item(psf_dir: str) -> Item:
 def check_pandeia_backend(
     python: str | Path | None = None, refdata: str | Path | None = None, psf_dir: str | Path | None = None
 ) -> list[Item]:
-    """Return the ACTIVE backend's three path roots (mirrors the worker preflight)."""
+    """Return the Pandeia interpreter, refdata and PSF items (mirrors the worker preflight)."""
     # an unset backend python is a MISSING item, never a crash
     interpreter = python if python is not None else ins.PANDEIA_PYTHON
     python = Path(interpreter) if interpreter else None
@@ -702,7 +702,7 @@ def all_items(report: dict) -> list[Item]:
 
 
 def required_ok(report: dict) -> bool:
-    """Return true when every REQUIRED item is present or auto-fetches on first use."""
+    """Return true when every REQUIRED item is present."""
     return all(it.status != MISSING for it in all_items(report) if it.required)
 
 

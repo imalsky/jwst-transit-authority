@@ -38,7 +38,7 @@ plt.rcParams.update(summary_figure._STYLE_OVERRIDES)  # type: ignore[arg-type]  
 # input behind a small toggle, which reads as "half the tool is missing".
 st.set_page_config(page_title="JWST Transit Authority", layout="wide", initial_sidebar_state="expanded")
 
-# Header: short orientation, no acknowledgment gate
+# Header: short orientation
 st.title("How to use this tool")
 st.subheader("Warning: This tool is in beta mode. That means if you find a bug, you beta email isaacmalsky@gmail.com")
 st.markdown(

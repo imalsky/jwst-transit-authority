@@ -30,7 +30,7 @@ _ADJ_VERSION = 4  # bump to invalidate cached adjoint diagnostics
 # peak-VMR layer inside it keeps a deep quenched maximum from hijacking the loss.
 PHOTOSPHERE_P_BAR = (1.0e-5, 1.0e-1)
 
-# Upstream certification thresholds (vulcan3.steady_state_grad
+# Upstream certification thresholds (vulcan3._adjoint_core
 # _ADJOINT_RESID_WARN and _SPREAD_WARN): above these the gradient is reported
 # as a RANKING, not trusted magnitudes.
 RESID_MEDIAN_TRUST = 0.2

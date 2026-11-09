@@ -212,7 +212,7 @@ UNMODELED_VMR_WARN = 1.0e-4
 
 # REFUSE, not warn, above this: the RT is blind to a bulk absorber and the
 # spectrum is not a model of the requested atmosphere. The gate is coarse and
-# deliberate, and the maintainer chose it over 1e-4. Between the two
+# deliberate, chosen over 1e-4. Between the two
 # thresholds the run only warns, and that error is unquantified.
 UNMODELED_VMR_REFUSE = 1.0e-3
 
@@ -365,16 +365,32 @@ def tau_bottom_breakdown(wl_um: AnyArray, tau: AnyArray, flux: AnyArray) -> str:
 
 
 def thin_flux_fraction(tau: AnyArray, flux: AnyArray, nu: AnyArray) -> float:
-    """Share of the emitted ENERGY coming from wavelengths whose bottom optical depth is below the gate.
+    """Return the share of the emitted energy from wavelengths whose bottom optical depth is below the gate.
 
-    The emission certificate.
+    The emission certificate. The ExoMolOP k-tables make the band grid constant-R, so dnu ~ nu: summing the samples
+    unweighted is not an energy fraction and under-reports the short-wavelength share, exactly where a see-through
+    bottom shows up. ``nu`` is required, never defaulted, so that sum cannot come back silently.
 
-    ``flux`` is spectral flux density per unit WAVENUMBER and ``nu`` (cm^-1) is
-    its band-centre grid, which the ExoMolOP k-tables make constant-R, so
-    dnu ~ nu. Summing the samples unweighted is therefore not an energy
-    fraction: it under-reports the short-wavelength share, exactly where a
-    see-through bottom shows up. ``nu`` is REQUIRED, never defaulted: a silent
-    fallback to the unweighted sum is the bug this signature exists to prevent.
+    Parameters
+    ----------
+    tau : Array [n_nu]
+        Optical depth at the column bottom.
+    flux : Array [n_nu]
+        Spectral flux density per unit wavenumber, any positive scale.
+    nu : Array [n_nu]
+        Band-centre wavenumbers, cm^-1, strictly monotonic.
+
+    Returns
+    -------
+    float
+        The flux-weighted fraction with tau below EMIS_TAU_THIN.
+
+    Raises
+    ------
+    ValueError
+        The arrays are misaligned, non-finite, negative or not monotonic.
+    RuntimeError
+        The flux is zero or non-finite across the whole band.
     """
     tau, flux = np.asarray(tau, float), np.asarray(flux, float)
     nu = np.asarray(nu, dtype=np.float64)

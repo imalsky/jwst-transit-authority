@@ -51,7 +51,7 @@ def chem_radius_anchor_bar(p_bar: AnyArray, p_btm_dyn: float, rocky: bool) -> fl
 def radius_at_anchor(
     p_bar: AnyArray, T: AnyArray, mu: AnyArray, rp_cm: float, gs_cgs: float, p_ref_bar: float, p_anchor_bar: float
 ) -> float:
-    """Radius (cm) at ``p_anchor_bar`` given ``rp_cm`` at ``p_ref_bar``.
+    """Return the radius at ``p_anchor_bar`` given ``rp_cm`` at ``p_ref_bar``.
 
     Hydrostatic equilibrium at fixed GM, ``g(r) = G*M/r**2``, linearises
     exactly in ``u = 1/r``::
@@ -63,6 +63,33 @@ def radius_at_anchor(
     grid bottom; deeper means smaller radius and stronger gravity. Evaluated at
     the exact anchor pressure, so the partial layer between it and the nearest
     grid point is accounted for rather than snapped away.
+
+    Parameters
+    ----------
+    p_bar : Array [nz]
+        Layer pressures, bar, in any order.
+    T : Array [nz]
+        Layer temperatures, K.
+    mu : Array [nz]
+        Mean molecular weight per layer, amu.
+    rp_cm : float
+        Planet radius at ``p_ref_bar``, cm.
+    gs_cgs : float
+        Surface gravity at ``p_ref_bar``, cm s^-2.
+    p_ref_bar : float
+        Pressure the catalogue radius applies at, bar.
+    p_anchor_bar : float
+        Pressure to return the radius at, bar.
+
+    Returns
+    -------
+    float
+        Radius at ``p_anchor_bar``, cm.
+
+    Raises
+    ------
+    ValueError
+        Either pressure lies outside the column, bottom interface included.
     """
     from vulcan_forward import constants as _vc
 
