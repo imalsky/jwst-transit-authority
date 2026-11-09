@@ -722,6 +722,8 @@ None changes a shipped number.
 
 Real, small, and out of todo.md by decision; nothing here changes a shipped number.
 
+- The constrain verdict (`gui_results._constrain_verdict`) prints `fisher.display_sigma`'s dlnCO value with no unit,
+  while the table on the same page is in dex. Display only.
 - Saturated channels the worker drops can open a gap `segment_ids` reads as a detector
   boundary (one extra offset nuisance); that mode is saturated and already excluded.
 - The archive snapshot carries two unread columns (`st_spectype`, `pl_bmassprov`); drop
