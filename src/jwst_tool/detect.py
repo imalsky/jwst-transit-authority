@@ -52,8 +52,26 @@ def detection_significance(
 
     The metric is the exact diagonal W = diag(1/sigma^2).
 
-    Inputs are validated loudly: ``signal`` 1-D and finite; ``sigma``
-    matching, finite, > 0; nuisance rows matching.
+    Parameters
+    ----------
+    signal : ndarray [n_bins]
+        Binned depth difference, fractional depth; finite.
+    sigma : ndarray [n_bins]
+        Per-bin depth sigma, fractional depth; finite and > 0.
+    nuisance : list of ndarray [n_bins] or None
+        Extra nuisance rows to profile out.
+    marginalize_offset : bool
+        Also profile a constant depth offset.
+
+    Returns
+    -------
+    float
+        The profiled score, sqrt(Delta chi^2).
+
+    Raises
+    ------
+    ValueError
+        An input is non-finite or misshapen, or a sigma is not positive.
     """
     signal = np.asarray(signal, float)
     if signal.ndim != 1 or signal.size == 0 or not np.all(np.isfinite(signal)):
@@ -175,7 +193,7 @@ def detection_score(result: dict, sigma: np.ndarray | None = None, *, projected:
 
 
 def transits_to_target(result: dict, target_sig: float, *, projected: bool = False) -> dict:
-    """Smallest transit count reaching ``target_sig`` for the detect goal.
+    """Return the smallest transit count reaching ``target_sig`` for the detect goal.
 
     Returns dict(n=int|None, reachable=bool, sig_inf=float). ``sig_inf`` is
     the infinite-transit (floor-only) limit; the score is monotone in N
@@ -450,13 +468,45 @@ def evaluate_mode(
     floor_spec: float | np.ndarray | None,
     noise_inflation: float = 1.0,
 ) -> dict:
-    """One instrument mode -> binned model, sigmas, conditional template S/N.
+    """Bin one instrument mode's model and noise and score it: the conditional template S/N.
 
-    Bins cover the intersection of the mode's science band, the model's
-    coverage, and the pixels pandeia returned; model, Jacobians, and noise
-    share ONE count-space operator (docs/forecast_statistics.md). ``target_mol=None``
-    (the parameter-constraint goal) skips the molecule-removed comparison:
-    ``sigma_detect`` comes back NaN and ``depth_wo`` None.
+    Bins cover the intersection of the mode's science band, the model's coverage, and the pixels pandeia returned;
+    model, Jacobians, and noise share one count-space operator (docs/forecast_statistics.md).
+
+    Parameters
+    ----------
+    mode_key : str
+        Registry key (instruments.MODES).
+    mode_result : dict
+        The worker's result for this mode.
+    model : dict
+        A cached forward-model result (model_cache.load_result).
+    target_mol : str or None
+        Molecule to detect; None (the constraint goal) skips the removed-molecule comparison, so ``sigma_detect``
+        comes back NaN and ``depth_wo`` None.
+    R_bin : float
+        Resolving power of the final bins; at most the model's own.
+    t_in_s : float
+        In-transit time per event, s.
+    t_out_s : float
+        Out-of-transit time per event, s.
+    n_transits : int
+        Number of events.
+    floor_spec : float, ndarray [n, 2] or None
+        The minimum noise floor (noise.resolve_floor).
+    noise_inflation : float
+        Factor on the random sigma.
+
+    Returns
+    -------
+    dict
+        Per kept bin ``wl``, ``wl_eff`` (um), ``depth``, ``depth_wo``, ``sigma``, ``floor`` (fractional), ``seg``
+        and ``jac_bins`` [n_par, n_keep]; ``sigma_detect``, ``sigma_detect_proj``, saturation record, ``warnings``.
+
+    Raises
+    ------
+    ValueError
+        An invalid grid, ``R_bin`` above the model's resolving power, or no band overlap.
     """
     m = ins.MODES[mode_key]
     wl_model = binning._validate_wl(model["wl_um"], f"{mode_key}: wl_model")

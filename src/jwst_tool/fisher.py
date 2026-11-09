@@ -246,11 +246,24 @@ def _fisher(Jn: np.ndarray, result: dict) -> np.ndarray:
 def mode_forecast(
     result: dict, free_names: list[str], diag: dict | None = None, conditional: dict | None = None
 ) -> dict:
-    """Per-mode marginalized sigmas: combined_forecast of the one mode.
+    """Return one mode's marginalized sigmas: combined_forecast of that mode alone.
 
-    result needs jac_bins (n_par, n_bins) whose rows are [free..., lnR0], sigma (n_bins,), and (optionally) seg
-    (n_bins,) for the per-segment offset nuisances. ``diag``: see _marg_sigmas. Pass a dict as ``conditional`` to
-    also receive the conditional sigmas (others fixed; see _conditional_sigmas) from the SAME Fisher matrix.
+    Parameters
+    ----------
+    result : dict
+        An evaluated mode: ``jac_bins`` [n_free + 1, n_bins] with rows [free..., lnR0], ``sigma`` [n_bins]
+        fractional depth, and ``seg`` [n_bins] detector segment ids.
+    free_names : list of str
+        The free parameters, in row order.
+    diag : dict or None
+        Receives rank, dimension, condition number and whitened eigenvalues (_marg_sigmas).
+    conditional : dict or None
+        Receives the conditional sigmas (others fixed) from the same Fisher matrix.
+
+    Returns
+    -------
+    dict
+        Marginalized sigma per free parameter, internal units; inf on a null direction.
     """
     return combined_forecast([result], free_names, diag=diag, conditional=conditional)
 
@@ -290,11 +303,27 @@ def _combined_system(results: list[dict], n_f: int) -> tuple[int, list]:
 def combined_forecast(
     results: list[dict], free_names: list[str], diag: dict | None = None, conditional: dict | None = None
 ) -> dict:
-    """All modes jointly.
+    """Return the marginalized sigmas of all modes fitted jointly.
 
-    Shared free params + shared lnR0 + one depth offset per detector SEGMENT (NRS1/NRS2 counted separately for the
-    two-detector gratings), all marginalized. Noise is block-diagonal across modes (diagonal sigma; no cross-mode
-    noise correlation is modeled). ``conditional``: as in mode_forecast.
+    Shared free parameters + shared lnR0 + one depth offset per detector segment (NRS1/NRS2 counted separately for
+    the two-detector gratings), all marginalized. Noise is block-diagonal across modes (diagonal sigma; no cross-mode
+    noise correlation is modeled).
+
+    Parameters
+    ----------
+    results : list of dict
+        Evaluated modes, each as in mode_forecast.
+    free_names : list of str
+        The free parameters, in row order.
+    diag : dict or None
+        Receives rank, dimension, condition number and whitened eigenvalues (_marg_sigmas).
+    conditional : dict or None
+        Receives the conditional sigmas (others fixed) from the same Fisher matrix.
+
+    Returns
+    -------
+    dict
+        Marginalized sigma per free parameter, internal units; inf on a null direction.
     """
     n_f = len(free_names)
     n_tot, system = _combined_system(results, n_f)

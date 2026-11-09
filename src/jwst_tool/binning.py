@@ -196,16 +196,39 @@ def smooth_to_native_r(
     band_hi: float,
     weight: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Blur a depth model to the Gaussian LSF of R(lambda) over [band_lo, band_hi]; returns a full-length copy.
+    """Blur a depth model to the Gaussian LSF of R(lambda) over [band_lo, band_hi].
 
-    Where the model grid does not resolve the kernel, the input is returned unchanged.
+    Where the model grid does not resolve the kernel, the input is returned unchanged. The instrument measures
+    LSF-averaged counts, so d_obs = L[F d] / L[F]; the operator is linear in d for fixed F, so a Jacobian row blurs
+    with the same weight as the depth.
 
-    ``wl_r`` must be strictly ascending (validated): the pandeia pixel grid is in dispersion order, and ``np.interp`` on
-    a descending table silently returns its last entry, so sort it first.
+    Parameters
+    ----------
+    wl_model : ndarray [n_model]
+        Model wavelengths, um, strictly ascending.
+    y : ndarray [n_model]
+        Depth or Jacobian row on ``wl_model``.
+    wl_r : ndarray [n_r]
+        Wavelengths of the native-R table, um, strictly ascending: the pandeia pixel grid is in dispersion order, and
+        ``np.interp`` on a descending table silently returns its last entry, so sort it first.
+    r_curve : ndarray [n_r]
+        Resolving power on ``wl_r``.
+    band_lo : float
+        Short edge of the band the blur is evaluated over, um.
+    band_hi : float
+        Long edge of that band, um.
+    weight : ndarray [n_model] or None
+        Stellar flux on ``wl_model``; None or a constant is the flat blur L[d].
 
-    ``weight`` is the stellar flux at ``wl_model``. The instrument measures LSF-averaged counts, so
-    d_obs = L[F d] / L[F], and ``None`` or a constant weight is the flat blur. The operator is linear in d for fixed F,
-    so a Jacobian row blurs with the same weight as the depth.
+    Returns
+    -------
+    ndarray [n_model]
+        A copy of ``y``, blurred inside the band.
+
+    Raises
+    ------
+    ValueError
+        A grid, table or weight is invalid, or no native-R sample lies inside the band.
     """
     wl, yv = _validate_model(wl_model, y, "smooth_to_native_r")
     wl_r_v, r_v = _validate_native_r(wl, wl_r, r_curve, weight)
@@ -314,30 +337,39 @@ def build_operator(
 ) -> dict:
     """Build the count-space measurement operator for one mode.
 
-    wl_pix, w_pix : Pandeia pixel wavelengths (any order) and weights
-                    (extracted stellar count rates). Weights must be finite
-                    and >= 0; zero-weight pixels are excluded, negative or
-                    non-finite weights raise (never sanitized).
-    edges         : final bin edges (finite, strictly ascending, >= 2).
-    wl_lo, wl_hi  : model wavelength span; pixel cells are clipped to it and
-                    pixels falling outside are dropped from BOTH model and
-                    noise, so the two stay the same estimator.
-    valid         : optional per-pixel bool mask (e.g. saturation exclusion).
+    A pixel belongs to the bin containing its center wavelength (indivisible extracted samples, as real reductions
+    group them); the model is integrated over the pixel's full cell. Exact-duplicate pixels have zero-width cells and
+    drop out here; detect.evaluate_mode masks them via degenerate_wl_mask before building the operator.
 
-    A pixel belongs to the bin containing its CENTER wavelength (indivisible
-    extracted samples, as real reductions group them); the MODEL is
-    integrated over the pixel's full cell. Exact-duplicate pixels have
-    zero-width cells and drop out here; detect.evaluate_mode masks them via
-    degenerate_wl_mask before building the operator. An operator left with NO
-    usable pixel raises with the per-criterion exclusion breakdown.
+    Parameters
+    ----------
+    wl_pix : ndarray [n_pix]
+        Pandeia pixel wavelengths, um, in any order.
+    w_pix : ndarray [n_pix]
+        Extracted stellar count rates, e-/s: finite and >= 0; zero-weight pixels are excluded.
+    edges : ndarray [n_bins + 1]
+        Final bin edges, um, finite and strictly ascending.
+    wl_lo : float
+        Short edge of the model wavelength span, um. Pixel cells are clipped to the span, and pixels outside it are
+        dropped from both model and noise, so the two stay the same estimator.
+    wl_hi : float
+        Long edge of that span, um.
+    valid : ndarray [n_pix] of bool or None
+        Pixels allowed into the operator (saturation exclusion).
 
-    Returns dict:
-      keep     (n_bins,)  bins with >=1 usable pixel
-      wl_center(n_keep,)  edge midpoints of kept bins
-      n_pix    (n_keep,)  usable pixels per kept bin
-      pix_idx  (n_use,)   indices into the INPUT pixel arrays (callers pass
-                          full-length per-pixel arrays; the operator selects)
-      pix_w, cell_lo, cell_hi (n_use,), pix_bin (n_use,) index into kept bins
+    Returns
+    -------
+    dict
+        ``keep`` [n_bins] bins with at least one usable pixel; ``wl_center`` [n_keep] edge midpoints of the kept
+        bins, um; ``n_pix`` [n_keep] usable pixels per kept bin; ``pix_idx`` [n_use] indices into the input pixel
+        arrays; ``pix_w``, ``cell_lo``, ``cell_hi`` [n_use] weights and cell edges, um; ``pix_bin`` [n_use] index
+        into the kept bins.
+
+    Raises
+    ------
+    ValueError
+        An input is invalid (never sanitized), or no usable pixel is left; the message breaks the exclusions down by
+        criterion.
     """
     wl_pix, w_pix, edges = _validate_operator_inputs(wl_pix, w_pix, edges, valid)
     order = np.argsort(wl_pix)
@@ -451,11 +483,23 @@ def _pl_antideriv(xq: np.ndarray, x: np.ndarray, y: np.ndarray, icum: np.ndarray
 def bin_model(op: dict, wl_model: np.ndarray, y_model: np.ndarray) -> np.ndarray:
     """Bin a native model through the operator.
 
-    Exact cell average of the piecewise-linear model per pixel, then the count-weighted bin mean.
+    Exact cell average of the piecewise-linear model per pixel, then the count-weighted bin mean. Linear in
+    ``y_model``, so the binned Jacobian is the operator applied to each row; exact for a constant model and for cell
+    edges between model nodes.
 
-    ``wl_model`` must be ascending and span every pixel cell. Linear in
-    y_model, so the binned Jacobian is the operator applied to each row;
-    exact for a constant model and for cell edges between model nodes.
+    Parameters
+    ----------
+    op : dict
+        The operator from build_operator.
+    wl_model : ndarray [n_model]
+        Model wavelengths, um, strictly ascending and spanning every pixel cell.
+    y_model : ndarray [n_model]
+        Model values (depth or a Jacobian row).
+
+    Returns
+    -------
+    ndarray [n_keep]
+        The binned model on the operator's kept bins.
     """
     wl, y = _validate_model(wl_model, y_model, "bin_model")
     icum = _pl_cumint(wl, y)

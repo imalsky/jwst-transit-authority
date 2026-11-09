@@ -19,7 +19,7 @@ _H = 6.62607015e-27  # erg s
 _C = 2.99792458e10  # cm/s
 _KB = 1.380649e-16  # erg/K
 
-# numpy 2 renamed trapz -> trapezoid (and removed trapz); support both
+# numpy 2 renamed trapz to trapezoid; support both
 _trapz = getattr(np, "trapezoid", None) or np.trapz  # type: ignore[attr-defined]  # noqa: NPY201  (numpy 1 has only this name)
 
 
@@ -33,11 +33,32 @@ def _pi_planck_nu(nu_cm: np.ndarray, teff: float) -> np.ndarray:
 
 
 def phoenix_surface_flux(nu_grid: np.ndarray, teff: float, logg: float, feh: float, log: Log = print) -> np.ndarray:
-    """PHOENIX stellar surface flux (erg s^-1 cm^-2 / cm^-1) on ``nu_grid``.
+    """Return the PHOENIX stellar surface flux density on ``nu_grid``.
 
-    Parameters: nu_grid (cm^-1, any order), teff (K), logg (log10 cgs),
-    feh ([Fe/H] dex). Raises with a remedy when the PHOENIX grid is absent
-    (``jwst-tool fetch`` downloads it) and on an energy-closure failure.
+    Parameters
+    ----------
+    nu_grid : ndarray [n_nu]
+        Wavenumbers, cm^-1, in any order.
+    teff : float
+        Effective temperature, K.
+    logg : float
+        Surface gravity, log10 of cm s^-2.
+    feh : float
+        Metallicity [Fe/H], dex.
+    log : Log
+        Receives the closure line.
+
+    Returns
+    -------
+    ndarray [n_nu]
+        Surface flux density, erg s^-1 cm^-2 / cm^-1.
+
+    Raises
+    ------
+    FileNotFoundError
+        The PHOENIX grid is absent (``jwst-tool fetch`` downloads it).
+    RuntimeError
+        The flux is non-finite or non-positive, or fails the energy-closure check.
     """
     from jwst_tool import instruments as ins
 

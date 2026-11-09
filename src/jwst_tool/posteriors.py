@@ -245,23 +245,37 @@ def marginalized_posteriors(
 def combo_forecast(
     name: str, mode_keys: list[str], results_by_mode: dict, free_names: list[str], co_eval: float | None = None
 ) -> dict:
-    """Forecast one NAMED combination of instrument modes.
+    """Forecast one named combination of instrument modes.
 
-    ``name``: the user's label for the combination (e.g. "SOSS + G395H").
-    ``mode_keys``: registry keys (instruments.MODES); an unknown key raises.
-    ``results_by_mode``: {mode_key: evaluate_mode result with Jacobians} from
-    a run; every requested key must be present.
+    Saturation policy is exactly the "All usable modes" row's: a saturated mode is unusable data, excluded from the
+    Fisher sum, and the exclusion is disclosed in the record. Goes through ``fisher.combined_forecast`` for any
+    usable-mode count, so a single-mode combo equals ``fisher.mode_forecast``. Curves are the caller's job
+    (``marginalized_posteriors``).
 
-    Saturation policy is EXACTLY the "All usable modes" row's: a
-    saturated mode is unusable data, excluded from the Fisher sum, and the
-    exclusion is disclosed in the returned record (``excluded``, with the
-    reason). A combo whose every mode is excluded raises -- there is no
-    forecast to report.
+    Parameters
+    ----------
+    name : str
+        The user's label for the combination (e.g. "SOSS + G395H").
+    mode_keys : list of str
+        Registry keys (instruments.MODES), without repeats.
+    results_by_mode : dict
+        {mode_key: evaluate_mode result with Jacobians}; every requested key must be present.
+    free_names : list of str
+        The free parameters, in Jacobian row order.
+    co_eval : float or None
+        The atmosphere's C/O; required when dlnCO is free.
 
-    Goes through ``fisher.combined_forecast`` for any usable-mode count, so a
-    single-mode combo equals ``fisher.mode_forecast``. Marginalized AND
-    conditional display-unit sigmas are reported;
-    curves are the caller's job (``marginalized_posteriors``).
+    Returns
+    -------
+    dict
+        ``name``, ``kind``, ``label``, ``mode_keys``, ``usable_modes``, ``excluded`` (mode and reason),
+        ``n_modes_usable``, ``co_eval``, ``sigma_marginalized_display`` and ``sigma_conditional_display`` (display
+        units, per parameter) and ``units``.
+
+    Raises
+    ------
+    ValueError
+        A blank name, an empty, repeated or unknown mode key, a missing result, or no usable mode.
     """
     from jwst_tool import instruments as ins  # data-root resolution stays lazy
 
@@ -370,24 +384,34 @@ def _mode_stream_seed(seed: int, mode_key: str) -> list[int]:
 
 
 def mock_realization(results: list, seed: int) -> dict:
-    """One seeded mock observation over the run's evaluated modes.
+    """Draw one seeded mock observation over the run's evaluated modes.
 
-    ``results``: list of ``detect.evaluate_mode`` result dicts (each needs
-    ``mode_key``, ``depth``, ``sigma``). ``seed``: non-negative int; the same
-    seed reproduces the identical realization (numpy ``default_rng`` with a
-    per-mode substream -- global ``np.random`` state is never touched).
-    The draw is ALWAYS at the mode's own per-bin sigma -- the same
+    The same seed reproduces the identical realization (numpy ``default_rng`` with a per-mode substream; global
+    ``np.random`` state is never touched). The draw is always at the mode's own per-bin sigma -- the same
     uncertainty the error bars, the conditional template S/N and the Fisher
     forecast use. There is deliberately no scale factor: a 0.5x or 2x draw
     is not a realization of the model whose error bars are plotted beside
     it. To change the assumed uncertainty, change the noise model (the
     per-mode random-noise multiplier), which propagates to every number.
 
-    Returns dict(kind, label, seed, modes) where modes[mode_key] is
-    dict(noise, depth_mock, sigma): ``noise`` is the N(0, sigma_i) draw per
-    bin (sigma_i = that mode's FINAL per-bin depth error, floor included)
-    and ``depth_mock = depth + noise``. What the draw may and may not
-    enter: MOCK_LABEL.
+    Parameters
+    ----------
+    results : list of dict
+        ``detect.evaluate_mode`` results, each with ``mode_key``, ``depth`` [n_bins] and ``sigma`` [n_bins].
+    seed : int
+        Non-negative seed.
+
+    Returns
+    -------
+    dict
+        ``kind``, ``label`` (what the draw may and may not enter: MOCK_LABEL), ``seed``, ``seed_scheme``,
+        ``numpy_version`` and ``modes``: per mode ``noise`` [n_bins], the N(0, sigma_i) draw at the mode's final
+        per-bin depth error (floor included), ``depth_mock = depth + noise`` and ``sigma``.
+
+    Raises
+    ------
+    ValueError
+        A negative seed, no results, a missing or repeated mode key, or a misshapen or non-finite depth or sigma.
     """
     seed = int(seed)
     if seed < 0:

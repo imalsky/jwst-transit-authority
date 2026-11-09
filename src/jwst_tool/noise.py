@@ -320,7 +320,27 @@ def _run_worker(job: dict, progress: Log | None = None) -> dict:
 
 
 def make_bins(wl_lo: float, wl_hi: float, R: float) -> np.ndarray:
-    """Log-spaced bin EDGES at resolving power R over [wl_lo, wl_hi]."""
+    """Return log-spaced bin edges at resolving power ``R`` over [wl_lo, wl_hi].
+
+    Parameters
+    ----------
+    wl_lo : float
+        Short edge, um.
+    wl_hi : float
+        Long edge, um.
+    R : float
+        Resolving power of the bins.
+
+    Returns
+    -------
+    ndarray [n_bins + 1]
+        Bin edges, um.
+
+    Raises
+    ------
+    ValueError
+        An edge or ``R`` is non-finite or out of order.
+    """
     if not (np.isfinite(wl_lo) and np.isfinite(wl_hi) and 0.0 < wl_lo < wl_hi):
         raise ValueError(f"make_bins: need finite 0 < wl_lo < wl_hi, got [{wl_lo!r}, {wl_hi!r}]")
     if not (np.isfinite(R) and R > 0.0):
@@ -330,18 +350,28 @@ def make_bins(wl_lo: float, wl_hi: float, R: float) -> np.ndarray:
 
 
 def resolve_floor(wl_um: np.ndarray, floor_spec: float | np.ndarray | None) -> np.ndarray:
-    """PandExo-compatible minimum-floor evaluation on the FINAL bin wavelengths.
+    """Evaluate the PandExo-compatible minimum noise floor on the final bin wavelengths.
 
-    ``floor_spec`` is one of:
-      * None            -- no minimum floor (zeros),
-      * a scalar        -- constant minimum uncertainty in ppm for every bin,
-      * an (n, 2) array -- [wavelength_um, floor_ppm] rows, linearly
-        interpolated with constant edge extension; duplicate wavelengths raise.
+    Applied downstream as sigma_final = max(sigma_random, floor): a hard minimum, never quadrature, never rescaled by
+    the binning R.
 
-    Returns the per-bin floor as a FRACTIONAL depth (ppm * 1e-6). Non-finite
-    or negative values raise, never silently sanitized. Applied downstream as
-    sigma_final = max(sigma_random, floor): a hard minimum, never quadrature,
-    never rescaled by the binning R.
+    Parameters
+    ----------
+    wl_um : ndarray [n_bins]
+        Final bin wavelengths, um.
+    floor_spec : float, ndarray [n, 2] or None
+        None for no floor; a constant floor, ppm; or [wavelength_um, floor_ppm] rows, linearly interpolated with
+        constant edge extension.
+
+    Returns
+    -------
+    ndarray [n_bins]
+        The floor as a fractional depth.
+
+    Raises
+    ------
+    ValueError
+        A value is non-finite or negative, the table is misshapen, or it repeats a wavelength.
     """
     wl = np.asarray(wl_um, float)
     if floor_spec is None:
@@ -383,18 +413,36 @@ def n_transits_int(n_transits: int) -> int:
 
 
 def pixel_depth_variance(mode_result: dict, t_in_s: float, t_out_s: float, n_transits: int) -> np.ndarray:
-    """Per-native-pixel transit-depth variance (box-depth approximation).
+    """Return the per-native-pixel transit-depth variance (box-depth approximation).
 
-    var = (sigma_1int/flux)^2 (1/n_in + 1/n_out) / n_transits, with the
-    integration counts from the mode's measured cycle time. Neglects
-    ingress/egress, limb darkening, and depth-detrending covariance.
+    var = (sigma_1int/flux)^2 (1/n_in + 1/n_out) / n_transits, with the integration counts from the mode's measured
+    cycle time. Neglects ingress/egress, limb darkening, and depth-detrending covariance.
 
-    SYMMETRIC in/out approximation: the OUT-of-transit flux and sigma stand
-    in for both terms. This is CONSERVATIVE and the excess grows with depth
-    (~3d/4 for equal baselines, NOT d/2: +0.76% at d=1%, +8.2% at 10%; d/2
-    to d for unequal baselines). Kept deliberately model-INDEPENDENT so ONE
-    measurement operator bins noise and model; exact separate in/out
-    propagation is a remaining refinement, NOT a same-answer refactor.
+    Symmetric in/out approximation: the out-of-transit flux and sigma stand in for both terms. This is conservative
+    and the excess grows with depth (~3d/4 for equal baselines, not d/2: +0.76% at d=1%, +8.2% at 10%; d/2 to d for
+    unequal baselines). It stays model-independent so one measurement operator bins noise and model; separate in/out
+    propagation would change results (notes "Measurement operator, LSF, noise, ramps, registry").
+
+    Parameters
+    ----------
+    mode_result : dict
+        A worker mode result: ``flux`` [n_pix] e-/s, ``noise_1int`` [n_pix] e-/s, ``t_cycle_s`` s.
+    t_in_s : float
+        In-transit time per event, s.
+    t_out_s : float
+        Out-of-transit time per event, s.
+    n_transits : int
+        Number of events, a positive integer.
+
+    Returns
+    -------
+    ndarray [n_pix]
+        Depth variance per pixel, fractional depth squared.
+
+    Raises
+    ------
+    ValueError
+        An input is non-finite, non-positive or misshapen, or a window is shorter than one integration cycle.
     """
     flux = np.asarray(mode_result["flux"], float)
     noise = np.asarray(mode_result["noise_1int"], float)
@@ -438,26 +486,42 @@ def depth_error_bins(
     op: dict | None = None,
     noise_inflation: float = 1.0,
 ) -> dict:
-    """Per-bin transit-depth sigma from a worker mode result.
+    """Return the per-bin transit-depth sigma of a worker mode result.
 
-    ``op`` is the mode's count-space measurement operator
-    (binning.build_operator); pass the SAME operator used to bin the model.
-    Built here from the pixel grid alone when omitted (noise-only use).
+    Order of operations matches PandExo: (1) random variance, (2) binned in count space, (3) transits combined,
+    (4) floor on the final bin wavelengths, (5) sigma = max(sigma_random, floor).
 
-    ``floor_spec`` is the PandExo-style minimum floor (resolve_floor). Order
-    of operations matches PandExo: (1) random variance, (2) binned in count
-    space, (3) transits combined, (4) floor on the final bin wavelengths,
-    (5) sigma = max(sigma_random, floor).
+    Parameters
+    ----------
+    mode_result : dict
+        A worker mode result (``wl`` um, ``flux`` e-/s, ``noise_1int`` e-/s, ``t_cycle_s`` s).
+    edges : ndarray [n_bins + 1]
+        Final bin edges, um; used only when ``op`` is None.
+    t_in_s : float
+        In-transit time per event, s.
+    t_out_s : float
+        Out-of-transit time per event, s.
+    n_transits : int
+        Number of events, a positive integer.
+    floor_spec : float, ndarray [n, 2] or None
+        The minimum floor (resolve_floor); required, never defaulted.
+    op : dict or None
+        The mode's measurement operator (binning.build_operator): pass the same one that bins the model. None builds
+        it from the pixel grid alone (noise-only use).
+    noise_inflation : float
+        Factor on the random sigma; it averages down with transits, unlike the floor.
 
-    Returns dict(wl_center, sigma, n_pix, var_phot, floor, n_transits) over
-    the operator's kept bins. ``var_phot`` is the random bin variance AT the
-    evaluated ``n_transits`` (scales as 1/N, inflation included); ``floor``
-    is N-independent. The two components let callers extrapolate to other
-    transit counts correctly.
+    Returns
+    -------
+    dict
+        ``wl_center`` [n_keep] um, ``sigma`` [n_keep] fractional depth, ``n_pix`` [n_keep], ``var_phot`` [n_keep]
+        the random bin variance at ``n_transits`` (scales as 1/N, inflation included), ``floor`` [n_keep]
+        (N-independent), ``n_transits``. The two components let callers extrapolate to other transit counts.
 
-    ``noise_inflation``: optional factor on the random sigma, default 1.0
-    (the Pandeia prediction as-is). Proportional: averages down with
-    transits, unlike the floor.
+    Raises
+    ------
+    ValueError
+        ``noise_inflation`` is not finite and positive.
     """
     ninf = float(noise_inflation)
     if not (np.isfinite(ninf) and ninf > 0.0):
