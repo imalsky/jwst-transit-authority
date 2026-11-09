@@ -230,7 +230,7 @@ def test_app_materializes_figures_only_through_locked_helpers():
 
 @pytest.mark.parametrize("n_pts", [1, 3, 6])
 def test_summary_legends_sit_inside_their_axes_and_cover_no_data(n_pts):
-    """Summary legends sit INSIDE the axes (maintainer; the paired T-P/mixing-ratio panels keep external legends), and
+    """Summary legends sit INSIDE the axes (the paired T-P/mixing-ratio panels keep external legends), and
     the failure is a legend on the data, so no legend rectangle may contain a plotted vertex, across 1/3/6 series since
     the spectrum legend grows. No legend titles and no multi-line entries; no overlapping tick labels.
     """
@@ -322,7 +322,7 @@ def test_forecast_panel_headroom_follows_the_legend_rows(n_src):
 
 def test_a_fitted_panel_is_not_labelled_a_forecast():
     """A panel whose curves are FITS to the jitter draw must not call itself
-    a forecast (external review). A Fisher forecast is centered on the input
+    a forecast. A Fisher forecast is centered on the input
     by construction, so a curve 2.7 sigma away under a "forecast density"
     axis reads as a bug; it is not one, so the axis must name which of the
     two it is.
@@ -404,9 +404,7 @@ def test_log_depth_axis_refusals_whisker_clip_and_tick_spacing():
        (matplotlib drops the non-positive points silently); filtering to the
        positives renders a -400..900 ppm model as its positive 69% with no
        indication -- never do that.
-    2. A negative WHISKER must not refuse the axis (maintainer-reported:
-       "Log depth axis unavailable ... starts at -288.9 ppm").
-       50 +/- 340 ppm is ordinary at low S/N; the whisker is clipped at the
+    2. A negative WHISKER must not refuse the axis: 50 +/- 340 ppm is ordinary at low S/N; the whisker is clipped at the
        spine and the limits follow the positive DEPTHS.
     3. Ticks come from a subdivided LogLocator, never a linear locator: a
        MaxNLocator places LINEARLY spaced ticks below 1.5 decades (equal

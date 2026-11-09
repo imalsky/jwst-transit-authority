@@ -456,7 +456,7 @@ def test_raw_outputs_must_belong_to_the_gated_run(gate):
         edit(s, o, p)
         return " | ".join(problems_of(s, o, p, "m"))
 
-    # a wrong PandExo engine or commit, once skipped because the field names differ by side
+    # a wrong PandExo engine or commit fails although the two sides name the field differently
     assert "pandeia_engine_version" in broken(lambda s, o, p: p["__provenance__"].update(pandeia_engine_version="1"))
     assert "pandexo_commit" in broken(lambda s, o, p: p["__provenance__"].update(pandexo_commit="0" * 40))
     assert "worker_version" in broken(lambda s, o, p: o["__provenance__"].update(worker_version=5))

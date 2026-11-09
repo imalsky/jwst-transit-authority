@@ -58,14 +58,12 @@ W39B_REFERENCE = {
     "kzz_mode": "file",  # mixing from the table, not a stand-in
     "kzz_const": 0.0,  # inert once tabulated
     "met_x_solar": 10.0,  # Tsai+2023 10x solar
-    "co_ratio": 0.55,  # CO_DEFAULT (maintainer):
-    # the cfg C_H/O_H 0.549348 rounded
-    # onto the 0.05 widget grid; the
-    # 0.12% composition shift awaits
-    # the SO2 re-measure noted below
+    # CO_DEFAULT: the cfg C_H/O_H 0.549348 rounded onto the 0.05 widget grid
+    "co_ratio": 0.55,
     "use_photo": True,  # SO2 is photochemical; non-negotiable
     "sl_angle_deg": 83.0,  # Tsai+2023 terminator slant
     "use_vm_mol": False,  # the validated baseline chemistry
     "nz": 100,
-    "network": "sncho2025",  # G395H SO2 4.23 sigma, as on sncho (v61)
+    # G395H SO2 4.23 sigma, as on sncho (notes "Composition, C/O bounds and networks")
+    "network": "sncho2025",
 }

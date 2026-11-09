@@ -154,8 +154,8 @@ def test_the_rate_caveat_reaches_the_page_and_every_export(monkeypatch):
 
 def test_emission_results_use_eclipse_terms():
     """An emission run says "eclipse" throughout, never "transit"; an
-    above-target result renders NO verdict line and NO banner (maintainer:
-    the figure and table carry the number).
+    above-target result renders NO verdict line and NO banner (the
+    figure and table carry the number).
     """
     out, out_meta = synthetic_out(science_mode="emission", sigma_detect=8.0, n_transits=3)
     at = run_with_result(out, out_meta)
@@ -214,8 +214,7 @@ def test_custom_archive_fill_and_uv_menu_never_moves():
     """Custom planet, one boot: a typed Teff never moves the UV MENU, and
     the archive Fill button writes the
     snapshot row into the form (pending-then-apply path) -- still without
-    touching the UV menu (no substitute spectra, standing maintainer
-    rule).
+    touching the UV menu (a proxy spectrum is never auto-selected).
     """
     at = run_app()
     at.selectbox(key="n0_planet").set_value("custom").run()
@@ -504,7 +503,7 @@ def test_a_nonpositive_bound_on_a_log_axis_warns_instead_of_killing_the_page():
 def test_axis_bounds_refuse_one_sided_and_reach_the_figure(monkeypatch):
     """One bound alone has no second edge: the page must SAY it fell back
     rather than invent the other bound -- and a COMPLETE pair must actually
-    reach the figure (the reviewer's 3.0 to 5.5 um zoom), not merely be
+    reach the figure (a 3.0 to 5.5 um zoom), not merely be
     accepted by the widget. The app closes every Figure it builds, so this
     records the ARGUMENTS of the call the page makes.
     """
@@ -523,7 +522,7 @@ def test_axis_bounds_refuse_one_sided_and_reach_the_figure(monkeypatch):
     out, out_meta = synthetic_out(sigma_detect=8.0, with_jac=True)
     at = run_with_result(out, out_meta, n0_sum_y_min=20500.0)  # max left blank
     assert not at.exception, at.exception
-    # Axis-control contract (maintainer): every axis is a
+    # Axis-control contract: every axis is a
     # typed min/max number-box pair that STARTS blank, no sliders anywhere,
     # no wavelength-range radio.
     assert not [r for r in at.radio if r.key == "n0_sum_wlmode"]

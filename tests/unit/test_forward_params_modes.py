@@ -100,8 +100,8 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # Re-pinning it follows a _VERSION bump (the version is a canonical key):
     # record what moved the spectrum, and whether the canonical
     # parameter SET moved with it.
-    # The G395H SO2 significance behind this configuration was re-measured at
-    # v61 (notes "Composition, C/O bounds and networks").
+    # The G395H SO2 significance behind this configuration is in notes
+    # "Composition, C/O bounds and networks".
     assert forward.params_key(forward.canonical_params(dict(planet="wasp39b", tp_mode="file"))) == "58d1754cf09089de"
     # ... and the bare DEFAULT run is that same atmosphere
     assert forward.params_key(forward.canonical_params(dict(planet="wasp39b"))) == "58d1754cf09089de"

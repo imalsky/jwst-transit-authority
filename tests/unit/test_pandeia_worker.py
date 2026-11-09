@@ -203,8 +203,8 @@ def _run_one_mode(
 
     ``sat_by_ngroup`` (ngroup -> measured saturation fraction) makes
     saturation depend on the requested ramp, which the group-search
-    regression tests need; the default constant ``sat_frac`` keeps the
-    older census tests unchanged. ``call_log`` collects the ngroup of every
+    regression tests need; the default constant ``sat_frac`` serves the
+    census tests. ``call_log`` collects the ngroup of every
     nint=1 stub calculation, in order.
     """
     mode = {

@@ -36,7 +36,7 @@ def test_condensation_detection_only_with_full_refusal_matrix():
 
 
 def test_shipped_tables_gate_defaults_and_are_never_substituted():
-    """Maintainer decision: a planet whose bundled measured T-P/Kzz
+    """A planet whose bundled measured T-P/Kzz
     table is VERIFIED end-to-end defaults to it; every other planet defaults
     to analytic Guillot + constant Kzz and carries a written tp_table_note.
     Each planet resolves to ITS OWN table; a planet without one refuses
@@ -62,7 +62,7 @@ def test_shipped_tables_gate_defaults_and_are_never_substituted():
             with pytest.raises(ValueError):
                 forward.canonical_params(dict(planet=key, tp_mode="file"))
     assert len(set(seen.values())) == len(seen)  # no shared table
-    # the verified set is exactly WASP-39 b today; HD 189733 b ships a good
+    # the verified set is exactly WASP-39 b; HD 189733 b ships a good
     # profile the solver does NOT certify at defaults, so it must stay
     # selectable-but-not-default -- choosing it explicitly still resolves
     assert [k for k in planets.PLANETS if tp_tables.shipped_tp_table_is_default(k)] == ["wasp39b"]

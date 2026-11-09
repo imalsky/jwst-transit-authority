@@ -43,7 +43,7 @@ def test_operator_is_linear_and_conserves_constant_depth():
 def test_pl_antideriv_exact_on_audit_counterexample():
     """The antiderivative of a piecewise-linear model is piecewise-QUADRATIC;
     linearly interpolating the cumulative integral is wrong between nodes.
-    Model y=x on [0,1]: average over [0.1,0.2] = 0.15 (np.interp gave 0.5).
+    Model y=x on [0,1]: average over [0.1,0.2] = 0.15 (interpolating the cumulative integral gives 0.5).
     """
     x = np.array([0.0, 1.0])
     y = np.array([0.0, 1.0])
