@@ -442,6 +442,8 @@ gate 0.25.
   generalize: the engine can move a column (HD 209458 b 0.90 ppm on 0.10.0), and a
   column cached on the Space's persistent `model_cache` is not covered. The key carries
   no engine version (Decision records).
+  A development checkout installs the engine editable, so the engine moves there with no
+  pin bump: clear `output/model_cache` after pulling an engine change that moves a column.
 - `$JWST_TOOL_DATA_REVISION` keys `model_cache` to the science data, which no parameter
   and no `_VERSION` tracks. The Space's entrypoint stamps the remote dataset HEAD
   (`HfApi().dataset_info().sha`) at boot, which can differ from the mounted bytes: a run
@@ -702,7 +704,7 @@ None changes a shipped number.
   [M]. More steps cannot end it, so the run refuses, with no retry and no early stop, and the refusal names raising `nz`.
   At nz 100 all four stencil points certify, h-vs-2h 0.184 [M], while the same setup's lnKzz row refuses at h-vs-2h 0.699
   (gate 0.25) [M]. nz 60 is the floor of `NZ_RANGE`; Guillot and `ncho` are non-default. The -1h column (1630 K) certifies at 2208 steps, but run on, both gates hold in one sample of 10000 steps
-  and it then enters an exact 200-step cycle, longdy 0.19-0.86 [M]: a certificate can pass on a transient (todo).
+  and it then enters an exact 200-step cycle, longdy 0.19-0.86 [M]: a certificate can pass on a transient.
 - CI skips the slow tier; the parity matrix shares PandExo's stellar spectrum;
   third-party data is not redistributed; cache identity is canonical params +
   hand-bumped versions; the worker ramp is transit-independent; stellar contamination,
