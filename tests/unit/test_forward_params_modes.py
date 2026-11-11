@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from param_helpers import W39B_REFERENCE, _p, _pf, _table
 
-from jwst_tool import chem_build, fisher, forward, jacobian, model_defs, planets, run_params, tp_tables
+from jwst_tool import chem_build, fisher, forward, jacobian, model_cache, model_defs, planets, run_params, tp_tables
 
 
 def test_wo_mols_canonical_form():
@@ -102,9 +102,9 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # parameter SET moved with it.
     # The G395H SO2 significance behind this configuration is in notes
     # "Composition, C/O bounds and networks".
-    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b", tp_mode="file"))) == "dd3ecebad77ba212"
+    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b", tp_mode="file"))) == "6b7ef08447c10fdc"
     # ... and the bare DEFAULT run is that same atmosphere
-    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b"))) == "dd3ecebad77ba212"
+    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b"))) == "6b7ef08447c10fdc"
     # the sha1 pin is only meaningful re-derived from the file the run
     # actually reads -- this catches the table itself being swapped
     path = tp_tables.shipped_tp_file("wasp39b")
@@ -583,42 +583,26 @@ def test_the_climate_anchor_refusal_names_its_last_pass(monkeypatch):
         )
 
 
-def test_tint_default_follows_the_planet():
-    """WASP-107 b's Guillot T_int is its published interior temperature
-    (Sing+2024, 460 K); every other planet takes the Thorngren, Gao & Fortney
-    (2019) relation at its T_eq inside 700-2800 K, else 100 K. A custom planet
-    states its own. An explicit value wins.
-    """
-
-    def thorngren(teq):  # their equation 3, F = 4 sigma T_eq^4 in 1e9 erg s^-1 cm^-2
-        return 0.39 * teq * np.exp(-((np.log10(4.0 * 5.670374419e-5 * teq**4 / 1.0e9) - 0.14) ** 2) / 1.095)
-
-    assert forward.canonical_params(dict(planet="wasp107b"))["Tint"] == 460.0
-    for planet in ("wasp39b", "hd189733b", "hd209458b"):
-        p = planets.PLANETS[planet]
-        teq = planets.system_teq(p["star"]["teff"], p["rstar_rsun"], p["orbit_au"])
-        assert forward.canonical_params(dict(planet=planet, tp_mode="guillot"))["Tint"] == round(thorngren(teq))
-    assert forward.canonical_params(dict(planet="wasp107b", Tint=120.0))["Tint"] == 120.0
-    # every registry default sits inside the accepted range
-    for p in planets.PLANETS.values():
-        assert model_defs.TINT_RANGE[0] <= planets.default_tint(p) <= model_defs.TINT_RANGE[1]
-
-
-def test_the_tint_range_holds_every_default_the_rule_gives():
-    """Both edges of the fitted T_eq span and the rule's maximum (about 671 K near T_eq 1883 K) sit inside TINT_RANGE;
-    just outside the span the generic 100 K applies."""
-
-    def tint_at(teq):  # a custom system with this T_eq: T_eq = T_eff sqrt(R* / 2a)
-        orbit = (5000.0 / teq) ** 2 * planets.R_SUN_CM / (2.0 * planets.AU_CM)
-        return planets.default_tint({}, system=dict(star_teff=5000.0, rstar_rsun=1.0, orbit_au=orbit))
-
-    lo, hi = model_defs.TINT_RANGE
-    # the edges themselves, a hair inside so the orbit round trip cannot step out
-    assert tint_at(700.0 * (1.0 + 1e-12)) == 45.0 and tint_at(2800.0 * (1.0 - 1e-12)) == 435.0
-    assert tint_at(699.99) == tint_at(2800.01) == planets.TINT_DEFAULT_K
-    rule = [tint_at(t) for t in np.linspace(700.0 * (1.0 + 1e-12), 2800.0 * (1.0 - 1e-12), 4201)]
-    assert max(rule) == 671.0 and 1850.0 < np.linspace(700.0, 2800.0, 4201)[int(np.argmax(rule))] < 1890.0
-    assert lo <= min(rule) and max(rule) <= hi
+def test_an_unstated_interior_temperature_runs_at_the_default_and_says_so():
+    """T_int defaults to the registry's published value (WASP-107 b, Sing+2024, 460 K), else 300 K. A run that reads it
+    without the request stating it records that for its caveat, under a key the chemistry key ignores; a saved payload
+    maps to itself, and a flag naming a T_int other than the default is refused."""
+    assert planets.TINT_DEFAULT_K == 300.0
+    for planet in planets.PLANETS:
+        for engine in (dict(tp_mode="guillot"), dict(chem_provider="picaso")):
+            cp = forward.canonical_params(dict(planet=planet, **engine))
+            assert (cp["Tint"], cp["tint_from_default"]) == (460.0 if planet == "wasp107b" else 300.0, True)
+            assert forward.canonical_params(cp) == cp
+            assert model_defs.TINT_RANGE[0] <= cp["Tint"] <= model_defs.TINT_RANGE[1]
+    unstated = dict(planet="wasp39b", tp_mode="guillot")
+    stated = dict(unstated, Tint=300.0)
+    assert forward.canonical_params(stated)["tint_from_default"] is False
+    assert forward.params_key(stated) != forward.params_key(unstated)
+    assert model_cache.chem_key(stated) == model_cache.chem_key(unstated)
+    assert forward.canonical_params(dict(planet="wasp39b"))["tint_from_default"] is False  # a table reads no T_int
+    assert forward.canonical_params(dict(planet="wasp107b", tp_mode="guillot", Tint=120.0))["Tint"] == 120.0
+    with pytest.raises(ValueError, match="tint_from_default=True names the default T_int, 300 K, but Tint=250"):
+        forward.canonical_params(dict(stated, Tint=250.0, tint_from_default=True))
 
 
 def test_the_run_network_is_handed_to_the_engine(monkeypatch):

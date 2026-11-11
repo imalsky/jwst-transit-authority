@@ -35,7 +35,8 @@ def cache_path(params: dict) -> Path:
 # column, so chem_key strips them and an RT-only edit reuses the solved column
 # (adjoint_diag.adjoint_key's strip list). Dual-use keys -- nz, p_btm_bar,
 # rt_ptop_bar (the chemistry top follows it), rp_rjup, gs_cgs, T-P,
-# composition, Kzz -- stay in the key, as does "version" via canonical_params.
+# composition, Kzz -- stay in the key, as does "version" via canonical_params. tint_from_default only says whether the
+# request stated T_int (the result's caveat); the column reads the value.
 # p_ref_bar is NOT irrelevant: it is the pressure the catalogue radius and
 # gravity apply at, so it sets the chemistry's own radius anchor and moves the
 # converged column (assemble_chem, "ONE gravity per run").
@@ -53,6 +54,7 @@ CHEM_IRRELEVANT_PARAMS = (
     "star_teff",
     "star_logg",
     "star_feh",
+    "tint_from_default",
 )
 
 

@@ -78,38 +78,10 @@ def check_system(cp: dict, tirr_derived: bool) -> None:
         _check_range("alpha_cloud", cp["alpha_cloud"], ALPHA_CLOUD_RANGE)
 
 
-def tint_refusal(tint_k: float, derived: bool) -> str | None:
-    """Return the refusal sentence of a T_int outside TINT_RANGE, None inside; the API and the sidebar seeder share it.
-
-    Parameters
-    ----------
-    tint_k : float
-        Interior temperature, K.
-    derived : bool
-        True when ``tint_k`` is the default planets.default_tint computed, not a value the user set.
-
-    Returns
-    -------
-    str or None
-        The sentence, or None when the value is accepted.
-    """
-    lo, hi = TINT_RANGE
-    if lo <= tint_k <= hi:
-        return None
-    if derived:
-        return (
-            f"the default Tint of this star and orbit is {tint_k:g} K (planets.default_tint), outside the supported "
-            f"range [{lo:g}, {hi:g}] K. Set Tint explicitly inside that range."
-        )
-    return f"Tint={tint_k:g} outside [{lo:g}, {hi:g}] K"
-
-
-def check_tint(cp: dict, derived: bool) -> None:
-    """Refuse a Guillot or climate T_int outside TINT_RANGE; run after the default is filled from the checked system."""
+def check_tint(cp: dict) -> None:
+    """Refuse a Guillot or climate T_int outside TINT_RANGE."""
     if cp["tp_mode"] in ("guillot", "picaso_climate"):
-        refusal = tint_refusal(cp["Tint"], derived)
-        if refusal:
-            raise ValueError(refusal)
+        _check_range("Tint", cp["Tint"], TINT_RANGE, "K")
 
 
 def rt_ptop_refusal(top_bar: float, derived: bool) -> str | None:

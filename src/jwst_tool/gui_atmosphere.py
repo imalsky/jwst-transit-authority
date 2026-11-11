@@ -42,10 +42,7 @@ def _engine_section() -> tuple[bool, str]:
     return pic, chem_provider
 
 
-_TINT_HELP = (
-    "Default: a published value where one exists, else Thorngren, Gao & Fortney (2019) for T_eq "
-    f"{planets.TINT_FIT_TEQ_RANGE_K[0]:g}-{planets.TINT_FIT_TEQ_RANGE_K[1]:g} K, else {planets.TINT_DEFAULT_K:g} K."
-)
+_TINT_HELP = f"Default: the planet's published value where one exists, else {planets.TINT_DEFAULT_K:g} K."
 
 
 def _seed_follow(key: str, auto_key: str, seed: float | None, follow: bool) -> None:
@@ -64,31 +61,12 @@ def _seed_follow(key: str, auto_key: str, seed: float | None, follow: bool) -> N
         st.session_state[key] = seed
 
 
-def _seed_tint(target: Target) -> str | None:
-    """Seed T_int with planets.default_tint and return the API's refusal of that default, if any.
-
-    A custom planet's default tracks its star and orbit until edited. A default outside TINT_RANGE leaves the widget
-    empty, never a value Streamlit would reset to its minimum.
-    """
-    k = target.k
-    system = dict(star_teff=target.teff, rstar_rsun=target.rstar, orbit_au=target.orbit_au)
-    tint0 = planets.default_tint(target.pdef, system=system if target.planet_key == "custom" else None)
-    refusal = param_checks.tint_refusal(tint0, derived=True)
-    seed = None if refusal else tint0
-    _seed_follow(k("tint"), k("tint_auto"), seed, target.planet_key == "custom")
-    return refusal
+def _tint_box(target: Target, tp_kwargs: dict) -> None:
+    """Draw T_int, seeded with planets.default_tint; the sidebar always states it."""
+    tp_kwargs["Tint"] = st.number_input("T_int (K)", *_W["tint"], step=25.0, key=target.k("tint"), help=_TINT_HELP)
 
 
-def _tint_box(target: Target, tp_kwargs: dict, refusal: str | None) -> None:
-    """Draw T_int; an empty widget sends no T_int, so canonical_params refuses with the sentence shown beside it."""
-    tint = st.number_input("T_int (K)", *_W["tint"], step=25.0, key=target.k("tint"), help=_TINT_HELP)
-    if tint is None:
-        st.error(refusal)
-    else:
-        tp_kwargs["Tint"] = tint
-
-
-def _guillot_boxes(target: Target, tint_refusal: str | None) -> dict:
+def _guillot_boxes(target: Target) -> dict:
     """Draw the Guillot (2010) profile's settings."""
     planet_key, pdef, science_mode, k = target.planet_key, target.pdef, target.science_mode, target.k
     teff, rstar, orbit_au = target.teff, target.rstar, target.orbit_au
@@ -110,7 +88,7 @@ def _guillot_boxes(target: Target, tint_refusal: str | None) -> dict:
         st.error(tirr_error)
     else:
         tp_kwargs["Tirr"] = tirr
-    _tint_box(target, tp_kwargs, tint_refusal)
+    _tint_box(target, tp_kwargs)
     # default 0.01 cm^2/g, Guillot (2010)'s canonical thermal opacity
     tp_kwargs["log_kappa"] = st.number_input("log10 kappa_IR (cm^2/g)", *_W["lk"], step=0.1, key=k("lk"))
     tp_kwargs["log_gamma"] = st.number_input("log10 gamma (kappa_vis/kappa_IR)", *_W["lg"], step=0.05, key=k("lg"))
@@ -235,10 +213,10 @@ def _tp_section(target: Target, pic: bool, chem_provider: str) -> Profile:
         )
         tp_kwargs: dict[str, float] = {}
         tp_file, tp_file_path, tp_file_ok = "", None, True
-        tint_refusal = _seed_tint(target)
         # seeded once (no value= default), so the engine switch can write
         # them back while hidden (gui_sidebar.keep_hidden_engine_state)
         for sk, sv in (
+            ("tint", planets.default_tint(target.pdef)),
             ("lk", model_defs.LOG_KAPPA_DEFAULT),
             ("lg", model_defs.LOG_GAMMA_DEFAULT),
             ("kzz", math.log10(model_defs.KZZ_CONST_DEFAULT)),
@@ -247,7 +225,7 @@ def _tp_section(target: Target, pic: bool, chem_provider: str) -> Profile:
                 st.session_state[k(sk)] = sv
         if tp_mode == "picaso_climate":
             # T_int shares its key with Guillot: the same physics and default
-            _tint_box(target, tp_kwargs, tint_refusal)
+            _tint_box(target, tp_kwargs)
             rf_key = K(f"rfacv_picaso_{science_mode}")
             if rf_key not in st.session_state:
                 st.session_state[rf_key] = model_defs.RFACV_DEFAULT[science_mode]
@@ -259,12 +237,11 @@ def _tp_section(target: Target, pic: bool, chem_provider: str) -> Profile:
                 help="0.5 = planet average, 1.0 = dayside.",
             )
         elif tp_mode == "guillot":
-            tp_kwargs = _guillot_boxes(target, tint_refusal)
+            tp_kwargs = _guillot_boxes(target)
         elif tp_mode == "file":
             tp_file, tp_file_path, tp_file_ok = _table_source(target)
             # a table reads no T_int, but a custom request states one (run_params.CUSTOM_REQUIRED_KEYS)
-            if st.session_state.get(k("tint")) is not None:
-                tp_kwargs["Tint"] = st.session_state[k("tint")]
+            tp_kwargs["Tint"] = st.session_state[k("tint")]
     return Profile(tp_mode, tp_kwargs, tp_file, tp_file_path, tp_file_ok)
 
 

@@ -166,6 +166,7 @@ _PARAM_KEYS_READ = frozenset(
         "tp_file_path",
         "tp_file_sha1",
         "tp_mode",
+        "tint_from_default",
         "use_condense",
         "use_moldiff",
         "use_photo",
@@ -509,7 +510,7 @@ def _filled_payload(params: dict, r: _Resolved) -> dict:
         # never share a cache entry ("" outside file mode)
         "tp_file": r.column.tp_file,
         "tp_file_sha1": r.column.tp_file_sha1,
-        # _default_tint and _guillot_tirr fill the defaults from the selected system
+        # _default_tint and _guillot_tirr fill the defaults
         "Tirr": float(params.get("Tirr", 0.0)),
         "Tint": float(params.get("Tint", 0.0)),
         "log_kappa": float(params.get("log_kappa", LOG_KAPPA_DEFAULT)),
@@ -590,10 +591,23 @@ def _system(cp: dict) -> dict:
 
 
 def _default_tint(params: dict, cp: dict, r: _Resolved) -> None:
-    """Fill the T_int default from planets.default_tint, the GUI's definition too; zeroed later where inert."""
-    if "Tint" not in params:
-        custom = r.planet not in planets.PLANETS
-        cp["Tint"] = planets.default_tint(r.sysd, system=_system(cp) if custom else None)
+    """Fill T_int from planets.default_tint, the GUI's definition too, when the request does not state it.
+
+    ``tint_from_default`` records that with the result, which then carries a caveat. A saved payload carries the flag,
+    so it maps to itself; a flag that names a T_int other than the default is refused. Both are zeroed where inert.
+    """
+    from_default = "Tint" not in params or bool(params.get("tint_from_default", False))
+    if from_default:
+        if r.planet not in planets.PLANETS:
+            raise ValueError("tint_from_default=True: a custom planet has no default T_int; state Tint.")
+        default = planets.default_tint(r.sysd)
+        if "Tint" in params and float(params["Tint"]) != default:
+            raise ValueError(
+                f"tint_from_default=True names the default T_int, {default:g} K, but Tint={params['Tint']}: drop "
+                "tint_from_default to run at the stated Tint."
+            )
+        cp["Tint"] = default
+    cp["tint_from_default"] = from_default
 
 
 def _guillot_tirr(params: dict, cp: dict, r: _Resolved) -> None:
@@ -640,6 +654,7 @@ def _zero_inert_settings(cp: dict, sysd: dict, science_mode: str, tp_mode: str) 
         cp["Tirr"] = cp["log_kappa"] = cp["log_gamma"] = 0.0
         if not climate:
             cp["Tint"] = 0.0
+            cp["tint_from_default"] = False
 
 
 # Decimals a canonical value keeps, enough for every registry value (rp 5, g 2), and those kept to six significant
@@ -714,7 +729,7 @@ def canonical_params(params: dict) -> dict:
     cp = _filled_payload(params, r)
     check_system(cp, tirr_derived=tp_mode == "guillot" and "Tirr" not in params)
     _default_tint(params, cp, r)
-    check_tint(cp, derived="Tint" not in params)
+    check_tint(cp)
     _guillot_tirr(params, cp, r)
     if pic:
         _picaso_fields(cp, params, column.tp_table, column.science_mode, tp_mode, solver.nz)

@@ -187,8 +187,7 @@ RFACV_RANGE = (0.05, 1.0)
 RFACV_DEFAULT = {"transmission": 0.5, "emission": 1.0}
 
 # T_int range (K), Guillot and climate alike: the GUI's T_int widget (picaso refuses T_int = 0). It holds every
-# planets.default_tint value: the Thorngren, Gao & Fortney (2019) rule's least is 45 K at T_eq 700 K (the low edge of
-# its fit) and its most about 671 K near T_eq 1883 K, under the "up to 700 K" the paper quotes for its grid.
+# planets.default_tint value.
 TINT_RANGE = (40.0, 700.0)
 
 # The climate grid and the quench search end at 100 bar (picaso_engine).

@@ -173,56 +173,22 @@ PLANETS: dict[str, dict[str, Any]] = {
     ),
 }
 
-# Interior temperature default, K, for a planet without a published value: the Thorngren, Gao & Fortney (2019, ApJL
-# 884, L6) hot-Jupiter relation, their equation 3, T_int = 0.39 T_eq exp(-(log10 F - 0.14)^2 / 1.095) with
-# F = 4 sigma T_eq^4 in units of 1e9 erg s^-1 cm^-2, inside the T_eq span of their model grid. Outside it, where the
-# relation is not fitted, TINT_DEFAULT_K.
-TINT_FIT_TEQ_RANGE_K = (700.0, 2800.0)
-THORNGREN_TINT_COEF = 0.39
-THORNGREN_LOG_F_PEAK = 0.14
-THORNGREN_LOG_F_WIDTH = 1.095
-THORNGREN_FLUX_UNIT_CGS = 1.0e9  # erg s^-1 cm^-2
-SIGMA_SB_CGS = 5.670374419e-5  # erg s^-1 cm^-2 K^-4, CODATA 2018
-TINT_DEFAULT_K = 100.0
+# Interior temperature default, K, of a planet the registry gives no published value (a maintainer's choice; a request
+# should state its own, and a run that does not carries a caveat with its result).
+TINT_DEFAULT_K = 300.0
 
 # Photolysis zenith angle, degrees. A transit sees the terminator: 83 deg is the slant of vulcan3's WASP-39 b config
 # (Tsai et al. 2023). An eclipse sees the dayside: 58 deg is VULCAN's dayside-average angle (Tsai et al. 2021).
 SL_ANGLE_DEG = {"transmission": 83.0, "emission": 58.0}
 
 
-def default_tint(planet: dict, system: dict | None = None) -> float:
-    """Return the default interior temperature, the Guillot and PICASO climate T_int.
+def default_tint(planet: dict) -> float:
+    """Return the default interior temperature (K), the Guillot and PICASO climate T_int.
 
-    The planet's published value where the registry carries one; else the Thorngren, Gao & Fortney (2019) relation
-    at the global T_eq (system_teq) when T_eq lies in TINT_FIT_TEQ_RANGE_K, rounded to a whole kelvin, far below the
-    relation's scatter; else TINT_DEFAULT_K. One definition for canonical_params and the sidebar widget.
-
-    Parameters
-    ----------
-    planet : dict
-        A registry entry (``PLANETS[...]``, or ``CUSTOM_FORM_SEED`` for the GUI's custom form).
-    system : dict, optional
-        ``star_teff`` (K), ``rstar_rsun`` (R_Sun) and ``orbit_au`` (au) of the custom planet; None for a registry
-        planet, whose own star and orbit are used.
-
-    Returns
-    -------
-    float
-        T_int, K.
+    The planet's published value where the registry carries one, else TINT_DEFAULT_K. One definition for
+    canonical_params and the sidebar widget.
     """
-    if "tint_k" in planet:
-        return float(planet["tint_k"])
-    teq = (
-        system_teq(system["star_teff"], system["rstar_rsun"], system["orbit_au"])
-        if system is not None
-        else system_teq(planet["star"]["teff"], planet["rstar_rsun"], planet["orbit_au"])
-    )
-    if not TINT_FIT_TEQ_RANGE_K[0] <= teq <= TINT_FIT_TEQ_RANGE_K[1]:
-        return TINT_DEFAULT_K
-    log_f = math.log10(4.0 * SIGMA_SB_CGS * teq**4 / THORNGREN_FLUX_UNIT_CGS)
-    return float(
-        round(THORNGREN_TINT_COEF * teq * math.exp(-((log_f - THORNGREN_LOG_F_PEAK) ** 2) / THORNGREN_LOG_F_WIDTH))
-    )
+    return float(planet.get("tint_k", TINT_DEFAULT_K))
 
 
 # The seed of the GUI's custom-planet form only (WASP-39 b's values, every field editable). The API never reads it: a

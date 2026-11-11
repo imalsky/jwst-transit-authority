@@ -40,7 +40,8 @@ if TYPE_CHECKING:
 
     from jwst_tool.tool_types import AnyArray, Log
 
-# The h-vs-2h gate, max |J_h - J_2h| / max |J_h|: measured rows on both sides of it are in notes "Jacobians and Fisher".
+# The h-vs-2h gate, max |J_h - J_2h| / max |J_h|. No basis recorded: it separates every recorded certified row from
+# every refused one (notes "Jacobians and Fisher"), but nothing derives it.
 FD_CONSISTENCY_TOL = 0.25
 
 

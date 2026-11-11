@@ -71,11 +71,13 @@ skill; policy: the project-root `CLAUDE.md`.
 - A range a sidebar widget also offers has one definition (`model_defs`, `planets`) that `canonical_params` and
   `share_config.WIDGET_RANGES` both read (`test_input_guards` checks both ends). A default outside its range, such as
   the Guillot `Tirr`, is refused, never clipped.
-- A request default has one definition (`model_defs.*_DEFAULT`, `planets.default_tirr` / `default_tint`) that
-  `canonical_params`, the sidebar and `share_config.WIDGET_RANGES` read; `jac_method` and the extra molecules still
-  differ between the API and the sidebar, a decision in todo. A fixed number that changes a result is a named constant
-  with its unit, in `model_defs` or the constant block of the module whose topic it is; those with no recorded reason
-  are listed in todo.
+- A request default has one definition (`model_defs.*_DEFAULT`, `planets.default_tirr` / `default_tint`,
+  `run_params.default_rt_ptop_bar`) that `canonical_params`, the sidebar and `share_config.WIDGET_RANGES` read;
+  `jac_method` and the extra molecules still differ between the API and the sidebar, a decision in todo. A fixed number
+  that changes a result is a named constant with its unit, in `model_defs` or the constant block of the module whose
+  topic it is, its comment saying "no basis recorded" where none is.
+- A run that reads T_int without the request stating it records `tint_from_default`, and its result carries the
+  caveat; the sidebar always states T_int.
 - Checks read the request's own values; `canonical_params` rounds last. A loaded configuration restores every saved
   value: a widget seeder replaces only the value it wrote itself (its `_auto` key).
 
@@ -158,7 +160,7 @@ skill; policy: the project-root `CLAUDE.md`.
 - Emission: Guillot default profile, flux-weighted tau-bottom gate, and the engine's `ibased_linsap` solver, never
   `ibased` (notes "Emission"). Eclipse depths come from the engine's `eclipse_flux_tau`, never `emission_flux_tau`;
   `emission_radius` stays the single (R_em/R_star)^2 anchor. Guillot `Tint` and `Tirr` defaults have one definition each
-  (`planets.default_tint`, the registry).
+  (`planets.default_tint`, `planets.default_tirr`).
 
 ### PICASO engine
 

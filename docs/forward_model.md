@@ -27,8 +27,9 @@ structure (T, mmw): the standard nested-model comparison.
 
 What a run leaves out travels with its result, so a cache hit shows it too: ``unlisted_core`` names the core absorbers
 of the band outside the engine's required five (HCN, H2S, SO2, C2H2, OCS, SO) that the RT omits without naming them, and
-a PICASO result carries ``picaso_retried_layers``, the layer solves that converged only at a shifted temperature. The
-GUI shows both as run caveats.
+a PICASO result carries ``picaso_retried_layers``, the layer solves that converged only at a shifted temperature, and a
+run that reads T_int without the request stating it carries ``tint_from_default`` in its payload. The GUI shows each as
+a run caveat.
 
 ## The stages
 
@@ -160,6 +161,9 @@ the 10x-solar equilibrium baseline), with the planet identity injected through t
 - RT: profile `{rp_cm, gs_cgs, rstar_cm}`.
 - noise: star dict to the Pandeia PHOENIX SED and Ks normalization.
 - timing: `t14_hr` to the in- and out-of-transit integration split.
+
+The interior temperature T_int (Guillot and the PICASO climate) defaults to the registry's published value where it
+has one (WASP-107 b), else `TINT_DEFAULT_K`, 300 K (`planets.default_tint`).
 
 T-P and Kzz are explicit modes, never silently substituted. Under Guillot the
 structural baseline is isothermal at a representative temperature (it sets

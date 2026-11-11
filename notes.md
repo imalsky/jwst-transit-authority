@@ -17,7 +17,7 @@ names the code state it was measured on.
 - Cache versions: `model_defs._VERSION` 64 (its fixtures, validation data and figures are not yet regenerated:
   todo), `noise.WORKER_VERSION` 12,
   `adjoint_diag._ADJ_VERSION` 4, `picaso_engine.WORKER_VERSION` 4. Default keys:
-  transmission `dd3ecebad77ba212` (test-pinned), emission `fc1ce9460f059330`.
+  transmission `6b7ef08447c10fdc` (test-pinned), emission `b482928cce0eeca8`.
 - Fixtures `tests/live/data/w39b_v63_reference.npz` and `w39b_picaso_reference.npz`
   (cold WASP-39 b, both modes; jax 0.6.2, vulcan3 0.18.0, vulcan-forward 0.31.0
   at dc2510b; 11 min, and 110 min for PICASO with 8 jobs sharing 10 cores; 45 min alone at v62).
@@ -222,24 +222,17 @@ names the code state it was measured on.
 - Guillot `kappa_IR` -2.0; `T_irr` defaults per planet from the registry's star and
   orbit; emission uses the DAYSIDE T_irr (x 2^0.25): planet-average T_irr puts the HD
   189733 b eclipse 28-49% low (chi2/N 934 -> 31 against Inglis et al. 2024).
-- `Tint` default (`planets.default_tint`, from v63; API, GUI and the PICASO climate): a published value where the
-  registry has one (WASP-107 b 460 K, Sing et al. 2024), else the Thorngren, Gao & Fortney (2019, ApJL 884, L6)
-  hot-Jupiter relation, their equation 3, T_int = 0.39 T_eq exp(-(log10 F - 0.14)^2 / 1.095), F = 4 sigma T_eq^4 in
-  1e9 erg s^-1 cm^-2, at the global T_eq while T_eq is inside their grid's 700-2800 K, rounded to 1 K; else
-  `TINT_DEFAULT_K` 100 (through v62 every planet without a published value took 100). A custom planet takes its own
-  star and orbit. `TINT_RANGE` is 40-700 K: the rule gives 45 K at T_eq 700 K, its least, and 671 K near
-  T_eq 1883 K, its most, under the "up to 700 K" the paper quotes; 435 K at 2800 K [M, the formula]. A default outside
-  the range would be refused by the API and left empty, with the same sentence, by the sidebar. Defaults [I, the formula]:
-
-  | planet | T_eq (K) | T_int v62 -> v63 (K) | T_irr transit / eclipse (K) |
-  |---|---|---|---|
-  | WASP-39 b | 1162.1 -> 1166.4 | 100 -> 356 | 1640 / 1960 (unchanged) |
-  | HD 189733 b | 1194.4 -> 1190.4 | 100 -> 376 | 1680 / 2000 (unchanged) |
-  | HD 209458 b | 1476.8 | 100 -> 570 | 2080 / 2480 |
-  | WASP-107 b | 737.5 | 460 (published) | 1040 / 1240 |
-
-  Every registry Guillot default stays inside `T_WINDOW` in both modes (WASP-39 b 998-2138 K, HD 189733 b 1022-2115,
-  HD 209458 b 1269-2714, WASP-107 b 653-1930, at the catalogue g and at 1.25 g) [M, profile only].
+- `Tint` default (`planets.default_tint`; API, GUI and the PICASO climate), the maintainer's choice from v64: a
+  published value where the registry has one (WASP-107 b 460 K, Sing et al. 2024), else `TINT_DEFAULT_K` 300 K. A
+  custom planet states its own. A run that reads T_int (Guillot or the PICASO climate) without the request stating it
+  carries `tint_from_default` in its payload and a caveat with its result; the flag keys the model cache, not the
+  chemistry cache. The GUI always states it. v63 used the Thorngren, Gao & Fortney (2019) hot-Jupiter relation inside
+  T_eq 700-2800 K and 100 K elsewhere: fitted above about 0.5 M_J, where WASP-39 b is not, and stepping from 100 K to
+  45 K at T_eq 700 K. Its defaults moved to 300 K: WASP-39 b 356, HD 189733 b 376, HD 209458 b 570 K [I, the formula].
+  T_irr defaults (K, transit / eclipse): WASP-39 b 1640 / 1960, HD 189733 b 1680 / 2000, HD 209458 b 2080 / 2480,
+  WASP-107 b 1040 / 1240. Every registry Guillot default stays inside `T_WINDOW` in both modes at the catalogue g and
+  at 1.25 g: WASP-39 b 997-2098 K, HD 189733 b 1021-2104, HD 209458 b 1263-2609, WASP-107 b 653-1930 [M, profile only,
+  v64].
 - One gravity per run: the catalogue (Rp, g) pair is converted to the chemistry's anchor
   pressure before it reaches VULCAN (`_assemble_chem`; vulcan3 anchors g near 1 bar). On
   W39b (anchor 0.923 bar) R -6.7%, g +14.9%. mu comes from one probe build (2.30 is 0.62%
@@ -552,7 +545,9 @@ gate 0.25.
   ("Current state"), transmission max |d| 68.8 ppm at 3.34 um (9 of 164 R = 100 bins over
   10 ppm, all in 3.3-3.6 um), SO2 band 3.95-4.15 um -0.8 ppm, emission max |d| 0.48 ppm;
   v62 `87afcd45da73bb56` / `40c16cece4cd0dea`; v63 (vulcan-forward 0.31.0 interface, survey
-  values for WASP-39 b and HD 189733 b, the Thorngren T_int default) the current keys.
+  values for WASP-39 b and HD 189733 b, the Thorngren T_int default) `6142809ab7cffe07` / `45d2a4c73f6ef7dc`; v64
+  (a table run starts at the table's top, custom planets state their system, T_int default 300 K and
+  `tint_from_default`) the current keys ("Current state"; the move: "Structure: T-P, Kzz, gravity anchor, model top").
 - The review pass of v63 (keys `6142809ab7cffe07` / `45d2a4c73f6ef7dc`: the four dead transport keys left the payload,
   and gs_cgs keeps two decimals, so WASP-39 b runs g 390.58, not 390.6) moved the references by at most 0.361 ppm
   (VULCAN transit, at 1.06 um, median -0.315), 0.030 (VULCAN eclipse), 0.368 / 0.035 (PICASO transit / eclipse) at
@@ -795,7 +790,9 @@ Standing maintainer decisions; the measurements sit in the section named.
   off); carbon-rich columns and WASP-107 b are uncovered, a user adds CH3/CS per run
   ("Opacity and radiative transfer").
 - `p_ref_bar` 1 mbar is not tuned to the data; `rt_ptop_bar` 1e-7 bar keeps the
-  published convention ("Structure: T-P, Kzz, gravity anchor, model top").
+  published convention, and a T-P table's run starts at the table's own top (v64; "Structure: T-P, Kzz, gravity
+  anchor, model top").
+- The T_int default is 300 K where the registry has no published value (v64; same section).
 - lnR0 is a radius change at fixed planet mass in both modes, as in vulcan-forward
   0.29.0 ("Emission", "Superseded designs").
 - A bin's segment is the count-majority segment, no fractional row ("Measurement
@@ -825,7 +822,10 @@ Standing maintainer decisions; the measurements sit in the section named.
   refused). `FORMER_EXTRA_MOLECULES` stays on the maintainer's request: old share files that
   list NH3 as an extra still load. Which fixed numbers become settings, and the two defaults
   the GUI and the API still disagree on (`jac_method`, `extra_mols`), wait for the
-  maintainer (todo).
+  maintainer (todo). The fixed numbers with no recorded basis keep their values, each commented "no basis recorded"
+  (maintainer's decision, v64): `KZZ_CONST_DEFAULT`, `KZZ_KDEEP_DEFAULT`, `LOG_GAMMA_DEFAULT`, `LOG_KAPPA_CLOUD_DEFAULT`,
+  the Guillot kappa, gamma and cloud FD steps, `binning.LSF_R_FLOOR`, `certify.EMIS_TAU_WARN`,
+  `tp_tables.T_CHECK_POINTS`, `planets.TIRR_RANGE` and `jacobian.FD_CONSISTENCY_TOL` 0.25 ("Jacobians and Fisher").
 - A custom planet states its own system, UV spectrum (VULCAN only), T-P mode and T_int (v64,
   `run_params.CUSTOM_REQUIRED_KEYS`), refused in one sentence naming every missing key: nothing comes from WASP-39 b,
   and a shipped table belongs to its planet only. `planets.CUSTOM_FORM_SEED` seeds the GUI form and nothing else; the

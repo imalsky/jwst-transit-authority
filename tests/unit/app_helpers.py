@@ -45,7 +45,14 @@ def synthetic_out(science_mode="transmission", saturated=False, sigma_detect=0.0
         "ymix_species": np.array(["H2", "CO", "H2O", "CH4", "CO2", "SO2", "He"], dtype="U16"),
         "science_mode": science_mode,
         "params_json": json.dumps(
-            {"co_ratio": 0.549348, "tp_mode": "guillot", "met_x_solar": 10.0, "science_mode": science_mode}
+            {
+                "co_ratio": 0.549348,
+                "tp_mode": "guillot",
+                "met_x_solar": 10.0,
+                "science_mode": science_mode,
+                "Tint": 300.0,
+                "tint_from_default": False,
+            }
         ),
         # every cached result carries the caveat fields (forward.py writes
         # them unconditionally); empty = nothing to report

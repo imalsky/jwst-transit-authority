@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import types
 
@@ -166,19 +167,25 @@ def test_picaso_refuses_a_vulcan_only_setting_by_name(setting):
         forward.canonical_params(dict(planet="wasp39b", chem_provider="picaso", **setting))
 
 
-def test_left_out_absorbers_and_picaso_retries_ride_the_result():
+def test_left_out_absorbers_an_unstated_tint_and_picaso_retries_ride_the_result():
     pytest.importorskip("pandas")  # the result page's own import; the unit CI lane installs no GUI stack
     from jwst_tool import gui_results
 
+    stated = forward.canonical_params(dict(planet="wasp39b", tp_mode="guillot", Tint=300.0))
     base = {
         "unmodeled": np.array([], dtype="U32"),
         "photo_escalated": np.array([], dtype="U48"),
         "rate_rows_outside": np.array([0]),
         "rate_rows_total": np.array([0]),
+        "params_json": np.array(json.dumps(stated)),
     }
     vulcan = dict(base, chem_provider=np.array("vulcan"), unlisted_core=np.array(["HCN", "H2S"], dtype="U8"))
     caveats = gui_results._model_caveats(vulcan)
     assert any(c.startswith("HCN, H2S absorb in this band and are not in the spectrum") for c in caveats)
+    assert not any("Interior temperature" in c for c in caveats)
+    unstated = forward.canonical_params(dict(planet="wasp39b", tp_mode="guillot"))
+    caveats = gui_results._model_caveats(dict(vulcan, params_json=np.array(json.dumps(unstated))))
+    assert "Interior temperature not stated: the run used the default T_int = 300 K." in caveats
     no_core = np.array([], dtype="U8")
     picaso = dict(base, chem_provider=np.array("picaso"), unlisted_core=no_core, picaso_retried_layers=np.array([3]))
     caveats = gui_results._model_caveats(picaso)

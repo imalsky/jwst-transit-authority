@@ -404,7 +404,6 @@ def _restore_system_profile(
         state[pk("sflux")] = str(cp["sflux"])
     if tp_mode == "picaso_climate":
         state[pk("tint")] = float(cp["Tint"])
-        state[pk("tint_auto")] = None  # a loaded T_int no longer tracks the custom star and orbit
         state[key(f"rfacv_picaso_{cp['science_mode']}")] = float(cp["rfacv"])
     elif tp_mode == "guillot":
         state.update(
@@ -412,7 +411,6 @@ def _restore_system_profile(
                 pk("tirr"): float(cp["Tirr"]),
                 pk("tirr_auto"): None,
                 pk("tint"): float(cp["Tint"]),
-                pk("tint_auto"): None,
                 pk("lk"): float(cp["log_kappa"]),
                 pk("lg"): float(cp["log_gamma"]),
             }
