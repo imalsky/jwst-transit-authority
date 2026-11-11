@@ -114,17 +114,5 @@ def load_result(params: dict) -> dict | None:
     (provenance.producer_commits; empty when no checkout could be read; under
     PICASO followed by the worker's stack versions), absent when the column
     came from the chem cache.
-
-    An entry written before unlisted_core or picaso_retried_layers existed is
-    logged and treated as a miss, so no result is shown without them.
     """
-    p = cache_path(params)
-    res = load_cached_npz(p)
-    if res is None:
-        return None
-    need = ["unlisted_core"] + (["picaso_retried_layers"] if str(res["chem_provider"]) == "picaso" else [])
-    missing = [k for k in need if k not in res]
-    if missing:
-        logging.getLogger(__name__).warning("[cache] %s predates %s; treating it as a cache miss", p.name, missing)
-        return None
-    return res
+    return load_cached_npz(cache_path(params))

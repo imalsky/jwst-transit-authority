@@ -24,6 +24,7 @@ from jwst_tool.certify import (
     check_elements,
     check_t_window,
     check_unmodeled,
+    table_species,
     unmodeled_absorbers,
 )
 from jwst_tool.chem_build import assemble_chem
@@ -55,6 +56,7 @@ from jwst_tool.spectrum import (
     EmissionEvidence,
     RtSetup,
     build_rt_setup,
+    emission_photosphere_bar,
     emission_spectra,
     gas_mask,
     transmission_spectra,
@@ -333,7 +335,8 @@ def _baseline_column(
     return _solve_cold(chem, A, th0, species_now, chem_out, setup, t0, log)
 
 
-def _opacity_advisory(col: _Column, config: Any, log: Log) -> list:
+def _opacity_advisory(col: _Column, setup: RtSetup, th0: AnyArray, log: Log) -> tuple[list, tuple[float, float]]:
+    """Gate and report the baseline's absorbers with no k-table; return them and the photosphere band, bar, it used."""
     # Missing opacity: a species the network solves but the RT cannot see is
     # missing absorption, not a missing trace. Loud, never silent. The error it
     # leaves is UNSIGNED: the tool scores depth - depth_wo, which in the
@@ -342,23 +345,24 @@ def _opacity_advisory(col: _Column, config: Any, log: Log) -> list:
     # omitted overlapping band deflates it.
     # Above UNMODELED_VMR_REFUSE the run stops here, before any spectrum or
     # Jacobian row is built: a missing bulk absorber is not a caveat.
-    table_species = {v["vulcan"] for k, v in config.MOLECULES.items() if k not in NO_EXOMOLOP_TABLE}
-    check_unmodeled(
-        col.species, np.asarray(col.y_sol), np.asarray(col.chem.p_bar), table_species, "baseline solve", log
-    )
-    unmodeled = unmodeled_absorbers(col.species, np.asarray(col.y_sol), np.asarray(col.chem.p_bar), table_species)
+    # The band is where the observation forms: the transit photosphere, or the eclipse's own (certify).
+    band = PHOTOSPHERE_BAR if setup.emis is None else emission_photosphere_bar(setup, col.column, col.y_sol, th0)
+    log(f"[fwd] absorber gate band: {band[0]:.3g}-{band[1]:.3g} bar")
+    tables = table_species(setup.config.MOLECULES)
+    y, p_bar = np.asarray(col.y_sol), np.asarray(col.chem.p_bar)
+    check_unmodeled(col.species, y, p_bar, tables, band, "baseline solve", log)
+    unmodeled = unmodeled_absorbers(col.species, y, p_bar, tables, band_bar=band)
     if unmodeled:
         log(
             "[fwd] WARNING: this column carries "
             + ", ".join(f"{sp} at {v:.2e}" for sp, v in unmodeled)
-            + f" (mean VMR, {PHOTOSPHERE_BAR[1] * 1e3:g}-"
-            f"{PHOTOSPHERE_BAR[0] * 1e3:g} mbar) with NO published k-table, "
+            + f" (mean VMR, {band[0]:.2g}-{band[1]:.2g} bar) with NO published k-table, "
             "so the RT omits them: the modeled feature contrast carries an "
             "UNQUANTIFIED error that can run in EITHER direction -- omitted "
             "background opacity inflates it, an omitted overlapping band "
             "deflates it. Carbon-rich compositions are where this bites."
         )
-    return unmodeled
+    return unmodeled, band
 
 
 def _rate_advisory(cp: dict, T_check: np.ndarray, log: Log) -> dict:
@@ -431,7 +435,8 @@ def _write_result(params: dict, cp: dict, A: Any, setup: RtSetup, col: _Column, 
         # auto-sized U dtype: a fixed width truncates the longest label
         photo_escalated=np.array(col.escalated),
         # Core absorbers of the band the RT leaves out without naming them
-        # (HCN, H2S or SO2): their features are missing from the spectrum.
+        # (constants.CORE_MOLECULE_BANDS_UM outside REQUIRED_MOLECULES): their
+        # features are missing from the spectrum.
         unlisted_core=np.array(list(setup.rt.unlisted_core_molecules), dtype="U8"),
     )
     if col.solved_here:
@@ -523,7 +528,7 @@ def run_model(params: dict, log: Log = print) -> Path:
     setup = build_rt_setup(cp, A.profile, A.tp_eval, A.config, chem, advance, log)
     th0 = jnp.asarray(A.theta)
     col = _baseline_column(params, cp, chem, A, th0, setup, advance, log)
-    unmodeled = _opacity_advisory(col, A.config, log)
+    unmodeled, unmodeled_band = _opacity_advisory(col, setup, th0, log)
     rate_ex = _rate_advisory(cp, T_check, log)
     wo_list = list(cp["wo_mols"])
     evidence = None
@@ -553,6 +558,7 @@ def run_model(params: dict, log: Log = print) -> Path:
             advance=advance,
             log=log,
             picaso_retried=A.retried if pic else [],
+            unmodeled_band=unmodeled_band,
         )
         rows = build_jacobian(baseline, depth.shape[0])
     if pic:

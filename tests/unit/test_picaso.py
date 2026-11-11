@@ -196,3 +196,25 @@ def test_a_damaged_cache_file_is_quarantined_and_logged_not_silently_re_solved(t
     assert not damaged.exists()
     assert [p.name.split("-")[0] for p in tmp_path.iterdir()] == ["entry.npz.corrupt"]
     assert "unreadable" in caplog.text
+
+
+def test_the_picaso_assembly_selects_the_default_network_before_vulcan3(monkeypatch):
+    """The radius anchor reads vulcan3's grid rule, and vulcan3 freezes a network at its first import: the assembly
+    names the tool's default first, so a default VULCAN run later in the same process is not refused."""
+    vulcan_chem = pytest.importorskip("vulcan_forward.vulcan_chem")
+    from jwst_tool import chem_build, forward
+
+    calls = []
+
+    class Reached(Exception):
+        pass
+
+    def anchor(*_a):
+        calls.append("anchor")
+        raise Reached
+
+    monkeypatch.setattr(vulcan_chem, "select_network", lambda *pair: calls.append(pair))
+    monkeypatch.setattr(chem_build, "chem_radius_anchor_bar", anchor)
+    with pytest.raises(Reached):
+        pe.assemble(forward.canonical_params(dict(planet="wasp39b", chem_provider="picaso")), lambda *_a: None)
+    assert calls == [model_defs.NETWORKS[model_defs.DEFAULT_NETWORK], "anchor"]

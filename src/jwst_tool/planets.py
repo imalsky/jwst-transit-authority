@@ -88,10 +88,12 @@ SFLUX_SOURCES["sflux-solar_hd209b.txt"] = SFLUX_SOURCES["Gueymard_solar.txt"]
 PLANETS: dict[str, dict[str, Any]] = {
     "wasp39b": dict(
         label="WASP-39 b",
+        # The sulfur survey's system (vulcan-retrieval runs/survey/wasp39b.yaml): the 1 mbar transit radius
+        # 9.546962e9 cm, g = G Mp / rp^2 with Mp 0.281 M_J, R* 0.939 R_Sun.
         star=dict(teff=5485.0, log_g=4.5, metallicity=0.0, ks_mag=10.20),
-        rstar_rsun=0.932,
-        rp_rjup=1.279,
-        gs_cgs=422.0,
+        rstar_rsun=0.939,
+        rp_rjup=1.33539,
+        gs_cgs=390.58,
         orbit_au=0.04828,
         t14_hr=2.80,
         sflux="sflux-W39b_Tsai2023.txt",
@@ -103,11 +105,13 @@ PLANETS: dict[str, dict[str, Any]] = {
     ),
     "hd189733b": dict(
         label="HD 189733 b",
+        # The sulfur survey's system (vulcan-retrieval runs/survey/hd189733b.yaml): the 1 mbar transit radius
+        # 8.105826e9 cm, g = G Mp / rp^2 with Mp 1.13 M_J, R* 0.75 R_Sun.
         star=dict(teff=5040.0, log_g=4.5, metallicity=0.0, ks_mag=5.54),
-        rstar_rsun=0.756,
-        rp_rjup=1.138,
-        gs_cgs=2190.0,
-        orbit_au=0.0313,
+        rstar_rsun=0.75,
+        rp_rjup=1.13381,
+        gs_cgs=2178.79,
+        orbit_au=0.03126,
         t14_hr=1.80,
         sflux="sflux-HD189_Moses11.txt",
         tp_table="atm_HD189_Kzz.txt",
@@ -168,7 +172,16 @@ PLANETS: dict[str, dict[str, Any]] = {
     ),
 }
 
-# Guillot T_int for a planet without a published interior temperature.
+# Interior temperature default, K, for a planet without a published value: the Thorngren, Gao & Fortney (2019, ApJL
+# 884, L6) hot-Jupiter relation, their equation 3, T_int = 0.39 T_eq exp(-(log10 F - 0.14)^2 / 1.095) with
+# F = 4 sigma T_eq^4 in units of 1e9 erg s^-1 cm^-2, inside the T_eq span of their model grid. Outside it, where the
+# relation is not fitted, TINT_DEFAULT_K.
+TINT_FIT_TEQ_RANGE_K = (700.0, 2800.0)
+THORNGREN_TINT_COEF = 0.39
+THORNGREN_LOG_F_PEAK = 0.14
+THORNGREN_LOG_F_WIDTH = 1.095
+THORNGREN_FLUX_UNIT_CGS = 1.0e9  # erg s^-1 cm^-2
+SIGMA_SB_CGS = 5.670374419e-5  # erg s^-1 cm^-2 K^-4, CODATA 2018
 TINT_DEFAULT_K = 100.0
 
 # Photolysis zenith angle, degrees. A transit sees the terminator: 83 deg is the slant of vulcan3's WASP-39 b config
@@ -176,12 +189,39 @@ TINT_DEFAULT_K = 100.0
 SL_ANGLE_DEG = {"transmission": 83.0, "emission": 58.0}
 
 
-def default_tint(planet: dict) -> float:
-    """Guillot T_int default: the planet's published value when the registry carries one, else TINT_DEFAULT_K.
+def default_tint(planet: dict, system: dict | None = None) -> float:
+    """Return the default interior temperature, the Guillot and PICASO climate T_int.
 
-    ONE definition for canonical_params and the sidebar widget, like default_tirr.
+    The planet's published value where the registry carries one; else the Thorngren, Gao & Fortney (2019) relation
+    at the global T_eq (system_teq) when T_eq lies in TINT_FIT_TEQ_RANGE_K, rounded to a whole kelvin, far below the
+    relation's scatter; else TINT_DEFAULT_K. One definition for canonical_params and the sidebar widget.
+
+    Parameters
+    ----------
+    planet : dict
+        A registry entry (``PLANETS[...]`` or ``CUSTOM_DEFAULTS``).
+    system : dict, optional
+        ``star_teff`` (K), ``rstar_rsun`` (R_Sun) and ``orbit_au`` (au) of the custom planet; None for a registry
+        planet, whose own star and orbit are used.
+
+    Returns
+    -------
+    float
+        T_int, K.
     """
-    return float(planet.get("tint_k", TINT_DEFAULT_K))
+    if "tint_k" in planet:
+        return float(planet["tint_k"])
+    teq = (
+        system_teq(system["star_teff"], system["rstar_rsun"], system["orbit_au"])
+        if system is not None
+        else system_teq(planet["star"]["teff"], planet["rstar_rsun"], planet["orbit_au"])
+    )
+    if not TINT_FIT_TEQ_RANGE_K[0] <= teq <= TINT_FIT_TEQ_RANGE_K[1]:
+        return TINT_DEFAULT_K
+    log_f = math.log10(4.0 * SIGMA_SB_CGS * teq**4 / THORNGREN_FLUX_UNIT_CGS)
+    return float(
+        round(THORNGREN_TINT_COEF * teq * math.exp(-((log_f - THORNGREN_LOG_F_PEAK) ** 2) / THORNGREN_LOG_F_WIDTH))
+    )
 
 
 # The "custom" planet starts from these (WASP-39b) values; everything editable.
@@ -227,6 +267,9 @@ DAYSIDE_TEQ_FACTOR = 2.0**0.25
 # ends; the profile built from it is then held to model_defs.T_WINDOW. A value outside is refused, never clipped.
 TIRR_RANGE = (800.0, 2500.0)
 
+# K: the default T_irr is rounded onto the T_irr widget's step, so an untouched widget holds the API's value exactly.
+TIRR_STEP_K = 20.0
+
 
 def default_tirr(planet: dict, system: dict | None = None, science_mode: str = "transmission") -> float:
     """Guillot T_irr default: sqrt(2) * T_eq on the GUI's 20 K step grid, never clipped (check_tirr refuses it).
@@ -249,7 +292,7 @@ def default_tirr(planet: dict, system: dict | None = None, science_mode: str = "
     )
     if str(science_mode) == "emission":
         teq *= DAYSIDE_TEQ_FACTOR
-    return round(teq * math.sqrt(2.0) / 20.0) * 20.0
+    return round(teq * math.sqrt(2.0) / TIRR_STEP_K) * TIRR_STEP_K
 
 
 def check_tirr(tirr_k: float, derived: bool) -> None:

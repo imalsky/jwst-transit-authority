@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from . import binning, instruments as ins, proc as proc_mod
+from .model_defs import SAT_LIMIT_DEFAULT
 
 if TYPE_CHECKING:
     from jwst_tool.tool_types import Log
@@ -113,7 +114,7 @@ def backend_fingerprint() -> dict:
     return _BACKEND_FINGERPRINT
 
 
-def noise_job(star: dict, mode_keys: list[str], sat_limit: float = 0.80) -> dict:
+def noise_job(star: dict, mode_keys: list[str], sat_limit: float = SAT_LIMIT_DEFAULT) -> dict:
     """Return the worker job for a star and modes; every field joins the cache key."""
     modes = []
     for key in mode_keys:
@@ -179,7 +180,7 @@ def _read_cached_json(path: Path) -> dict | None:
         return None
 
 
-def missing_modes(star: dict, mode_keys: list[str], sat_limit: float = 0.80) -> list[str]:
+def missing_modes(star: dict, mode_keys: list[str], sat_limit: float = SAT_LIMIT_DEFAULT) -> list[str]:
     """Return the subset of ``mode_keys`` with no READABLE per-mode cache entry (in order).
 
     Probes readability, not bare existence, quarantining unreadable entries -- so this and ``run_modes`` agree on
@@ -193,7 +194,7 @@ def missing_modes(star: dict, mode_keys: list[str], sat_limit: float = 0.80) -> 
 def run_modes(
     star: dict,
     mode_keys: list[str],
-    sat_limit: float = 0.80,
+    sat_limit: float = SAT_LIMIT_DEFAULT,
     progress: Log | None = None,
     launch: bool = True,
 ) -> dict | None:

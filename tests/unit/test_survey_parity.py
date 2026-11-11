@@ -15,8 +15,10 @@ import yaml
 from jwst_tool import planets
 
 SURVEY = Path(__file__).resolve().parents[3] / "vulcan-retrieval"
-# planner registry key -> (survey spec, survey vulcan3 config). WASP-39 b and HD 189733 b are not aligned yet.
+# planner registry key -> (survey spec, survey vulcan3 config)
 SHARED = {
+    "wasp39b": ("runs/survey/wasp39b.yaml", "data/survey/w39b/W39b.yaml"),
+    "hd189733b": ("runs/survey/hd189733b.yaml", "data/survey/hd189b/HD189b.yaml"),
     "wasp107b": ("runs/survey/wasp107b.yaml", "data/survey/w107b/W107b.yaml"),
     "hd209458b": ("runs/survey/hd209458b.yaml", "data/survey/hd209b/HD209b.yaml"),
 }
@@ -36,7 +38,10 @@ def test_registry_matches_the_survey(planet):
     assert reg["gs_cgs"] == pytest.approx(spec["tp_gravity_cgs"], rel=REL)
     assert reg["rstar_rsun"] == pytest.approx(cfg["r_star"], rel=REL)
     assert reg["orbit_au"] == pytest.approx(cfg["orbit_radius"], rel=REL)
-    ours = Path(planets.sflux_file(reg["sflux"]))
+    # a relative path is vulcan3's: the working directory first, then its packaged data (the survey runs from its root)
+    resolve_data_path = pytest.importorskip("vulcan3.paths").resolve_data_path
+    ours = resolve_data_path(planets.sflux_file(reg["sflux"]))
     theirs = SURVEY / cfg["sflux_file"]
+    theirs = theirs if theirs.exists() else resolve_data_path(cfg["sflux_file"])
     assert ours.name == theirs.name
     assert hashlib.sha256(ours.read_bytes()).hexdigest() == hashlib.sha256(theirs.read_bytes()).hexdigest()

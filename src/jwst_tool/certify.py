@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from jwst_tool.model_defs import NZ_DEFAULT, T_WINDOW
+from jwst_tool.model_defs import NO_EXOMOLOP_TABLE, NZ_DEFAULT, T_WINDOW
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -217,8 +217,14 @@ UNMODELED_VMR_WARN = 1.0e-4
 UNMODELED_VMR_REFUSE = 1.0e-3
 
 
-# Transmission photosphere, the band the warning is measured over (bar).
+# Transmission photosphere, the band the gate averages over in a transit (bar).
 PHOTOSPHERE_BAR = (1.0e-5, 1.0e-2)
+
+# In an eclipse the gate averages over the pressures the emitted flux comes from: between these flux-weighted
+# quantiles of the tau = 2/3 pressure over the baseline column's bands and g-ordinates
+# (spectrum.emission_photosphere_bar), the central 90 % of the flux (measured: notes "Convergence certificate and
+# element gate").
+EMIS_PHOTOSPHERE_QUANTILES = (0.05, 0.95)
 
 
 # Absent from the k-table set for a REASON, so not missing opacity. Two
@@ -259,17 +265,25 @@ _NOT_A_K_TABLE_ABSORBER = frozenset(
 )
 
 
+def table_species(molecules: dict) -> set[str]:
+    """Return the network names of the species the engine can build opacity for, from its molecule table."""
+    return {v["vulcan"] for k, v in molecules.items() if k not in NO_EXOMOLOP_TABLE}
+
+
 def unmodeled_absorbers(
     species: list[str],
     y: AnyArray,
     p_bar: AnyArray,
     table_species: Iterable[str],
+    band_bar: tuple[float, float] = PHOTOSPHERE_BAR,
     floor: float = UNMODELED_VMR_WARN,
 ) -> list[tuple[str, float]]:
     """Network species with no opacity table that are abundant anyway.
 
-    Returns [(name, mean VMR over the transmission photosphere), ...] above
+    Returns [(name, mean VMR over the layers inside ``band_bar``), ...] above
     ``floor`` (UNMODELED_VMR_WARN by default), most abundant first.
+    ``band_bar`` is the photosphere of the observation, bar: PHOTOSPHERE_BAR in
+    a transit, spectrum.emission_photosphere_bar in an eclipse.
     ``table_species`` is the set the engine can build opacity for; the
     background gases and the homonuclear diatomics are excluded because their
     absence is deliberate, not a gap.
@@ -277,7 +291,7 @@ def unmodeled_absorbers(
     y = np.asarray(y, dtype=np.float64)
     vmr = y / y.sum(axis=1, keepdims=True)
     p_bar = np.asarray(p_bar, dtype=np.float64)
-    band = (p_bar >= PHOTOSPHERE_BAR[0]) & (p_bar <= PHOTOSPHERE_BAR[1])
+    band = (p_bar >= band_bar[0]) & (p_bar <= band_bar[1])
     if not band.any():
         return []
     skip = set(table_species) | _NOT_A_K_TABLE_ABSORBER
@@ -290,6 +304,7 @@ def check_unmodeled(
     y: AnyArray,
     p_bar: AnyArray,
     table_species: Iterable[str],
+    band_bar: tuple[float, float],
     stage: str,
     log: Log = print,
 ) -> None:
@@ -297,8 +312,9 @@ def check_unmodeled(
 
     Below it the run proceeds and only says so (the warning at the call site). No table can be supplied for these
     species -- ExoMolOP publishes none -- so the only remedy is a composition that does not make them bulk carriers.
+    ``band_bar`` is the observation's photosphere, as for unmodeled_absorbers.
     """
-    over = unmodeled_absorbers(species, y, p_bar, table_species, floor=UNMODELED_VMR_REFUSE)
+    over = unmodeled_absorbers(species, y, p_bar, table_species, band_bar=band_bar, floor=UNMODELED_VMR_REFUSE)
     if not over:
         return
     log(
@@ -306,7 +322,7 @@ def check_unmodeled(
         + ", ".join(f"{sp} {v:.2e}" for sp, v in over)
     )
     raise RuntimeError(
-        f"{stage}: the transmission photosphere carries "
+        f"{stage}: the photosphere ({band_bar[0]:.2g}-{band_bar[1]:.2g} bar) carries "
         + ", ".join(f"{sp} at VMR {v:.2e}" for sp, v in over)
         + f", over the {UNMODELED_VMR_REFUSE:.0e} gate, and the RT has no "
         "opacity table for it: the spectrum would omit a bulk absorber and "
@@ -336,6 +352,10 @@ EMIS_TAU_THIN = 3.0  # per-wavelength "sees through the bottom"
 
 
 EMIS_THIN_FLUX_FRAC = 0.01  # tolerated share of emitted flux from those wavelengths
+
+# A removed-molecule eclipse whose smallest bottom optical depth is below this, while its flux passes the gate, is
+# reported as leaning on the deepest layers (a log warning; no number changes). No basis recorded.
+EMIS_TAU_WARN = 10.0
 
 
 def tau_bottom_breakdown(wl_um: AnyArray, tau: AnyArray, flux: AnyArray) -> str:

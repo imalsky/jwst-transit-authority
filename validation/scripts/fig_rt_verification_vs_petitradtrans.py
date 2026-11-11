@@ -27,7 +27,7 @@ from vulcan_forward import exojax_rt
 
 RSTAR_W39 = 0.932 * 6.957e10
 # Single-molecule and reduced references by design: each build names the core absorbers it leaves out.
-NOT_H2O = ["CO2", "CO", "CH4", "NH3", "HCN", "H2S", "SO2"]
+NOT_H2O = ["CO2", "CO", "CH4", "NH3", "HCN", "H2S", "SO2", "C2H2", "OCS", "SO"]
 RJ = 7.1492e9
 KB, MH = 1.380649e-16, 1.66053907e-24
 
@@ -46,7 +46,6 @@ def isothermal_h2o():
             omit_core_molecules=NOT_H2O,
             nu_min=2000.0,
             nu_max=10000.0,
-            opacity_mode="exomolop",
             art_nlayer=n,
             art_ptop_bar=1e-6,
             art_pbtm_bar=1e2,
@@ -85,10 +84,9 @@ def w39b_8species():
     trt = exojax_rt.build_rt_model(
         dict(
             molecules=mols,
-            omit_core_molecules=["NH3", "HCN"],  # not among the reference's eight
+            omit_core_molecules=["NH3", "HCN", "C2H2", "OCS"],  # not among the reference's eight
             nu_min=1e4 / 5.0,
             nu_max=1e4 / 3.0,
-            opacity_mode="exomolop",
             art_nlayer=n,
             art_ptop_bar=1e-8,
             # the pRT side ran to 50 bar, where this profile reaches 3507 K, past the engine's opacity window; the
@@ -125,10 +123,10 @@ def emission_h2o():
         omit_core_molecules=NOT_H2O,
         nu_min=1e4 / 5.0,
         nu_max=1e4 / 3.0,
-        opacity_mode="exomolop",
         art_nlayer=n,
         art_ptop_bar=1e-6,
         art_pbtm_bar=1e2,
+        p_ref_bar=1e-3,  # the engine's own fixture test of this column (its tests/test_e2e_rt_reference.py EMIS_PROF)
         rp_cm=100 * RJ,
         gs_cgs=1e3,
         rstar_cm=RSTAR_W39,
@@ -162,7 +160,6 @@ def grey_absorber():
             omit_core_molecules=NOT_H2O,
             nu_min=1e4 / 5.0,
             nu_max=1e4 / 3.0,
-            opacity_mode="exomolop",
             art_nlayer=n,
             art_ptop_bar=1e-10,
             art_pbtm_bar=1e2,

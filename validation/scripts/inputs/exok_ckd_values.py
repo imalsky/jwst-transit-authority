@@ -11,11 +11,11 @@ import numpy as np
 jax.config.update("jax_enable_x64", True)
 import exo_k as xk
 import jax.numpy as jnp
-from vulcan_forward import ckd, exomolop, paths
+from vulcan_forward import ckd, constants, exomolop, paths
 
 OUT = Path(__file__).resolve().parents[2] / "data"
 DATA = paths.exomolop_dir()
-FLOOR = exomolop.K_FLOOR
+FLOOR = constants.K_FLOOR
 T_SHOW, P_SHOW = 1100.0, 1e-3
 WN_SHOW = (2000.0, 10000.0)
 NB = 10  # R=1000 -> R=100 binning factor

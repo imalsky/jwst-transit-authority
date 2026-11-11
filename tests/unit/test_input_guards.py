@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import logging
 import sys
 import types
 
 import numpy as np
 import pytest
 
-from jwst_tool import forward, gui_results, jacobian, model_cache, picaso_engine as pe, share_config
+from jwst_tool import forward, gui_results, jacobian, picaso_engine as pe, share_config
 
 # Guillot T_irr defaults (K) of every registry planet, transmission and emission: removing the clip moved none.
 _REGISTRY_TIRR = {
@@ -118,7 +117,7 @@ def test_picaso_refuses_a_vulcan_only_setting_by_name(setting):
         forward.canonical_params(dict(planet="wasp39b", chem_provider="picaso", **setting))
 
 
-def test_left_out_absorbers_and_picaso_retries_ride_the_result(tmp_path, monkeypatch, caplog):
+def test_left_out_absorbers_and_picaso_retries_ride_the_result():
     base = {
         "unmodeled": np.array([], dtype="U32"),
         "photo_escalated": np.array([], dtype="U48"),
@@ -132,15 +131,6 @@ def test_left_out_absorbers_and_picaso_retries_ride_the_result(tmp_path, monkeyp
     picaso = dict(base, chem_provider=np.array("picaso"), unlisted_core=no_core, picaso_retried_layers=np.array([3]))
     caveats = gui_results._model_caveats(picaso)
     assert any("converged 3 layer solves only at a shifted temperature" in c for c in caveats)
-    # an entry written before the two records existed is a logged miss, never shown without them
-    monkeypatch.setattr(model_cache, "cache_path", lambda _p: tmp_path / "entry.npz")
-    np.savez(tmp_path / "entry.npz", chem_provider=np.array("vulcan"))
-    with caplog.at_level(logging.WARNING):
-        assert model_cache.load_result({}) is None
-    assert "predates ['unlisted_core']" in caplog.text
-    np.savez(tmp_path / "entry.npz", chem_provider=np.array("picaso"), unlisted_core=np.array([], dtype="U8"))
-    assert model_cache.load_result({}) is None
-    assert "predates ['picaso_retried_layers']" in caplog.text
 
 
 def test_the_picaso_worker_counts_the_layers_it_re_solves_at_a_shifted_temperature(monkeypatch):
@@ -162,7 +152,7 @@ def test_the_picaso_worker_counts_the_layers_it_re_solves_at_a_shifted_temperatu
     req = {"xh": {"C": 0.1}, "metallicity": 1.0, "p_bar": [0.01, 0.1, 1.0], "T": [1000.0, 2000.0, 1500.0]}
     out = pw._run(None, None, {"refdata": "/unused"}, dict(req, climate=None, quench_kzz=None))
     assert int(out["chem_retry"]) == 1 and out["converged"].all()
-    # the certificate records the count; a cached result without it is a logged miss, not a result without it
+    # the certificate records the count
     res = {
         "converged": np.ones(1, bool),
         "atoms_names": np.array(["H", "C", "N", "O", "S"]),
@@ -184,7 +174,7 @@ def test_the_fd_refusal_names_the_numbers_and_the_tools_own_remedies():
     assert "model_defs" not in msg and "FD_STEPS" not in msg
 
 
-def test_the_result_sums_every_retried_layer_and_an_uncounted_worker_cache_is_a_miss(tmp_path, monkeypatch, caplog):
+def test_the_result_sums_every_retried_layer(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
     monkeypatch.setattr(forward, "cache_path", lambda _params: tmp_path / "entry.npz")
@@ -206,10 +196,6 @@ def test_the_result_sums_every_retried_layer_and_an_uncounted_worker_cache_is_a_
     cp = {"science_mode": "transmission", "chem_provider": "picaso"}
     out = np.load(forward._write_result({}, cp, assembly, setup, col, res), allow_pickle=False)
     assert int(out["picaso_retried_layers"][0]) == 5
-    np.savez(tmp_path / "worker.npz", converged=np.ones(1, bool))
-    with caplog.at_level(logging.WARNING):
-        assert pe._load(tmp_path / "worker.npz", {}, "stage") is None
-    assert "predates the retried-layer count" in caplog.text
 
 
 def test_the_sidebar_shows_the_tirr_refusal_in_an_empty_widget_never_a_clipped_number():

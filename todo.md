@@ -3,59 +3,55 @@
 Open, owed or waiting on a decision, in priority order. Evidence is in notes.md, by
 section name.
 
-1. [owed] v62 (NH3 always on, survey values and UV files, dayside angle, band-mean stellar flux): the slow tier again
-   once the engine's pending interface change lands.
-2. [blocker] v62 needs an unreleased vulcan-forward: its floor and the deploy pins move with that release.
-3. [decision] Fixed numbers outside any input: the finite-difference steps, defaults repeated in the GUI and the share
-   file, and about 146 result-changing numbers in the code.
-4. [science] Three gates without a recorded basis: the unmodeled-absorber band, the finite-difference tolerance and
-   the radius-gravity anchor's pass count.
+1. [blocker] v63 needs an unreleased vulcan-forward: its floor (0.31.0) and the deploy pins move with that release.
+2. [decision] Fixed numbers and defaults: which fixed numbers become settings, and two defaults where the GUI and the
+   API disagree.
+3. [decision] The finite-difference h-vs-2h tolerance 0.25 has a measured spread but no derivation.
+4. [upstream] The eclipse photosphere band reads vulcan-forward internals; it needs a public accessor.
+5. [stale] The README example figure was not regenerated at v63.
 
-## 1. v62: the slow tier
+## 1. The engine release v63 depends on
 
-Evidence: notes "Opacity and radiative transfer" and "Emission" (what v62 changed and by how much) and "Current
-state". Done: the normal tier, both e2e fixtures regenerated from their embedded scripts, the validation set
-(chemistry cases, atmosphere cases, pRT references, figures) regenerated at the shipped model top, and the slow tier
-at v62 on the uncommitted engine. Owed:
+Evidence: notes "Current state". v63 calls `vulcan_chem.select_network` and passes `network`, `atom_list`,
+`vulcan_cfg_name`, `art_pbtm_bar` and `p_ref_bar` in the profile; the engine that reads them is vulcan-forward 0.31.0,
+uncommitted in its working tree. `pyproject.toml` already floors 0.31.0; `deploy/pins.env`, the Dockerfile and CI still
+pin vulcan-forward 0accd36, on which a default run fails. Order: vulcan-forward's version and push, then the pins
+(`deploy/pins.env`, the Dockerfile, CI) and this repo's push. Never deploy the Space from a mixed pair.
 
-- The slow tier again (`JWST_TOOL_RUN_SLOW=1`, the command in CLAUDE.md "Setup and commands"; about 70 min on 15
-  CPUs) once the engine's pending interface change lands.
-- WASP-39 b and HD 189733 b are not aligned with the sulfur survey's system values (notes "Opacity and radiative
-  transfer"); the maintainer has not asked for it.
+Done when the pins name a released, tested vulcan-forward commit.
 
-Done when the slow tier passes on the engine v62 ships with.
+## 2. Fixed numbers and defaults
 
-## 2. The engine release v62 depends on
+Evidence: notes "Decision records" (Fixed numbers and request defaults). Done: the request defaults have one definition
+in `model_defs` that `canonical_params`, the sidebar and `share_config.WIDGET_RANGES` read; the result-changing inline
+numbers of the forward model and the measurement operator are named constants with unit and reason. Open, the
+maintainer's choice:
 
-v62 reads `nu_edges`, `unlisted_core_molecules` and `omit_core_molecules` from vulcan-forward's RT result, and its
-WASP-107 b default relies on nothing else there, but a default run on the pinned engine (`deploy/pins.env`, 0accd36)
-fails at the echo check. Order: vulcan-forward's version and push, then this repo's floor (`pyproject.toml`), the
-pins (`deploy/pins.env`, the Dockerfile, CI) and its push. Never deploy the Space from a mixed pair.
+- Which fixed numbers become settings (the FD steps among them; today all stay fixed).
+- The sidebar defaults `jac_method` to "ad", the API to "fd"; the sidebar preselects `EXTRA_MOLECULES_DEFAULT`, the API
+  runs no extras. Unifying either moves a shipped default.
+- Defaults and fixed numbers with no recorded basis: `KZZ_CONST_DEFAULT` 1e9, `KZZ_KDEEP_DEFAULT` 1e5,
+  `LOG_GAMMA_DEFAULT` -1, `LOG_KAPPA_CLOUD_DEFAULT` -1, the Guillot kappa, gamma and cloud FD steps (0.05 dex),
+  `binning.LSF_R_FLOOR` 5 (a raise of a native R below it, not a refusal), `certify.EMIS_TAU_WARN` 10,
+  `tp_tables.T_CHECK_POINTS` 200, `planets.TIRR_RANGE`.
 
-## 3. Fixed numbers outside any input
+Done when each is a setting or a fixed number with a recorded basis, by the maintainer's choice.
 
-Against the oracle's "Settings are visible" and "One definition per default". The maintainer decides which become
-settings and which stay named constants with their reason.
+## 3. The finite-difference tolerance
 
-- The finite-difference steps (`model_defs.FD_STEPS`) are fixed; a row that fails its step-size check can only be
-  dropped or moved.
-- Defaults are repeated: `share_config.WIDGET_RANGES` holds the widget defaults of the Pfunc and JM16 Kzz, the cloud
-  deck and the diurnal factor, and `run_params._filled_payload` holds the same values again.
-- About 146 numbers that change a result are fixed in the code, outside any input (an audit count, not re-measured).
+Evidence: notes "Jacobians and Fisher". `jacobian.FD_CONSISTENCY_TOL` 0.25 separates every recorded certified row from
+every recorded refused one, but nothing derives it. The maintainer keeps it, or sets it from a stated error budget.
 
-Done when each is a setting or a named constant with its reason, by the maintainer's choice.
+## 4. A public eclipse-photosphere accessor
 
-## 4. Three gates without a recorded basis
+Evidence: notes "Convergence certificate and element gate". `spectrum.emission_photosphere_bar` reads
+`_Emission._dtau`, `_g_layers`, `lnp_em` and `_rt_geometry._photosphere_lnp`, pinned by
+`tests/unit/test_engine_api_contract.py`. The item lives in vulcan-forward: a public return of the tau = 2/3 pressure
+(per g-ordinate and band) from `eclipse_flux_tau`. Done when the tool calls it and drops the private names.
 
-Evidence: notes "Convergence certificate and element gate", "Jacobians and Fisher" and "Structure: T-P, Kzz, gravity
-anchor, model top".
+## 5. The README example figure
 
-- The unmodeled-absorber gate (`certify.check_unmodeled`) averages over the transmission photosphere
-  (`certify.PHOTOSPHERE_BAR`, 1e-5 to 1e-2 bar) in emission too, and runs only on the baseline column, not on the
-  finite-difference stencil columns, though CLAUDE.md "Certificates" says every certified column passes it.
-- The finite-difference h-vs-2h tolerance (`jacobian.FD_CONSISTENCY_TOL`, 0.25) has no recorded basis.
-- The radius-gravity anchor (`chem_build._radius_anchor`, and `picaso_engine._guillot_gravity` on the PICASO Guillot
-  path) runs a fixed 3 passes with no convergence test; notes record two passes as enough on WASP-39 b. The PICASO
-  climate path does test `ANCHOR_TOL`.
-
-Done when each has a measured basis in notes, or is changed by a science decision.
+`validation/scripts/fig_readme_example.py` (writes `assets/w39b_so2_forecast.png`) runs the app at its defaults and
+was last made at v61; the v63 planet values move the default WASP-39 b transit depth by about 7 %. Run it after a
+default GUI run has filled `output/`. Done when the figure is regenerated at v63 and notes "Jacobians and Fisher"
+carries its numbers.

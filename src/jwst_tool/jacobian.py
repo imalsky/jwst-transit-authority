@@ -19,6 +19,8 @@ from jwst_tool.certify import (
     check_elements,
     check_emission_thin,
     check_t_window,
+    check_unmodeled,
+    table_species,
 )
 from jwst_tool.model_defs import (
     CHEM_PARAM_NAMES,
@@ -37,6 +39,7 @@ if TYPE_CHECKING:
 
     from jwst_tool.tool_types import AnyArray, Log
 
+# The h-vs-2h gate, max |J_h - J_2h| / max |J_h|: measured rows on both sides of it are in notes "Jacobians and Fisher".
 FD_CONSISTENCY_TOL = 0.25
 
 
@@ -131,6 +134,8 @@ class Baseline:
     bz_build: float
     advance: Callable[[], None]
     log: Log
+    # (low, high) bar: the photosphere the baseline's absorber gate used, applied to every column the rows solve
+    unmodeled_band: tuple[float, float]
     # PICASO only: (stage, layer solves retried at a shifted T) of every column the run solves; the T-P stencil
     # points' own assemblies add theirs here
     picaso_retried: list = field(default_factory=list)
@@ -164,6 +169,13 @@ def _gate_emis(b: Baseline, dep: AnyArray, tau: AnyArray, stage: str) -> AnyArra
     return dep
 
 
+def _check_unmodeled(b: Baseline, y: AnyArray, chem_b: Any, stage: str) -> None:
+    """Apply the baseline's absorber gate to a column a row solved: no absorber without a k-table may be bulk there."""
+    species = [sp for sp, _ in sorted(chem_b.sidx.items(), key=lambda kv: kv[1])]
+    tables = table_species(b.setup.config.MOLECULES)
+    check_unmodeled(species, np.asarray(y), np.asarray(chem_b.p_bar), tables, b.unmodeled_band, stage, b.log)
+
+
 def _certified_depth(
     b: Baseline, chem_b: Any, th: AnyArray, stage: str, tp_eval_b: Callable | None = None
 ) -> np.ndarray:
@@ -179,6 +191,7 @@ def _certified_depth(
     else:
         y_b, chem_b, _, _ = certified_solve(chem_b, th, stage, log=b.log)
         check_elements(np.asarray(y_b), chem_b, stage, b.log)
+    _check_unmodeled(b, y_b, chem_b, stage)
     dep_fn = ColumnSpectrum(b.setup, chem_b, tp_eval_b).depth
     if b.setup.emis is None:
         return np.asarray(dep_fn(y_b, jnp.asarray(th)))
@@ -239,7 +252,7 @@ def _ad_chemistry_rows(b: Baseline, rows: Rows) -> dict[str, np.ndarray]:
         # remaining rows run on the cadence-1 build directly and are all
         # flagged. Only the certificate is inside the try: a backend
         # failure propagates.
-        chem_ad = b.build_chem(extra_abun=AD_BUILD_OVERRIDES, tag="AD rows", photo_frq=b.run_frq)
+        chem_ad = b.build_chem(tag="AD rows", photo_frq=b.run_frq, solver=AD_BUILD_OVERRIDES)
         chem_ad1 = None
         t1 = time.time()
         b.advance()
@@ -264,9 +277,9 @@ def _ad_chemistry_rows(b: Baseline, rows: Rows) -> dict[str, np.ndarray]:
                 )
                 if chem_ad1 is None:
                     chem_ad1 = b.build_chem(
-                        extra_abun={**AD_BUILD_OVERRIDES, "count_max": AD_RETRY_COUNT_MAX},
                         tag="AD rows [photo cadence 1]",
                         photo_frq=1,
+                        solver={**AD_BUILD_OVERRIDES, "count_max": AD_RETRY_COUNT_MAX},
                     )
                 stage += " [photo cadence 1]"
                 out = _ad_row(b, chem_ad1, e)
@@ -274,6 +287,7 @@ def _ad_chemistry_rows(b: Baseline, rows: Rows) -> dict[str, np.ndarray]:
                 b.escalated.append(f"AD {_n} row")
             pd, _pdiag, ptau, py, dd = out
             check_elements(np.asarray(py), b.chem, stage, b.log)
+            _check_unmodeled(b, py, b.chem, stage)
             # the jvp's own primal, not y_sol: certify the point the
             # tangent is actually taken at
             if b.setup.emis is not None:

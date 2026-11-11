@@ -23,7 +23,10 @@ if TYPE_CHECKING:
 
 # Shared physics: re-exported, never redefined
 MOLECULES = _fwd.MOLECULES
-W39B_CFG_NAME = _fwd.DEFAULT_CFG_NAME
+
+# The vulcan3 config every VULCAN run builds on: the tool overrides its planet, star, orbit, UV file and composition
+# per run, and model_defs.CFG_ABUNDANCES and CHEM_P_SPAN_DYN are checked against it (chem_build._check_cfg_constants).
+W39B_CFG_NAME = "W39b"
 
 # The planner's own base RT profile
 # Only the band edges: run_model sets every other key from the canonical

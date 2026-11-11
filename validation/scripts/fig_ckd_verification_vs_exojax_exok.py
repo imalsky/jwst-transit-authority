@@ -28,12 +28,12 @@ import jax.numpy as jnp
 
 from jwst_tool import engine_config  # noqa: E402  (the tool's k-table root)
 import exojax_master_provider_exomolop as prov
-from vulcan_forward import ckd, exomolop
+from vulcan_forward import ckd, constants, exomolop
 from exojax.opacity.ckd.core import interpolate_log_k_2d
 
 EK = np.load(DATA / "exok_ckd_vals.npz")
 KTABLES = engine_config.EXOMOLOP_DIR
-FLOOR = exomolop.K_FLOOR
+FLOOR = constants.K_FLOOR
 T_SHOW, P_SHOW = 1100.0, 1e-3
 NB = 10
 SUB = {m: "".join(c if not c.isdigit() else f"$_{c}$" for c in m) for m in EK["mols"]}

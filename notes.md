@@ -9,33 +9,36 @@ names the code state it was measured on.
 ## Current state
 
 - Tool 0.72.0 on main. VULCAN is the default chemistry engine, PICASO the second.
-- Floors `vulcan-forward>=0.29.0`, `vulcan3>=0.18.0` (pyproject). `deploy/pins.env` and
+- Floors `vulcan-forward>=0.31.0`, `vulcan3>=0.18.0` (pyproject). `deploy/pins.env` and
   the Dockerfile pin vulcan3 2441e6c and vulcan-forward 0accd36; the Dockerfile pins the
   tool at cd67563. The running Space was last deployed from the earlier pins (tool
   b23df79) and is unchanged until a redeploy.
-- Cache versions: `model_defs._VERSION` 62, `noise.WORKER_VERSION` 12,
-  `adjoint_diag._ADJ_VERSION` 4, `picaso_engine.WORKER_VERSION` 3. Default keys:
-  transmission `87afcd45da73bb56` (test-pinned), emission `40c16cece4cd0dea`.
-- Fixtures `tests/live/data/w39b_v62_reference.npz` and `w39b_picaso_reference.npz`
-  (cold WASP-39 b, both modes; jax 0.6.2, vulcan3 0.18.0, vulcan-forward 0.30.0 plus its
-  uncommitted guards; 10 and 45 min on daw).
-- v62 needs a vulcan-forward that has `REQUIRED_MOLECULES`, `nu_edges` on the RT result,
-  `omit_core_molecules` and the stellar-span check: newer than the 0.30.0 floor and the
-  `deploy/pins.env` pin, which move with its release (todo).
+- Cache versions: `model_defs._VERSION` 63, `noise.WORKER_VERSION` 12,
+  `adjoint_diag._ADJ_VERSION` 4, `picaso_engine.WORKER_VERSION` 4. Default keys:
+  transmission `beeb3d3f0e34cd7b` (test-pinned), emission `e4fb5a68a9d1325b`.
+- Fixtures `tests/live/data/w39b_v63_reference.npz` and `w39b_picaso_reference.npz`
+  (cold WASP-39 b, both modes; jax 0.6.2, vulcan3 0.18.0, vulcan-forward 0.31.0
+  0.31.0 (554286f); 11 min, and 112 min for PICASO with 12 jobs sharing 10 cores; 45 min alone at v62).
+- v63 needs vulcan-forward 0.31.0 (the caller names the network, config and RT geometry;
+  `select_network`): not yet released, so the `deploy/pins.env` pin moves with its release
+  (todo). The installed editable metadata still reads 0.30.0, which `provenance._versions`
+  reports; the module's `__version__` is 0.31.0.
 - Tests. Normal suite `python -m pytest tests -q -n 6`; `tests/conftest.py` defaults
   `JAX_PLATFORMS=cpu` and points an unset `JWST_TOOL_OUTPUT_DIR` at a throwaway
-  directory. `tests` on daw (8 pinned cores): 555 run, 18 skipped, in 49 s [M]. CI
+  directory. `tests` at v63 on daw (6 workers on 10 pinned cores): 563 passed, 18 skipped, in 43 s [M]. CI
   runs the unit suite on Python 3.10-3.12 plus a GUI-smoke job; `full-stack-smoke.yml`
   runs by hand. Slow tier (`JWST_TOOL_RUN_SLOW=1`), parallel on 15 CPUs, one thread per
-  worker: `pytest tests -q -n 14 --dist worksteal` (CLAUDE.md). At v62 on the uncommitted
-  engine: 524 passed in 1:06:34 (reported by the run; owed again once the engine's pending
-  interface change lands, todo). The earlier run, whose times follow: 511 passed, 2 skipped
+  worker: `pytest tests -q -n 14 --dist worksteal` (CLAUDE.md). At v63 on vulcan-forward
+  0.31.0 (554286f), 9 workers on 10 cores, every PICASO solve cold: 581 passed in 3994 s
+  (1:06:34) [M]; longest PICASO e2e eclipse 3541 s and transit 3300 s, emission closure
+  2553 s (config cadence) / 2232 s (cadence 1), TOI-7169 b 2019 s, transmission closure
+  1750 / 1178 s, VULCAN e2e 376 / 269 s. The earlier run, whose times follow: 511 passed, 2 skipped
   in 79 min under load [M, tool 0f6392d, vulcan-forward b1ec05a, vulcan3 0db0361]; nothing
   requires serial. Longest: emission closure 3635 s (config cadence) / 2602 s (cadence
   1), TOI-7169 b escalation 2473 s, transmission closure 1693 / 1097 s, PICASO e2e 1403 /
   1283 s, VULCAN e2e 373 / 240 s. A worker's next test cannot be stolen, so two neighbours
   add: this run's time is the transmission cadence-1 closure then the emission closure.
-  With the two emission closures as neighbours one worker ran both and passed 90 min, so
+  With the two emission closures as neighbours one worker ran both for over 90 min, near the 100 min cap, so
   they sit apart in `test_closure.py`. Alone, on one core: cadence-1 emission 2514 s.
 - Space, at the last Hub API read: `imalsky/jwst-transit-authority` RUNNING on cpu-basic
   (2 vCPU / 16 GB), sleep 48 h. The four live checks (cold transmission run, cold
@@ -179,8 +182,19 @@ names the code state it was measured on.
   engine fix is VULCAN-JAX's Ros2 stage repair; with it the column drifts 0.00%.
 - `check_elements`: layer-median X/H against the build column, `ELEMENT_TOL` 1.5% (set by
   the carbon-rich ladder, "Composition, C/O bounds and networks"); cached presets sit at
-  0.006-0.008%. It runs on every certified column: baseline, chem-cache hit, each FD
+  0.006-0.008%. It runs on every certified VULCAN column: baseline, chem-cache hit, each FD
   stencil point, each AD warm re-converge.
+- `check_unmodeled` runs on the same columns from v63, PICASO ones included (through v62 only
+  the baseline), over the observation's photosphere. Transit: `PHOTOSPHERE_BAR` 1e-5 to
+  1e-2 bar, unchanged. Eclipse: the baseline's flux-weighted 5-95 % quantiles of the
+  tau = 2/3 pressure over bands and g-ordinates (`EMIS_PHOTOSPHERE_QUANTILES`,
+  `spectrum.emission_photosphere_bar`), weights the band's eclipse flux times its width,
+  split over g by the quadrature weights. Through v62 the eclipse used the transit band.
+  Default WASP-39 b eclipse (v62 column, no extras): tau = 2/3 at 2.8e-7 to 0.38 bar over
+  every band and g; flux-weighted 1 / 5 / 16 / 50 / 84 / 95 / 99 % at 6.8e-6 / 5.9e-5 /
+  5.9e-4 / 0.010 / 0.055 / 0.10 / 0.21 bar, none at the grid bottom [M]. So the eclipse
+  band is 5.9e-5 to 0.10 bar, a decade deeper at its base than the transit band. The
+  function reads engine internals (todo).
 
 ## Structure: T-P, Kzz, gravity anchor, model top
 
@@ -192,12 +206,31 @@ names the code state it was measured on.
   HD 209458 b's is refused (2997 K, above the 2980 K opacity ceiling).
 - Guillot `kappa_IR` -2.0; `T_irr` defaults per planet from the registry's star and
   orbit; emission uses the DAYSIDE T_irr (x 2^0.25): planet-average T_irr puts the HD
-  189733 b eclipse 28-49% low (chi2/N 934 -> 31 against Inglis et al. 2024). `Tint`:
-  WASP-107 b 460 K (Sing et al. 2024), others `TINT_DEFAULT_K` 100.
+  189733 b eclipse 28-49% low (chi2/N 934 -> 31 against Inglis et al. 2024).
+- `Tint` default (`planets.default_tint`, from v63; API, GUI and the PICASO climate): a published value where the
+  registry has one (WASP-107 b 460 K, Sing et al. 2024), else the Thorngren, Gao & Fortney (2019, ApJL 884, L6)
+  hot-Jupiter relation, their equation 3, T_int = 0.39 T_eq exp(-(log10 F - 0.14)^2 / 1.095), F = 4 sigma T_eq^4 in
+  1e9 erg s^-1 cm^-2, at the global T_eq while T_eq is inside their grid's 700-2800 K, rounded to 1 K; else
+  `TINT_DEFAULT_K` 100 (through v62 every planet without a published value took 100). A custom planet takes its own
+  star and orbit. `TINT_RANGE` is 50-700 K, the top the "up to 700 K" the paper quotes. Defaults [I, the formula]:
+
+  | planet | T_eq (K) | T_int v62 -> v63 (K) | T_irr transit / eclipse (K) |
+  |---|---|---|---|
+  | WASP-39 b | 1162.1 -> 1166.4 | 100 -> 356 | 1640 / 1960 (unchanged) |
+  | HD 189733 b | 1194.4 -> 1190.4 | 100 -> 376 | 1680 / 2000 (unchanged) |
+  | HD 209458 b | 1476.8 | 100 -> 570 | 2080 / 2480 |
+  | WASP-107 b | 737.5 | 460 (published) | 1040 / 1240 |
+
+  Every registry Guillot default stays inside `T_WINDOW` in both modes (WASP-39 b 998-2138 K, HD 189733 b 1022-2115,
+  HD 209458 b 1269-2714, WASP-107 b 653-1930, at the catalogue g and at 1.25 g) [M, profile only].
 - One gravity per run: the catalogue (Rp, g) pair is converted to the chemistry's anchor
   pressure before it reaches VULCAN (`_assemble_chem`; vulcan3 anchors g near 1 bar). On
   W39b (anchor 0.923 bar) R -6.7%, g +14.9%. mu comes from one probe build (2.30 is 0.62%
-  off); the Guillot/gravity iteration converges in two passes. Handing VULCAN the
+  off). The Guillot/gravity iteration runs `ANCHOR_PASSES` 3 passes and from v63 refuses a last pass that moved g by
+  more than `ANCHOR_TOL` 5e-3 (the PICASO climate anchor's tolerance, one definition). Last-pass change at the v63
+  defaults: WASP-39 b eclipse 3.4e-5, HD 189733 b 1.1e-7 / 1.8e-7 (transit / eclipse), HD 209458 b transit 2.4e-6,
+  WASP-107 b 5.6e-5 / 7.2e-5 [M, build only]; a tabulated profile does not read g, so its passes 2 and 3 move
+  nothing. Handing VULCAN the
   catalogue pair puts the radius ~7% high and every gravity ~13% low. `p_ref_bar` is 1
   mbar, not tuned to the data (7.8% low against the white-light depth; Decision records).
 - Transmission dtau uses inverse-square g(r) (exojax's own profile: -51 ppm at W39b
@@ -213,21 +246,28 @@ names the code state it was measured on.
 
 - NH3 is in the always-on set (`model_defs.MOLECULES`) from v62: vulcan-forward refuses a
   band that lacks H2O, CO2, CO, CH4 or NH3 where each absorbs, and warns for HCN, H2S and
-  SO2 (its notes "Opacity: correlated-k on ExoMolOP"). Through v61 a run with no
+  SO2, and from 0.31.0 C2H2, OCS and SO (its notes "Opacity: correlated-k on ExoMolOP"). Through v61 a run with no
   `extra_mols` radiated five molecules. `extra_mols` may still name NH3
   (`FORMER_EXTRA_MOLECULES`): it is dropped, and an old share file loads. The warned names
-  are logged at the RT build (`unlisted_core_molecules`); the sulfur-free network names H2S
-  and SO2 as left out. Default WASP-39 b transmission, v61 to v62: at most 44.7 ppm at
+  are logged at the RT build (`unlisted_core_molecules`); the sulfur-free network names H2S,
+  OCS, SO and SO2 as left out (from v63; through v62 H2S and SO2 only). Default WASP-39 b transmission, v61 to v62: at most 44.7 ppm at
   2.28 um, median 1.6 ppm [M, the fixtures].
 - UV spectra: vulcan-forward refuses one that does not cover the network's photolysis
   thresholds (to 655.5 nm), which removes `sflux-epseri.txt` (115-283 nm) from the menu.
   WASP-107 b and HD 209458 b take the sulfur survey's proxies, shipped in
   `src/jwst_tool/stellar_flux/`, and its system values (WASP-107 b: g 305.14 against 270,
   R* 0.657 against 0.67, 0.055 au; HD 209458 b: R* 1.19 against 1.155, 0.04707 au, the solar
-  spectrum scaled by (6091/5772)^4, default T_irr 2080 K against 2040);
-  `tests/unit/test_survey_parity.py` compares them when vulcan-retrieval is beside this
-  repo. WASP-39 b keeps the production WASP-39b case's values (R* 0.932, g 422), not the
-  survey's (0.939, 390.58); HD 189733 b is not compared.
+  spectrum scaled by (6091/5772)^4, default T_irr 2080 K against 2040). From v63 WASP-39 b
+  and HD 189733 b take the survey's values too (vulcan-retrieval `runs/survey/<planet>.yaml`
+  and `data/survey/<case>/<Case>.yaml`), with the UV files they already shared: WASP-39 b
+  rp 9.546962e9 cm (was 9.143827e9, the production WASP-39b case's 1.279 R_J), R* 0.939
+  (0.932), g 390.58 (422), 0.04828 au; HD 189733 b rp 8.105826e9 (8.135790e9), R* 0.75
+  (0.756), g 2178.79 (2190), 0.03126 au (0.0313). `tests/unit/test_survey_parity.py` compares
+  all four when vulcan-retrieval is beside this repo, resolving a relative UV path as
+  vulcan3 does. Not compared: the survey's HD 189733 config header gives Teff 5052 K, the
+  registry 5040 K (a comment there, not a key). The Tsai and ERS validation scripts
+  (`rtcase.py`, `fig_rt_verification_vs_petitradtrans.py`) keep the published model's own
+  R* 0.932 and radius anchor, on purpose.
 - Correlated-k over the published ExoMolOP k-tables is the only path: R = 1000, 5115
   bands, 16 g-points, T 100-3400 K, P 1e-5-100 bar, 25 principal-isotopologue tables on
   one grid. RT knobs are echoed by the engine and refused on mismatch (they bite at
@@ -241,11 +281,11 @@ names the code state it was measured on.
   Decision records).
 - Against petitRADTRANS 3.4.0 on the same k-tables: engine fixtures rms 0.0013% /
   0.096% / 0.021% (isothermal H2O radius, W39b depth, H2O emission flux). The six
-  `validation/data/atmos_*.npz` (v62, sncho2025, cadence 5), fitted offset at R = 100:
-  transmission residual std WASP-39 b 17.37 ppm, HD 189733 b 4.25, WASP-107 b 45.84, HD
-  209458 b 4.69; emission relative RMS 0.304% / 0.250% (v61: 17.65, 4.23, 49.02, 4.75;
-  0.306% / 0.249%). The 14 solves take 17 min in parallel, then the pRT references and
-  the figures 8 min [M, daw]. The Tsai and ERS columns (`inputs/chem_cases.py`) and their
+  `validation/data/atmos_*.npz` (v63, sncho2025, cadence 5), fitted offset at R = 100:
+  transmission residual std WASP-39 b 19.45 ppm, HD 189733 b 4.31, WASP-107 b 45.84, HD
+  209458 b 4.75; emission relative RMS 0.309% / 0.249% (v62: 17.37, 4.25, 45.84, 4.69;
+  0.304% / 0.250%). The 14 solves take 4-23 min each, single-threaded, then the pRT
+  references 1 min and the figures 6 min [M, daw]. The Tsai and ERS columns (`inputs/chem_cases.py`) and their
   RT (`rtcase.py`) run at the shipped model top from v62; before, 1e-9 and 1e-8 bar. An isothermal column emits
   pi*B(T) to 6.7e-16. The figure script refuses mixed cadences and a stale pRT reference.
   After a `_VERSION` bump that moves a spectrum, regenerate the npz (`atmos_cases.py` x 6,
@@ -299,8 +339,9 @@ names the code state it was measured on.
   (`eclipse_flux_tau`): W39b depth ratio photospheric/single median 1.070; a single
   radius reads the CO2 feature contrast 9% low. `emission_radius` stays the
   (R_em/R_star)^2 factor.
-- HD 189733 b MIRI LRS vs Inglis et al. 2024 (v62): chi2/N 67.66, 27.04 with a fitted
-  -131 ppm offset (v61: 67.7, 26.87 at -132), under the dayside f = 1/2 Guillot default (v60, sncho: 67.6, 26.85).
+- HD 189733 b MIRI LRS vs Inglis et al. 2024 (v63): chi2/N 93.75, 27.51 with a fitted
+  -168 ppm offset (v62: 67.66, 27.04 at -131; v61: 67.7, 26.87 at -132), under the dayside f = 1/2 Guillot default;
+  v63 moved its system values and T_int (100 -> 376 K).
 - lnR0 (a radius change at fixed planet mass in both modes, v60; Decision records):
   default W39b eclipse AD and FD lnR0 rows agree to corr 0.99999997. Emission lnR0 FD
   points are tau-gated.
@@ -345,6 +386,15 @@ names the code state it was measured on.
 
 The closure gate is corr > 0.99 and scale within 15%; the FD self-check is the h-vs-2h
 gate 0.25.
+
+- Basis of the 0.25 gate (`FD_CONSISTENCY_TOL`): measured, not derived. Certified rows on
+  record read 0.024-0.210 (v63 WASP-39 b eclipse lnZ 0.024, dlnCO 0.050, transit Guillot
+  Tirr 0.092 [M, slow tier]; one-sided dlnCO 0.032 at C/O 0.55, 0.060 at 0.89, 0.210 at
+  0.95; TOI-7169 b dlnCO 0.084, lnZ 0.034; Guillot ncho Tirr 0.184), refused ones 0.258-0.699
+  (central dlnCO h = 0.05 at 0.89: 0.258; one-sided at 0.97: 0.269, 1.03: 0.414; ncho lnKzz
+  0.699). For an O(h^2) central row, J_h - J_true is about (J_2h - J_h)/3, so the gate
+  bounds the uncorrected row's leading error at about 8 % of its peak before Richardson
+  removes it. No error budget picks 0.25 over a neighbour (todo).
 
 - A non-finite Fisher matrix or nuisance row is refused: a NaN radius-nuisance row once
   gave a finite sigma (the positive-diagonal mask dropped it).
@@ -471,7 +521,18 @@ gate 0.25.
   `f4b94ee63633f386`, transmission 2.2e-6 ppm, emission 0.0049 ppm, PICASO fixture
   bitwise unchanged; v61 (sncho2025 the default network, a68d715 file) the current keys
   ("Current state"), transmission max |d| 68.8 ppm at 3.34 um (9 of 164 R = 100 bins over
-  10 ppm, all in 3.3-3.6 um), SO2 band 3.95-4.15 um -0.8 ppm, emission max |d| 0.48 ppm.
+  10 ppm, all in 3.3-3.6 um), SO2 band 3.95-4.15 um -0.8 ppm, emission max |d| 0.48 ppm;
+  v62 `87afcd45da73bb56` / `40c16cece4cd0dea`; v63 (vulcan-forward 0.31.0 interface, survey
+  values for WASP-39 b and HD 189733 b, the Thorngren T_int default) the current keys.
+- v62 -> v63, default WASP-39 b at R = 100, ppm, from the fixtures and cold reruns on v63
+  code [M]: the v62 parameters rerun on v63 code reproduce the v62 fixtures to <= 0.01
+  (VULCAN eclipse 0.006, the rest 0.000), and two identical cold VULCAN eclipse runs are
+  bitwise equal. Total / planet values (T_int held at 100 K) / T_int:
+  VULCAN transit max 1675.8 (median +1481.6, a uniform rise: (Rp/Rs)^2 goes up 7.4 %; 194.2
+  with the median removed, at 4.33 um) / all of it (file mode does not read T_int);
+  VULCAN eclipse 134.7 (median +27.8, 106.9 median removed, at 5.23 um) / 130.4 / 4.4;
+  PICASO transit 1664.2 (median +1487.7, 176.5 median removed) / 1663.3 / 2.0;
+  PICASO eclipse 150.4 (median +35.8, 114.6 median removed) / 145.3 / 12.0.
 - No-bump exemptions: `data_revision` (omitted while the variable is unset, so local
   payloads are byte-identical, test-pinned); engine moves that reproduce the fixture to
   <= 0.0065 ppm (vulcan3 0.10.1 at v57, 0.11.0 at v58). An engine exemption does NOT
@@ -490,10 +551,10 @@ gate 0.25.
 - `_PARAM_KEYS_ECHOED` holds the keys `canonical_params` emits but never reads (`version`,
   `data_revision`, `picaso_stack`); without `data_revision` in it the function refused its
   own output wherever the variable was set (0.66.1, on the Space).
-- Result records added without a key bump: `unlisted_core` and `picaso_retried_layers` (model_cache) and the
-  worker's `chem_retry` (picaso_cache). A `picaso_engine.WORKER_VERSION` bump would move every PICASO `params_key`
-  through `picaso_stack`, and with it the PICASO e2e fixture's recorded keys. No spectrum moves: an entry without the
-  record is logged and treated as a miss, so it is solved again.
+- `picaso_engine.WORKER_VERSION` 4 (v63) keys the worker's `chem_retry` field, and `_VERSION` 63 the model-cache
+  records `unlisted_core` and `picaso_retried_layers`: with new keys no entry without them is read, so the
+  "older entry is a miss" branches are gone. The worker version moves every PICASO `params_key` through
+  `picaso_stack`.
 - Cached results carry a `producer` stamp ("repo=sha12", `+dirty` when dirty, empty on a
   non-checkout install); not a key. A chem-cache column has none; exports then show the
   installed commits marked "installed now".
@@ -711,6 +772,18 @@ Standing maintainer decisions; the measurements sit in the section named.
 - The cache key carries no engine version: every engine pin bump bumps
   `model_defs._VERSION`. The Space's `data_revision` stamp is the remote dataset HEAD at
   boot, which may differ from the mounted bytes ("Cache keys and version history").
+- Fixed numbers and request defaults (v63): every request default has one definition
+  (`model_defs.*_DEFAULT`, `planets.default_tirr`, `planets.default_tint`) that
+  `canonical_params`, the sidebar and `share_config.WIDGET_RANGES` read; a fixed number
+  that changes a result is a named constant with unit and reason in `model_defs`, or in the
+  constant block of the module whose topic it is (the LSF numerics in `binning`, the
+  PICASO request rounding in `picaso_engine`, the gate thresholds in `certify`). The move
+  changed no canonical parameter and no cache key over 140 requests (four planets and
+  custom, both modes, both engines, each Kzz mode, cloud, photolysis and moldiff off,
+  ncho), and `smooth_to_native_r` is bitwise equal on 80 random cases [M]. `use_vm_mol`
+  with `use_moldiff` off is refused by name (through v62 silently zeroed; vulcan3 now
+  refuses it). Which fixed numbers become settings, and the two defaults the GUI and the
+  API still disagree on (`jac_method`, `extra_mols`), wait for the maintainer (todo).
 - GUI copy is for an exoplanet proposer: precise terms stay, explaining prose goes,
   caveats live in README or notes ("GUI, figures and copy", "Do not retry").
 - Capacity is one Space and its slot limit: no self-scaler, queue or overflow Space
@@ -801,9 +874,6 @@ Real, small, and out of todo.md by decision; nothing here changes a shipped numb
   keeps a numpy 1/2 `trapz` shim; `planets.py`/`stellar.py` restate constants
   `vulcan_forward.constants` owns; `gui_forecast._LN10` duplicates `fisher._LN10`;
   `upload_data.sh` stages k-tables from the `vulcan-retrieval` checkout.
-- pyproject's `vulcan-forward` floor still allows 0.29.0, which runs one extra warm-up
-  solve per chemistry build (about 2x chemistry time [E]); CI, the Dockerfile and
-  `deploy/pins.env` pin `0accd36`. Raise the floor at the next vulcan-forward release.
 - Composition FD rows keep the baseline's radius anchor and T-P ("Jacobians and
   Fisher"); the own-vs-frozen check was never run on an eclipse case.
 - The README forecast figure (`assets/w39b_so2_forecast.png`) carries the model caveats

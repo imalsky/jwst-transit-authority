@@ -11,7 +11,6 @@ import fcntl
 import functools
 import hashlib
 import json
-import logging
 import os
 import subprocess
 import tempfile
@@ -32,7 +31,7 @@ if TYPE_CHECKING:
     from jwst_tool.tool_types import Log
 
 PICASO_VERSIONS = {"picaso": datacheck.PICASO_RELEASE, "photochem": "0.9.2"}
-WORKER_VERSION = 3  # bump when picaso_worker.py output changes
+WORKER_VERSION = 4  # bump when picaso_worker.py output changes
 # What a PICASO payload is solved by: part of the cache key.
 PICASO_STACK = (
     f"picaso {PICASO_VERSIONS['picaso']}, photochem "
@@ -90,8 +89,10 @@ CK_T_MAX = 4000.0  # top of picaso's 1460-point CK grid
 # Element budget per layer, all phases, against the request (cold solves
 # close to <= 2e-4 on the WASP-39 b, cool and hot columns at 1-100x solar)
 ELEMENT_TOL = 1.0e-3
-ANCHOR_TOL = 5.0e-3  # baseline gravity fixed point (|dg/g|)
-ANCHOR_PASSES = 3
+# Decimals a worker request keeps of g (cm/s^2) and T (K): far below anything physical, so the request key does not
+# move with the last bits of a JAX profile (CPU against GPU)
+REQUEST_G_DECIMALS = 4
+REQUEST_T_DECIMALS = 6
 
 # picaso species -> VULCAN names (ymix_species, the structure figure and the
 # RT molecule map read VULCAN names); ions and electrons are not carried
@@ -232,11 +233,6 @@ def _load(path: Path, req: dict, stage: str) -> dict | None:
 
     res = load_cached_npz(path)
     if res is None:
-        return None
-    if "chem_retry" not in res:
-        logging.getLogger(__name__).warning(
-            "[cache] %s predates the retried-layer count; treating it as a cache miss", path.name
-        )
         return None
     # a cache file under the same WORKER_VERSION may carry an always-empty
     # "error" array; it is not a result field
@@ -414,14 +410,12 @@ def _request(cp: dict, p_eval: np.ndarray, met: float, co: float, g: float, T_ev
                 "orbit_au": cp["orbit_au"],
             },
         }
-    # T and g are rounded far below anything physical so the request key
-    # does not move with the last bits of a JAX profile (CPU vs GPU)
     return {
         "xh": composition(met, co),
         "metallicity": float(met),
-        "g_cgs": round(float(g), 4),
+        "g_cgs": round(float(g), REQUEST_G_DECIMALS),
         "p_bar": p_eval.tolist(),
-        "T": (None if T_eval is None else np.round(np.asarray(T_eval, float), 6).tolist()),
+        "T": (None if T_eval is None else np.round(np.asarray(T_eval, float), REQUEST_T_DECIMALS).tolist()),
         "quench_kzz": float(cp["kzz_const"]) if cp["picaso_quench"] else None,
         "climate": clim,
     }
@@ -437,9 +431,10 @@ def _guillot_gravity(
     """Iterate g and the Guillot T (tau = kappa P / g) to their fixed point at one probe mu, as the VULCAN path does."""
     from jwst_tool import chem_build
 
-    g = cp["gs_cgs"]
-    for _ in range(3):
-        g = g_at_anchor(np.asarray(chem_build.build_tp(cp, g)[0](tp, p_tool)), mu)
+    g = g_prev = cp["gs_cgs"]
+    for _ in range(model_defs.ANCHOR_PASSES):
+        g_prev, g = g, g_at_anchor(np.asarray(chem_build.build_tp(cp, g)[0](tp, p_tool)), mu)
+    chem_build.check_anchor_converged(g_prev, g, "PICASO Guillot gravity anchor")
     return g
 
 
@@ -453,25 +448,25 @@ def _climate_gravity(
     g_at_anchor: Callable[[np.ndarray, np.ndarray], float],
     log: Log,
 ) -> float:
-    """First gravity from a Guillot guess column, then the climate's own, iterated to ANCHOR_TOL."""
+    """First gravity from a Guillot guess column, then the climate's own, iterated to model_defs.ANCHOR_TOL."""
     from jwst_tool import chem_build
 
     tirr = planets.system_teq(cp["star_teff"], cp["rstar_rsun"], cp["orbit_au"]) * np.sqrt(2.0)
-    tp0 = np.array([tirr, cp["Tint"], -2.0, -1.0])
+    tp0 = np.array([tirr, cp["Tint"], model_defs.LOG_KAPPA_DEFAULT, model_defs.LOG_GAMMA_DEFAULT])
     T0 = np.asarray(chem_build.build_tp(dict(cp, tp_mode="guillot"), cp["gs_cgs"])[0](tp0, p_eval))
     g = g_at_anchor(
         T0[:nz][::-1], _mu(run(request(cp["met_x_solar"], cp["co_ratio"], cp["gs_cgs"], T0), "geometry probe"))
     )
-    for k in range(ANCHOR_PASSES):
+    for k in range(model_defs.ANCHOR_PASSES):
         col = run(request(cp["met_x_solar"], cp["co_ratio"], g), f"climate (gravity pass {k + 1})")
         g_new = g_at_anchor(col.T_base, _mu(col))
         log(f"[fwd] PICASO gravity anchor pass {k + 1}: g = {g:.2f} -> {g_new:.2f} cm/s2 at {p_anchor:g} bar")
-        if abs(g_new / g - 1.0) <= ANCHOR_TOL:
+        if abs(g_new / g - 1.0) <= model_defs.ANCHOR_TOL:
             return g
         g = g_new
     raise RuntimeError(
-        f"PICASO climate gravity anchor did not settle to {ANCHOR_TOL:g} "
-        f"in {ANCHOR_PASSES} passes (last {g:.2f} -> {g_new:.2f} cm/s2)."
+        f"PICASO climate gravity anchor did not settle to {model_defs.ANCHOR_TOL:g} "
+        f"in {model_defs.ANCHOR_PASSES} passes (last {g:.2f} -> {g_new:.2f} cm/s2)."
     )
 
 
@@ -482,7 +477,11 @@ def assemble(cp: dict, log: Log) -> SimpleNamespace:
 
     One constant g per run, at the tool's chemistry anchor: docs/picaso_engine.md, section `picaso_engine`.
     """
-    from vulcan_forward import vulcan_chem  # noqa: F401  (env + x64 before exojax: the order is load-bearing)
+    from vulcan_forward import vulcan_chem  # before exojax: it sets jax x64
+
+    # The radius anchor reads vulcan3's grid rule, and vulcan3 freezes a network at its first import: select the
+    # tool's default, so a default VULCAN run later in this process is not refused.
+    vulcan_chem.select_network(*model_defs.NETWORKS[model_defs.DEFAULT_NETWORK])
 
     # isort: split
     from jwst_tool import chem_build, engine_config as config, tp_tables

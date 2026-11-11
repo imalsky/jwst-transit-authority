@@ -650,7 +650,7 @@ def _more_settings_step(target: Target, atm: Atmosphere) -> Solver:
         if K("rtint") not in st.session_state or science_mode == "emission":
             # canonical_params pins simpson in emission (no transit chord);
             # show the pinned state, not a silently ignored choice
-            st.session_state[K("rtint")] = "simpson"
+            st.session_state[K("rtint")] = model_defs.RT_INTEGRATION_DEFAULT
         # key always seeded above, so no index= default
         rt_integration = st.selectbox(
             "Transit chord integration",

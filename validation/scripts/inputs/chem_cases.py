@@ -45,10 +45,13 @@ def cases():
 def main(name):
     """Solve one named case and save its column."""
     # isort: off
-    from vulcan_forward import vulcan_chem  # first: it sets jax x64 and the frozen network before vulcan3 and exojax
+    from vulcan_forward import vulcan_chem  # first: it sets jax x64 before exojax
+    from jwst_tool.model_defs import DEFAULT_NETWORK, NETWORKS, RT_PTOP_DEFAULT
+
+    network, atom_list = NETWORKS[DEFAULT_NETWORK]  # the tool's default network, named before vulcan3 freezes one
+    vulcan_chem.select_network(network, atom_list)
     import vulcan3
     from vulcan3 import composition as ba
-    from jwst_tool.model_defs import RT_PTOP_DEFAULT
     # isort: on
 
     factor, co_target, morning, photo = cases()[name]
@@ -60,7 +63,13 @@ def main(name):
         ovr["atm_file"] = str(morning_tp_kzz())
     # The shipped model top, so the validation columns are the tool's: the engine's own default reaches higher.
     profile = dict(
-        vulcan_cfg_name="W39b", use_photo=photo, yconv_cri=0.01, cfg_overrides=ovr, art_ptop_bar=RT_PTOP_DEFAULT
+        network=network,
+        atom_list=atom_list,
+        vulcan_cfg_name="W39b",
+        use_photo=photo,
+        yconv_cri=0.01,
+        cfg_overrides=ovr,
+        art_ptop_bar=RT_PTOP_DEFAULT,
     )
 
     t0 = time.time()

@@ -40,7 +40,8 @@ cfg, deck = m["config"], m["deck"]
 trt = rc.exojax_rt.build_rt_model(
     dict(
         molecules=["H2O"],
-        omit_core_molecules=["CO2", "CO", "CH4", "NH3", "HCN", "H2S", "SO2"],  # a one-molecule reference by design
+        # a one-molecule reference by design
+        omit_core_molecules=["CO2", "CO", "CH4", "NH3", "HCN", "H2S", "SO2", "C2H2", "OCS", "SO"],
         nu_min=1e4 / cfg["wl_um"][1],
         nu_max=1e4 / cfg["wl_um"][0],
         art_nlayer=cfg["nlayer"],

@@ -19,6 +19,10 @@ _H = 6.62607015e-27  # erg s
 _C = 2.99792458e10  # cm/s
 _KB = 1.380649e-16  # erg/K
 
+# Accepted band-integrated F_s / (pi B_nu(T_eff)) of a PHOENIX spectrum on the RT band: a surface flux sits near 1
+# (1.083 for WASP-39 at 1-15 um), while a unit or convention mistake is off by orders of magnitude.
+FLUX_CLOSURE_RANGE = (0.5, 1.5)
+
 # numpy 2 renamed trapz to trapezoid; support both
 _trapz = getattr(np, "trapezoid", None) or np.trapz  # type: ignore[attr-defined]  # noqa: NPY201  (numpy 1 has only this name)
 
@@ -114,7 +118,7 @@ def phoenix_surface_flux(nu_edges: np.ndarray, teff: float, logg: float, feh: fl
     band_fs = _trapz(fs_nu[order], nu[order])
     band_bb = _trapz(_pi_planck_nu(nu[order], float(teff)), nu[order])
     ratio = band_fs / band_bb
-    if not 0.5 <= ratio <= 1.5:
+    if not FLUX_CLOSURE_RANGE[0] <= ratio <= FLUX_CLOSURE_RANGE[1]:
         raise RuntimeError(
             f"PHOENIX flux normalization failed the energy-closure check: "
             f"band-integrated Fs / pi*B_nu(Teff) = {ratio:.3g} (expected "

@@ -217,19 +217,17 @@ def test_extra_molecules_resolve_in_engine_and_unknown_refused():
         forward.canonical_params(_p(extra_mols=["PH3"]))
 
 
-def test_vm_mol_pinned_explicitly_and_zeroed_without_moldiff():
+def test_vm_mol_pinned_explicitly_and_refused_without_moldiff():
     # the tool must PIN the vm_mol scheme in the canonical params (cache-
     # keyed), never inherit the upstream YAML default; False = the validated
     # baseline chemistry
     cp = forward.canonical_params(_p())
     assert cp["use_vm_mol"] is False
     assert forward.canonical_params(_p(use_vm_mol=True))["use_vm_mol"] is True
-    # inert when moldiff is off (engine gates use_vm on both): zeroed so it
-    # cannot fragment the cache into two identical setups
-    on = forward.canonical_params(_p(use_moldiff=False, use_vm_mol=True))
-    off = forward.canonical_params(_p(use_moldiff=False, use_vm_mol=False))
-    assert on["use_vm_mol"] is False
-    assert forward.params_key(on) == forward.params_key(off)
+    # without moldiff the upwind advection does nothing, and vulcan3 refuses the pair: refused by name before any build
+    assert forward.canonical_params(_p(use_moldiff=False))["use_vm_mol"] is False
+    with pytest.raises(ValueError, match="use_vm_mol=True needs use_moldiff=True"):
+        forward.canonical_params(_p(use_moldiff=False, use_vm_mol=True))
 
 
 def test_composition_structural_path_baseline_and_ranges():

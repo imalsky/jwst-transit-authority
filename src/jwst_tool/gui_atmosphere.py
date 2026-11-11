@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -41,6 +42,27 @@ def _engine_section() -> tuple[bool, str]:
     return pic, chem_provider
 
 
+_TINT_HELP = (
+    "Default: a published value where one exists, else Thorngren, Gao & Fortney (2019) for T_eq "
+    f"{planets.TINT_FIT_TEQ_RANGE_K[0]:g}-{planets.TINT_FIT_TEQ_RANGE_K[1]:g} K, else {planets.TINT_DEFAULT_K:g} K."
+)
+
+
+def _seed_tint(target: Target) -> None:
+    """Seed T_int once with planets.default_tint; a custom planet's tracks its star and orbit until edited."""
+    k = target.k
+    system = dict(star_teff=target.teff, rstar_rsun=target.rstar, orbit_au=target.orbit_au)
+    tint0 = planets.default_tint(target.pdef, system=system if target.planet_key == "custom" else None)
+    if target.planet_key == "custom":
+        # follow-until-overridden, as T_irr: the first manual edit breaks the link
+        prev_auto = st.session_state.get(k("tint_auto"))
+        if prev_auto is not None and st.session_state.get(k("tint")) == prev_auto:
+            st.session_state[k("tint")] = tint0
+        st.session_state[k("tint_auto")] = tint0
+    if k("tint") not in st.session_state:
+        st.session_state[k("tint")] = tint0
+
+
 def _guillot_boxes(target: Target) -> dict:
     """Draw the Guillot (2010) profile's settings."""
     planet_key, pdef, science_mode, k = target.planet_key, target.pdef, target.science_mode, target.k
@@ -74,13 +96,13 @@ def _guillot_boxes(target: Target) -> dict:
     # so no value= default
     if st.session_state.get(k("tirr")) is None:
         st.session_state[k("tirr")] = seed
-    tirr = st.number_input("T_irr (K)", *_W["tirr"], step=20.0, key=k("tirr"))
+    tirr = st.number_input("T_irr (K)", *_W["tirr"], step=planets.TIRR_STEP_K, key=k("tirr"))
     if tirr is None:
         # no Tirr in the request: canonical_params refuses with the same sentence
         st.error(tirr_error)
     else:
         tp_kwargs["Tirr"] = tirr
-    tp_kwargs["Tint"] = st.number_input("T_int (K)", *_W["tint"], step=25.0, key=k("tint"))
+    tp_kwargs["Tint"] = st.number_input("T_int (K)", *_W["tint"], step=25.0, key=k("tint"), help=_TINT_HELP)
     # default 0.01 cm^2/g, Guillot (2010)'s canonical thermal opacity
     tp_kwargs["log_kappa"] = st.number_input("log10 kappa_IR (cm^2/g)", *_W["lk"], step=0.1, key=k("lk"))
     tp_kwargs["log_gamma"] = st.number_input("log10 gamma (kappa_vis/kappa_IR)", *_W["lg"], step=0.05, key=k("lg"))
@@ -167,7 +189,7 @@ def _table_source(target: Target) -> tuple:
 
 def _tp_section(target: Target, pic: bool, chem_provider: str) -> Profile:
     """Draw the T-P profile; return (tp_mode, its settings, table source, table path, whether a table is usable)."""
-    planet_key, pdef, science_mode, k = target.planet_key, target.pdef, target.science_mode, target.k
+    planet_key, science_mode, k = target.planet_key, target.science_mode, target.k
     with st.expander("Temperature-pressure profile"):
         # each engine keeps its own T-P choice (PICASO adds its climate solver)
         tp_key = k("tp_picaso") if pic else k("tp")
@@ -205,14 +227,19 @@ def _tp_section(target: Target, pic: bool, chem_provider: str) -> Profile:
         )
         tp_kwargs = {}
         tp_file, tp_file_path, tp_file_ok = "", None, True
+        _seed_tint(target)
         # seeded once (no value= default), so the engine switch can write
         # them back while hidden (gui_sidebar.keep_hidden_engine_state)
-        for sk, sv in (("tint", planets.default_tint(pdef)), ("lk", -2.0), ("lg", -1.0), ("kzz", 9.0)):
+        for sk, sv in (
+            ("lk", model_defs.LOG_KAPPA_DEFAULT),
+            ("lg", model_defs.LOG_GAMMA_DEFAULT),
+            ("kzz", math.log10(model_defs.KZZ_CONST_DEFAULT)),
+        ):
             if k(sk) not in st.session_state:
                 st.session_state[k(sk)] = sv
         if tp_mode == "picaso_climate":
             # T_int shares its key with Guillot: the same physics and default
-            tp_kwargs["Tint"] = st.number_input("T_int (K)", *_W["tint"], step=25.0, key=k("tint"))
+            tp_kwargs["Tint"] = st.number_input("T_int (K)", *_W["tint"], step=25.0, key=k("tint"), help=_TINT_HELP)
             rf_key = K(f"rfacv_picaso_{science_mode}")
             if rf_key not in st.session_state:
                 st.session_state[rf_key] = model_defs.RFACV_DEFAULT[science_mode]
@@ -264,7 +291,9 @@ def _composition_section() -> tuple:
         # knob. The whole range under both engines, like C/O below: above
         # PICASO's cap (model_defs.PICASO_MET_RANGE) canonical_params' sentence
         # stops the Run.
-        met = st.number_input("Metallicity (× solar)", *model_defs.MET_RANGE, 10.0, 0.5, format="%.2f", key=K("met"))
+        met = st.number_input(
+            "Metallicity (× solar)", *model_defs.MET_RANGE, model_defs.MET_DEFAULT, 0.5, format="%.2f", key=K("met")
+        )
         # The widget spans the WHOLE admissible range over every (network,
         # photolysis) pair; which part of it is legal for the current pair is
         # canonical_params' call, and an illegal value stops the Run with its
@@ -286,7 +315,7 @@ def _kzz_section(k: KeyFn, pic: bool, tp_mode: str) -> Mixing:
         if pic:
             # PICASO is equilibrium chemistry, optionally quenched at one
             # constant Kzz: no profile menu and no multiplier
-            kzz_mode, kzz_x = "const", 1.0
+            kzz_mode, kzz_x = "const", model_defs.KZZ_X_DEFAULT
             kzz_const = kzz_kmax = kzz_plev = kzz_kdeep = 0.0
             picaso_quench = st.checkbox("Quench (constant Kzz)", value=False, key=K("quench_picaso"))
             if picaso_quench:
@@ -316,7 +345,7 @@ def _kzz_section(k: KeyFn, pic: bool, tp_mode: str) -> Mixing:
                 }.__getitem__,
             )
             kzz_const = kzz_kmax = kzz_plev = kzz_kdeep = 0.0
-            kzz_x = 1.0
+            kzz_x = model_defs.KZZ_X_DEFAULT
             if kzz_mode == "const":
                 log_kzz = st.number_input("log10 Kzz (cm^2 s^-1)", *_W["kzz"], step=0.25, key=k("kzz"))
                 kzz_const = 10.0**log_kzz
@@ -335,7 +364,7 @@ def _kzz_section(k: KeyFn, pic: bool, tp_mode: str) -> Mixing:
 def _photochemistry_section(pic: bool, science_mode: str) -> Photochemistry:
     if pic:  # VULCAN-JAX settings; none of them is sent under PICASO
         network, use_photo, use_moldiff, use_vm_mol = "", False, False, False
-        sl_angle_deg, f_diurnal = 0.0, 1.0
+        sl_angle_deg, f_diurnal = 0.0, model_defs.F_DIURNAL_DEFAULT
     else:
         with st.expander("Photochemistry & transport"):
             network = st.selectbox(
@@ -469,7 +498,7 @@ def _cloud_section(target: Target) -> Clouds:
             log_kappa_cloud = st.number_input("log10 kappa_cloud (cm^2/g at 3.5 µm)", *_W["ck"], 0.1, key=K("ck"))
             alpha_cloud = st.number_input("Cloud spectral slope alpha (kappa ∝ nu^alpha)", *_W["ca"], 0.25, key=K("ca"))
         else:
-            log_kappa_cloud, alpha_cloud = -1.0, 0.0
+            log_kappa_cloud, alpha_cloud = model_defs.LOG_KAPPA_CLOUD_DEFAULT, model_defs.ALPHA_CLOUD_DEFAULT
     return Clouds(use_rayleigh, cloud_on, cloud_mode, cloud_top_bar, log_kappa_cloud, alpha_cloud)
 
 

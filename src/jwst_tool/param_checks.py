@@ -31,6 +31,7 @@ from jwst_tool.model_defs import (
     MET_RANGE,
     MOLECULES,
     NO_EXOMOLOP_TABLE,
+    P_REF_DEFAULT_BAR,
     PICASO_MET_RANGE,
     RT_PTOP_DEFAULT,
     RT_PTOP_RANGE,
@@ -65,14 +66,18 @@ def check_system(cp: dict) -> None:
         _check_range("star_teff", cp["star_teff"], rng["teff"], "K (the PHOENIX grid range exercised)")
         _check_range("star_logg", cp["star_logg"], rng["logg"], "(log10 cm s^-2)")
         _check_range("star_feh", cp["star_feh"], rng["feh"], "dex")
-    if cp["tp_mode"] == "guillot" or climate:
-        _check_range("Tint", cp["Tint"], TINT_RANGE, "K")
     if cp["tp_mode"] == "guillot":
         _check_range("log_kappa", cp["log_kappa"], LOG_KAPPA_RANGE, "(log10 cm^2/g)")
         _check_range("log_gamma", cp["log_gamma"], LOG_GAMMA_RANGE)
     if cp["cloud_on"]:
         _check_range("log_kappa_cloud", cp["log_kappa_cloud"], LOG_KAPPA_CLOUD_RANGE, "(log10 cm^2/g)")
         _check_range("alpha_cloud", cp["alpha_cloud"], ALPHA_CLOUD_RANGE)
+
+
+def check_tint(cp: dict) -> None:
+    """Refuse a Guillot or climate T_int outside TINT_RANGE; run after the default is filled from the checked system."""
+    if cp["tp_mode"] in ("guillot", "picaso_climate"):
+        _check_range("Tint", cp["Tint"], TINT_RANGE, "K")
 
 
 def check_rt_settings(cp: dict) -> None:
@@ -86,7 +91,7 @@ def check_rt_settings(cp: dict) -> None:
             f"p_ref_bar={cp['p_ref_bar']:g} must lie inside the RT grid "
             f"[{cp['rt_ptop_bar']:g}, {art_pbtm:g}] bar. It is the pressure "
             "at which rp_rjup and gs_cgs are defined, so the grid has to "
-            "cover it. 1e-3 bar is the validated default for a "
+            f"cover it. {P_REF_DEFAULT_BAR:g} bar is the default for a "
             "transit-derived radius."
         )
     if cp["rt_integration"] not in ("simpson", "trapezoid"):
@@ -308,6 +313,18 @@ def check_condensation(cp: dict, network: str) -> None:
                 "would silently be zero. Enable it, or turn condensation "
                 "off."
             )
+
+
+def check_diffusion(cp: dict) -> None:
+    """Refuse upwind advection with molecular diffusion off: it moves the diffusion flux, so it would do nothing.
+
+    vulcan3 refuses the pair too, after the build has started; this refusal costs no solve.
+    """
+    if cp["use_vm_mol"] and not cp["use_moldiff"]:
+        raise ValueError(
+            "use_vm_mol=True needs use_moldiff=True: the upwind advection acts on the molecular-diffusion flux, "
+            "which is off. Set use_moldiff=True, or use_vm_mol=False."
+        )
 
 
 def _zero_inactive_kzz(cp: dict) -> None:

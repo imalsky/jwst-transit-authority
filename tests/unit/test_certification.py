@@ -339,20 +339,31 @@ def test_a_bulk_absorber_with_no_k_table_refuses_the_run():
 
     y = _col(2.0e-3)
     with pytest.raises(RuntimeError, match="C6H6 at VMR 2.00e-03") as e:
-        certify.check_unmodeled(sp, y, p, tables, "baseline solve", log.append)
+        certify.check_unmodeled(sp, y, p, tables, certify.PHOTOSPHERE_BAR, "baseline solve", log.append)
     assert "1e-03" in str(e.value) and "Lower C/O" in str(e.value)
     # the element gate's failure path, NOT a stall: nothing may retry this
     assert not isinstance(e.value, certify.NotCertified)
 
     # the warn band: modelable, so the run proceeds, but the caveat names it
     y = _col(2.0e-4)
-    assert certify.check_unmodeled(sp, y, p, tables, "baseline", log.append) is None
+    assert certify.check_unmodeled(sp, y, p, tables, certify.PHOTOSPHERE_BAR, "baseline", log.append) is None
     assert [n for n, _ in certify.unmodeled_absorbers(sp, y, p, tables)] == ["C6H6"]
 
     # below the warning floor this column is reported nowhere
     y = _col(5.0e-5)
-    assert certify.check_unmodeled(sp, y, p, tables, "baseline", log.append) is None
+    assert certify.check_unmodeled(sp, y, p, tables, certify.PHOTOSPHERE_BAR, "baseline", log.append) is None
     assert certify.unmodeled_absorbers(sp, y, p, tables) == []
+
+
+def test_the_absorber_gate_reads_the_observations_own_photosphere():
+    """An eclipse forms deeper than a transit: a bulk absorber with no k-table only at 0.05 bar is outside the transit
+    band and refused over an eclipse band that reaches it."""
+    sp = ["H2O", "C6H6", "H2"]
+    p = np.array([5.0e-2, 1.0e-3, 1.0e-4])
+    y = np.array([[1.0e-3, 5.0e-3, 0.994], [1.0e-3, 0.0, 0.999], [1.0e-3, 0.0, 0.999]])
+    certify.check_unmodeled(sp, y, p, {"H2O"}, certify.PHOTOSPHERE_BAR, "transit", print)
+    with pytest.raises(RuntimeError, match=r"photosphere \(6e-05-0.1 bar\) carries C6H6"):
+        certify.check_unmodeled(sp, y, p, {"H2O"}, (6.0e-5, 0.1), "eclipse", print)
 
 
 def test_a_stalled_column_escalates_once_and_a_certified_one_never_does():

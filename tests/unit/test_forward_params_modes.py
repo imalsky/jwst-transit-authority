@@ -102,9 +102,9 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # parameter SET moved with it.
     # The G395H SO2 significance behind this configuration is in notes
     # "Composition, C/O bounds and networks".
-    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b", tp_mode="file"))) == "87afcd45da73bb56"
+    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b", tp_mode="file"))) == "beeb3d3f0e34cd7b"
     # ... and the bare DEFAULT run is that same atmosphere
-    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b"))) == "87afcd45da73bb56"
+    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b"))) == "beeb3d3f0e34cd7b"
     # the sha1 pin is only meaningful re-derived from the file the run
     # actually reads -- this catches the table itself being swapped
     path = tp_tables.shipped_tp_file("wasp39b")
@@ -528,12 +528,67 @@ def test_the_chemistry_radius_anchor_is_the_hydrostatic_identity():
     )
 
 
+def test_a_gravity_anchor_that_has_not_converged_is_refused(monkeypatch):
+    """The Guillot anchors run a fixed number of passes; a last pass that still moves g is refused, never used."""
+    from types import SimpleNamespace
+
+    from jwst_tool import picaso_engine
+
+    tol = model_defs.ANCHOR_TOL
+    assert chem_build.check_anchor_converged(400.0, 400.0 * (1.0 + 0.5 * tol), "s") == pytest.approx(0.5 * tol)
+    with pytest.raises(RuntimeError, match="did not converge"):
+        chem_build.check_anchor_converged(400.0, 400.0 * (1.0 + 2.0 * tol), "s")
+    # the PICASO Guillot anchor: a map that keeps moving g by 5 % per pass
+    monkeypatch.setattr(chem_build, "build_tp", lambda _cp, g: (lambda _tp, _p: np.full(1, g),))
+    cp = {"gs_cgs": 400.0}
+    with pytest.raises(RuntimeError, match="PICASO Guillot gravity anchor did not converge"):
+        picaso_engine._guillot_gravity(cp, np.zeros(4), np.ones(1), np.ones(1), lambda T, _mu: 1.05 * float(T[0]))
+    # one that settles returns the last pass
+    assert picaso_engine._guillot_gravity(cp, np.zeros(4), np.ones(1), np.ones(1), lambda _T, _mu: 410.0) == 410.0
+    # the VULCAN chemistry anchor, on a radius map that keeps shrinking
+    radii = iter([9.0e9, 8.5e9, 8.0e9])
+    monkeypatch.setattr(chem_build, "chem_radius_anchor_bar", lambda *_a: 1.0)
+    monkeypatch.setattr(chem_build, "radius_at_anchor", lambda *_a: next(radii))
+    probe = SimpleNamespace(y0=np.ones((2, 2)), species_masses=np.ones(2), p_bar=np.ones(2))
+    cp = {"gs_cgs": 400.0, "p_ref_bar": 1e-3, "rt_ptop_bar": 1e-7, "p_btm_bar": 10.0}
+    with pytest.raises(RuntimeError, match="chemistry gravity anchor did not converge"):
+        chem_build._radius_anchor(cp, np.zeros(7), probe, 9.5e9, object(), False, lambda *_a: None)
+
+
 def test_tint_default_follows_the_planet():
     """WASP-107 b's Guillot T_int is its published interior temperature
-    (Sing+2024, 460 K); every other preset keeps the generic 100 K, so the
-    WASP-39 b reference key above cannot move. An explicit value wins.
+    (Sing+2024, 460 K); every other planet takes the Thorngren, Gao & Fortney
+    (2019) relation at its T_eq inside 700-2800 K, else 100 K, a custom planet
+    at its own star and orbit. An explicit value wins.
     """
+
+    def thorngren(teq):  # their equation 3, F = 4 sigma T_eq^4 in 1e9 erg s^-1 cm^-2
+        return 0.39 * teq * np.exp(-((np.log10(4.0 * 5.670374419e-5 * teq**4 / 1.0e9) - 0.14) ** 2) / 1.095)
+
     assert forward.canonical_params(dict(planet="wasp107b"))["Tint"] == 460.0
-    assert forward.canonical_params(dict(planet="wasp39b", tp_mode="guillot"))["Tint"] == 100.0
-    assert forward.canonical_params(dict(planet="custom", tp_mode="guillot"))["Tint"] == 100.0
+    for planet in ("wasp39b", "hd189733b", "hd209458b"):
+        p = planets.PLANETS[planet]
+        teq = planets.system_teq(p["star"]["teff"], p["rstar_rsun"], p["orbit_au"])
+        assert forward.canonical_params(dict(planet=planet, tp_mode="guillot"))["Tint"] == round(thorngren(teq))
+    hd209 = planets.PLANETS["hd209458b"]
+    hd209_system = dict(star_teff=hd209["star"]["teff"], rstar_rsun=hd209["rstar_rsun"], orbit_au=hd209["orbit_au"])
+    custom = dict(planet="custom", tp_mode="guillot", science_mode="emission", **hd209_system)
+    assert forward.canonical_params(custom)["Tint"] == 570.0
+    # a T_eq below the relation's grid keeps the generic value
+    cool = dict(custom, orbit_au=0.5)
+    assert planets.system_teq(cool["star_teff"], cool["rstar_rsun"], cool["orbit_au"]) < 700.0
+    assert forward.canonical_params(dict(cool, Tirr=900.0))["Tint"] == planets.TINT_DEFAULT_K
     assert forward.canonical_params(dict(planet="wasp107b", Tint=120.0))["Tint"] == 120.0
+    # every registry default sits inside the accepted range
+    for p in planets.PLANETS.values():
+        assert model_defs.TINT_RANGE[0] <= planets.default_tint(p) <= model_defs.TINT_RANGE[1]
+
+
+def test_the_run_network_is_handed_to_the_engine(monkeypatch):
+    """vulcan3 freezes its network at the first import: the run's pair goes through the engine's select_network, which
+    refuses another pair later in the process, never through the environment directly."""
+    vulcan_chem = pytest.importorskip("vulcan_forward.vulcan_chem")
+    calls = []
+    monkeypatch.setattr(vulcan_chem, "select_network", lambda *pair: calls.append(pair))
+    assert chem_build._select_network({"network": "ncho"}, lambda *_a: None) == model_defs.NETWORKS["ncho"]
+    assert calls == [model_defs.NETWORKS["ncho"]]

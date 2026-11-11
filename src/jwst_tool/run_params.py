@@ -9,20 +9,33 @@ from typing import TYPE_CHECKING, Any
 from jwst_tool import picaso_engine as _pe, planets
 from jwst_tool.model_defs import (
     _VERSION,
+    ALPHA_CLOUD_DEFAULT,
     CHEM_PROVIDERS,
     CO_DEFAULT,
     DEFAULT_NETWORK,
+    F_DIURNAL_DEFAULT,
     FORMER_EXTRA_MOLECULES,
+    KZZ_CONST_DEFAULT,
+    KZZ_KDEEP_DEFAULT,
+    KZZ_KMAX_DEFAULT,
+    KZZ_PLEV_DEFAULT_BAR,
+    KZZ_X_DEFAULT,
+    LOG_GAMMA_DEFAULT,
+    LOG_KAPPA_CLOUD_DEFAULT,
+    LOG_KAPPA_DEFAULT,
+    MET_DEFAULT,
     NETWORKS,
     NZ_DEFAULT,
     NZ_RANGE,
     P_BTM_FILE_BAR,
     P_BTM_PARAMETRIC_BAR,
     P_BTM_RANGE,
+    P_REF_DEFAULT_BAR,
     PICASO_NO_SPECIES,
     PICASO_P_BTM_MAX,
     RFACV_DEFAULT,
     RFACV_RANGE,
+    RT_INTEGRATION_DEFAULT,
     RT_PTOP_DEFAULT,
     T_WINDOW,
     TP_FILE_SHIPPED,
@@ -36,11 +49,13 @@ from jwst_tool.model_defs import (
 from jwst_tool.param_checks import (
     check_composition,
     check_condensation,
+    check_diffusion,
     check_fisher_rows,
     check_kzz,
     check_molecules,
     check_rt_settings,
     check_system,
+    check_tint,
 )
 from jwst_tool.tp_tables import read_tp_table, resolve_tp_file, shipped_tp_table_is_default
 
@@ -203,8 +218,8 @@ _PICASO_INERT = {
     "yconv_cri": YCONV_DEFAULT,
     "yconv_min": YCONV_MIN_DEFAULT,
     "sl_angle_deg": 0.0,
-    "f_diurnal": 1.0,
-    "kzz_x": 1.0,
+    "f_diurnal": F_DIURNAL_DEFAULT,
+    "kzz_x": KZZ_X_DEFAULT,
     "kzz_kmax": 0.0,
     "kzz_plev": 0.0,
     "kzz_kdeep": 0.0,
@@ -396,7 +411,7 @@ def _filled_payload(params: dict, r: _Resolved) -> dict:
         "rstar_rsun": round(float(params.get("rstar_rsun", r.sysd["rstar_rsun"])), 4),
         "orbit_au": round(float(params.get("orbit_au", r.sysd["orbit_au"])), 5),
         "sflux": r.solver.sflux,
-        "met_x_solar": round(float(params.get("met_x_solar", 10.0)), 4),
+        "met_x_solar": round(float(params.get("met_x_solar", MET_DEFAULT)), 4),
         "co_ratio": round(float(params.get("co_ratio", CO_DEFAULT)), 6),
         # Kzz default follows the structure: a tabulated T-P with a Kzz column
         # supplies the mixing profile too, otherwise constant.
@@ -413,33 +428,28 @@ def _filled_payload(params: dict, r: _Resolved) -> dict:
                 else "const",
             )
         ),
-        "kzz_x": round(float(params.get("kzz_x", 1.0)), 4),
-        "kzz_const": round(float(params.get("kzz_const", 1.0e9)), 1),
+        "kzz_x": round(float(params.get("kzz_x", KZZ_X_DEFAULT)), 4),
+        "kzz_const": round(float(params.get("kzz_const", KZZ_CONST_DEFAULT)), 1),
         # parametric Kzz profiles: Pfunc (kzz_kmax cm^2/s, kzz_plev bar) and
         # JM16 (kzz_kdeep); param_checks zeroes the unused ones for cache hygiene
-        "kzz_kmax": round(float(params.get("kzz_kmax", 1.0e5)), 1),
-        "kzz_plev": float(f"{float(params.get('kzz_plev', 0.1)):.6e}"),
-        "kzz_kdeep": round(float(params.get("kzz_kdeep", 1.0e5)), 1),
+        "kzz_kmax": round(float(params.get("kzz_kmax", KZZ_KMAX_DEFAULT)), 1),
+        "kzz_plev": float(f"{float(params.get('kzz_plev', KZZ_PLEV_DEFAULT_BAR)):.6e}"),
+        "kzz_kdeep": round(float(params.get("kzz_kdeep", KZZ_KDEEP_DEFAULT)), 1),
         "tp_mode": r.tp_mode,
         # file-mode identity: source label + content hash, so two tables can
         # never share a cache entry ("" outside file mode)
         "tp_file": r.column.tp_file,
         "tp_file_sha1": r.column.tp_file_sha1,
-        # _guillot_tirr fills the default once the system values are checked
+        # _default_tint and _guillot_tirr fill the defaults from the selected system
         "Tirr": round(float(params.get("Tirr", 0.0)), 2),
-        # the planet's published interior temperature where the registry
-        # carries one (WASP-107 b), via planets.default_tint like Tirr
-        "Tint": round(
-            float(params.get("Tint", planets.default_tint(planets.PLANETS.get(r.planet, planets.CUSTOM_DEFAULTS)))), 2
-        ),
-        # 0.01 cm^2/g, Guillot (2010); the sidebar's default must agree
-        "log_kappa": round(float(params.get("log_kappa", -2.0)), 3),
-        "log_gamma": round(float(params.get("log_gamma", -1.0)), 3),
+        "Tint": round(float(params.get("Tint", 0.0)), 2),
+        "log_kappa": round(float(params.get("log_kappa", LOG_KAPPA_DEFAULT)), 3),
+        "log_gamma": round(float(params.get("log_gamma", LOG_GAMMA_DEFAULT)), 3),
         # physical VULCAN knobs (all flow through cfg_overrides; the defaults
         # are the W39b cfg values)
         "use_photo": bool(params.get("use_photo", not r.pic)),
         "sl_angle_deg": round(float(params.get("sl_angle_deg", planets.SL_ANGLE_DEG[r.column.science_mode])), 1),
-        "f_diurnal": round(float(params.get("f_diurnal", 1.0)), 3),
+        "f_diurnal": round(float(params.get("f_diurnal", F_DIURNAL_DEFAULT)), 3),
         "use_moldiff": bool(params.get("use_moldiff", not r.pic)),
         # Upwind molecular-diffusion advection: PINNED explicitly, never
         # inherited from the engine. False is the validated baseline here.
@@ -451,16 +461,16 @@ def _filled_payload(params: dict, r: _Resolved) -> dict:
         # follows it (engine rule), so no RT layer is clamped above the
         # chemistry. rt_integration picks the ArtTransPure chord scheme.
         "rt_ptop_bar": float(f"{float(params.get('rt_ptop_bar', RT_PTOP_DEFAULT)):.6e}"),
-        "rt_integration": str(params.get("rt_integration", "simpson")),
+        "rt_integration": str(params.get("rt_integration", RT_INTEGRATION_DEFAULT)),
         # The pressure rp_rjup and gs_cgs apply at. A catalogue radius is the
         # transit radius near the terminator photosphere, NOT the RT-grid
         # bottom exojax defaults to; anchoring it there inflates every depth.
-        "p_ref_bar": float(f"{float(params.get('p_ref_bar', 1.0e-3)):.6e}"),
+        "p_ref_bar": float(f"{float(params.get('p_ref_bar', P_REF_DEFAULT_BAR)):.6e}"),
         # chemistry + RT column bottom (model_defs.P_BTM_RANGE)
         "p_btm_bar": round(r.column.p_btm_bar, 4),
         "cloud_on": bool(params.get("cloud_on", False)),
-        "log_kappa_cloud": round(float(params.get("log_kappa_cloud", -1.0)), 3),
-        "alpha_cloud": round(float(params.get("alpha_cloud", 0.0)), 2),
+        "log_kappa_cloud": round(float(params.get("log_kappa_cloud", LOG_KAPPA_CLOUD_DEFAULT)), 3),
+        "alpha_cloud": round(float(params.get("alpha_cloud", ALPHA_CLOUD_DEFAULT)), 2),
         # Detection-only condensation: param_checks refuses ANY derivative
         "use_condense": bool(params.get("use_condense", False)),
         # removed and refused above; pinned off so the cache key is unchanged
@@ -513,6 +523,17 @@ def _picaso_fields(cp: dict, params: dict, tp_table: Any, science_mode: str, tp_
         )
 
 
+def _system(cp: dict) -> dict:
+    return dict(star_teff=cp["star_teff"], rstar_rsun=cp["rstar_rsun"], orbit_au=cp["orbit_au"])
+
+
+def _default_tint(params: dict, cp: dict, r: _Resolved) -> None:
+    """Fill the T_int default from planets.default_tint, the GUI's definition too; zeroed later where inert."""
+    if "Tint" not in params:
+        custom = r.planet not in planets.PLANETS
+        cp["Tint"] = round(planets.default_tint(r.sysd, system=_system(cp) if custom else None), 2)
+
+
 def _guillot_tirr(params: dict, cp: dict, r: _Resolved) -> None:
     """Fill and check the Guillot T_irr: the request's value, else sqrt(2) * T_eq of the selected system.
 
@@ -524,25 +545,21 @@ def _guillot_tirr(params: dict, cp: dict, r: _Resolved) -> None:
     if "Tirr" in params:
         planets.check_tirr(cp["Tirr"], derived=False)
         return
-    system = dict(star_teff=cp["star_teff"], rstar_rsun=cp["rstar_rsun"], orbit_au=cp["orbit_au"])
-    cp["Tirr"] = round(default_tirr(r.planet, system=system, science_mode=r.column.science_mode), 2)
+    cp["Tirr"] = round(default_tirr(r.planet, system=_system(cp), science_mode=r.column.science_mode), 2)
     planets.check_tirr(cp["Tirr"], derived=True)
 
 
 def _zero_inert_settings(cp: dict, sysd: dict, science_mode: str, tp_mode: str) -> None:
     """Normalize settings inert for the chosen modes, so one physics maps to one key."""
     climate = tp_mode == "picaso_climate"
-    if not cp["use_photo"]:  # photolysis knobs are inert without photo
+    if not cp["use_photo"]:  # photolysis settings are inert without photo
         cp["sl_angle_deg"] = 0.0
-        cp["f_diurnal"] = 1.0
+        cp["f_diurnal"] = F_DIURNAL_DEFAULT
         # The UV spectrum feeds only photolysis: normalize it photo-off so
         # identical physics never caches under two keys.
         cp["sflux"] = str(sysd["sflux"])
         if not climate:  # the semi-major axis heats the climate
             cp["orbit_au"] = round(float(sysd["orbit_au"]), 5)
-    if not cp["use_moldiff"]:  # upwind vm_mol is inert without moldiff
-        cp["use_vm_mol"] = False  # (engine gates use_vm on both); keep the
-        # key from fragmenting the cache
     if not cp["cloud_on"]:  # cloud knobs are inert when the deck is off
         cp["log_kappa_cloud"] = 0.0
         cp["alpha_cloud"] = 0.0
@@ -552,7 +569,7 @@ def _zero_inert_settings(cp: dict, sysd: dict, science_mode: str, tp_mode: str) 
         # solver must not read scattering as thermal absorption) and the chord
         # scheme exists only in transmission: normalize both for the cache.
         cp["use_rayleigh"] = False
-        cp["rt_integration"] = "simpson"
+        cp["rt_integration"] = RT_INTEGRATION_DEFAULT
     elif not climate:
         # transmission: the star lives only on the noise side.
         cp["star_teff"] = cp["star_logg"] = cp["star_feh"] = 0.0
@@ -592,6 +609,8 @@ def canonical_params(params: dict) -> dict:
     )
     cp = _filled_payload(params, r)
     check_system(cp)
+    _default_tint(params, cp, r)
+    check_tint(cp)
     _guillot_tirr(params, cp, r)
     if pic:
         _picaso_fields(cp, params, column.tp_table, column.science_mode, tp_mode, solver.nz)
@@ -600,6 +619,7 @@ def canonical_params(params: dict) -> dict:
     co_bound, met_range = check_composition(cp, network, pic)
     check_fisher_rows(cp, tp_mode, pic, network, co_bound, met_range)
     check_condensation(cp, network)
+    check_diffusion(cp)
     _zero_inert_settings(cp, sysd, column.science_mode, tp_mode)
     check_kzz(cp, tp_mode, column.tp_table, pic)
     # Science-data identity. Every key above describes the MODEL; none of them

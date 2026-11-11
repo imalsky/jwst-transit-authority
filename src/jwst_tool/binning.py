@@ -23,6 +23,20 @@ SEGMENT_GAP_FACTOR = 20.0
 # so detect.evaluate_mode excludes them from the operator.
 DEGENERATE_WL_FRAC = 0.02
 
+# The LSF blur's numerics (smooth_to_native_r). Gaussian FWHM per sigma, 2 sqrt(2 ln 2) to five figures: the per-mode
+# instruments.LSF_WIDTH fits were made with this value.
+FWHM_PER_SIGMA = 2.3548
+# Smallest resolving power a kernel is built for: a native-R entry below it is raised to it. No basis recorded.
+LSF_R_FLOOR = 5.0
+# The working grid reaches this many widest-kernel sigmas past each band edge, so the edge blur sees model content.
+LSF_PAD_SIGMAS = 5.0
+# Working-grid samples per narrowest-kernel sigma.
+LSF_SAMPLES_PER_SIGMA = 6.0
+# Kernel half-width in widest-kernel sigmas: the weight beyond it is below exp(-8), 3e-4.
+LSF_HALF_WIDTH_SIGMAS = 4.0
+# Relative floor on the cell-averaged stellar-flux weight, so a window of zero flux does not divide by zero.
+LSF_WEIGHT_FLOOR = 1.0e-12
+
 
 def _validate_wl(wl: np.ndarray, name: str) -> np.ndarray:
     """Finite, positive, non-empty 1-D wavelength array or ValueError.
@@ -238,10 +252,10 @@ def smooth_to_native_r(
     if not in_band.any():
         raise ValueError(f"smooth_to_native_r: no native-R sample inside the band [{band_lo:g}, {band_hi:g}] um")
     r_band = r_v[in_band]
-    r_min = max(5.0, float(np.min(r_band)))
+    r_min = max(LSF_R_FLOOR, float(np.min(r_band)))
     r_max = max(r_min, float(np.max(r_band)))
-    s_max = 1.0 / (2.3548 * r_min)  # widest kernel sigma, in ln-lambda
-    s_min = 1.0 / (2.3548 * r_max)
+    s_max = 1.0 / (FWHM_PER_SIGMA * r_min)  # widest kernel sigma, in ln-lambda
+    s_min = 1.0 / (FWHM_PER_SIGMA * r_max)
 
     sel = (lnw >= x_lo) & (lnw <= x_hi)
     if not sel.any():
@@ -250,9 +264,9 @@ def smooth_to_native_r(
     if s_max < d_model:  # kernel unresolved by the model grid
         return yv.copy()
 
-    lo = max(float(lnw[0]), x_lo - 5.0 * s_max)
-    hi = min(float(lnw[-1]), x_hi + 5.0 * s_max)
-    dl = s_min / 6.0
+    lo = max(float(lnw[0]), x_lo - LSF_PAD_SIGMAS * s_max)
+    hi = min(float(lnw[-1]), x_hi + LSF_PAD_SIGMAS * s_max)
+    dl = s_min / LSF_SAMPLES_PER_SIGMA
     n = int(np.ceil((hi - lo) / dl)) + 1
     grid = lo + dl * np.arange(n)
 
@@ -296,14 +310,14 @@ def smooth_to_native_r(
         if _valid[-1] < f_grid.size - 1:
             f_grid[_valid[-1] + 1 :] = f_grid[_valid[-1]]
         fmax = float(f_grid.max()) if f_grid.size else 0.0
-        f_grid = np.maximum(f_grid, 1e-12 * fmax) if fmax > 0.0 else np.ones_like(yg)
+        f_grid = np.maximum(f_grid, LSF_WEIGHT_FLOOR * fmax) if fmax > 0.0 else np.ones_like(yg)
 
-    k = int(np.ceil(4.0 * s_max / dl))
+    k = int(np.ceil(LSF_HALF_WIDTH_SIGMAS * s_max / dl))
     pad = np.concatenate([np.full(k, yg[0]), yg, np.full(k, yg[-1])])
     pad_f = np.concatenate([np.full(k, f_grid[0]), f_grid, np.full(k, f_grid[-1])])
     win = np.lib.stride_tricks.sliding_window_view(pad, 2 * k + 1)
     win_f = np.lib.stride_tricks.sliding_window_view(pad_f, 2 * k + 1)
-    sig = 1.0 / (2.3548 * np.maximum(np.interp(np.exp(grid), wl_r_v, r_v), 5.0))
+    sig = 1.0 / (FWHM_PER_SIGMA * np.maximum(np.interp(np.exp(grid), wl_r_v, r_v), LSF_R_FLOOR))
     off = dl * (np.arange(2 * k + 1) - k)
     w = np.exp(-0.5 * (off[None, :] / sig[:, None]) ** 2) * win_f  # flux-weighted
     smoothed = (w * win).sum(axis=1) / w.sum(axis=1)

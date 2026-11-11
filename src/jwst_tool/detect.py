@@ -17,6 +17,10 @@ if TYPE_CHECKING:
 # transits-to-target scan cap: beyond this, effectively unreachable anyway
 N_TRANSITS_CAP = 500
 
+# Relative eigenvalue cutoff of the nuisance projection, near float64 round-off on a correlation-form matrix: a
+# direction below it is a null direction, and a chi^2 left below it of the raw value is round-off, reported as 0.
+RANK_RTOL = 1.0e-12
+
 # Nuisance directions for sigma_detect_proj: T-P parameters, the reference
 # radius, and the cloud deck (an uncertain deck absorbs broadband signal
 # like an offset). Never add the chemistry rows (lnZ, dlnCO, lnKzz) -- they
@@ -104,11 +108,11 @@ def detection_significance(
             An = A[np.ix_(keep, keep)] / np.outer(d[keep], d[keep])
             bn = b[keep] / d[keep]
             ew, ev = np.linalg.eigh(0.5 * (An + An.T))
-            good = ew > 1e-12 * max(float(ew[-1]), 1e-300)
+            good = ew > RANK_RTOL * max(float(ew[-1]), 1e-300)
             if good.any():
                 proj = ev[:, good].T @ bn
                 chi2 -= float(np.sum(proj**2 / ew[good]))
-    if chi2 <= 1e-12 * chi2_raw:
+    if chi2 <= RANK_RTOL * chi2_raw:
         # below the eigen-threshold's own resolution: the projection's
         # rounding noise, not shape information -- report exactly 0
         chi2 = 0.0

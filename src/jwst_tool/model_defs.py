@@ -65,7 +65,7 @@ DT_MAX_S = 1.0e13  # chemistry step-size cap (s); prevents the adaptive-dt ballo
 
 # model_cache buster (identity = canonical params + this number, never a content
 # hash); bump on any physics or canonical-key-set change.
-_VERSION = 62
+_VERSION = 63
 
 # The W39b cfg's elemental set (number ratios to H, 10x solar): Lodders 2020
 # Table 8 present-day solar (log eps C 8.47, N 7.85, O 8.73, S 7.15; He is
@@ -79,6 +79,40 @@ CFG_ABUNDANCES = {"O_H": 0.00537, "C_H": 0.00295, "N_H": 0.000708, "S_H": 0.0001
 # set (C_H / O_H = 0.54935; not [C/H]/[O/H], not a log), rounded onto the
 # widgets' 0.05 grid.
 CO_DEFAULT = 0.55
+
+# Request defaults. One definition each: canonical_params fills a missing key from here, and the sidebar widgets
+# (directly or through share_config.WIDGET_RANGES) start from the same value. "No basis recorded" marks a default
+# chosen without a recorded measurement or citation.
+MET_DEFAULT = 10.0  # x solar: the W39b cfg's set (CFG_ABUNDANCES), the metallicity Tsai et al. 2023 fit for WASP-39 b
+KZZ_X_DEFAULT = 1.0  # multiplier on the whole Kzz profile: the profile as given
+KZZ_CONST_DEFAULT = 1.0e9  # cm^2/s, constant Kzz: the log-centre of KZZ_CONST_RANGE; no basis recorded
+KZZ_KMAX_DEFAULT = 1.0e5  # cm^2/s, Pfunc deep Kzz: vulcan3's config value (K_max)
+KZZ_PLEV_DEFAULT_BAR = 0.1  # bar, Pfunc transition level: vulcan3's config value (K_p_lev)
+KZZ_KDEEP_DEFAULT = 1.0e5  # cm^2/s, JM16 deep floor: equal to the Pfunc deep value; no basis recorded
+LOG_KAPPA_DEFAULT = -2.0  # log10 cm^2/g, Guillot kappa_IR: 0.01 cm^2/g, Guillot (2010)'s thermal opacity
+LOG_GAMMA_DEFAULT = -1.0  # log10 kappa_vis / kappa_IR: no basis recorded
+F_DIURNAL_DEFAULT = 1.0  # diurnal photolysis factor: vulcan3's config value (f_diurnal)
+# bar: a catalogue transit radius belongs near the transmission photosphere, not at the RT grid bottom; 1 mbar is not
+# tuned to data (notes "Structure: T-P, Kzz, gravity anchor, model top")
+P_REF_DEFAULT_BAR = 1.0e-3
+LOG_KAPPA_CLOUD_DEFAULT = -1.0  # log10 cm^2/g at 3.5 um, cloud deck opacity when the deck is on: no basis recorded
+ALPHA_CLOUD_DEFAULT = 0.0  # cloud deck slope: 0 is a grey deck, the engine's powerlaw_clouds convention
+RT_INTEGRATION_DEFAULT = "simpson"  # the chord scheme exojax's ArtTransPure uses by default
+
+# Fraction of Pandeia's per-mode saturation_fullwell a ramp may reach: PandExo's default saturation level, 80 % (docs/
+# noise_and_binning.md says what that divisor is).
+SAT_LIMIT_DEFAULT = 0.80
+
+# Gravity anchor: the catalogue (Rp, g) pair is moved to the chemistry's anchor level, a fixed point with the profile
+# that reads g (Guillot's tau = kappa P / g, or PICASO's climate). The Guillot anchors run ANCHOR_PASSES passes, the
+# climate anchor at most that many; a last pass that still moves g by more than ANCHOR_TOL (relative) is refused.
+# Measured passes: notes "Structure: T-P, Kzz, gravity anchor, model top".
+ANCHOR_TOL = 5.0e-3
+ANCHOR_PASSES = 3
+
+# Heat redistribution factor f of the Guillot (2010) profile: 1/4 spreads the irradiation over the whole planet. The
+# dayside an eclipse sees is carried by its T_irr instead (planets.DAYSIDE_TEQ_FACTOR).
+GUILLOT_F_REDIST = 0.25
 
 
 def elemental_abundances(met_x_solar: float, co_ratio: float) -> dict:
@@ -135,8 +169,9 @@ RFACV_RANGE = (0.05, 1.0)
 
 RFACV_DEFAULT = {"transmission": 0.5, "emission": 1.0}
 
-# T_int range (K), Guillot and climate alike: the GUI's T_int widget (picaso refuses T_int = 0).
-TINT_RANGE = (50.0, 500.0)
+# T_int range (K), Guillot and climate alike: the GUI's T_int widget (picaso refuses T_int = 0). The top is the
+# "up to 700 K" Thorngren, Gao & Fortney (2019) quote for their grid, so it holds every planets.default_tint value.
+TINT_RANGE = (50.0, 700.0)
 
 # The climate grid and the quench search end at 100 bar (picaso_engine).
 PICASO_P_BTM_MAX = 100.0
@@ -282,7 +317,12 @@ TP_PARAM_NAMES = {
 # FD Fisher steps. lnZ scales O/C/N/S together (C/O preserved), dlnCO scales
 # C_H at fixed O, lnKzz/T-P rows perturb theta on the same build. Every row is
 # evaluated at h AND 2h -- disagreement beyond FD_CONSISTENCY_TOL RAISES --
-# and reported as the Richardson combination (4 J_h - J_2h)/3.
+# and reported as the Richardson combination (4 J_h - J_2h)/3. Fixed, not
+# settings. A smaller step lets the solver's convergence noise, which a
+# difference divides by h, fail the gate: dlnCO at h = 0.05 reads 0.258
+# (notes "Jacobians and Fisher"), and the PICASO T_int row 1.190 at 7 K against
+# 0.541 at 10 K (notes "PICASO engine"). The Guillot kappa and gamma and the
+# cloud-deck steps have no basis recorded.
 FD_STEPS = {
     "lnZ": 0.10,
     "dlnCO": 0.10,

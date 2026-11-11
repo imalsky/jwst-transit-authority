@@ -14,7 +14,7 @@ import jax.numpy as jnp
 import numpy as np
 
 # isort: off
-from vulcan_forward import vulcan_chem  # noqa: F401  # first: it sets jax x64 and the frozen network before exojax
+from vulcan_forward import vulcan_chem  # noqa: F401  # first: it sets jax x64 before exojax
 from vulcan_forward import exojax_rt
 from jwst_tool.model_defs import RT_PTOP_DEFAULT
 # isort: on
@@ -33,10 +33,9 @@ def build_trt(wl_lo_um: float, wl_hi_um: float):
     return exojax_rt.build_rt_model(
         dict(
             molecules=RT_MOLS,
-            omit_core_molecules=["NH3", "HCN"],  # not among Tsai et al. 2023's eight
+            omit_core_molecules=["NH3", "HCN", "C2H2", "OCS"],  # not among Tsai et al. 2023's eight
             nu_min=1e4 / wl_hi_um,
             nu_max=1e4 / wl_lo_um,
-            opacity_mode="exomolop",
             art_nlayer=80,
             art_ptop_bar=RT_PTOP_DEFAULT,  # the shipped model top, as the chemistry columns (inputs/chem_cases.py)
             art_pbtm_bar=7.6,

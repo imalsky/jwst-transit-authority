@@ -22,12 +22,14 @@ solved column ``y``.
 
 Retries: picaso re-solves a layer that does not converge at a temperature shifted by up to 1e-4 of T. The certificate
 records the count of each request (`retried_layers`), the log names it per stage, and the result's
-`picaso_retried_layers` sums it over every column the run solved, probe and stencil points included. A cached worker
-result without the count is logged and solved again.
+`picaso_retried_layers` sums it over every column the run solved, probe and stencil points included.
 
 Gravity: one constant g per run for the climate solve, the quench scale height and the Guillot profile, at the tool's
 chemistry anchor (the grid interface nearest 1 bar), as on the VULCAN path. A climate baseline iterates g with its own T
-and mean molecular weight to `ANCHOR_TOL`; the composition stencil points of a run reuse that g.
+and mean molecular weight to `model_defs.ANCHOR_TOL`; the Guillot profile runs `ANCHOR_PASSES` passes and is refused if
+the last moved g by more than that. The composition stencil points of a run reuse that g. The anchor reads vulcan3's grid
+rule, so the assembly first selects the tool's default network (`vulcan_chem.select_network`): vulcan3 freezes one at
+its first import, and a default VULCAN run later in the same process must find it.
 
 ## `picaso_worker`
 

@@ -10,7 +10,9 @@ import numpy as np
 
 from jwst_tool import planets
 from jwst_tool.certify import (
+    EMIS_PHOTOSPHERE_QUANTILES,
     EMIS_TAU_THIN,
+    EMIS_TAU_WARN,
     EMIS_THIN_FLUX_FRAC,
     check_emission_thin,
     tau_bottom_breakdown,
@@ -86,7 +88,6 @@ def build_rt_setup(
         "art_pbtm_bar": profile["art_pbtm_bar"],
         "rt_integration": cp["rt_integration"],
         "p_ref_bar": cp["p_ref_bar"],
-        "opacity_mode": profile["opacity_mode"],
         "omit_core_molecules": profile["omit_core_molecules"],
     }
     for k, want in echo.items():
@@ -217,6 +218,47 @@ class ColumnSpectrum:
         )
 
 
+def emission_photosphere_bar(setup: RtSetup, column: ColumnSpectrum, y: AnyArray, th: AnyArray) -> tuple[float, float]:
+    """Return the pressures an eclipse forms over: flux-weighted quantiles of the tau = 2/3 pressure.
+
+    Per g-ordinate and band, the engine's own tau = 2/3 pressure of this column (the one ``eclipse_flux_tau`` folds
+    into the eclipse depth), weighted by the band's eclipse flux times its width and split over g-ordinates by their
+    quadrature weight; the range between ``EMIS_PHOTOSPHERE_QUANTILES``. The engine returns only the flux, so this reads
+    its internals (``_Emission._dtau``, ``_g_layers``, ``lnp_em``, ``_rt_geometry._photosphere_lnp``), pinned by
+    tests/unit/test_engine_api_contract.py.
+
+    Parameters
+    ----------
+    setup : RtSetup
+        An emission setup.
+    column : ColumnSpectrum
+        The build of the column ``y``.
+    y : Array [nz, ni]
+        The certified column, number densities.
+    th : Array
+        The build's theta.
+
+    Returns
+    -------
+    tuple of float
+        (low, high) pressure, bar.
+    """
+    from vulcan_forward._rt_geometry import _photosphere_lnp
+
+    vmr, vmr_h2, t_art, mmw_art, vmr_he = column.art_profiles(y, th)
+    model = setup.emis.eclipse_flux_tau.__self__
+    g_layers = model._g_layers(t_art, mmw_art, 0.0)
+    dtau = model._dtau(vmr, vmr_h2, vmr_he, t_art, mmw_art, g_layers, setup.cloud_vec, None)
+    p_phot = np.exp(np.asarray(_photosphere_lnp(dtau, model.lnp_em))).ravel()  # [ng * nband], bar
+    flux, _ = setup.emis.eclipse_flux_tau(vmr, vmr_h2, t_art, mmw_art, vmr_he=vmr_he, cloud=setup.cloud_vec)
+    band_w = np.asarray(flux) * np.abs(np.gradient(np.asarray(setup.rt.nu_grid)))
+    weight = (np.asarray(model.opacities.ckd_pack.gw)[:, None] * band_w[None, :]).ravel()
+    order = np.argsort(p_phot)
+    cum = np.cumsum(weight[order]) / weight.sum()
+    lo, hi = (float(p_phot[order][np.searchsorted(cum, q)]) for q in EMIS_PHOTOSPHERE_QUANTILES)
+    return lo, hi
+
+
 @dataclass(frozen=True)
 class EmissionEvidence:
     """What detect's band-restricted gate needs from the emission spectra."""
@@ -287,10 +329,10 @@ def _removed_molecule_gates(
                 "refuses this target. The spectrum and the other "
                 "molecules are unaffected."
             )
-        elif emis_tau_min_wo[i] < 10.0:
+        elif emis_tau_min_wo[i] < EMIS_TAU_WARN:
             log(
                 f"[fwd] WARNING: min bottom optical depth "
-                f"{emis_tau_min_wo[i]:.1f} at {wl_i:.2f} um (< 10) "
+                f"{emis_tau_min_wo[i]:.1f} at {wl_i:.2f} um (< {EMIS_TAU_WARN:g}) "
                 f"with {mol} removed: its detection contrast leans on "
                 "the deepest layers -- treat with care."
             )

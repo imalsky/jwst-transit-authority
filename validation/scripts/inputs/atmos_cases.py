@@ -18,7 +18,7 @@ import jax.numpy as jnp
 import numpy as np
 
 # isort: off
-from vulcan_forward import vulcan_chem  # noqa: F401  # first: it sets jax x64 and the frozen network before exojax
+from vulcan_forward import vulcan_chem  # noqa: F401  # first: it sets jax x64 before exojax
 from vulcan_forward import _rt_geometry, constants, exojax_rt, interp_map
 from jwst_tool import chem_build, forward, planets
 from jwst_tool.stellar import phoenix_surface_flux

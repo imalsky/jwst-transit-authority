@@ -33,7 +33,9 @@ skill; policy: the project-root `CLAUDE.md`.
 - Install: editable member of the root uv workspace; standalone, `pip install --no-deps -e .`. Rebuild the editable
   metadata after a version bump (`provenance._versions` reads it).
 - Import order is load-bearing: `engine_config` -> `vulcan_forward.vulcan_chem` -> exojax (`vulcan_chem` raises if
-  exojax came first; `tests/conftest.py` takes the order).
+  exojax came first; `tests/conftest.py` takes the order). vulcan3 freezes its network at its first import: name it
+  with `vulcan_chem.select_network` before anything imports vulcan3 (`chem_build._select_network`; the PICASO assembly
+  and `tests/conftest.py` select the default network). A script that imports vulcan3 itself selects first.
 - Paths resolve in `instruments.py`, loud on failure: `data/` holds inputs (`JWST_TOOL_DATA_DIR`), `output/` generated
   caches (`JWST_TOOL_OUTPUT_DIR`). Engine data comes from `$VULCAN_FORWARD_DATA`.
 - Pandeia runs in a subprocess at `JWST_TOOL_PANDEIA_PYTHON` (+ `JWST_TOOL_PANDEIA_REFDATA`); on daw the root `.venv`,
@@ -67,6 +69,9 @@ skill; policy: the project-root `CLAUDE.md`.
 - A range a sidebar widget also offers has one definition (`model_defs`, `planets`) that `canonical_params` and
   `share_config.WIDGET_RANGES` both read (`test_input_guards` checks both ends). A default outside its range, such as
   the Guillot `Tirr`, is refused, never clipped.
+- A request default has one definition (`model_defs.*_DEFAULT`, `planets.default_tirr` / `default_tint`) that
+  `canonical_params`, the sidebar and `share_config.WIDGET_RANGES` read. A fixed number that changes a result is a named
+  constant with its unit and reason, in `model_defs` or the constant block of the module whose topic it is.
 
 ### Composition, C/O and networks
 
@@ -85,9 +90,14 @@ skill; policy: the project-root `CLAUDE.md`.
 
 - Every certified stage records branch, longdydt, aflux_change and the controlling `species@z` cell, and a failure names
   them (`certify.check_converged`).
-- Every certified column passes `certify.check_elements` (layer-median X/H within `ELEMENT_TOL` of the build column) and
-  `certify.check_unmodeled` (an absorber with no k-table above `UNMODELED_VMR_REFUSE` is refused before any spectrum;
-  above `UNMODELED_VMR_WARN` the run warns). Values and basis: notes "Convergence certificate and element gate".
+- Every certified VULCAN column passes `certify.check_elements` (layer-median X/H within `ELEMENT_TOL` of the build
+  column; a PICASO column passes `picaso_engine.certify`'s own element gate), and every certified column of either
+  engine passes `certify.check_unmodeled` (an absorber with no k-table above `UNMODELED_VMR_REFUSE` is refused before any
+  spectrum; above `UNMODELED_VMR_WARN` the run warns): the baseline, a chem-cache column, each FD stencil column and
+  each AD primal. It averages over the observation's photosphere, the transit band or the eclipse's flux-weighted
+  tau = 2/3 range that the baseline sets (`spectrum.emission_photosphere_bar`). Values and basis: notes "Convergence
+  certificate and element gate".
+- A gravity anchor whose last pass still moves g by more than `model_defs.ANCHOR_TOL` is refused, never used.
 - `yconv_min` is canonical and may only tighten below 0.1: cold baseline solves exit on the loose branch, so `yconv_cri`
   alone cannot tighten them.
 

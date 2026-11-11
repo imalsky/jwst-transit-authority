@@ -22,7 +22,7 @@ SRC = Path(__file__).resolve().parents[2] / "src" / "jwst_tool"
 # deliberate edit here too.
 EXPECTED = {
     "vulcan_forward.exojax_rt": ["build_rt_model", "build_emis_model"],
-    "vulcan_forward.vulcan_chem": ["build_chem_model", "ChemParams"],
+    "vulcan_forward.vulcan_chem": ["build_chem_model", "ChemParams", "select_network"],
     "vulcan_forward.interp_map": ["make_to_art"],
     "vulcan_forward.paths": ["opacity_cache_dir"],
     "vulcan_forward.exomolop": ["table_path", "provenance", "table_info"],
@@ -31,11 +31,10 @@ EXPECTED = {
         "ATOM_COLS",
         "ATOMIC_MASSES",
         "ART_PTOP_BAR",
-        "ART_PBTM_BAR",
         "T_OPA_MIN_K",
         "T_OPA_MAX_K",
-        "P_REF_BAR",
         "P_REF_EMISSION_BAR",
+        "K_FLOOR",
     ],
 }
 
@@ -53,7 +52,9 @@ RT_NAMESPACE = [
     "art_pbtm_bar",
     "p_ref_bar",
     "rt_integration",
-    "opacity_mode",
+    "omit_core_molecules",
+    "unlisted_core_molecules",
+    "nu_edges",
 ]
 EMIS_NAMESPACE = ["eclipse_flux_tau", "emission_radius", "art_pbtm_bar"]
 
@@ -161,14 +162,14 @@ def test_the_profile_keys_the_tool_sets_are_ones_the_engine_reads():
         pytest.skip("RT stack (exojax) not installed")
     importlib.import_module("vulcan_forward.vulcan_chem")
     reads = _profile_reads(_engine_tree("vulcan_forward.exojax_rt"))
-    for key in ("art_ptop_bar", "art_pbtm_bar", "rt_integration", "p_ref_bar", "opacity_mode", "art_nlayer"):
+    for key in ("art_ptop_bar", "art_pbtm_bar", "rt_integration", "p_ref_bar", "art_nlayer"):
         assert key in reads, f"the engine never reads profile[{key!r}], so the tool sets a knob that does nothing"
     # the chemistry side: the solver knobs the tool drives, plus the two
     # margins the AD dlnCO gate reads (their absence must fail here, not at
     # run time)
     chem_tree = _engine_tree("vulcan_forward.vulcan_chem")
     reads = _profile_reads(chem_tree)
-    for key in ("yconv_cri", "yconv_min", "dt_max", "co_mode"):
+    for key in ("yconv_cri", "yconv_min", "dt_max", "co_mode", "network", "atom_list", "vulcan_cfg_name"):
         assert key in reads, f"the engine never reads profile[{key!r}]"
     returned = _returned_fields(chem_tree, "build_chem_model")
     for attr in ("co_bz_bound", "co_bz_margin"):
@@ -218,6 +219,25 @@ def test_the_tools_engine_calls_pass_arguments_it_accepts():
     assert checked >= 3, (
         f"only {checked} engine calls found in the tool -- the scan is not looking where it thinks it is"
     )
+
+
+def test_the_engine_internals_the_eclipse_photosphere_reads_still_exist():
+    """spectrum.emission_photosphere_bar reads the engine's tau = 2/3 photosphere through private names (it returns only
+    the flux): eclipse_flux_tau bound to _Emission, its _dtau and _g_layers, its lnp_em and opacities fields, and
+    _rt_geometry._photosphere_lnp. A rename must fail here, not inside an eclipse run.
+    """
+    _skip_without_engine()
+    if importlib.util.find_spec("exojax") is None:  # pragma: no cover
+        pytest.skip("RT stack (exojax) not installed")
+    importlib.import_module("vulcan_forward.vulcan_chem")
+    from vulcan_forward import _rt_geometry, exojax_rt
+
+    assert callable(_rt_geometry._photosphere_lnp)
+    emission = exojax_rt._Emission
+    assert callable(emission._dtau) and callable(emission._g_layers) and callable(emission.eclipse_flux_tau)
+    assert {"lnp_em", "opacities"} <= set(emission.__dataclass_fields__)
+    # the g-ordinate weights, read as the engine itself reads them
+    assert "ckd_pack" in exojax_rt._Opacities._fields and "opacities.ckd_pack.gw" in inspect.getsource(exojax_rt)
 
 
 @pytest.mark.parametrize(("dist", "mod_name"), [("vulcan-forward", "vulcan_forward"), ("vulcan3", "vulcan3")])

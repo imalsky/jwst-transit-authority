@@ -22,12 +22,14 @@ if "JWST_TOOL_OUTPUT_DIR" not in os.environ and os.environ.get("JWST_TOOL_RUN_SL
     os.environ["JWST_TOOL_OUTPUT_DIR"] = tempfile.mkdtemp(prefix="jwst-tool-tests-")
     atexit.register(shutil.rmtree, os.environ["JWST_TOOL_OUTPUT_DIR"], True)
 
-# Import order is load-bearing (vulcan_forward.vulcan_chem freezes the
-# VULCAN3_* env vars and jax x64 before vulcan3 loads), and a unit test
-# may reach a helper that imports vulcan3 on its own -- which then freezes
-# the WRONG network for every engine test after it in the process. Take the
-# order here, once. Guarded: the light suite runs with no engine installed.
+# Import order is load-bearing: vulcan_forward.vulcan_chem sets jax x64 before exojax. Guarded: the light suite runs
+# with no engine installed.
 try:
-    import vulcan_forward.vulcan_chem  # noqa: F401  (imported for its environment and x64 setup)
+    from vulcan_forward import vulcan_chem
 except ImportError:
     pass
+else:
+    from jwst_tool.model_defs import DEFAULT_NETWORK, NETWORKS
+
+    # The suite runs the tool's default network, and vulcan3 freezes one at its first import, which a helper may reach.
+    vulcan_chem.select_network(*NETWORKS[DEFAULT_NETWORK])

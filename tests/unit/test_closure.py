@@ -60,7 +60,9 @@ def _force_cadence_1(monkeypatch, tmp_path, forward):
     def assemble(cp, log):
         a = orig(cp, log)
         build = a.build_chem
-        a.build_chem = lambda extra_abun=None, tag="baseline", photo_frq=None: build(extra_abun, tag, 1)
+        a.build_chem = lambda extra_abun=None, tag="baseline", photo_frq=None, solver=None: build(
+            extra_abun, tag, 1, solver
+        )
         return a
 
     monkeypatch.setattr(forward, "assemble_chem", assemble)
@@ -108,7 +110,7 @@ def _emission_closure(monkeypatch, tmp_path, cadence):
 
 
 # Apart on purpose: xdist cannot steal the test queued next on a busy worker, so these two, the slow tier's longest,
-# run one after the other when neighbours, past the 90 min limit (notes "Current state").
+# run one after the other when neighbours, near the 100 min limit (notes "Current state").
 @_SLOW_EMISSION
 def test_emission_ad_rows_match_the_certified_fd_rows_at_cadence_1(monkeypatch, tmp_path):
     _emission_closure(monkeypatch, tmp_path, 1)

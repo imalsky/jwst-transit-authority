@@ -26,9 +26,9 @@ A "removed" spectrum zeroes that molecule's VMR in the RT only, keeping the
 structure (T, mmw): the standard nested-model comparison.
 
 What a run leaves out travels with its result, so a cache hit shows it too: ``unlisted_core`` names the core absorbers
-of the band (HCN, H2S, SO2) the RT omits without naming them, and a PICASO result carries ``picaso_retried_layers``,
-the layer solves that converged only at a shifted temperature. The GUI shows both as run caveats. A cache entry written
-before either record existed is logged and treated as a miss.
+of the band outside the engine's required five (HCN, H2S, SO2, C2H2, OCS, SO) that the RT omits without naming them, and
+a PICASO result carries ``picaso_retried_layers``, the layer solves that converged only at a shifted temperature. The
+GUI shows both as run caveats.
 
 ## The stages
 
@@ -42,11 +42,19 @@ and the research note's scripts read.
   API and the GUI refuse the same values. A Guillot T_irr default outside `TIRR_RANGE` is refused, never clipped: the
   run needs an explicit `Tirr`. Under PICASO a VULCAN-only setting is refused unless it holds the value a PICASO payload
   carries.
-- `model_defs`: what the model offers, the FD steps and stencil, `_VERSION`.
+- `model_defs`: what the model offers, the request defaults (one definition each, read by `canonical_params`, the
+  sidebar and `share_config.WIDGET_RANGES`), the fixed numbers of the forward model with their reasons, the FD steps and
+  stencil, `_VERSION`.
 - `model_cache`, `tp_tables`: keys and cache reads, with no JAX; T-P tables, shipped or content-addressed uploads.
-- `chem_build`: assembles the VULCAN chemistry build and refuses a cfg that drifted from the constants here.
+- `chem_build`: assembles the VULCAN chemistry build and refuses a cfg that drifted from the constants here. It names
+  the network, atom list and vulcan3 config at the top level of the engine profile, selects the network through
+  `vulcan_chem.select_network` before vulcan3 loads, and refuses a gravity anchor whose last pass still moved g by more
+  than `ANCHOR_TOL`.
 - `certify`: the gates a column passes before a spectrum is built, each raising. `certified_solve` raises `NotCertified`
-  on a stall, the only failure that may escalate photolysis cadence.
+  on a stall, the only failure that may escalate photolysis cadence. The unmodeled-absorber gate averages over the
+  observation's photosphere: `PHOTOSPHERE_BAR` in a transit; in an eclipse the flux-weighted `EMIS_PHOTOSPHERE_QUANTILES`
+  of the tau = 2/3 pressure over bands and g-ordinates (`spectrum.emission_photosphere_bar`, which reads the engine's
+  internals). The baseline sets the band, and every column a Jacobian row solves passes the gate over it.
 - `spectrum`: builds the RT, and `ColumnSpectrum` is the depth of one chemistry build, transit or eclipse behind one
   signature.
 

@@ -51,22 +51,23 @@ WIDGET_RANGES: dict[str, tuple[Any, ...]] = {
     "lk": model_defs.LOG_KAPPA_RANGE,
     "lg": model_defs.LOG_GAMMA_RANGE,
     "kzz": _log10_range(model_defs.KZZ_CONST_RANGE),
-    "kzkmax": (*_log10_range(model_defs.KZZ_KMAX_RANGE), 5.0),
-    "kzplev": (*_log10_range(model_defs.KZZ_PLEV_RANGE), -1.0),
-    "kzkdeep": (*_log10_range(model_defs.KZZ_KDEEP_RANGE), 5.0),
-    "kzzx": (*_log10_range(model_defs.KZZ_X_RANGE), 0.0),
-    "sza": (*model_defs.SL_ANGLE_RANGE, 83.0),
-    "fdiur": (*model_defs.F_DIURNAL_RANGE, 1.0),
+    "kzkmax": (*_log10_range(model_defs.KZZ_KMAX_RANGE), math.log10(model_defs.KZZ_KMAX_DEFAULT)),
+    "kzplev": (*_log10_range(model_defs.KZZ_PLEV_RANGE), math.log10(model_defs.KZZ_PLEV_DEFAULT_BAR)),
+    "kzkdeep": (*_log10_range(model_defs.KZZ_KDEEP_RANGE), math.log10(model_defs.KZZ_KDEEP_DEFAULT)),
+    "kzzx": (*_log10_range(model_defs.KZZ_X_RANGE), math.log10(model_defs.KZZ_X_DEFAULT)),
+    # the default follows the science mode (planets.SL_ANGLE_DEG), so the widget is seeded, not given one
+    "sza": model_defs.SL_ANGLE_RANGE,
+    "fdiur": (*model_defs.F_DIURNAL_RANGE, model_defs.F_DIURNAL_DEFAULT),
     "yconv": (*model_defs.YCONV_RANGE, model_defs.YCONV_DEFAULT),
     "yconvmin": (*model_defs.YCONV_MIN_RANGE, model_defs.YCONV_MIN_DEFAULT),
-    "ck": (*model_defs.LOG_KAPPA_CLOUD_RANGE, -1.0),
-    "ca": (*model_defs.ALPHA_CLOUD_RANGE, 0.0),
+    "ck": (*model_defs.LOG_KAPPA_CLOUD_RANGE, model_defs.LOG_KAPPA_CLOUD_DEFAULT),
+    "ca": (*model_defs.ALPHA_CLOUD_RANGE, model_defs.ALPHA_CLOUD_DEFAULT),
     "cpt": (-6.0, 1.0, -3.0),
     "rtptop": (*model_defs.RT_PTOP_RANGE, model_defs.RT_PTOP_DEFAULT),
-    "pref": (1.0e-6, 7.0, 1.0e-3),
+    "pref": (1.0e-6, 7.0, model_defs.P_REF_DEFAULT_BAR),
     "tsig": (1.0, 10.0),
     "ntr": (1, 10, 1),
-    "sat": (0.5, 0.95, 0.80),
+    "sat": (0.5, 0.95, model_defs.SAT_LIMIT_DEFAULT),
     "rbin": (25, 500, 100),
     "seed": (0, 9999, 0),
     "noisescale": (0.5, 3.0, 1.0),
@@ -395,6 +396,7 @@ def _restore_system_profile(
         state[pk("sflux")] = str(cp["sflux"])
     if tp_mode == "picaso_climate":
         state[pk("tint")] = float(cp["Tint"])
+        state[pk("tint_auto")] = None  # a loaded T_int no longer tracks the custom star and orbit
         state[key(f"rfacv_picaso_{cp['science_mode']}")] = float(cp["rfacv"])
     elif tp_mode == "guillot":
         state.update(
@@ -402,6 +404,7 @@ def _restore_system_profile(
                 pk("tirr"): float(cp["Tirr"]),
                 pk("tirr_auto"): None,
                 pk("tint"): float(cp["Tint"]),
+                pk("tint_auto"): None,
                 pk("lk"): float(cp["log_kappa"]),
                 pk("lg"): float(cp["log_gamma"]),
             }

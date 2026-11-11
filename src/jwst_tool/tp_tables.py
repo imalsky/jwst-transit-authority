@@ -12,6 +12,10 @@ import numpy as np
 from jwst_tool import instruments as _ins, planets
 from jwst_tool.model_defs import CHEM_P_SPAN_DYN, T_WINDOW, TP_FILE_SHIPPED, TP_FILE_UPLOAD
 
+# Log-spaced pressures at which a table, interpolated linearly as the engine reads it, is checked against T_WINDOW
+# over the run's span. No basis recorded.
+T_CHECK_POINTS = 200
+
 # tp_mode="file" helpers (light path: no vulcan3/jax imports)
 
 
@@ -156,7 +160,7 @@ def read_tp_table(path: Path, span: tuple | None = None) -> dict:
     # agree at every tabulated row and differ only by the temperature change
     # across the single row-interval at each span edge.
     o = np.argsort(P)
-    grid = np.logspace(np.log10(span[0]), np.log10(span[1]), 200)
+    grid = np.logspace(np.log10(span[0]), np.log10(span[1]), T_CHECK_POINTS)
     T_grid = np.interp(np.log10(grid), np.log10(P[o]), T[o])
     if T_grid.min() < T_WINDOW[0] or T_grid.max() > T_WINDOW[1]:
         lo_all, hi_all = float(T.min()), float(T.max())

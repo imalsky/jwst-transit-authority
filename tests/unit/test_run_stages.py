@@ -24,8 +24,15 @@ def _baseline(depth_of, co_ratio=0.55, run_frq=None, **cp):
     """A Baseline whose every build is a record of its abundances and cadence; depth_of(x, frq) is the spectrum."""
     builds = []
 
-    def build_chem(extra_abun=None, tag="", photo_frq=None):
-        chem = SimpleNamespace(x=(extra_abun or {}).get("x", 0.0), frq=photo_frq, tag=tag, y=np.ones((2, 2)))
+    def build_chem(extra_abun=None, tag="", photo_frq=None, solver=None):
+        chem = SimpleNamespace(
+            x=(extra_abun or {}).get("x", 0.0),
+            frq=photo_frq,
+            tag=tag,
+            y=np.ones((2, 2)),
+            abun=extra_abun,
+            solver=solver,
+        )
         builds.append(chem)
         return chem
 
@@ -51,6 +58,7 @@ def _baseline(depth_of, co_ratio=0.55, run_frq=None, **cp):
         bz_build=float("nan"),
         advance=lambda: None,
         log=_quiet,
+        unmodeled_band=certify.PHOTOSPHERE_BAR,
     ), builds
 
 
@@ -128,6 +136,8 @@ def test_an_ad_row_is_divided_by_its_step_and_a_stall_moves_every_later_row(monk
     monkeypatch.setattr(jacobian, "_ad_row", ad_row)
     monkeypatch.setattr(jacobian, "check_converged", check_converged)
     monkeypatch.setattr(jacobian, "check_elements", lambda *_a: 0.0)
+    gated = []
+    monkeypatch.setattr(jacobian, "_check_unmodeled", lambda _b, _y, _chem, stage: gated.append(stage))
     rows = jacobian.Rows(["lnZ", "lnKzz"], np.zeros((3, 2)))
     cols = jacobian._ad_chemistry_rows(b, rows)
 
@@ -137,6 +147,13 @@ def test_an_ad_row_is_divided_by_its_step_and_a_stall_moves_every_later_row(monk
     assert used == [(0, None), (0, 1), (2, 1)]
     assert b.escalated == ["AD lnZ row", "AD lnKzz row"]
     assert builds[1].frq == 1
+    # each row's own primal passes the absorber gate
+    assert gated == ["AD warm re-converge (lnZ) [photo cadence 1]", "AD warm re-converge (lnKzz) [photo cadence 1]"]
+    # the step caps are top-level solver settings, never cfg_overrides: the engine refuses dt_max set in both
+    assert [(c.abun, c.solver) for c in builds] == [
+        (None, jacobian.AD_BUILD_OVERRIDES),
+        (None, {**jacobian.AD_BUILD_OVERRIDES, "count_max": jacobian.AD_RETRY_COUNT_MAX}),
+    ]
 
 
 def test_the_lnr0_row_is_the_central_difference_of_the_depth():
@@ -209,7 +226,19 @@ def test_the_opacity_advisory_refuses_a_bulk_absorber_with_no_table():
     y = np.ones((12, 3)) * np.array([1.0, 1e-4, 1e-1])
     col = SimpleNamespace(species=["H2", "H2O", "CS2"], y_sol=y, chem=SimpleNamespace(p_bar=p_bar))
     with pytest.raises(RuntimeError, match="CS2"):
-        forward._opacity_advisory(col, config, _quiet)
+        forward._opacity_advisory(col, SimpleNamespace(emis=None, config=config), None, _quiet)
+
+
+def test_every_column_a_row_solves_passes_the_absorber_gate():
+    """A stencil column (here a PICASO build, already certified) passes the absorber gate like the baseline."""
+    b, _ = _baseline(_spectrum)
+    b.pic = True
+    b.setup = SimpleNamespace(emis=None, tp_eval=None, config=SimpleNamespace(MOLECULES={"H2O": {"vulcan": "H2O"}}))
+    p_bar = np.geomspace(1e-5, 1.0, 12)
+    chem = SimpleNamespace(y=np.ones((12, 3)) * np.array([1.0, 1e-4, 1e-1]), sidx={"H2": 0, "H2O": 1, "CS2": 2})
+    chem.p_bar = p_bar
+    with pytest.raises(RuntimeError, match="FD lnZ \\+1h: the photosphere .* carries CS2"):
+        jacobian._certified_depth(b, chem, np.zeros(4), "FD lnZ +1h")
 
 
 def test_the_stored_entry_holds_gas_mixing_ratios_and_the_flux_its_depth_implies(monkeypatch, tmp_path):
@@ -282,7 +311,6 @@ _ECHOED = {
     "art_pbtm_bar": 7.0,
     "rt_integration": "simpson",
     "p_ref_bar": 1.0,
-    "opacity_mode": "exomolop",
     "omit_core_molecules": [],
 }
 
@@ -307,7 +335,7 @@ def test_an_engine_that_does_not_echo_a_setting_is_refused(wrong, monkeypatch):
         "science_mode": "transmission",
         "cloud_on": False,
     }
-    profile = {"art_pbtm_bar": 7.0, "opacity_mode": "exomolop", "omit_core_molecules": []}
+    profile = {"art_pbtm_bar": 7.0, "omit_core_molecules": []}
     tp_eval = object()  # parametric: no tabulated column to map
     if wrong is None:
         setup = spectrum.build_rt_setup(cp, profile, tp_eval, None, None, lambda: None, _quiet)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -11,11 +10,14 @@ import numpy as np
 
 from jwst_tool import planets
 from jwst_tool.model_defs import (
+    ANCHOR_PASSES,
+    ANCHOR_TOL,
     ART_PBTM_FRACTION,
     CFG_ABUNDANCES,
     CHEM_P_SPAN_DYN,
     CHEM_PARAM_NAMES,
     DT_MAX_S,
+    GUILLOT_F_REDIST,
     NETWORKS,
     P_BTM_FILE_BAR,
     TP_PARAM_NAMES,
@@ -184,7 +186,7 @@ def build_tp(cp: dict, gs_cgs: float) -> tuple[Any, int, list, list]:
             p = jnp.asarray(p_bar)
             Tirr, Tint = tp[0], tp[1]
             kappa, gamma = 10.0 ** tp[2], 10.0 ** tp[3]
-            return atmprof_Guillot(p, gs_cgs, kappa, gamma, Tint, Tirr, 0.25)
+            return atmprof_Guillot(p, gs_cgs, kappa, gamma, Tint, Tirr, GUILLOT_F_REDIST)
 
         vals = [cp["Tirr"], cp["Tint"], cp["log_kappa"], cp["log_gamma"]]
         return tp_eval, 4, vals, CHEM_PARAM_NAMES + TP_PARAM_NAMES["guillot"]
@@ -214,12 +216,9 @@ def rt_profile_common(cp: dict, config: Any) -> dict:
     profile["art_pbtm_bar"] = cp["p_btm_bar"] * ART_PBTM_FRACTION
     profile["rt_integration"] = cp["rt_integration"]
     profile["p_ref_bar"] = cp["p_ref_bar"]
-    # Correlated-k over the published ExoMolOP k-tables is the engine's only
-    # opacity path; set explicitly so the echo check can verify it.
-    profile["opacity_mode"] = "exomolop"
     profile["molecules"] = active_molecules(cp)
     # The sulfur-free network cannot carry them, so they are named as left out, not reported as an oversight.
-    profile["omit_core_molecules"] = ["H2S", "SO2"] if cp["network"] == "ncho" else []
+    profile["omit_core_molecules"] = ["H2S", "OCS", "SO", "SO2"] if cp["network"] == "ncho" else []
     profile["use_photo"] = cp["use_photo"]  # build_chem_model reads this key
     profile["use_rayleigh"] = cp["use_rayleigh"]  # exojax_rt reads this flag
     # Planet identity
@@ -231,17 +230,12 @@ def rt_profile_common(cp: dict, config: Any) -> dict:
     return profile
 
 
-def _cfg_overrides(cp: dict, rp_cm: float, net_path: str, net_atoms: str, log: Log) -> tuple:
+def _cfg_overrides(cp: dict, rp_cm: float, log: Log) -> tuple:
     """Return the chemistry side's config overrides and the T-P table path (None for a parametric profile)."""
     tp_path = None
     ovr = {  # chemistry side (applied pre-pre-loop)
         # VULCAN derives g = G*Mp/Rp^2, so convert gs_cgs to a planet mass
         "Mp": cp["gs_cgs"] * rp_cm**2 / planets.G_CGS,
-        # the cfg network must agree with the import-frozen one (the engine
-        # raises when it does not); S_H stays in the cfg under ncho, harmless
-        # with an S-free atom_list
-        "network": net_path,
-        "atom_list": net_atoms.split(","),
         "Rp": rp_cm,
         "r_star": cp["rstar_rsun"],
         "orbit_radius": cp["orbit_au"],
@@ -341,6 +335,38 @@ def _check_cfg_constants(cp: dict, config: Any, tp_path: Path | None, log: Log) 
     return cfg_chk
 
 
+def check_anchor_converged(g_prev: float, g: float, stage: str) -> float:
+    """Refuse a gravity anchor whose last pass still moved g by more than ANCHOR_TOL; return that relative change.
+
+    Parameters
+    ----------
+    g_prev : float
+        Gravity before the last pass, cm s^-2.
+    g : float
+        Gravity after it, cm s^-2.
+    stage : str
+        Which anchor, for the message.
+
+    Returns
+    -------
+    float
+        |g / g_prev - 1|.
+
+    Raises
+    ------
+    RuntimeError
+        The change is above ANCHOR_TOL or not finite.
+    """
+    change = abs(g / g_prev - 1.0)
+    if not change <= ANCHOR_TOL:
+        raise RuntimeError(
+            f"{stage} did not converge: its last of {ANCHOR_PASSES} passes moved g from {g_prev:.2f} to {g:.2f} "
+            f"cm/s2 ({change:.2e}, gate {ANCHOR_TOL:g}). The profile's dependence on gravity is too strong to anchor "
+            "at these settings: change T_irr, kappa_IR or p_ref_bar, or use a tabulated profile."
+        )
+    return change
+
+
 def _radius_anchor(
     cp: dict, theta: np.ndarray, probe: Any, rp_cm: float, tp_eval: Callable | None, rocky: bool, log: Log
 ) -> tuple:
@@ -358,7 +384,8 @@ def _radius_anchor(
     mu_col = (y0 / y0.sum(axis=1, keepdims=True)) @ np.asarray(probe.species_masses, dtype=np.float64)
     p_anchor = chem_radius_anchor_bar(probe.p_bar, chem_p_span_dyn(cp)[1], rocky)
     g_anchor, r_anchor = cp["gs_cgs"], rp_cm
-    for _ in range(3):
+    for _ in range(ANCHOR_PASSES):
+        g_prev = g_anchor
         T_col = (
             np.asarray(probe.T_base, dtype=np.float64)
             if tp_eval is None
@@ -366,6 +393,7 @@ def _radius_anchor(
         )
         r_anchor = radius_at_anchor(probe.p_bar, T_col, mu_col, rp_cm, cp["gs_cgs"], cp["p_ref_bar"], p_anchor)
         g_anchor = cp["gs_cgs"] * (rp_cm / r_anchor) ** 2
+    change = check_anchor_converged(g_prev, g_anchor, "chemistry gravity anchor")
     log(
         f"[fwd] radius anchor: chemistry runs R_p = {r_anchor:.4e} cm, "
         f"g = {g_anchor:.1f} cm/s2 at its {p_anchor:g} bar grid anchor, from "
@@ -373,21 +401,22 @@ def _radius_anchor(
         f"p_ref_bar = {cp['p_ref_bar']:g} bar "
         f"({100.0 * (1.0 - r_anchor / rp_cm):.2f}% smaller radius, "
         f"{100.0 * (g_anchor / cp['gs_cgs'] - 1.0):.1f}% stronger gravity); "
-        "the Guillot T-P uses the same gravity"
+        f"the Guillot T-P uses the same gravity; the last of {ANCHOR_PASSES} passes moved g by {change:.2e}"
     )
     return r_anchor, g_anchor
 
 
 def _select_network(cp: dict, log: Log) -> tuple[str, str]:
-    """Set the kinetics network before vulcan_chem arrives: the engine freezes it at its first import.
+    """Hand the run's kinetics network to vulcan3, which freezes it at its first import.
 
-    Set for every network, the default included: skipping it for "sncho" would let a sncho request that follows a
-    sncho2025 run in the same process be served by sncho2025 and cached under the sncho key. A conflicting in-process
-    import raises.
+    Selected for every network, the default included, so a request for another network than the process already runs
+    raises in the engine instead of being served by the frozen one and cached under the requested key. S_H stays in
+    the cfg under ncho, harmless with an S-free atom list.
     """
+    from vulcan_forward import vulcan_chem
+
     net_path, net_atoms = NETWORKS[cp["network"]]
-    os.environ["VULCAN3_NETWORK"] = net_path
-    os.environ["VULCAN3_ATOM_LIST"] = net_atoms
+    vulcan_chem.select_network(net_path, net_atoms)
     log(f"[fwd] kinetics network: {cp['network']} ({net_path}, atoms {net_atoms})")
     return net_path, net_atoms
 
@@ -431,8 +460,9 @@ def assemble_chem(cp: dict, log: Log) -> SimpleNamespace:
     profile["yconv_min"] = cp["yconv_min"]
     profile["co_mode"] = "fixed_O"
     profile["dt_max"] = DT_MAX_S
+    profile["network"], profile["atom_list"], profile["vulcan_cfg_name"] = net_path, net_atoms, config.W39B_CFG_NAME
     rp_cm = profile["rp_cm"]
-    ovr, tp_path = _cfg_overrides(cp, rp_cm, net_path, net_atoms, log)
+    ovr, tp_path = _cfg_overrides(cp, rp_cm, log)
     profile["cfg_overrides"] = ovr
     cfg_chk = _check_cfg_constants(cp, config, tp_path, log)
 
@@ -442,8 +472,15 @@ def assemble_chem(cp: dict, log: Log) -> SimpleNamespace:
         f"C/O = {cp['co_ratio']:.3f} (C_H {ovr['C_H']:.3e}, O_H {ovr['O_H']:.3e})"
     )
 
-    def _build_chem(extra_abun: dict | None = None, tag: str = "baseline", photo_frq: int | None = None) -> Any:
-        prof = dict(profile)
+    def _build_chem(
+        extra_abun: dict | None = None,
+        tag: str = "baseline",
+        photo_frq: int | None = None,
+        solver: dict | None = None,
+    ) -> Any:
+        # solver: top-level step settings of a derivative build (jacobian.AD_BUILD_OVERRIDES); the engine refuses
+        # a key set both there and in cfg_overrides
+        prof = {**profile, **(solver or {})}
         prof["cfg_overrides"] = {**ovr, **extra_abun} if extra_abun else ovr
         if photo_frq is not None:  # escalation rebuild; see certified_solve
             prof["cfg_overrides"] = {
