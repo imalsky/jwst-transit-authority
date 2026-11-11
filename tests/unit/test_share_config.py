@@ -6,6 +6,7 @@ pandeia, no JAX: the mapping is pure dict work over canonical params.
 """
 
 import pytest
+from param_helpers import _table
 
 from jwst_tool import forward, model_defs, picaso_engine, planets, share_config, tp_tables
 
@@ -340,9 +341,8 @@ def test_embedded_tp_table_is_all_or_nothing(tmp_path):
     after = set(up.glob("*")) if up.exists() else set()
     assert after == before, "invalid config left files in the uploads archive"
 
-    text = tp_tables.shipped_tp_file("wasp39b").read_text()
-    src = tmp_path / "table.txt"
-    src.write_text(text)
+    src = _table(tmp_path, name="table.txt")
+    text = src.read_text()
     canon = forward.canonical_params(
         dict(planet="wasp39b", tp_mode="file", tp_file=model_defs.TP_FILE_UPLOAD, tp_file_path=str(src))
     )

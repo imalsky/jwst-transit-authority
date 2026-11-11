@@ -62,27 +62,3 @@ def _pf(path, **kw):
     )
     base.update(kw)
     return base
-
-
-# --- WASP-39 b reference state: DO NOT let this drift ------------------------
-# The REFERENCE configuration (tp_mode="file", the shipped evening-terminator
-# table) is the one measured against the published JWST detection, and also
-# the DEFAULT. The guard anchors to the EXPLICIT file-mode
-# config so it protects the reference even if the default moves.
-# Re-measure against the literature before updating expected values.
-W39B_REFERENCE = {
-    "tp_mode": "file",  # measured evening-terminator table
-    "tp_file": "shipped",
-    "tp_file_sha1": "1a4ce744e65205d8",  # exact profile bytes (T AND Kzz)
-    "kzz_mode": "file",  # mixing from the table, not a stand-in
-    "kzz_const": 0.0,  # inert once tabulated
-    "met_x_solar": 10.0,  # Tsai+2023 10x solar
-    # CO_DEFAULT: the cfg C_H/O_H 0.549348 rounded onto the 0.05 widget grid
-    "co_ratio": 0.55,
-    "use_photo": True,  # SO2 is photochemical; non-negotiable
-    "sl_angle_deg": 83.0,  # Tsai+2023 terminator slant
-    "use_vm_mol": False,  # the validated baseline chemistry
-    "nz": 100,
-    # G395H SO2 4.23 sigma, as on sncho (notes "Composition, C/O bounds and networks")
-    "network": "sncho2025",
-}

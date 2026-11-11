@@ -91,7 +91,7 @@ class Atmosphere:
     pic: bool
     chem_provider: str
     profile: Profile
-    rt_ptop_bar: float | None
+    rt_ptop_bar: float
     p_ref_bar: float
     p_btm_bar: float
     met: float

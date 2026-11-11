@@ -99,8 +99,12 @@ PLANETS: dict[str, dict[str, Any]] = {
         t14_hr=2.80,
         sflux="sflux-W39b_Tsai2023.txt",
         tp_table="atm_W39b_evening_TP_Kzz.txt",
-        tp_table_default=True,
-        tp_table_note="",
+        tp_table_default=False,
+        tp_table_note=(
+            "Selectable, not the default: the table ends at 5.3e-6 bar, below the deepest model top the tool supports "
+            "(1e-6 bar), and a table must reach the model top, so a run on it is refused. Extend the table upward to "
+            "use it."
+        ),
         note="Inflated ~Saturn-mass planet (Ks = 10.2, G8V host); a well-observed "
         "warm transmission-spectroscopy target.",
     ),

@@ -28,7 +28,7 @@ _SEED_SPECIES = ("H2O", "CH4", "CO", "CO2", "NH3", "N2", "HCN", "H2S")
 
 @pytest.mark.parametrize("met", [1.0, 10.0, 100.0])
 def test_picaso_chemistry_is_the_vulcan_seed_on_the_same_column(met, tmp_path, monkeypatch):
-    """Same T-P (the shipped WASP-39 b table), same C/N/O/S/He: PICASO's
+    """Same T-P (the shipped HD 189733 b table), same C/N/O/S/He: PICASO's
     on-the-fly equilibrium and VULCAN's ExoGibbs seed agree to 0.01 dex on
     every major carrier over the photosphere. This pins the composition
     injection AND the thermochemical data of both codes; the production
@@ -37,7 +37,9 @@ def test_picaso_chemistry_is_the_vulcan_seed_on_the_same_column(met, tmp_path, m
     from jwst_tool import forward
 
     monkeypatch.setattr(pe, "PICASO_CACHE", tmp_path)
-    cp = forward.canonical_params(dict(planet="wasp39b", tp_mode="file", use_photo=False, met_x_solar=met))
+    cp = forward.canonical_params(
+        dict(planet="hd189733b", tp_mode="file", rt_ptop_bar=1.0e-7, use_photo=False, met_x_solar=met)
+    )
     chem = chem_build.assemble_chem(cp, lambda s: None).build_chem()
     p = np.asarray(chem.p_bar)[::-1]
     T = np.asarray(chem.T_base, float)[::-1]

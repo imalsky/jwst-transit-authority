@@ -65,12 +65,10 @@ from jwst_tool.param_checks import (
     check_rt_settings,
     check_system,
     check_tint,
-    rt_ptop_refusal,
 )
-from jwst_tool.tp_tables import read_tp_table, resolve_tp_file, shipped_tp_table_is_default, table_top_bar
+from jwst_tool.tp_tables import read_tp_table, resolve_tp_file, shipped_tp_table_is_default
 
 if TYPE_CHECKING:
-    from pathlib import Path
     from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -83,15 +81,6 @@ def default_p_btm_bar(params: dict) -> float:
     """
     mode = str(params.get("tp_mode", default_tp_mode(params)))
     return P_BTM_FILE_BAR if mode == "file" else P_BTM_PARAMETRIC_BAR
-
-
-def default_rt_ptop_bar(tp_path: Path | None) -> float:
-    """Return the model top (bar) of a run that does not set rt_ptop_bar: its T-P table's own top, else RT_PTOP_DEFAULT.
-
-    One definition for canonical_params and the sidebar's model-top widget. A table never reaches above its own top,
-    and the top tabulated temperature and Kzz are never extended over a part of the column the table does not cover.
-    """
-    return RT_PTOP_DEFAULT if tp_path is None else table_top_bar(tp_path)
 
 
 # Structure default: a MEASURED T-P/Kzz table VERIFIED end-to-end for a planet
@@ -362,19 +351,12 @@ def _column_settings(params: dict, tp_mode: str, pic: bool) -> _ColumnSettings:
             f"p_btm_bar={p_btm_bar:g} bar is below the PICASO climate and "
             f"quench column, which ends at {PICASO_P_BTM_MAX:g} bar."
         )
-    tp_file, tp_file_sha1, tp_table, tp_path = "", "", None, None
+    rt_ptop_bar = float(params.get("rt_ptop_bar", RT_PTOP_DEFAULT))
+    tp_file, tp_file_sha1, tp_table = "", "", None
     if tp_mode == "file":
         tp_path, tp_file_sha1 = resolve_tp_file(params)
-        tp_file = str(params.get("tp_file", TP_FILE_SHIPPED))
-    if "rt_ptop_bar" in params:
-        rt_ptop_bar = float(params["rt_ptop_bar"])
-    else:
-        rt_ptop_bar = default_rt_ptop_bar(tp_path)
-        refusal = rt_ptop_refusal(rt_ptop_bar, derived=True)
-        if refusal:
-            raise ValueError(refusal)
-    if tp_path is not None:
         tp_table = read_tp_table(tp_path, span=(rt_ptop_bar * 1.0e6, p_btm_bar * 1.0e6))
+        tp_file = str(params.get("tp_file", TP_FILE_SHIPPED))
     if science_mode not in ("transmission", "emission"):
         raise ValueError(
             f"unknown science_mode {science_mode!r}: choose 'transmission' "

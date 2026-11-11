@@ -10,14 +10,14 @@ from pathlib import Path
 import numpy as np
 
 from jwst_tool import instruments as _ins, planets
-from jwst_tool.model_defs import CHEM_P_SPAN_DYN, T_WINDOW, TP_FILE_SHIPPED, TP_FILE_UPLOAD
+from jwst_tool.model_defs import CHEM_P_SPAN_DYN, RT_PTOP_RANGE, T_WINDOW, TP_FILE_SHIPPED, TP_FILE_UPLOAD
 
 # Log-spaced pressures at which a table, interpolated linearly as the engine reads it, is checked against T_WINDOW
 # over the run's span. No basis recorded.
 T_CHECK_POINTS = 200
 
 # Relative slack of the top-coverage gate: the canonical rt_ptop_bar keeps six significant figures, so a model top
-# set to a table's top can sit up to 5e-6 (relative) above it.
+# set to a table's top can sit up to 5e-6 (relative) above it once rounded.
 TOP_RTOL = 1.0e-5
 
 # tp_mode="file" helpers (light path: no vulcan3/jax imports)
@@ -140,11 +140,6 @@ def _read_columns(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray | None
     return P, T, Kzz
 
 
-def table_top_bar(path: Path) -> float:
-    """Return a T-P table's top (least) pressure, bar: the model top of a file-mode run that does not set one."""
-    return float(_read_columns(path)[0].min()) / 1.0e6
-
-
 def read_tp_table(path: Path, span: tuple | None = None) -> dict:
     """Parse + validate a VULCAN atm table on the LIGHT path.
 
@@ -178,11 +173,17 @@ def read_tp_table(path: Path, span: tuple | None = None) -> dict:
     # Top coverage too, against a run's own top: above the table the engine holds the top tabulated temperature and
     # Kzz constant.
     if run_span and P.min() > span[0] * (1.0 + TOP_RTOL):
+        top_bar = P.min() / 1e6
+        remedy = (
+            f"Extend the table to the model top, or set rt_ptop_bar to at least {top_bar:.4g} bar."
+            if top_bar <= RT_PTOP_RANGE[1]
+            else f"Its top lies below the deepest model top the tool supports, {RT_PTOP_RANGE[1]:g} bar, so the table "
+            "cannot be used: extend it upward to that pressure or beyond, or use the Guillot profile."
+        )
         raise ValueError(
-            f"T-P table {path}: top pressure {P.min() / 1e6:.4g} bar does not reach the model top "
-            f"{span[0] / 1e6:.4g} bar (rt_ptop_bar). The engine would hold the top tabulated temperature and Kzz "
-            f"constant above the table. Extend the table to the model top, or set rt_ptop_bar to at least "
-            f"{P.min() / 1e6:.4g} bar; a run that does not set rt_ptop_bar starts at the table's top."
+            f"T-P table {path}: top pressure {top_bar:.4g} bar does not reach the model top {span[0] / 1e6:.4g} bar "
+            f"(rt_ptop_bar). The engine would hold the top tabulated temperature and Kzz constant above the table. "
+            + remedy
         )
     # The T window applies to what the engine evaluates -- the profile over the
     # chemistry span with the edge clamp, NOT every raw row (raw rows wrongly

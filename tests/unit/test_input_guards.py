@@ -298,20 +298,19 @@ def test_the_sidebar_shows_the_tirr_refusal_in_an_empty_widget_never_a_clipped_n
     assert at.number_input(key="n0_custom_tirr").value == 1640.0 and not at.sidebar.error
 
 
-def test_the_model_top_widget_follows_the_table_top_and_shows_the_api_refusal():
-    """The sidebar seeds the model top from run_params.default_rt_ptop_bar and follows the profile until edited; an
-    edited top above the table is refused beside Run with the API's sentence."""
+def test_the_sidebar_opens_wasp39b_on_guillot_and_refuses_its_table_beside_run():
+    """WASP-39 b opens on Guillot at the default model top with nothing refused; its shipped table, which ends below
+    every supported model top, is refused beside Run with the API's sentence."""
     pytest.importorskip("streamlit")
     from app_helpers import run_app
 
     at = run_app()
-    assert at.number_input(key="n0_rtptop").value == 5.349e-6
-    at.selectbox(key="n0_wasp39b_tp").set_value("guillot").run()
+    assert at.selectbox(key="n0_wasp39b_tp").value == "guillot" and not at.error, [e.value for e in at.error]
     assert at.number_input(key="n0_rtptop").value == 1.0e-7
-    at.number_input(key="n0_rtptop").set_value(1.0e-8).run()
+    with pytest.raises(ValueError, match="cannot be used") as refusal:
+        forward.canonical_params(dict(planet="wasp39b", tp_mode="file"))
     at.selectbox(key="n0_wasp39b_tp").set_value("file").run()
-    assert at.number_input(key="n0_rtptop").value == 1.0e-8
-    assert any("top pressure 5.349e-06 bar does not reach the model top 1e-08 bar" in e.value for e in at.error)
+    assert any(str(refusal.value) in e.value for e in at.error), [e.value for e in at.error]
 
 
 def test_a_custom_star_is_checked_wherever_it_is_read():

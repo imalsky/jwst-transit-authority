@@ -45,10 +45,9 @@ and the research note's scripts read.
   states its own system, UV spectrum, T-P mode and `Tint` (`run_params.CUSTOM_REQUIRED_KEYS`; under PICASO no UV
   spectrum), refused in one error naming every missing key: nothing is taken from another planet, and it has no
   shipped table. Its stellar T_eff is checked where its T_irr default reads it. A Guillot T_irr default outside
-  `TIRR_RANGE` is refused, never clipped: the run needs an explicit `Tirr`. The model top defaults to the T-P table's
-  own top in file mode (`run_params.default_rt_ptop_bar`), else `RT_PTOP_DEFAULT`; a table that does not reach the
-  run's top or bottom is refused. Under PICASO a VULCAN-only setting is refused unless it holds the value a PICASO
-  payload carries.
+  `TIRR_RANGE` is refused, never clipped: the run needs an explicit `Tirr`. A T-P table that does not reach the run's
+  model top (`RT_PTOP_DEFAULT` unless set) or bottom is refused. Under PICASO a VULCAN-only setting is refused unless
+  it holds the value a PICASO payload carries.
 - `model_defs`: what the model offers, the request defaults (one definition each, read by `canonical_params`, the
   sidebar and `share_config.WIDGET_RANGES`), the fixed numbers of the forward model with their reasons, the FD steps and
   stencil, `_VERSION`.

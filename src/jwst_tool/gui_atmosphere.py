@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import streamlit as st
 
-from jwst_tool import model_defs, param_checks, planets, run_params, share_config, tp_tables
+from jwst_tool import model_defs, planets, run_params, share_config, tp_tables
 from jwst_tool.gui_common import K
 from jwst_tool.gui_inputs import Atmosphere, Clouds, Mixing, Photochemistry, Profile, Target
 from jwst_tool.gui_sources import KSRC_WARN
@@ -245,37 +245,9 @@ def _tp_section(target: Target, pic: bool, chem_provider: str) -> Profile:
     return Profile(tp_mode, tp_kwargs, tp_file, tp_file_path, tp_file_ok)
 
 
-def _seed_rt_ptop(target: Target, profile: Profile) -> str | None:
-    """Seed the model top with run_params.default_rt_ptop_bar (a table's own top in file mode); return its refusal.
-
-    The default tracks the structure until edited. A default outside RT_PTOP_RANGE leaves the widget empty with the
-    API's sentence.
-    """
-    try:
-        tp_path = None
-        if profile.tp_mode == "file" and profile.tp_file_ok:
-            if profile.tp_file == model_defs.TP_FILE_SHIPPED:
-                tp_path = tp_tables.shipped_tp_file(target.planet_key)
-            elif profile.tp_file_path:
-                tp_path = Path(profile.tp_file_path)
-        top0 = run_params.default_rt_ptop_bar(tp_path)
-        refusal = param_checks.rt_ptop_refusal(top0, derived=True)
-    except (ValueError, RuntimeError) as e:  # canonical_params refuses the same table beside Run
-        top0, refusal = None, str(e)
-    _seed_follow(K("rtptop"), K("rtptop_auto"), None if refusal else top0, True)
-    return refusal
-
-
-def _pressure_section(target: Target, profile: Profile) -> tuple:
-    science_mode, tp_mode = target.science_mode, profile.tp_mode
-    refusal = _seed_rt_ptop(target, profile)
+def _pressure_section(science_mode: str, tp_mode: str) -> tuple:
     with st.expander("Pressure limits & reference radius"):
-        # key always seeded above, so no value= default; empty means the request carries no top
-        rt_ptop_bar = st.number_input(
-            "Model top pressure (bar)", *_W["rtptop"], step=1.0e-9, format="%.1e", key=K("rtptop")
-        )
-        if rt_ptop_bar is None:
-            st.error(refusal)
+        rt_ptop_bar = st.number_input("Model top pressure (bar)", *_W["rtptop"], 1.0e-9, format="%.1e", key=K("rtptop"))
         p_ref_bar = st.number_input(
             "Reference pressure for the planet radius (bar)", *_W["pref"], format="%.1e", key=K("pref")
         )
@@ -524,7 +496,7 @@ def atmosphere_step(target: Target, ksrc: dict, ksrc_err: str | None) -> Atmosph
     """Draw step 2 and return its settings."""
     pic, chem_provider = _engine_section()
     profile = _tp_section(target, pic, chem_provider)
-    rt_ptop_bar, p_ref_bar, p_btm_bar = _pressure_section(target, profile)
+    rt_ptop_bar, p_ref_bar, p_btm_bar = _pressure_section(target.science_mode, profile.tp_mode)
     met, co_ratio = _composition_section()
     mixing = _kzz_section(target.k, pic, profile.tp_mode)
     photo = _photochemistry_section(pic, target.science_mode)
