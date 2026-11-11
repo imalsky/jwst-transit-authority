@@ -4,7 +4,7 @@ JWST Transit Authority forecasts how well a JWST transit or eclipse observation 
 metallicity and C/O, from a VULCAN (default) or PICASO chemistry column, ExoJAX radiative transfer and Pandeia noise.
 Proposers use it through the public Hugging Face Space or a local install (Streamlit GUI, Python API, `jwst-tool` CLI).
 In the chain `vulcan3 <- vulcan-forward <- {vulcan-retrieval, jwst-transit-authority}` it depends on vulcan-forward (and
-through it vulcan3), never on vulcan-retrieval.
+through it vulcan3), never on vulcan-retrieval (`oracle.md` "Its own dependencies").
 
 Generic rules (code, docs, git, reviews, jobs) are in the maintainer's global rules, and the shared policy is in the
 project-root `CLAUDE.md`. This file holds only what is unique to this repo.
@@ -132,7 +132,7 @@ skill; policy: the project-root `CLAUDE.md`.
 - The C/O forecast curve is the density per d ln(C/O) on a log C/O axis (`posteriors.ln_gaussian_curve`; no 1/(C/O)
   Jacobian). Quote every finite C/O uncertainty in log10(C/O) dex (`fisher.format_co_width`); no mapped physical C/O
   range anywhere; never show `fisher.display_sigma`'s dlnCO value. Share files carry the run's `elemental_abundances`.
-- Sigma labels say "conditional template S/N": never a retrieval claim, never "PandExo-identical".
+- Sigma labels say "conditional template S/N" (`oracle.md` "Labelled for what it is").
 
 ### Measurement operator and noise
 
@@ -154,7 +154,7 @@ skill; policy: the project-root `CLAUDE.md`.
   refused by name. `run_model` verifies the engine's echo of every RT knob: never drop an echo check.
 - Species with no k-table are not offered (`_NO_EXOMOLOP_TABLE`). Never widen `EXTRA_MOLECULES_DEFAULT` without a
   measured ppm impact; widening either molecule list is a deploy change (re-run `upload_data.sh`).
-- Every "Data sources" row carries a resolvable DOI and page (`test_app_smoke` fails on a blank or placeholder). Curate
+- `test_app_smoke` fails on a blank or placeholder "Data sources" DOI (`oracle.md` "Sources are cited"). Curate
   k-table DOIs in vulcan-forward's `fetch_exomolop._DATASET_DOI`, never in the GUI. A new `SFLUX_CHOICES` entry needs a
   `planets.SFLUX_SOURCES` entry.
 - Emission: Guillot default profile, flux-weighted tau-bottom gate, and the engine's `ibased_linsap` solver, never
@@ -167,7 +167,7 @@ skill; policy: the project-root `CLAUDE.md`.
 - PICASO is the second engine (`chem_provider='picaso'`); VULCAN payloads, keys and fixture never move for it.
   PICASO-only keys (`rfacv`, `picaso_quench`, `picaso_stack`) exist only in PICASO payloads.
 - The climate is solved in equilibrium and the quench applied after: never put the quench in picaso's climate loop,
-  never re-normalize the TOA flux gate to admit it. The coupling is one-way: never call it self-consistent.
+  never re-normalize the TOA flux gate to admit it. The coupling is one-way (`oracle.md` "Labelled for what it is").
 - The composition is imposed through the injected `chemeq_solver`, never mapped onto picaso's (mh, C/O); every layer is
   solved cold.
 - FD only; the lnKzz and climate T_int rows are refused; metallicity is capped at `PICASO_MET_RANGE`; VULCAN-only

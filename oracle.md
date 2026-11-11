@@ -30,6 +30,7 @@ observation need, or the run stops with the reason. Every number is in honest un
   numerical guard that is fixed on purpose is a named constant with its reason beside it.
 - **One definition per default.** A default that both the API and the GUI use has one definition, so the two cannot
   drift apart.
+- **Its own dependencies.** The tool depends on vulcan-forward, and through it on vulcan3, never on vulcan-retrieval.
 
 ### Success: the science
 
@@ -48,8 +49,10 @@ observation need, or the run stops with the reason. Every number is in honest un
 
 ### Success: the output
 
-- **Labelled for what it is.** A significance is a conditional template signal-to-noise, never a retrieval claim.
-  A C/O uncertainty is in dex. A curve fitted to one noise realization is never called a forecast.
+- **Labelled for what it is.** A significance is a conditional template signal-to-noise, never a retrieval claim and
+  never called PandExo-identical. A C/O uncertainty is in dex. A curve fitted to one noise realization is never called
+  a forecast. PICASO's one-way quench is never called self-consistent.
+- **Sources are cited.** Every row of the app's data-sources table carries a resolvable DOI and page.
 - **Limits are listed.** Everything the model leaves out that could move a shown number is in notes "Accepted
   limitations", and a limitation that applies to a run is said beside its result.
 
@@ -76,6 +79,7 @@ observation need, or the run stops with the reason. Every number is in honest un
 - A limitation that could move a shown number and is not in notes "Accepted limitations".
 - A validation figure or reference made at settings the tool does not ship.
 - A deployed app built from a pair of engine and tool commits that was not tested together.
+- A data source the app lists without a resolvable DOI, or a dependency on vulcan-retrieval.
 
 ## Ready to use
 
