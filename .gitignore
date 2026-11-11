@@ -40,3 +40,6 @@ data/picaso_refdata-*/
 
 # vulcan3 figures (plot_dir): never tracked.
 /plot/
+
+# The maintainer's open-work list: local, not published.
+todo.md
