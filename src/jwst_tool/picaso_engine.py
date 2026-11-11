@@ -463,7 +463,7 @@ def _climate_gravity(
         g_new = g_at_anchor(col.T_base, _mu(col))
         log(f"[fwd] PICASO gravity anchor pass {passes}: g = {g:.2f} -> {g_new:.2f} cm/s2 at {p_anchor:g} bar")
         # the climate was solved at g, so g is the gravity of the column that passes
-        if chem_build.anchor_settled(g, g_new, passes, 1):
+        if chem_build.anchor_settled(g, g_new, passes, model_defs.PICASO_ANCHOR_MIN_PASSES):
             return g
         g_prev, g = g, g_new
     raise chem_build.anchor_refusal(

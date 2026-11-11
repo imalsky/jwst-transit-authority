@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -69,6 +70,8 @@ from jwst_tool.tp_tables import read_tp_table, resolve_tp_file, shipped_tp_table
 
 if TYPE_CHECKING:
     from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def default_p_btm_bar(params: dict) -> float:
@@ -219,7 +222,7 @@ def _check_request_keys(params: dict) -> None:
 
 # The values the VULCAN-only settings take in a PICASO payload: the solver gates are pinned to their defaults, the
 # photolysis settings are zeroed with photolysis off, and the unused Kzz profiles are zeroed (sflux comes per planet).
-_PICASO_INERT = {
+PICASO_INERT = {
     "yconv_cri": YCONV_DEFAULT,
     "yconv_min": YCONV_MIN_DEFAULT,
     "sl_angle_deg": 0.0,
@@ -259,8 +262,7 @@ def _engine_settings(params: dict) -> tuple[str, str, bool, str]:
             vulcan_only.append("network")
         if str(params.get("kzz_mode", "const")) != "const":
             vulcan_only.append(f"kzz_mode={params.get('kzz_mode')!r}")
-        sysd = planets.PLANETS.get(str(params.get("planet", "wasp39b")), planets.CUSTOM_DEFAULTS)
-        inert = dict(_PICASO_INERT, sflux=sysd["sflux"])
+        inert = dict(PICASO_INERT, sflux=_planet(params)[1]["sflux"])
         vulcan_only += [f"{k}={params[k]!r}" for k, v in inert.items() if k in params and params[k] != v]
         if vulcan_only:
             raise ValueError(
@@ -403,6 +405,9 @@ class _Resolved:
 def _filled_payload(params: dict, r: _Resolved) -> dict:
     """Return the canonical key set with every default filled, at the request's own values (_rounded rounds last)."""
     star_ref = planets.PLANETS.get(r.planet, planets.CUSTOM_DEFAULTS)["star"]
+    extra_mols = {str(m) for m in (params.get("extra_mols") or [])}
+    if extra_mols & FORMER_EXTRA_MOLECULES:
+        logger.info("extra_mols %s dropped: always in the RT set now", sorted(extra_mols & FORMER_EXTRA_MOLECULES))
     return {
         "planet": r.planet,
         "science_mode": r.column.science_mode,
@@ -479,7 +484,7 @@ def _filled_payload(params: dict, r: _Resolved) -> dict:
         "alpha_cloud": float(params.get("alpha_cloud", ALPHA_CLOUD_DEFAULT)),
         # Detection-only condensation: param_checks refuses ANY derivative
         "use_condense": bool(params.get("use_condense", USE_CONDENSE_DEFAULT)),
-        "extra_mols": sorted({str(m) for m in (params.get("extra_mols") or [])} - FORMER_EXTRA_MOLECULES),
+        "extra_mols": sorted(extra_mols - FORMER_EXTRA_MOLECULES),
         # Leave-one-out spectrum set: None = every RT molecule (the detect
         # default), [] skips the block. param_checks puts it in fold order.
         "wo_mols": None if params.get("wo_mols") is None else [str(m) for m in params["wo_mols"]],

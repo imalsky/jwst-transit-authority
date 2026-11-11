@@ -17,6 +17,7 @@ R_SUN_CM = 6.957e10
 AU_CM = 1.495978707e13  # only converts orbit_au in system_teq
 G_CGS = 6.67430e-8  # gravitational constant (cm^3 g^-1 s^-2); for gs_cgs -> Mp
 M_JUP_G = 1.89813e30  # Jupiter mass (g); for archive mass -> surface gravity
+CM_PER_M = 100.0  # exact; surface gravity m s^-2 <-> cm s^-2
 
 # Stellar UV spectra usable as photochemistry input, all in one two-column surface-flux format, labeled by type. Most
 # ship with vulcan3 (atm/stellar_flux/); OWN_SFLUX ship with this package. vulcan3's sflux-epseri.txt is not offered:
@@ -295,8 +296,8 @@ def default_tirr(planet: dict, system: dict | None = None, science_mode: str = "
     return round(teq * math.sqrt(2.0) / TIRR_STEP_K) * TIRR_STEP_K
 
 
-def check_tirr(tirr_k: float, derived: bool) -> None:
-    """Refuse a Guillot T_irr outside TIRR_RANGE.
+def tirr_refusal(tirr_k: float, derived: bool) -> str | None:
+    """Return the refusal sentence of a Guillot T_irr outside TIRR_RANGE, None inside; the API and the sidebar share it.
 
     Parameters
     ----------
@@ -305,20 +306,27 @@ def check_tirr(tirr_k: float, derived: bool) -> None:
     derived : bool
         True when ``tirr_k`` is the default computed from the star and orbit (default_tirr), not a value the user set.
 
-    Raises
-    ------
-    ValueError
-        ``tirr_k`` is outside TIRR_RANGE or not finite.
+    Returns
+    -------
+    str or None
+        The sentence, or None when the value is accepted. A non-finite value is refused.
     """
     lo, hi = TIRR_RANGE
     if lo <= tirr_k <= hi:
-        return
+        return None
     if derived:
-        raise ValueError(
+        return (
             f"the default Tirr of this star and orbit is {tirr_k:g} K (sqrt(2) x T_eq), outside the supported Guillot "
             f"range [{lo:g}, {hi:g}] K. Set Tirr explicitly inside that range."
         )
-    raise ValueError(f"Tirr={tirr_k:g} K is outside the supported Guillot range [{lo:g}, {hi:g}] K.")
+    return f"Tirr={tirr_k:g} K is outside the supported Guillot range [{lo:g}, {hi:g}] K."
+
+
+def check_tirr(tirr_k: float, derived: bool) -> None:
+    """Raise ValueError with ``tirr_refusal``'s sentence when ``tirr_k`` is outside TIRR_RANGE or not finite."""
+    refusal = tirr_refusal(tirr_k, derived)
+    if refusal:
+        raise ValueError(refusal)
 
 
 # Gray cloud: opacity <-> the pressure it blocks down to.

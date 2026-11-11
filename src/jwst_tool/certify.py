@@ -344,6 +344,20 @@ def check_unmodeled(
     )
 
 
+def gate_unmodeled(
+    species: list[str],
+    y: AnyArray,
+    p_bar: AnyArray,
+    table_species: Iterable[str],
+    band_bar: tuple[float, float],
+    stage: str,
+    log: Log = print,
+) -> list[tuple[str, float]]:
+    """Refuse a column as ``check_unmodeled`` does; return the absorbers above the warning level to report."""
+    check_unmodeled(species, y, p_bar, table_species, band_bar, stage, log)
+    return unmodeled_absorbers(species, y, p_bar, table_species, band_bar=band_bar)
+
+
 # Instrument windows the emission tau-bottom report is broken down by, so a
 # refusal says WHERE the column sees through. The 1-2 um entry is first: it is
 # where the modeled opacity set runs out, not where the column is shallow.

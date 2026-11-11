@@ -21,6 +21,7 @@ from jwst_tool.model_defs import (
     GUILLOT_F_REDIST,
     NETWORKS,
     P_BTM_FILE_BAR,
+    S_MOLECULES,
     TP_PARAM_NAMES,
     active_molecules,
     chem_p_span_dyn,
@@ -203,6 +204,8 @@ def rt_profile_common(cp: dict, config: Any) -> dict:
 
     Pinned by tests/unit/test_rt_profile_golden.py.
     """
+    from vulcan_forward import constants as _vc
+
     profile = dict(config.WIDE)
     # The COUNTS are locked equal for one resolution control; ExoJAX builds its
     # own pressure coordinates and interp_map maps chemistry onto them.
@@ -218,8 +221,11 @@ def rt_profile_common(cp: dict, config: Any) -> dict:
     profile["rt_integration"] = cp["rt_integration"]
     profile["p_ref_bar"] = cp["p_ref_bar"]
     profile["molecules"] = active_molecules(cp)
-    # The sulfur-free network cannot carry them, so they are named as left out, not reported as an oversight.
-    profile["omit_core_molecules"] = ["H2S", "OCS", "SO", "SO2"] if cp["network"] == "ncho" else []
+    # The sulfur-free network cannot carry the sulfur core molecules, so they are named as left out, not reported as
+    # an oversight.
+    profile["omit_core_molecules"] = (
+        sorted(S_MOLECULES & set(_vc.CORE_MOLECULE_BANDS_UM)) if cp["network"] == "ncho" else []
+    )
     profile["use_photo"] = cp["use_photo"]  # build_chem_model reads this key
     profile["use_rayleigh"] = cp["use_rayleigh"]  # exojax_rt reads this flag
     # Planet identity

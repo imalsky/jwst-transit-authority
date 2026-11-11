@@ -19,10 +19,9 @@ from jwst_tool.certify import (
     check_elements,
     check_emission_thin,
     check_t_window,
-    check_unmodeled,
+    gate_unmodeled,
     merge_unmodeled,
     table_species,
-    unmodeled_absorbers,
 )
 from jwst_tool.model_defs import (
     CHEM_PARAM_NAMES,
@@ -181,8 +180,7 @@ def _check_unmodeled(b: Baseline, y: AnyArray, chem_b: Any, stage: str) -> None:
     species = [sp for sp, _ in sorted(chem_b.sidx.items(), key=lambda kv: kv[1])]
     tables = table_species(b.setup.config.MOLECULES)
     y, p_bar = np.asarray(y), np.asarray(chem_b.p_bar)
-    check_unmodeled(species, y, p_bar, tables, b.unmodeled_band, stage, b.log)
-    found = unmodeled_absorbers(species, y, p_bar, tables, band_bar=b.unmodeled_band)
+    found = gate_unmodeled(species, y, p_bar, tables, b.unmodeled_band, stage, b.log)
     if found:
         b.log(
             f"[fwd] WARNING: {stage}: the column carries "

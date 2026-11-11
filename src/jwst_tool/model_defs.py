@@ -10,8 +10,8 @@ from jwst_tool import planets
 # (constants.REQUIRED_MOLECULES), so those five are never optional here; SO2 stays on with them.
 MOLECULES = ["H2O", "CO2", "CO", "CH4", "SO2", "NH3"]
 # Extras of earlier versions that are now always on. `extra_mols` may still name one (an old share file or script):
-# it is dropped from the list, and the run is the model that was asked for. Kept on the maintainer's request, the one
-# legacy reading the tool keeps: old share files that list NH3 as an extra still load.
+# it is dropped from the list, and the run is the model that was asked for. This is the one legacy reading the tool
+# keeps, so that old share files that list NH3 as an extra still load.
 FORMER_EXTRA_MOLECULES = frozenset({"NH3"})
 
 # RT additions the network already solves; extra_mols exposes them to the RT.
@@ -125,6 +125,7 @@ SAT_LIMIT_DEFAULT = 0.80
 # (notes "Structure: T-P, Kzz, gravity anchor, model top"), so a map not settled by the eighth is not contracting.
 ANCHOR_TOL = 5.0e-3
 ANCHOR_MIN_PASSES = 3
+PICASO_ANCHOR_MIN_PASSES = 1  # a climate pass is a full climate solve: none runs past the first that settles
 ANCHOR_MAX_PASSES = 8
 
 # Heat redistribution factor f of the Guillot (2010) profile: 1/4 spreads the irradiation over the whole planet. The

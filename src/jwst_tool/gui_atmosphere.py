@@ -48,6 +48,22 @@ _TINT_HELP = (
 )
 
 
+def _seed_follow(key: str, auto_key: str, seed: float | None, follow: bool) -> None:
+    """Seed a widget key with its derived default; ``auto_key`` holds the last seed.
+
+    With ``follow``, a value still equal to the last seed tracks the new one and the first manual edit breaks the link,
+    so the default does not freeze at the first render. An empty widget refills once the seed is valid. The key is
+    always seeded here, so the widget takes no ``value=`` default.
+    """
+    if follow:
+        prev_auto = st.session_state.get(auto_key)
+        if prev_auto is not None and st.session_state.get(key) == prev_auto:
+            st.session_state[key] = seed
+        st.session_state[auto_key] = seed
+    if st.session_state.get(key) is None:
+        st.session_state[key] = seed
+
+
 def _seed_tint(target: Target) -> str | None:
     """Seed T_int with planets.default_tint and return the API's refusal of that default, if any.
 
@@ -59,14 +75,7 @@ def _seed_tint(target: Target) -> str | None:
     tint0 = planets.default_tint(target.pdef, system=system if target.planet_key == "custom" else None)
     refusal = param_checks.tint_refusal(tint0, derived=True)
     seed = None if refusal else tint0
-    if target.planet_key == "custom":
-        # follow-until-overridden, as T_irr: the first manual edit breaks the link
-        prev_auto = st.session_state.get(k("tint_auto"))
-        if prev_auto is not None and st.session_state.get(k("tint")) == prev_auto:
-            st.session_state[k("tint")] = seed
-        st.session_state[k("tint_auto")] = seed
-    if st.session_state.get(k("tint")) is None:
-        st.session_state[k("tint")] = seed
+    _seed_follow(k("tint"), k("tint_auto"), seed, target.planet_key == "custom")
     return refusal
 
 
@@ -93,25 +102,8 @@ def _guillot_boxes(target: Target, tint_refusal: str | None) -> dict:
     )
     # A default outside the supported range leaves the widget empty with the
     # API's refusal beside it, never a clipped number.
-    seed: float | None = tirr0
-    tirr_error = None
-    try:
-        planets.check_tirr(tirr0, derived=True)
-    except ValueError as e:
-        seed, tirr_error = None, str(e)
-    if planet_key == "custom":
-        # follow-until-overridden: while T_irr still equals the last
-        # derived default, keep it tracking the star/orbit fields;
-        # the first manual edit breaks the link (otherwise T_irr
-        # freezes at the first-render seed).
-        prev_auto = st.session_state.get(k("tirr_auto"))
-        if prev_auto is not None and st.session_state.get(k("tirr")) == prev_auto:
-            st.session_state[k("tirr")] = seed
-        st.session_state[k("tirr_auto")] = seed
-    # key always seeded (an empty widget refills once the default is valid),
-    # so no value= default
-    if st.session_state.get(k("tirr")) is None:
-        st.session_state[k("tirr")] = seed
+    tirr_error = planets.tirr_refusal(tirr0, derived=True)
+    _seed_follow(k("tirr"), k("tirr_auto"), None if tirr_error else tirr0, planet_key == "custom")
     tirr = st.number_input("T_irr (K)", *_W["tirr"], step=planets.TIRR_STEP_K, key=k("tirr"))
     if tirr is None:
         # no Tirr in the request: canonical_params refuses with the same sentence
@@ -412,7 +404,7 @@ def _photochemistry_section(pic: bool, science_mode: str) -> Photochemistry:
                 st.session_state[K("sza")] = sza_default
             st.session_state[K("sza_scimode_seen")] = science_mode
             sl_angle_deg = st.number_input(
-                "Photolysis zenith angle (degrees)", *_W["sza"][:2], step=1.0, key=K("sza"), disabled=not use_photo
+                "Photolysis zenith angle (degrees)", *_W["sza"], step=1.0, key=K("sza"), disabled=not use_photo
             )
             f_diurnal = st.number_input(
                 "Diurnal photolysis factor", *_W["fdiur"], 0.05, key=K("fdiur"), disabled=not use_photo
@@ -510,7 +502,7 @@ def _cloud_section(target: Target) -> Clouds:
             # the same number for either coordinate.
             log_p_top = st.number_input("log10 cloud top pressure (bar)", *_W["cpt"], 0.25, key=K("cpt"))
             cloud_top_bar = 10.0**log_p_top
-            log_kappa_cloud = planets.gray_cloud_log_kappa(cloud_top_bar, g_ms2 * 100.0, rp, teq)
+            log_kappa_cloud = planets.gray_cloud_log_kappa(cloud_top_bar, g_ms2 * planets.CM_PER_M, rp, teq)
             alpha_cloud = 0.0
         elif cloud_on:
             log_kappa_cloud = st.number_input("log10 kappa_cloud (cm^2/g at 3.5 µm)", *_W["ck"], 0.1, key=K("ck"))

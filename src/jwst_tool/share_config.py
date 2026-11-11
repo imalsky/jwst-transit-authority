@@ -380,7 +380,7 @@ def _restore_system_profile(
         key("planet"): planet,
         key("scimode"): str(cp["science_mode"]),
         pk("rp"): float(cp["rp_rjup"]),
-        pk("g"): float(cp["gs_cgs"]) / 100.0,
+        pk("g"): float(cp["gs_cgs"]) / planets.CM_PER_M,
         pk("rstar"): float(cp["rstar_rsun"]),
         pk("a"): float(cp["orbit_au"]),
         # always written: a VULCAN file loaded under PICASO switches back

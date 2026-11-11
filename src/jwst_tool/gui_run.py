@@ -229,7 +229,7 @@ def _model_params(t: Target, a: Atmosphere, g: Goal, s: Solver) -> dict:
         yconv_cri=s.yconv_cri,
         yconv_min=s.yconv_min,
         rp_rjup=t.rp,
-        gs_cgs=t.g_ms2 * 100.0,
+        gs_cgs=t.g_ms2 * planets.CM_PER_M,
         rstar_rsun=t.rstar,
         orbit_au=t.orbit_au,
         sflux=t.sflux,
@@ -271,21 +271,7 @@ def _model_params(t: Target, a: Atmosphere, g: Goal, s: Solver) -> dict:
     if a.pic:
         # VULCAN-JAX settings are omitted, never sent at a neutral value; rfacv
         # rides a.profile.tp_kwargs (climate only)
-        for vk in (
-            "network",
-            "yconv_cri",
-            "yconv_min",
-            "sflux",
-            "kzz_x",
-            "kzz_kmax",
-            "kzz_plev",
-            "kzz_kdeep",
-            "use_photo",
-            "sl_angle_deg",
-            "f_diurnal",
-            "use_moldiff",
-            "use_vm_mol",
-        ):
+        for vk in ("network", "sflux", "use_photo", "use_moldiff", "use_vm_mol", *run_params.PICASO_INERT):
             del params[vk]
         params.update(chem_provider="picaso", picaso_quench=a.mixing.picaso_quench)
     return params

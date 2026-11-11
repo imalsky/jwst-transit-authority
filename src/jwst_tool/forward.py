@@ -23,9 +23,8 @@ from jwst_tool.certify import (
     check_ad_co_margin,
     check_elements,
     check_t_window,
-    check_unmodeled,
+    gate_unmodeled,
     table_species,
-    unmodeled_absorbers,
 )
 from jwst_tool.chem_build import assemble_chem
 from jwst_tool.instruments import MODEL_CACHE
@@ -350,8 +349,7 @@ def _opacity_advisory(col: _Column, setup: RtSetup, th0: AnyArray, log: Log) -> 
     log(f"[fwd] absorber gate band: {band[0]:.3g}-{band[1]:.3g} bar")
     tables = table_species(setup.config.MOLECULES)
     y, p_bar = np.asarray(col.y_sol), np.asarray(col.chem.p_bar)
-    check_unmodeled(col.species, y, p_bar, tables, band, "baseline solve", log)
-    unmodeled = unmodeled_absorbers(col.species, y, p_bar, tables, band_bar=band)
+    unmodeled = gate_unmodeled(col.species, y, p_bar, tables, band, "baseline solve", log)
     if unmodeled:
         log(
             "[fwd] WARNING: this column carries "

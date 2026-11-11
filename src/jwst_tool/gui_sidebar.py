@@ -269,7 +269,7 @@ def _target_step() -> Target:
             "Planet radius (Jupiter radii)", *ranges["rp"], pdef["rp_rjup"], 0.01, key=_k("rp"), format="%.3f"
         )
         g_ms2 = st.number_input(
-            "Planet surface gravity (m s^-2)", *ranges["g"], pdef["gs_cgs"] / 100.0, 0.5, key=_k("g")
+            "Planet surface gravity (m s^-2)", *ranges["g"], pdef["gs_cgs"] / planets.CM_PER_M, 0.5, key=_k("g")
         )
         orbit_au = st.number_input(
             "Semi-major axis (AU)", *ranges["a"], pdef["orbit_au"], 0.001, key=_k("a"), format="%.4f"

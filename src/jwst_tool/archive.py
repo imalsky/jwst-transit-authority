@@ -247,7 +247,7 @@ def custom_fill(row: dict) -> dict:
         and not _is_limit(row, "pl_bmassjlim")
         and not _is_limit(row, "pl_radjlim")
     ):
-        _take("g", (planets.G_CGS * mass * planets.M_JUP_G / (radj * planets.R_JUP_CM) ** 2) / 100.0)
+        _take("g", (planets.G_CGS * mass * planets.M_JUP_G / (radj * planets.R_JUP_CM) ** 2) / planets.CM_PER_M)
     return values
 
 

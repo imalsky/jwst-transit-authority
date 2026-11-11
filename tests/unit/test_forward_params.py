@@ -334,7 +334,7 @@ def test_picaso_lnz_stencil_turns_one_sided_at_the_metallicity_cap():
         (dict(jac_method="ad", fisher_params=["lnZ"]), "finite differences"),
         (dict(picaso_quench=True, fisher_params=["lnKzz"]), "staircase"),
         (dict(rfacv=0.0), "rfacv"),
-        (dict(Tint=39.0), "Tint"),  # below TINT_RANGE, whose floor is 40 K from v63
+        (dict(Tint=39.0), "Tint"),  # below the TINT_RANGE floor (40 K)
         (dict(fisher_params=["Tint"]), "not a PICASO climate Fisher row"),
         (dict(p_btm_bar=200.0), "100 bar"),
         (dict(extra_mols=["N2O"]), "equilibrium species"),

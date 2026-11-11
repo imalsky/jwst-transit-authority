@@ -59,7 +59,7 @@ def check_system(cp: dict) -> None:
     """
     rng = planets.CUSTOM_FIELD_RANGES
     _check_range("rp_rjup", cp["rp_rjup"], rng["rp"], "R_jup")
-    _check_range("gs_cgs", cp["gs_cgs"], (100.0 * rng["g"][0], 100.0 * rng["g"][1]), "cm s^-2")
+    _check_range("gs_cgs", cp["gs_cgs"], (planets.CM_PER_M * rng["g"][0], planets.CM_PER_M * rng["g"][1]), "cm s^-2")
     _check_range("rstar_rsun", cp["rstar_rsun"], rng["rstar"], "R_sun")
     _check_range("orbit_au", cp["orbit_au"], rng["a"], "au")
     climate = cp["tp_mode"] == "picaso_climate"
