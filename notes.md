@@ -10,17 +10,17 @@ names the code state it was measured on.
 
 - Tool 0.72.0 on main. VULCAN is the default chemistry engine, PICASO the second.
 - Floors `vulcan-forward>=0.31.0`, `vulcan3>=0.18.0` (pyproject). `deploy/pins.env` and
-  the Dockerfile pin vulcan3 76b837a and vulcan-forward b5e1f5a (0.31.0); the Dockerfile
+  the Dockerfile pin vulcan3 ae21fef (0.18.0) and vulcan-forward 2fdf5a2 (0.31.1); the Dockerfile
   still pins the tool at cd67563, which predates v63, so a redeploy moves it first (todo).
   The running Space was last deployed from the earlier pins (tool b23df79) and is
   unchanged until a redeploy.
-- Cache versions: `model_defs._VERSION` 64 (its fixtures, validation data and figures are not yet regenerated:
-  todo), `noise.WORKER_VERSION` 12,
+- Cache versions: `model_defs._VERSION` 64, `noise.WORKER_VERSION` 12,
   `adjoint_diag._ADJ_VERSION` 4, `picaso_engine.WORKER_VERSION` 4. Default keys:
   transmission `36eda8aab768a154` (test-pinned), emission `b482928cce0eeca8`.
-- Fixtures `tests/live/data/w39b_v63_reference.npz` and `w39b_picaso_reference.npz`
-  (cold WASP-39 b, both modes; jax 0.6.2, vulcan3 0.18.0, vulcan-forward 0.31.0
-  at dc2510b; 11 min, and 110 min for PICASO with 8 jobs sharing 10 cores; 45 min alone at v62).
+- Fixtures `tests/live/data/w39b_v64_reference.npz` and `w39b_picaso_reference.npz` (cold WASP-39 b, both modes, on
+  the pinned engines; 11 min, and 87 min for PICASO with 16 jobs on 18 cores; 45 min alone at v62). Against v63 at
+  R = 100: VULCAN transit +396 ppm at 4.50 um, median +191 (Guillot, not the table), eclipse -2.2 ppm (T_int); PICASO
+  transit -1.0, eclipse -3.2 ppm [M]. Validation data, pRT references and figures regenerated with them.
 - v63 needs vulcan-forward 0.31.0 (the caller names the network, config and RT geometry;
   `select_network`, `eclipse_photosphere`); the pins above name it. The tiers below ran on
   vulcan-forward 07f936d and vulcan3 362d642; the pinned commits differ from those only in
@@ -354,9 +354,9 @@ names the code state it was measured on.
   (`eclipse_flux_tau`): W39b depth ratio photospheric/single median 1.070; a single
   radius reads the CO2 feature contrast 9% low. `emission_radius` stays the
   (R_em/R_star)^2 factor.
-- HD 189733 b MIRI LRS vs Inglis et al. 2024 (v63): chi2/N 93.80, 27.51 with a fitted
-  -168 ppm offset (v62: 67.66, 27.04 at -131; v61: 67.7, 26.87 at -132), under the dayside f = 1/2 Guillot default;
-  v63 moved its system values and T_int (100 -> 376 K).
+- HD 189733 b MIRI LRS vs Inglis et al. 2024 (v64): chi2/N 90.41, 27.46 with a fitted
+  -163 ppm offset (v63: 93.80, 27.51 at -168; v62: 67.66, 27.04 at -131), under the dayside f = 1/2 Guillot default;
+  v63 moved its system values, v64 its T_int (376 -> 300 K).
 - lnR0 (a radius change at fixed planet mass in both modes, v60; Decision records):
   default W39b eclipse AD and FD lnR0 rows agree to corr 0.99999997. Emission lnR0 FD
   points are tau-gated.
