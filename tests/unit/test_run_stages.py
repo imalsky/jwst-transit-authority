@@ -59,6 +59,7 @@ def _baseline(depth_of, co_ratio=0.55, run_frq=None, **cp):
         advance=lambda: None,
         log=_quiet,
         unmodeled_band=certify.PHOTOSPHERE_BAR,
+        unmodeled=[],
     ), builds
 
 
@@ -126,8 +127,8 @@ def test_an_ad_row_is_divided_by_its_step_and_a_stall_moves_every_later_row(monk
     def ad_row(_b, chem_x, e):
         i = int(np.flatnonzero(e)[0])
         used.append((i, chem_x.frq))
-        # a tangent along e carries the step: the row divides it back out
-        return np.ones(2), chem_x, None, np.ones((2, 2)), slope[i] * e[i]
+        # a tangent along e carries the step: the row divides it back out; the primal is marked by its row and cadence
+        return np.ones(2), chem_x, None, np.full((2, 2), 10.0 * i + (chem_x.frq or 0)), slope[i] * e[i]
 
     def check_converged(diag, _stage, _species, _chem, _log):
         if diag.frq is None:
@@ -137,7 +138,7 @@ def test_an_ad_row_is_divided_by_its_step_and_a_stall_moves_every_later_row(monk
     monkeypatch.setattr(jacobian, "check_converged", check_converged)
     monkeypatch.setattr(jacobian, "check_elements", lambda *_a: 0.0)
     gated = []
-    monkeypatch.setattr(jacobian, "_check_unmodeled", lambda _b, _y, _chem, stage: gated.append(stage))
+    monkeypatch.setattr(jacobian, "_check_unmodeled", lambda _b, y, _chem, stage: gated.append((stage, float(y[0, 0]))))
     rows = jacobian.Rows(["lnZ", "lnKzz"], np.zeros((3, 2)))
     cols = jacobian._ad_chemistry_rows(b, rows)
 
@@ -147,8 +148,11 @@ def test_an_ad_row_is_divided_by_its_step_and_a_stall_moves_every_later_row(monk
     assert used == [(0, None), (0, 1), (2, 1)]
     assert b.escalated == ["AD lnZ row", "AD lnKzz row"]
     assert builds[1].frq == 1
-    # each row's own primal passes the absorber gate
-    assert gated == ["AD warm re-converge (lnZ) [photo cadence 1]", "AD warm re-converge (lnKzz) [photo cadence 1]"]
+    # each row's own primal, the one its tangent was taken at, passes the absorber gate
+    assert gated == [
+        ("AD warm re-converge (lnZ) [photo cadence 1]", 1.0),
+        ("AD warm re-converge (lnKzz) [photo cadence 1]", 21.0),
+    ]
     # the step caps are top-level solver settings, never cfg_overrides: the engine refuses dt_max set in both
     assert [(c.abun, c.solver) for c in builds] == [
         (None, jacobian.AD_BUILD_OVERRIDES),
@@ -239,6 +243,22 @@ def test_every_column_a_row_solves_passes_the_absorber_gate():
     chem.p_bar = p_bar
     with pytest.raises(RuntimeError, match="FD lnZ \\+1h: the photosphere .* carries CS2"):
         jacobian._certified_depth(b, chem, np.zeros(4), "FD lnZ +1h")
+
+
+def test_a_row_columns_warning_level_absorber_rides_the_result(monkeypatch):
+    """Below the refusal level the run proceeds, and the absorber a stencil column carries joins the run's record."""
+    b, _ = _baseline(_spectrum)
+    b.pic = True
+    b.setup = SimpleNamespace(emis=None, tp_eval=None, config=SimpleNamespace(MOLECULES={"H2O": {"vulcan": "H2O"}}))
+    b.unmodeled = [("CS2", 2.0e-4)]
+    chem = SimpleNamespace(
+        y=np.ones((12, 3)) * np.array([1.0, 1e-4, 5e-4]),
+        sidx={"H2": 0, "H2O": 1, "CS2": 2},
+        p_bar=np.geomspace(1e-5, 1.0, 12),
+    )
+    monkeypatch.setattr(jacobian, "ColumnSpectrum", lambda *_a: SimpleNamespace(depth=lambda *_a, **_k: np.ones(2)))
+    jacobian._certified_depth(b, chem, np.zeros(4), "FD lnZ +1h")
+    assert [sp for sp, _ in b.unmodeled] == ["CS2"] and b.unmodeled[0][1] == pytest.approx(5e-4 / 1.0006)
 
 
 def test_the_stored_entry_holds_gas_mixing_ratios_and_the_flux_its_depth_implies(monkeypatch, tmp_path):

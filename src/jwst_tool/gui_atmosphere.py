@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import streamlit as st
 
-from jwst_tool import model_defs, planets, run_params, share_config, tp_tables
+from jwst_tool import model_defs, param_checks, planets, run_params, share_config, tp_tables
 from jwst_tool.gui_common import K
 from jwst_tool.gui_inputs import Atmosphere, Clouds, Mixing, Photochemistry, Profile, Target
 from jwst_tool.gui_sources import KSRC_WARN
@@ -48,22 +48,38 @@ _TINT_HELP = (
 )
 
 
-def _seed_tint(target: Target) -> None:
-    """Seed T_int once with planets.default_tint; a custom planet's tracks its star and orbit until edited."""
+def _seed_tint(target: Target) -> str | None:
+    """Seed T_int with planets.default_tint and return the API's refusal of that default, if any.
+
+    A custom planet's default tracks its star and orbit until edited. A default outside TINT_RANGE leaves the widget
+    empty, never a value Streamlit would reset to its minimum.
+    """
     k = target.k
     system = dict(star_teff=target.teff, rstar_rsun=target.rstar, orbit_au=target.orbit_au)
     tint0 = planets.default_tint(target.pdef, system=system if target.planet_key == "custom" else None)
+    refusal = param_checks.tint_refusal(tint0, derived=True)
+    seed = None if refusal else tint0
     if target.planet_key == "custom":
         # follow-until-overridden, as T_irr: the first manual edit breaks the link
         prev_auto = st.session_state.get(k("tint_auto"))
         if prev_auto is not None and st.session_state.get(k("tint")) == prev_auto:
-            st.session_state[k("tint")] = tint0
-        st.session_state[k("tint_auto")] = tint0
-    if k("tint") not in st.session_state:
-        st.session_state[k("tint")] = tint0
+            st.session_state[k("tint")] = seed
+        st.session_state[k("tint_auto")] = seed
+    if st.session_state.get(k("tint")) is None:
+        st.session_state[k("tint")] = seed
+    return refusal
 
 
-def _guillot_boxes(target: Target) -> dict:
+def _tint_box(target: Target, tp_kwargs: dict, refusal: str | None) -> None:
+    """Draw T_int; an empty widget sends no T_int, so canonical_params refuses with the sentence shown beside it."""
+    tint = st.number_input("T_int (K)", *_W["tint"], step=25.0, key=target.k("tint"), help=_TINT_HELP)
+    if tint is None:
+        st.error(refusal)
+    else:
+        tp_kwargs["Tint"] = tint
+
+
+def _guillot_boxes(target: Target, tint_refusal: str | None) -> dict:
     """Draw the Guillot (2010) profile's settings."""
     planet_key, pdef, science_mode, k = target.planet_key, target.pdef, target.science_mode, target.k
     teff, rstar, orbit_au = target.teff, target.rstar, target.orbit_au
@@ -102,7 +118,7 @@ def _guillot_boxes(target: Target) -> dict:
         st.error(tirr_error)
     else:
         tp_kwargs["Tirr"] = tirr
-    tp_kwargs["Tint"] = st.number_input("T_int (K)", *_W["tint"], step=25.0, key=k("tint"), help=_TINT_HELP)
+    _tint_box(target, tp_kwargs, tint_refusal)
     # default 0.01 cm^2/g, Guillot (2010)'s canonical thermal opacity
     tp_kwargs["log_kappa"] = st.number_input("log10 kappa_IR (cm^2/g)", *_W["lk"], step=0.1, key=k("lk"))
     tp_kwargs["log_gamma"] = st.number_input("log10 gamma (kappa_vis/kappa_IR)", *_W["lg"], step=0.05, key=k("lg"))
@@ -225,9 +241,9 @@ def _tp_section(target: Target, pic: bool, chem_provider: str) -> Profile:
                 "file": ("Tabulated table (T-P)" if pic else "Tabulated table (T-P, optional Kzz)"),
             }.__getitem__,
         )
-        tp_kwargs = {}
+        tp_kwargs: dict[str, float] = {}
         tp_file, tp_file_path, tp_file_ok = "", None, True
-        _seed_tint(target)
+        tint_refusal = _seed_tint(target)
         # seeded once (no value= default), so the engine switch can write
         # them back while hidden (gui_sidebar.keep_hidden_engine_state)
         for sk, sv in (
@@ -239,7 +255,7 @@ def _tp_section(target: Target, pic: bool, chem_provider: str) -> Profile:
                 st.session_state[k(sk)] = sv
         if tp_mode == "picaso_climate":
             # T_int shares its key with Guillot: the same physics and default
-            tp_kwargs["Tint"] = st.number_input("T_int (K)", *_W["tint"], step=25.0, key=k("tint"), help=_TINT_HELP)
+            _tint_box(target, tp_kwargs, tint_refusal)
             rf_key = K(f"rfacv_picaso_{science_mode}")
             if rf_key not in st.session_state:
                 st.session_state[rf_key] = model_defs.RFACV_DEFAULT[science_mode]
@@ -251,7 +267,7 @@ def _tp_section(target: Target, pic: bool, chem_provider: str) -> Profile:
                 help="0.5 = planet average, 1.0 = dayside.",
             )
         elif tp_mode == "guillot":
-            tp_kwargs = _guillot_boxes(target)
+            tp_kwargs = _guillot_boxes(target, tint_refusal)
         elif tp_mode == "file":
             tp_file, tp_file_path, tp_file_ok = _table_source(target)
     return Profile(tp_mode, tp_kwargs, tp_file, tp_file_path, tp_file_ok)
@@ -267,15 +283,16 @@ def _pressure_section(science_mode: str, tp_mode: str) -> tuple:
         # structure mode -- a measured T-P table caps the honest column at its
         # own bottom (7.6 bar for the shipped tables), parametric profiles get
         # a round 10 bar -- and tracks that mode until the user edits the box
-        # (same seed pattern as the Kzz mode below; an untouched default must
-        # never survive a structure switch and refuse the run).
+        # (an untouched default must never survive a structure switch and
+        # refuse the run). Untouched means the value this seeder wrote, held
+        # under the _auto key: a typed or loaded value, even one equal to a
+        # default number, is never replaced.
         pbtm_key = K(f"pbtm_{science_mode}")
+        auto_key = K(f"pbtm_{science_mode}_auto")
         pbtm_default = run_params.default_p_btm_bar(dict(tp_mode=tp_mode))
         pbtm_now = st.session_state.get(pbtm_key)
-        if pbtm_now is None or (
-            pbtm_now in (model_defs.P_BTM_FILE_BAR, model_defs.P_BTM_PARAMETRIC_BAR) and pbtm_now != pbtm_default
-        ):
-            st.session_state[pbtm_key] = pbtm_default
+        if pbtm_now is None or pbtm_now == st.session_state.get(auto_key):
+            st.session_state[pbtm_key] = st.session_state[auto_key] = pbtm_default
         # key always seeded above, so no value= default
         p_btm_bar = st.number_input(
             "Column bottom pressure (bar)", *model_defs.P_BTM_RANGE, step=1.0, format="%.4g", key=pbtm_key
@@ -317,7 +334,9 @@ def _kzz_section(k: KeyFn, pic: bool, tp_mode: str) -> Mixing:
             # constant Kzz: no profile menu and no multiplier
             kzz_mode, kzz_x = "const", model_defs.KZZ_X_DEFAULT
             kzz_const = kzz_kmax = kzz_plev = kzz_kdeep = 0.0
-            picaso_quench = st.checkbox("Quench (constant Kzz)", value=False, key=K("quench_picaso"))
+            picaso_quench = st.checkbox(
+                "Quench (constant Kzz)", value=model_defs.PICASO_QUENCH_DEFAULT, key=K("quench_picaso")
+            )
             if picaso_quench:
                 kzz_const = 10.0 ** st.number_input("log10 Kzz (cm^2 s^-1)", *_W["kzz"], step=0.25, key=k("kzz"))
         else:
@@ -345,7 +364,6 @@ def _kzz_section(k: KeyFn, pic: bool, tp_mode: str) -> Mixing:
                 }.__getitem__,
             )
             kzz_const = kzz_kmax = kzz_plev = kzz_kdeep = 0.0
-            kzz_x = model_defs.KZZ_X_DEFAULT
             if kzz_mode == "const":
                 log_kzz = st.number_input("log10 Kzz (cm^2 s^-1)", *_W["kzz"], step=0.25, key=k("kzz"))
                 kzz_const = 10.0**log_kzz
@@ -356,8 +374,7 @@ def _kzz_section(k: KeyFn, pic: bool, tp_mode: str) -> Mixing:
                 kzz_kdeep = 10.0 ** st.number_input(
                     "log10 deep-floor Kzz (cm^2 s^-1)", *_W["kzkdeep"], 0.25, key=k("kzkdeep")
                 )
-            if kzz_mode != "const":
-                kzz_x = 10.0 ** st.number_input("Kzz profile multiplier, log10(f)", *_W["kzzx"], 0.05, key=k("kzzx"))
+            kzz_x = 10.0 ** st.number_input("Kzz profile multiplier, log10(f)", *_W["kzzx"], 0.05, key=k("kzzx"))
     return Mixing(picaso_quench, kzz_mode, kzz_x, kzz_const, kzz_kmax, kzz_plev, kzz_kdeep)
 
 
@@ -378,7 +395,7 @@ def _photochemistry_section(pic: bool, science_mode: str) -> Photochemistry:
                 }.__getitem__,
             )
             if K("photo") not in st.session_state:
-                st.session_state[K("photo")] = True
+                st.session_state[K("photo")] = model_defs.USE_PHOTO_DEFAULT
             # key always seeded above, so no value= default. AD needs
             # photolysis on; canonical_params refuses that combination and
             # the Run block shows its sentence, rather than the widget
@@ -400,9 +417,10 @@ def _photochemistry_section(pic: bool, science_mode: str) -> Photochemistry:
             f_diurnal = st.number_input(
                 "Diurnal photolysis factor", *_W["fdiur"], 0.05, key=K("fdiur"), disabled=not use_photo
             )
-            use_moldiff = st.checkbox("Molecular diffusion", value=True, key=K("moldiff"))
+            use_moldiff = st.checkbox("Molecular diffusion", value=model_defs.USE_MOLDIFF_DEFAULT, key=K("moldiff"))
+            # never disabled: a request with advection and no diffusion is refused by canonical_params, beside Run
             use_vm_mol = st.checkbox(
-                "Upwind molecular-diffusion advection", value=False, key=K("vmmol"), disabled=not use_moldiff
+                "Upwind molecular-diffusion advection", value=model_defs.USE_VM_MOL_DEFAULT, key=K("vmmol")
             )
 
     return Photochemistry(network, use_photo, use_moldiff, use_vm_mol, sl_angle_deg, f_diurnal)
@@ -457,14 +475,14 @@ def _cloud_section(target: Target) -> Clouds:
     science_mode, g_ms2, rp, teq = target.science_mode, target.g_ms2, target.rp, target.teq
     with st.expander("Clouds & scattering (ExoJAX)"):
         if K("rayl") not in st.session_state:
-            st.session_state[K("rayl")] = True
+            st.session_state[K("rayl")] = model_defs.USE_RAYLEIGH_DEFAULT
         if science_mode == "emission":
             # canonical_params forces Rayleigh OFF in emission (no scattering
             # channel); show the forced state, not a checked-but-ignored box
             st.session_state[K("rayl")] = False
         # key always seeded above, so no value= default
         use_rayleigh = st.checkbox("H2/He Rayleigh scattering", key=K("rayl"), disabled=(science_mode == "emission"))
-        cloud_on = st.checkbox("Cloud / haze opacity", value=False, key=K("cloud"))
+        cloud_on = st.checkbox("Cloud / haze opacity", value=model_defs.CLOUD_ON_DEFAULT, key=K("cloud"))
         cloud_mode = "haze"
         if cloud_on:
             # The gray deck is entered as a cloud-top PRESSURE and mapped to an

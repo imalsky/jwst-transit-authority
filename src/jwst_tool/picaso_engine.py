@@ -431,11 +431,12 @@ def _guillot_gravity(
     """Iterate g and the Guillot T (tau = kappa P / g) to their fixed point at one probe mu, as the VULCAN path does."""
     from jwst_tool import chem_build
 
-    g = g_prev = cp["gs_cgs"]
-    for _ in range(model_defs.ANCHOR_PASSES):
+    g = cp["gs_cgs"]
+    for passes in range(1, model_defs.ANCHOR_MAX_PASSES + 1):
         g_prev, g = g, g_at_anchor(np.asarray(chem_build.build_tp(cp, g)[0](tp, p_tool)), mu)
-    chem_build.check_anchor_converged(g_prev, g, "PICASO Guillot gravity anchor")
-    return g
+        if chem_build.anchor_settled(g_prev, g, passes, model_defs.ANCHOR_MIN_PASSES):
+            return g
+    raise chem_build.anchor_refusal("PICASO Guillot gravity anchor", g_prev, g, chem_build.GUILLOT_ANCHOR_REMEDY)
 
 
 def _climate_gravity(
@@ -448,7 +449,7 @@ def _climate_gravity(
     g_at_anchor: Callable[[np.ndarray, np.ndarray], float],
     log: Log,
 ) -> float:
-    """First gravity from a Guillot guess column, then the climate's own, iterated to model_defs.ANCHOR_TOL."""
+    """First gravity from a Guillot guess column, then the climate's own, iterated to ANCHOR_TOL within the pass cap."""
     from jwst_tool import chem_build
 
     tirr = planets.system_teq(cp["star_teff"], cp["rstar_rsun"], cp["orbit_au"]) * np.sqrt(2.0)
@@ -457,16 +458,20 @@ def _climate_gravity(
     g = g_at_anchor(
         T0[:nz][::-1], _mu(run(request(cp["met_x_solar"], cp["co_ratio"], cp["gs_cgs"], T0), "geometry probe"))
     )
-    for k in range(model_defs.ANCHOR_PASSES):
-        col = run(request(cp["met_x_solar"], cp["co_ratio"], g), f"climate (gravity pass {k + 1})")
+    for passes in range(1, model_defs.ANCHOR_MAX_PASSES + 1):
+        col = run(request(cp["met_x_solar"], cp["co_ratio"], g), f"climate (gravity pass {passes})")
         g_new = g_at_anchor(col.T_base, _mu(col))
-        log(f"[fwd] PICASO gravity anchor pass {k + 1}: g = {g:.2f} -> {g_new:.2f} cm/s2 at {p_anchor:g} bar")
-        if abs(g_new / g - 1.0) <= model_defs.ANCHOR_TOL:
+        log(f"[fwd] PICASO gravity anchor pass {passes}: g = {g:.2f} -> {g_new:.2f} cm/s2 at {p_anchor:g} bar")
+        # the climate was solved at g, so g is the gravity of the column that passes
+        if chem_build.anchor_settled(g, g_new, passes, 1):
             return g
-        g = g_new
-    raise RuntimeError(
-        f"PICASO climate gravity anchor did not settle to {model_defs.ANCHOR_TOL:g} "
-        f"in {model_defs.ANCHOR_PASSES} passes (last {g:.2f} -> {g_new:.2f} cm/s2)."
+        g_prev, g = g, g_new
+    raise chem_build.anchor_refusal(
+        "PICASO climate gravity anchor",
+        g_prev,
+        g,
+        "The climate and its gravity do not reach a fixed point: change T_int or rfacv, or use the Guillot or a "
+        "tabulated profile.",
     )
 
 

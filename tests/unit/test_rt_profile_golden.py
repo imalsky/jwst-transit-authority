@@ -35,7 +35,7 @@ def test_rt_profile_common_golden_default():
     assert prof["use_photo"] is True
     assert prof["use_rayleigh"] is True
     assert prof["rp_cm"] == pytest.approx(9.546962e9, rel=1e-5)
-    assert prof["gs_cgs"] == 390.6
+    assert prof["gs_cgs"] == 390.58
     assert prof["rstar_cm"] == pytest.approx(0.939 * 6.957e10, rel=1e-6)
     # none of the chemistry-only keys leak in here (they are added by
     # assemble_chem on top): the vulcan profile stays bit-identical because

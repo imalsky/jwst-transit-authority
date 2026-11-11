@@ -697,3 +697,12 @@ def test_gui_removed_physics_defaults_load_and_nondefaults_refuse():
         canon = dict(_canon(), **stale)
         with pytest.raises(ValueError, match="removed in 0.48.0"):
             share_config.widget_state(canon, _key)
+
+
+@pytest.mark.parametrize(("field", "value"), [("n_transits", 10.9), ("r_bin", 500.9), ("seed", 9999.9)])
+def test_a_fractional_integer_setting_is_refused_never_truncated(field, value):
+    share = share_config.build_share(_canon(), {}, {field: value})
+    with pytest.raises(ValueError, match=rf"{field}={value} in the configuration is not a whole number"):
+        share_config.widget_state(share, _key)
+    share = share_config.build_share(_canon(), {}, {field: float(int(value))})
+    assert share_config.widget_state(share, _key)

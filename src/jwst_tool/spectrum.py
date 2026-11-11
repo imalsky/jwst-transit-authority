@@ -219,13 +219,12 @@ class ColumnSpectrum:
 
 
 def emission_photosphere_bar(setup: RtSetup, column: ColumnSpectrum, y: AnyArray, th: AnyArray) -> tuple[float, float]:
-    """Return the pressures an eclipse forms over: flux-weighted quantiles of the tau = 2/3 pressure.
+    """Return the pressures an eclipse forms over: flux-weighted quantiles of the tau = 2/3 pressure, on RT layer edges.
 
-    Per g-ordinate and band, the engine's own tau = 2/3 pressure of this column (the one ``eclipse_flux_tau`` folds
-    into the eclipse depth), weighted by the band's eclipse flux times its width and split over g-ordinates by their
-    quadrature weight; the range between ``EMIS_PHOTOSPHERE_QUANTILES``. The engine returns only the flux, so this reads
-    its internals (``_Emission._dtau``, ``_g_layers``, ``lnp_em``, ``_rt_geometry._photosphere_lnp``), pinned by
-    tests/unit/test_engine_api_contract.py.
+    The engine's ``eclipse_photosphere`` gives each k-ordinate's tau = 2/3 pressure and its term of the eclipse flux;
+    each weighs that term times its band's width in wavenumber (``nu_edges``). The pressures where the cumulative
+    weight crosses ``EMIS_PHOTOSPHERE_QUANTILES`` are widened to the edges of the RT layers holding them, so a
+    photosphere at one pressure is still the layer it sits in.
 
     Parameters
     ----------
@@ -243,20 +242,20 @@ def emission_photosphere_bar(setup: RtSetup, column: ColumnSpectrum, y: AnyArray
     tuple of float
         (low, high) pressure, bar.
     """
-    from vulcan_forward._rt_geometry import _photosphere_lnp
-
     vmr, vmr_h2, t_art, mmw_art, vmr_he = column.art_profiles(y, th)
-    model = setup.emis.eclipse_flux_tau.__self__
-    g_layers = model._g_layers(t_art, mmw_art, 0.0)
-    dtau = model._dtau(vmr, vmr_h2, vmr_he, t_art, mmw_art, g_layers, setup.cloud_vec, None)
-    p_phot = np.exp(np.asarray(_photosphere_lnp(dtau, model.lnp_em))).ravel()  # [ng * nband], bar
-    flux, _ = setup.emis.eclipse_flux_tau(vmr, vmr_h2, t_art, mmw_art, vmr_he=vmr_he, cloud=setup.cloud_vec)
-    band_w = np.asarray(flux) * np.abs(np.gradient(np.asarray(setup.rt.nu_grid)))
-    weight = (np.asarray(model.opacities.ckd_pack.gw)[:, None] * band_w[None, :]).ravel()
+    p_phot, flux = setup.emis.eclipse_photosphere(vmr, vmr_h2, t_art, mmw_art, vmr_he=vmr_he, cloud=setup.cloud_vec)
+    band_width = np.abs(np.diff(np.asarray(setup.emis.nu_edges, dtype=np.float64)))  # cm^-1
+    weight = (np.asarray(flux, dtype=np.float64) * band_width[None, :]).ravel()
+    p_phot = np.asarray(p_phot, dtype=np.float64).ravel()
     order = np.argsort(p_phot)
     cum = np.cumsum(weight[order]) / weight.sum()
     lo, hi = (float(p_phot[order][np.searchsorted(cum, q)]) for q in EMIS_PHOTOSPHERE_QUANTILES)
-    return lo, hi
+    ln_p = np.sort(np.log(np.asarray(setup.rt.p_art_bar, dtype=np.float64)))
+    half = 0.5 * np.diff(ln_p)
+    edges = np.exp(np.concatenate([[ln_p[0] - half[0]], ln_p[:-1] + half, [ln_p[-1] + half[-1]]]))
+    i_lo = int(np.clip(np.searchsorted(edges, lo, side="right") - 1, 0, edges.size - 1))
+    i_hi = int(np.clip(np.searchsorted(edges, hi, side="left"), 0, edges.size - 1))
+    return float(edges[i_lo]), float(edges[i_hi])
 
 
 @dataclass(frozen=True)

@@ -20,7 +20,9 @@ from jwst_tool.certify import (
     check_emission_thin,
     check_t_window,
     check_unmodeled,
+    merge_unmodeled,
     table_species,
+    unmodeled_absorbers,
 )
 from jwst_tool.model_defs import (
     CHEM_PARAM_NAMES,
@@ -136,6 +138,8 @@ class Baseline:
     log: Log
     # (low, high) bar: the photosphere the baseline's absorber gate used, applied to every column the rows solve
     unmodeled_band: tuple[float, float]
+    # the run's (species, VMR) absorbers with no k-table above the warning level, every column's merged
+    unmodeled: list
     # PICASO only: (stage, layer solves retried at a shifted T) of every column the run solves; the T-P stencil
     # points' own assemblies add theirs here
     picaso_retried: list = field(default_factory=list)
@@ -170,10 +174,22 @@ def _gate_emis(b: Baseline, dep: AnyArray, tau: AnyArray, stage: str) -> AnyArra
 
 
 def _check_unmodeled(b: Baseline, y: AnyArray, chem_b: Any, stage: str) -> None:
-    """Apply the baseline's absorber gate to a column a row solved: no absorber without a k-table may be bulk there."""
+    """Apply the baseline's absorber gate to a column a row solved, and carry its warnings to the run's result.
+
+    No absorber without a k-table may be bulk there; one above the warning level joins ``b.unmodeled``.
+    """
     species = [sp for sp, _ in sorted(chem_b.sidx.items(), key=lambda kv: kv[1])]
     tables = table_species(b.setup.config.MOLECULES)
-    check_unmodeled(species, np.asarray(y), np.asarray(chem_b.p_bar), tables, b.unmodeled_band, stage, b.log)
+    y, p_bar = np.asarray(y), np.asarray(chem_b.p_bar)
+    check_unmodeled(species, y, p_bar, tables, b.unmodeled_band, stage, b.log)
+    found = unmodeled_absorbers(species, y, p_bar, tables, band_bar=b.unmodeled_band)
+    if found:
+        b.log(
+            f"[fwd] WARNING: {stage}: the column carries "
+            + ", ".join(f"{sp} at {v:.2e}" for sp, v in found)
+            + " (mean VMR over the photosphere band) with NO published k-table; recorded with the result"
+        )
+        merge_unmodeled(b.unmodeled, found)
 
 
 def _certified_depth(

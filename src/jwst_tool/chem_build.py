@@ -10,7 +10,8 @@ import numpy as np
 
 from jwst_tool import planets
 from jwst_tool.model_defs import (
-    ANCHOR_PASSES,
+    ANCHOR_MAX_PASSES,
+    ANCHOR_MIN_PASSES,
     ANCHOR_TOL,
     ART_PBTM_FRACTION,
     CFG_ABUNDANCES,
@@ -335,36 +336,40 @@ def _check_cfg_constants(cp: dict, config: Any, tp_path: Path | None, log: Log) 
     return cfg_chk
 
 
-def check_anchor_converged(g_prev: float, g: float, stage: str) -> float:
-    """Refuse a gravity anchor whose last pass still moved g by more than ANCHOR_TOL; return that relative change.
+def anchor_settled(g_prev: float, g: float, passes: int, min_passes: int) -> bool:
+    """Return whether a gravity-anchor pass moved g (cm s^-2) by at most ANCHOR_TOL, after ``min_passes`` passes."""
+    return passes >= min_passes and abs(g / g_prev - 1.0) <= ANCHOR_TOL
+
+
+def anchor_refusal(stage: str, g_prev: float, g: float, remedy: str) -> RuntimeError:
+    """Return the refusal of a gravity anchor still moving after ANCHOR_MAX_PASSES, naming its last pass and a remedy.
 
     Parameters
     ----------
-    g_prev : float
-        Gravity before the last pass, cm s^-2.
-    g : float
-        Gravity after it, cm s^-2.
     stage : str
-        Which anchor, for the message.
+        Which anchor.
+    g_prev : float
+        Gravity going into the last pass, cm s^-2.
+    g : float
+        Gravity coming out of it, cm s^-2.
+    remedy : str
+        What the user can change.
 
     Returns
     -------
-    float
-        |g / g_prev - 1|.
-
-    Raises
-    ------
     RuntimeError
-        The change is above ANCHOR_TOL or not finite.
+        The error to raise.
     """
-    change = abs(g / g_prev - 1.0)
-    if not change <= ANCHOR_TOL:
-        raise RuntimeError(
-            f"{stage} did not converge: its last of {ANCHOR_PASSES} passes moved g from {g_prev:.2f} to {g:.2f} "
-            f"cm/s2 ({change:.2e}, gate {ANCHOR_TOL:g}). The profile's dependence on gravity is too strong to anchor "
-            "at these settings: change T_irr, kappa_IR or p_ref_bar, or use a tabulated profile."
-        )
-    return change
+    return RuntimeError(
+        f"{stage} did not converge in {ANCHOR_MAX_PASSES} passes: the last moved g from {g_prev:.2f} to {g:.2f} cm/s2 "
+        f"({abs(g / g_prev - 1.0):.2e}, gate {ANCHOR_TOL:g}). {remedy}"
+    )
+
+
+GUILLOT_ANCHOR_REMEDY = (
+    "The profile's dependence on gravity is too strong to anchor at these settings: change T_irr, kappa_IR or "
+    "p_ref_bar, or use a tabulated profile."
+)
 
 
 def _radius_anchor(
@@ -384,7 +389,7 @@ def _radius_anchor(
     mu_col = (y0 / y0.sum(axis=1, keepdims=True)) @ np.asarray(probe.species_masses, dtype=np.float64)
     p_anchor = chem_radius_anchor_bar(probe.p_bar, chem_p_span_dyn(cp)[1], rocky)
     g_anchor, r_anchor = cp["gs_cgs"], rp_cm
-    for _ in range(ANCHOR_PASSES):
+    for passes in range(1, ANCHOR_MAX_PASSES + 1):
         g_prev = g_anchor
         T_col = (
             np.asarray(probe.T_base, dtype=np.float64)
@@ -393,7 +398,10 @@ def _radius_anchor(
         )
         r_anchor = radius_at_anchor(probe.p_bar, T_col, mu_col, rp_cm, cp["gs_cgs"], cp["p_ref_bar"], p_anchor)
         g_anchor = cp["gs_cgs"] * (rp_cm / r_anchor) ** 2
-    change = check_anchor_converged(g_prev, g_anchor, "chemistry gravity anchor")
+        if anchor_settled(g_prev, g_anchor, passes, ANCHOR_MIN_PASSES):
+            break
+    else:
+        raise anchor_refusal("chemistry gravity anchor", g_prev, g_anchor, GUILLOT_ANCHOR_REMEDY)
     log(
         f"[fwd] radius anchor: chemistry runs R_p = {r_anchor:.4e} cm, "
         f"g = {g_anchor:.1f} cm/s2 at its {p_anchor:g} bar grid anchor, from "
@@ -401,7 +409,7 @@ def _radius_anchor(
         f"p_ref_bar = {cp['p_ref_bar']:g} bar "
         f"({100.0 * (1.0 - r_anchor / rp_cm):.2f}% smaller radius, "
         f"{100.0 * (g_anchor / cp['gs_cgs'] - 1.0):.1f}% stronger gravity); "
-        f"the Guillot T-P uses the same gravity; the last of {ANCHOR_PASSES} passes moved g by {change:.2e}"
+        f"the Guillot T-P uses the same gravity; pass {passes} moved g by {abs(g_anchor / g_prev - 1.0):.2e}"
     )
     return r_anchor, g_anchor
 

@@ -355,6 +355,35 @@ def test_a_bulk_absorber_with_no_k_table_refuses_the_run():
     assert certify.unmodeled_absorbers(sp, y, p, tables) == []
 
 
+def test_a_photosphere_band_with_no_layer_is_refused_never_an_empty_pass():
+    sp = ["H2O", "C6H6", "H2"]
+    y = np.array([[1.0e-3, 0.1, 0.899]] * 3)
+    with pytest.raises(RuntimeError, match="no layer of the column .* in the photosphere band 0.002-0.003 bar"):
+        certify.check_unmodeled(sp, y, np.array([1e-1, 1e-2, 1e-4]), {"H2O"}, (2e-3, 3e-3), "eclipse", print)
+
+
+def test_the_eclipse_band_is_where_the_flux_comes_from():
+    """Two k-ordinates, nearly all the flux from the one at 1 mbar: the band is the RT layer holding 1 mbar."""
+    from types import SimpleNamespace
+
+    from jwst_tool import spectrum
+
+    p_art = np.logspace(-6, 1, 50)
+    emis = SimpleNamespace(
+        eclipse_photosphere=lambda *_a, **_k: (np.array([[1.0e-3], [1.0]]), np.array([[0.999], [0.001]])),
+        nu_edges=np.array([1000.0, 1100.0]),
+    )
+    setup = SimpleNamespace(emis=emis, rt=SimpleNamespace(p_art_bar=p_art), cloud_vec=None)
+    column = SimpleNamespace(art_profiles=lambda _y, _th: (None,) * 5)
+    lo, hi = spectrum.emission_photosphere_bar(setup, column, None, None)
+    step = 10.0 ** (7.0 / 49.0)
+    assert lo < 1.0e-3 < hi and hi / lo == pytest.approx(step)
+    # the flux on the other ordinate moves the band there
+    emis.eclipse_photosphere = lambda *_a, **_k: (np.array([[1.0e-3], [1.0]]), np.array([[0.001], [0.999]]))
+    lo, hi = spectrum.emission_photosphere_bar(setup, column, None, None)
+    assert lo < 1.0 < hi
+
+
 def test_the_absorber_gate_reads_the_observations_own_photosphere():
     """An eclipse forms deeper than a transit: a bulk absorber with no k-table only at 0.05 bar is outside the transit
     band and refused over an eclipse band that reaches it."""

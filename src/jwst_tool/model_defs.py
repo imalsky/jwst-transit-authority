@@ -10,7 +10,8 @@ from jwst_tool import planets
 # (constants.REQUIRED_MOLECULES), so those five are never optional here; SO2 stays on with them.
 MOLECULES = ["H2O", "CO2", "CO", "CH4", "SO2", "NH3"]
 # Extras of earlier versions that are now always on. `extra_mols` may still name one (an old share file or script):
-# it is dropped from the list, and the run is the model that was asked for.
+# it is dropped from the list, and the run is the model that was asked for. Kept on the maintainer's request, the one
+# legacy reading the tool keeps: old share files that list NH3 as an extra still load.
 FORMER_EXTRA_MOLECULES = frozenset({"NH3"})
 
 # RT additions the network already solves; extra_mols exposes them to the RT.
@@ -98,17 +99,33 @@ P_REF_DEFAULT_BAR = 1.0e-3
 LOG_KAPPA_CLOUD_DEFAULT = -1.0  # log10 cm^2/g at 3.5 um, cloud deck opacity when the deck is on: no basis recorded
 ALPHA_CLOUD_DEFAULT = 0.0  # cloud deck slope: 0 is a grey deck, the engine's powerlaw_clouds convention
 RT_INTEGRATION_DEFAULT = "simpson"  # the chord scheme exojax's ArtTransPure uses by default
+# Switches. Photolysis and molecular diffusion are VULCAN physics (off under PICASO, which has neither): on, as in the
+# W39b cfg. Upwind advection off: the validated baseline (notes "Structure: T-P, Kzz, gravity anchor, model top").
+# Rayleigh on: zero-parameter physics, without which the < 1.5 um slope is biased. No cloud and no condensation by
+# default: a cloud is never a default (oracle), and condensation is detection-only. No PICASO quench: equilibrium.
+USE_PHOTO_DEFAULT = True
+USE_MOLDIFF_DEFAULT = True
+USE_VM_MOL_DEFAULT = False
+USE_RAYLEIGH_DEFAULT = True
+CLOUD_ON_DEFAULT = False
+USE_CONDENSE_DEFAULT = False
+PICASO_QUENCH_DEFAULT = False
+# The API's Jacobian method: certified finite differences. The sidebar starts from "ad" (faster); the maintainer
+# decides whether the two become one (todo).
+JAC_METHOD_DEFAULT = "fd"
 
 # Fraction of Pandeia's per-mode saturation_fullwell a ramp may reach: PandExo's default saturation level, 80 % (docs/
 # noise_and_binning.md says what that divisor is).
 SAT_LIMIT_DEFAULT = 0.80
 
 # Gravity anchor: the catalogue (Rp, g) pair is moved to the chemistry's anchor level, a fixed point with the profile
-# that reads g (Guillot's tau = kappa P / g, or PICASO's climate). The Guillot anchors run ANCHOR_PASSES passes, the
-# climate anchor at most that many; a last pass that still moves g by more than ANCHOR_TOL (relative) is refused.
-# Measured passes: notes "Structure: T-P, Kzz, gravity anchor, model top".
+# that reads g (Guillot's tau = kappa P / g, or PICASO's climate). Passes run until one moves g by at most ANCHOR_TOL
+# (relative); the Guillot anchors run at least ANCHOR_MIN_PASSES (cheap, and the passes every default has run), and an
+# anchor still moving after ANCHOR_MAX_PASSES is refused. Measured, the third Guillot pass moves g by 1e-7 to 7e-5
+# (notes "Structure: T-P, Kzz, gravity anchor, model top"), so a map not settled by the eighth is not contracting.
 ANCHOR_TOL = 5.0e-3
-ANCHOR_PASSES = 3
+ANCHOR_MIN_PASSES = 3
+ANCHOR_MAX_PASSES = 8
 
 # Heat redistribution factor f of the Guillot (2010) profile: 1/4 spreads the irradiation over the whole planet. The
 # dayside an eclipse sees is carried by its T_irr instead (planets.DAYSIDE_TEQ_FACTOR).
@@ -169,9 +186,10 @@ RFACV_RANGE = (0.05, 1.0)
 
 RFACV_DEFAULT = {"transmission": 0.5, "emission": 1.0}
 
-# T_int range (K), Guillot and climate alike: the GUI's T_int widget (picaso refuses T_int = 0). The top is the
-# "up to 700 K" Thorngren, Gao & Fortney (2019) quote for their grid, so it holds every planets.default_tint value.
-TINT_RANGE = (50.0, 700.0)
+# T_int range (K), Guillot and climate alike: the GUI's T_int widget (picaso refuses T_int = 0). It holds every
+# planets.default_tint value: the Thorngren, Gao & Fortney (2019) rule's least is 45 K at T_eq 700 K (the low edge of
+# its fit) and its most about 671 K near T_eq 1883 K, under the "up to 700 K" the paper quotes for its grid.
+TINT_RANGE = (40.0, 700.0)
 
 # The climate grid and the quench search end at 100 bar (picaso_engine).
 PICASO_P_BTM_MAX = 100.0
@@ -246,6 +264,10 @@ P_BTM_RANGE = (1.0, 300.0)
 # The RT column bottom sits just inside the chemistry bottom: interp_map refuses
 # an ART grid reaching below it. Keep this 7.0 / 7.6 ratio at any depth.
 ART_PBTM_FRACTION = 7.0 / 7.6
+
+# bar: where rp and g may be quoted, the widest RT grid any run builds. canonical_params also requires it inside the
+# run's own grid [rt_ptop_bar, p_btm_bar * ART_PBTM_FRACTION]; the sidebar widget offers this range.
+P_REF_RANGE_BAR = (RT_PTOP_RANGE[0], P_BTM_RANGE[1] * ART_PBTM_FRACTION)
 
 
 def chem_p_span_dyn(cp: dict) -> tuple:

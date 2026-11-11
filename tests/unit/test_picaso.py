@@ -218,3 +218,45 @@ def test_the_picaso_assembly_selects_the_default_network_before_vulcan3(monkeypa
     with pytest.raises(Reached):
         pe.assemble(forward.canonical_params(dict(planet="wasp39b", chem_provider="picaso")), lambda *_a: None)
     assert calls == [model_defs.NETWORKS[model_defs.DEFAULT_NETWORK], "anchor"]
+
+
+_AFTER_PICASO = """
+import sys
+from jwst_tool import chem_build, forward, picaso_engine as pe
+
+class Reached(Exception):
+    pass
+
+def solve(*_a, **_k):
+    raise Reached
+
+pe.solve = solve
+try:
+    pe.assemble(forward.canonical_params(dict(planet="wasp39b", chem_provider="picaso")), lambda *_a: None)
+except Reached:
+    pass
+assert "vulcan3" in sys.modules, "the PICASO assembly never reached vulcan3"
+a = chem_build.assemble_chem(forward.canonical_params(dict(planet="wasp39b")), lambda *_a: None)
+a.build_chem(tag="after PICASO")
+try:
+    chem_build.assemble_chem(forward.canonical_params(dict(planet="wasp39b", network="ncho")), lambda *_a: None)
+except RuntimeError as e:
+    assert "already imported" in str(e), e
+else:
+    raise AssertionError("a second network in the same process was not refused")
+print("OK")
+"""
+
+
+def test_a_default_vulcan_build_follows_a_picaso_assembly_in_one_process():
+    """In a fresh process (no conftest selection): PICASO's assembly reaches vulcan3, a default VULCAN build then works,
+    and another network is refused, as notes "PICASO engine" records."""
+    import os
+    import subprocess
+
+    pytest.importorskip("vulcan_forward.vulcan_chem")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("VULCAN3_")}
+    out = subprocess.run(
+        [sys.executable, "-c", _AFTER_PICASO], env=env, capture_output=True, text=True, timeout=600, check=False
+    )
+    assert out.returncode == 0 and out.stdout.strip().endswith("OK"), out.stderr[-2000:]

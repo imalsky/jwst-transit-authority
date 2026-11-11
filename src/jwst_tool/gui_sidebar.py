@@ -293,7 +293,7 @@ def _target_step() -> Target:
             # otherwise the pick is silently replaced, and shared that way.
             # Session state, not use_photo: the checkbox renders further down.
             # PICASO has no photolysis.
-            disabled=pic or not st.session_state.get(K("photo"), True),
+            disabled=pic or not st.session_state.get(K("photo"), model_defs.USE_PHOTO_DEFAULT),
         )
 
     # T_eq is derived from the star and orbit for every planet, registry or

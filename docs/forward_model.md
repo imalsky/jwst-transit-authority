@@ -35,11 +35,13 @@ GUI shows both as run caveats.
 `forward` runs the stages below, then `jacobian` builds the rows. It re-exports, in `__all__`, the names the deploy scripts
 and the research note's scripts read.
 
-- `run_params`, `param_checks`: `canonical_params` fills every default, rounds, zeroes settings inert for the chosen
-  modes so one physics maps to one key, and refuses unknown keys, out-of-range values and conflicts. A refusal costs no
-  solve. The output maps to itself, so a saved payload validates by feeding it back in. Each range a sidebar widget also
+- `run_params`, `param_checks`: `canonical_params` fills every default, refuses unknown keys, out-of-range values and
+  conflicts, zeroes settings inert for the chosen modes, and rounds last, so every check reads the request's own value
+  and one physics maps to one key. A non-integer where an integer belongs (`nz`) is refused. A refusal costs no solve.
+  The output maps to itself, so a saved payload validates by feeding it back in. Each range a sidebar widget also
   offers has one definition (`model_defs`, `planets.CUSTOM_FIELD_RANGES`, `planets.TIRR_RANGE`) that both read, so the
-  API and the GUI refuse the same values. A Guillot T_irr default outside `TIRR_RANGE` is refused, never clipped: the
+  API and the GUI refuse the same values; `p_ref_bar` must also lie inside the run's own RT grid. A custom planet's
+  stellar T_eff is checked in either mode, since its T_irr and T_int defaults read it. A Guillot T_irr default outside `TIRR_RANGE` is refused, never clipped: the
   run needs an explicit `Tirr`. Under PICASO a VULCAN-only setting is refused unless it holds the value a PICASO payload
   carries.
 - `model_defs`: what the model offers, the request defaults (one definition each, read by `canonical_params`, the
@@ -48,13 +50,16 @@ and the research note's scripts read.
 - `model_cache`, `tp_tables`: keys and cache reads, with no JAX; T-P tables, shipped or content-addressed uploads.
 - `chem_build`: assembles the VULCAN chemistry build and refuses a cfg that drifted from the constants here. It names
   the network, atom list and vulcan3 config at the top level of the engine profile, selects the network through
-  `vulcan_chem.select_network` before vulcan3 loads, and refuses a gravity anchor whose last pass still moved g by more
-  than `ANCHOR_TOL`.
+  `vulcan_chem.select_network` before vulcan3 loads. Its gravity anchor runs at least `ANCHOR_MIN_PASSES` passes and on
+  until one moves g by at most `ANCHOR_TOL`, refused after `ANCHOR_MAX_PASSES`.
 - `certify`: the gates a column passes before a spectrum is built, each raising. `certified_solve` raises `NotCertified`
   on a stall, the only failure that may escalate photolysis cadence. The unmodeled-absorber gate averages over the
   observation's photosphere: `PHOTOSPHERE_BAR` in a transit; in an eclipse the flux-weighted `EMIS_PHOTOSPHERE_QUANTILES`
-  of the tau = 2/3 pressure over bands and g-ordinates (`spectrum.emission_photosphere_bar`, which reads the engine's
-  internals). The baseline sets the band, and every column a Jacobian row solves passes the gate over it.
+  of the tau = 2/3 pressure over k-ordinates, each weighted by its own term of the eclipse flux times its band's width
+  (the engine's `eclipse_photosphere` and `nu_edges`), widened to the edges of the RT layers holding them
+  (`spectrum.emission_photosphere_bar`). A band holding no chemistry layer centre is refused. The baseline sets the
+  band; every column a Jacobian row solves passes the gate over it, and its warning-level absorbers join the result's
+  `unmodeled` record.
 - `spectrum`: builds the RT, and `ColumnSpectrum` is the depth of one chemistry build, transit or eclipse behind one
   signature.
 

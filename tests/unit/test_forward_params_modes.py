@@ -102,9 +102,9 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # parameter SET moved with it.
     # The G395H SO2 significance behind this configuration is in notes
     # "Composition, C/O bounds and networks".
-    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b", tp_mode="file"))) == "beeb3d3f0e34cd7b"
+    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b", tp_mode="file"))) == "6142809ab7cffe07"
     # ... and the bare DEFAULT run is that same atmosphere
-    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b"))) == "beeb3d3f0e34cd7b"
+    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b"))) == "6142809ab7cffe07"
     # the sha1 pin is only meaningful re-derived from the file the run
     # actually reads -- this catches the table itself being swapped
     path = tp_tables.shipped_tp_file("wasp39b")
@@ -196,21 +196,20 @@ def test_kzz_modes_validate_and_zero_inert_knobs(tmp_path):
 
 
 def test_boundary_flux_escape_and_settling_are_removed():
-    """Cache-neutral removal: the four keys stay in the canonical payload
-    pinned off, so no cached spectrum's key moved, and any enabling value
-    is refused instead of silently ignored.
+    """The four keys are gone from the payload (model version 63), and a request that names one, with any value, is
+    refused by name rather than silently ignored.
     """
     cp0 = forward.canonical_params(_p())
-    assert cp0["use_settling"] is False and cp0["diff_esc"] == []
-    assert cp0["top_flux"] == [] and cp0["bot_flux"] == []
-    for enabling in (
+    assert not {"use_settling", "diff_esc", "top_flux", "bot_flux"} & set(cp0)
+    for named in (
+        dict(use_settling=False),
         dict(use_settling=True),
-        dict(diff_esc=["H2"]),
+        dict(diff_esc=[]),
         dict(top_flux=[["H2O", 1.0e8]]),
         dict(bot_flux=[["SO2", 1.0e9, 0.1]]),
     ):
-        with pytest.raises(ValueError, match="removed from this tool"):
-            forward.canonical_params(_p(**enabling))
+        with pytest.raises(ValueError, match=rf"\['{next(iter(named))}'\] were removed"):
+            forward.canonical_params(_p(**named))
 
 
 # --- cloud deck -------------------------------------------------------------
@@ -528,31 +527,60 @@ def test_the_chemistry_radius_anchor_is_the_hydrostatic_identity():
     )
 
 
-def test_a_gravity_anchor_that_has_not_converged_is_refused(monkeypatch):
-    """The Guillot anchors run a fixed number of passes; a last pass that still moves g is refused, never used."""
+def test_a_gravity_anchor_iterates_to_its_tolerance_and_is_refused_only_at_the_cap(monkeypatch):
+    """A stable fixed point that needs more than three passes is used; a map still moving at the cap is refused,
+    naming the gravity before and after its last pass."""
     from types import SimpleNamespace
 
     from jwst_tool import picaso_engine
 
-    tol = model_defs.ANCHOR_TOL
-    assert chem_build.check_anchor_converged(400.0, 400.0 * (1.0 + 0.5 * tol), "s") == pytest.approx(0.5 * tol)
-    with pytest.raises(RuntimeError, match="did not converge"):
-        chem_build.check_anchor_converged(400.0, 400.0 * (1.0 + 2.0 * tol), "s")
-    # the PICASO Guillot anchor: a map that keeps moving g by 5 % per pass
+    tol, cap = model_defs.ANCHOR_TOL, model_defs.ANCHOR_MAX_PASSES
     monkeypatch.setattr(chem_build, "build_tp", lambda _cp, g: (lambda _tp, _p: np.full(1, g),))
     cp = {"gs_cgs": 400.0}
-    with pytest.raises(RuntimeError, match="PICASO Guillot gravity anchor did not converge"):
-        picaso_engine._guillot_gravity(cp, np.zeros(4), np.ones(1), np.ones(1), lambda T, _mu: 1.05 * float(T[0]))
-    # one that settles returns the last pass
-    assert picaso_engine._guillot_gravity(cp, np.zeros(4), np.ones(1), np.ones(1), lambda _T, _mu: 410.0) == 410.0
+
+    def guillot(step):
+        return picaso_engine._guillot_gravity(cp, np.zeros(4), np.ones(1), np.ones(1), lambda T, _mu: step(float(T[0])))
+
+    # contraction 0.5 towards 500: the 3rd pass still moves g by > tol, a later one settles
+    calls = []
+    g = guillot(lambda g: calls.append(g) or 500.0 + 0.5 * (g - 500.0))
+    assert len(calls) > model_defs.ANCHOR_MIN_PASSES and abs(g - 500.0) / 500.0 < 2.0 * tol
+    # a map that keeps moving g by 5 % per pass is refused at the cap, with distinct before and after values
+    with pytest.raises(
+        RuntimeError, match=rf"did not converge in {cap} passes: the last moved g from ([0-9.]+) to (?!\1)"
+    ):
+        guillot(lambda g: 1.05 * g)
     # the VULCAN chemistry anchor, on a radius map that keeps shrinking
-    radii = iter([9.0e9, 8.5e9, 8.0e9])
+    radii = iter(9.0e9 * 0.95**k for k in range(100))
     monkeypatch.setattr(chem_build, "chem_radius_anchor_bar", lambda *_a: 1.0)
     monkeypatch.setattr(chem_build, "radius_at_anchor", lambda *_a: next(radii))
     probe = SimpleNamespace(y0=np.ones((2, 2)), species_masses=np.ones(2), p_bar=np.ones(2))
-    cp = {"gs_cgs": 400.0, "p_ref_bar": 1e-3, "rt_ptop_bar": 1e-7, "p_btm_bar": 10.0}
-    with pytest.raises(RuntimeError, match="chemistry gravity anchor did not converge"):
-        chem_build._radius_anchor(cp, np.zeros(7), probe, 9.5e9, object(), False, lambda *_a: None)
+    cp_v = {"gs_cgs": 400.0, "p_ref_bar": 1e-3, "rt_ptop_bar": 1e-7, "p_btm_bar": 10.0}
+    with pytest.raises(RuntimeError, match=f"chemistry gravity anchor did not converge in {cap} passes"):
+        chem_build._radius_anchor(cp_v, np.zeros(7), probe, 9.5e9, object(), False, lambda *_a: None)
+
+
+def test_the_climate_anchor_refusal_names_its_last_pass(monkeypatch):
+    from types import SimpleNamespace
+
+    from jwst_tool import picaso_engine
+
+    monkeypatch.setattr(chem_build, "build_tp", lambda _cp, g: (lambda _tp, p: np.full(np.size(p), 1000.0),))
+    cp = {
+        "gs_cgs": 400.0,
+        "star_teff": 5000.0,
+        "rstar_rsun": 1.0,
+        "orbit_au": 0.05,
+        "Tint": 200.0,
+        "met_x_solar": 1.0,
+        "co_ratio": 0.5,
+    }
+    col = SimpleNamespace(T_base=np.ones(2), y=np.ones((2, 1)), species_masses=np.ones(1))
+    gs = iter(400.0 * 1.05**k for k in range(1, 100))
+    with pytest.raises(RuntimeError, match=r"the last moved g from ([0-9.]+) to (?!\1)[0-9.]+ cm/s2 .* change T_int"):
+        picaso_engine._climate_gravity(
+            cp, np.ones(2), 2, 1.0, lambda *_a: col, lambda *_a: {}, lambda *_a: next(gs), lambda *_a: None
+        )
 
 
 def test_tint_default_follows_the_planet():
@@ -582,6 +610,23 @@ def test_tint_default_follows_the_planet():
     # every registry default sits inside the accepted range
     for p in planets.PLANETS.values():
         assert model_defs.TINT_RANGE[0] <= planets.default_tint(p) <= model_defs.TINT_RANGE[1]
+
+
+def test_the_tint_range_holds_every_default_the_rule_gives():
+    """Both edges of the fitted T_eq span and the rule's maximum (about 671 K near T_eq 1883 K) sit inside TINT_RANGE;
+    just outside the span the generic 100 K applies."""
+
+    def tint_at(teq):  # a custom system with this T_eq: T_eq = T_eff sqrt(R* / 2a)
+        orbit = (5000.0 / teq) ** 2 * planets.R_SUN_CM / (2.0 * planets.AU_CM)
+        return planets.default_tint({}, system=dict(star_teff=5000.0, rstar_rsun=1.0, orbit_au=orbit))
+
+    lo, hi = model_defs.TINT_RANGE
+    # the edges themselves, a hair inside so the orbit round trip cannot step out
+    assert tint_at(700.0 * (1.0 + 1e-12)) == 45.0 and tint_at(2800.0 * (1.0 - 1e-12)) == 435.0
+    assert tint_at(699.99) == tint_at(2800.01) == planets.TINT_DEFAULT_K
+    rule = [tint_at(t) for t in np.linspace(700.0 * (1.0 + 1e-12), 2800.0 * (1.0 - 1e-12), 4201)]
+    assert max(rule) == 671.0 and 1850.0 < np.linspace(700.0, 2800.0, 4201)[int(np.argmax(rule))] < 1890.0
+    assert lo <= min(rule) and max(rule) <= hi
 
 
 def test_the_run_network_is_handed_to_the_engine(monkeypatch):

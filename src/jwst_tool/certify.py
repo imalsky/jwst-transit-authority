@@ -293,10 +293,22 @@ def unmodeled_absorbers(
     p_bar = np.asarray(p_bar, dtype=np.float64)
     band = (p_bar >= band_bar[0]) & (p_bar <= band_bar[1])
     if not band.any():
-        return []
+        raise RuntimeError(
+            f"no layer of the column ({p_bar.size} layers, {p_bar.min():.3g}-{p_bar.max():.3g} bar) has its centre in "
+            f"the photosphere band {band_bar[0]:.3g}-{band_bar[1]:.3g} bar, so the absorbers with no k-table cannot be "
+            "checked there. Raise nz, or move the column so it covers the band."
+        )
     skip = set(table_species) | _NOT_A_K_TABLE_ABSORBER
     out = [(sp, float(vmr[band, i].mean())) for i, sp in enumerate(species) if sp not in skip]
     return sorted([o for o in out if o[1] > floor], key=lambda o: -o[1])
+
+
+def merge_unmodeled(into: list[tuple[str, float]], found: list[tuple[str, float]]) -> None:
+    """Add a column's (species, VMR) warnings to a run's list in place: each species' largest VMR, largest first."""
+    best = dict(into)
+    for sp, v in found:
+        best[sp] = max(v, best.get(sp, v))
+    into[:] = sorted(best.items(), key=lambda o: -o[1])
 
 
 def check_unmodeled(

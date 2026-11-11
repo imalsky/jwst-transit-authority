@@ -250,7 +250,7 @@ def _model_params(t: Target, a: Atmosphere, g: Goal, s: Solver) -> dict:
         sl_angle_deg=a.photo.sl_angle_deg,
         f_diurnal=a.photo.f_diurnal,
         use_moldiff=a.photo.use_moldiff,
-        use_vm_mol=a.photo.use_vm_mol and a.photo.use_moldiff,
+        use_vm_mol=a.photo.use_vm_mol,
         use_rayleigh=a.clouds.use_rayleigh,
         rt_ptop_bar=float(a.rt_ptop_bar),
         rt_integration=s.rt_integration,

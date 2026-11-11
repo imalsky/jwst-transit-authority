@@ -26,10 +26,11 @@ records the count of each request (`retried_layers`), the log names it per stage
 
 Gravity: one constant g per run for the climate solve, the quench scale height and the Guillot profile, at the tool's
 chemistry anchor (the grid interface nearest 1 bar), as on the VULCAN path. A climate baseline iterates g with its own T
-and mean molecular weight to `model_defs.ANCHOR_TOL`; the Guillot profile runs `ANCHOR_PASSES` passes and is refused if
-the last moved g by more than that. The composition stencil points of a run reuse that g. The anchor reads vulcan3's grid
+and mean molecular weight until a pass moves g by at most `model_defs.ANCHOR_TOL`; the Guillot profile runs at least
+`ANCHOR_MIN_PASSES` and on to the same tolerance. Either is refused, naming its last pass, after `ANCHOR_MAX_PASSES`. The composition stencil points of a run reuse that g. The anchor reads vulcan3's grid
 rule, so the assembly first selects the tool's default network (`vulcan_chem.select_network`): vulcan3 freezes one at
-its first import, and a default VULCAN run later in the same process must find it.
+its first import, and a default VULCAN run later in the same process must find it. One process runs one network: a
+non-default VULCAN network after a PICASO run, or PICASO after one, is refused by the engine (notes "PICASO engine").
 
 ## `picaso_worker`
 

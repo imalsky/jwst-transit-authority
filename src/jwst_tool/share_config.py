@@ -64,7 +64,7 @@ WIDGET_RANGES: dict[str, tuple[Any, ...]] = {
     "ca": (*model_defs.ALPHA_CLOUD_RANGE, model_defs.ALPHA_CLOUD_DEFAULT),
     "cpt": (-6.0, 1.0, -3.0),
     "rtptop": (*model_defs.RT_PTOP_RANGE, model_defs.RT_PTOP_DEFAULT),
-    "pref": (1.0e-6, 7.0, model_defs.P_REF_DEFAULT_BAR),
+    "pref": (*model_defs.P_REF_RANGE_BAR, model_defs.P_REF_DEFAULT_BAR),
     "tsig": (1.0, 10.0),
     "ntr": (1, 10, 1),
     "sat": (0.5, 0.95, model_defs.SAT_LIMIT_DEFAULT),
@@ -149,6 +149,13 @@ def build_share(
     if floor_table:
         share["floor_table"] = [[float(a), float(b)] for a, b in floor_table]
     return share
+
+
+def _whole(value: Any, name: str) -> int:
+    """Return an integer setting, refusing a fraction rather than truncating it (10.9 transits is not 10)."""
+    if isinstance(value, bool) or not float(value).is_integer():
+        raise ValueError(f"{name}={value!r} in the configuration is not a whole number: give an integer.")
+    return int(float(value))
 
 
 def _log10(value: float, name: str) -> float:
@@ -334,10 +341,10 @@ def _restore_observation(state: dict, obs: dict, cfg: dict, key: KeyFn, pk: KeyF
     if modes:
         state[key("modes")] = modes
     for source, widget, cast in (  # type: ignore[assignment]  # float then int: each is a converter
-        ("n_transits", "ntr", int),
+        ("n_transits", "ntr", lambda v: _whole(v, "n_transits")),
         ("sat_limit", "sat", float),
-        ("r_bin", "rbin", int),
-        ("seed", "seed", int),
+        ("r_bin", "rbin", lambda v: _whole(v, "r_bin")),
+        ("seed", "seed", lambda v: _whole(v, "seed")),
         ("show_noise", "shownoise", bool),
     ):
         if obs.get(source) is not None:
@@ -496,8 +503,7 @@ def _restore_vulcan_physics(state: dict, cp: dict, key: KeyFn, pk: KeyFn) -> Non
         state[pk("kzplev")] = _log10(cp["kzz_plev"], "kzz_plev")
     elif mode == "JM16":
         state[pk("kzkdeep")] = _log10(cp["kzz_kdeep"], "kzz_kdeep")
-    if mode != "const":
-        state[pk("kzzx")] = _log10(cp["kzz_x"], "kzz_x")
+    state[pk("kzzx")] = _log10(cp["kzz_x"], "kzz_x")
     state.update(
         {
             key("photo"): bool(cp["use_photo"]),
@@ -530,8 +536,9 @@ def _restore_rt_state(state: dict, cp: dict, key: KeyFn, cloud_top_bar: float | 
             key("rtptop"): float(cp["rt_ptop_bar"]),
             key("rtint"): str(cp["rt_integration"]),
             key("pref"): float(cp["p_ref_bar"]),
-            # per-geometry widget key (the sidebar's key contract)
+            # per-geometry widget key (the sidebar's key contract); a loaded bottom is explicit, never re-seeded
             key(f"pbtm_{cp['science_mode']}"): float(cp["p_btm_bar"]),
+            key(f"pbtm_{cp['science_mode']}_auto"): None,
         }
     )
 

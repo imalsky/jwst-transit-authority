@@ -394,3 +394,42 @@ def test_the_photolysis_angle_follows_the_science_mode_until_it_is_edited():
     at.number_input(key="n0_sza").set_value(70.0).run()
     at.radio(key="n0_scimode").set_value("emission").run()
     assert at.number_input(key="n0_sza").value == 70.0
+
+
+def test_a_loaded_configuration_keeps_every_saved_value():
+    """A constant-Kzz multiplier and an explicit Guillot column bottom equal to the table default (7.6 bar) survive the
+    restore: the widgets show what the file holds, never a seeded default."""
+    import math
+
+    from jwst_tool import forward, share_config
+
+    canon = forward.canonical_params(
+        dict(planet="wasp39b", tp_mode="guillot", kzz_mode="const", kzz_x=2.0, p_btm_bar=model_defs.P_BTM_FILE_BAR)
+    )
+    state = share_config.widget_state(share_config.build_share(canon, {}, {}), lambda name: f"n0_{name}")
+    at = run_app()  # the populate callback writes into a session that has already rendered once
+    for k, v in state.items():
+        at.session_state[k] = v
+    at.run()
+    assert not at.exception, at.exception
+    assert at.selectbox(key="n0_wasp39b_tp").value == "guillot"
+    assert at.number_input(key="n0_wasp39b_kzzx").value == pytest.approx(math.log10(2.0))
+    assert at.number_input(key="n0_pbtm_transmission").value == model_defs.P_BTM_FILE_BAR
+    at.run()  # a second pass of the seeders moves nothing either
+    assert at.number_input(key="n0_pbtm_transmission").value == model_defs.P_BTM_FILE_BAR
+
+
+def test_an_interior_default_outside_its_range_is_refused_beside_an_empty_widget(monkeypatch):
+    """The seeder never hands Streamlit a value it would reset to the widget's minimum: the widget stays empty and the
+    API's own sentence stands beside it."""
+    from jwst_tool import forward, planets
+
+    monkeypatch.setattr(planets, "default_tint", lambda *_a, **_k: 30.0)
+    with pytest.raises(ValueError) as refusal:
+        forward.canonical_params(dict(planet="hd209458b", tp_mode="guillot"))
+    assert "default Tint of this star and orbit is 30 K" in str(refusal.value)
+    at = run_app()
+    at.selectbox(key="n0_planet").set_value("hd209458b").run()
+    at.selectbox(key="n0_hd209458b_tp").set_value("guillot").run()
+    assert at.number_input(key="n0_hd209458b_tint").value is None
+    assert str(refusal.value) in [e.value for e in at.sidebar.error]

@@ -56,7 +56,7 @@ RT_NAMESPACE = [
     "unlisted_core_molecules",
     "nu_edges",
 ]
-EMIS_NAMESPACE = ["eclipse_flux_tau", "emission_radius", "art_pbtm_bar"]
+EMIS_NAMESPACE = ["eclipse_flux_tau", "eclipse_photosphere", "emission_radius", "art_pbtm_bar", "nu_edges"]
 
 
 def _skip_without_engine():
@@ -103,8 +103,18 @@ def _returned_fields(tree, function):
 
 
 def _profile_reads(tree):
-    """Keys read off a ``profile``: subscripts, .get, membership, and the literal keys of a loop that subscripts it."""
+    """Keys read off a ``profile``: subscripts, .get, membership, and the keys of a loop that subscripts it.
+
+    A loop's keys are the string literals of its iterable, and of any module-level table the iterable names.
+    """
     reads = set()
+    tables = {
+        t.id: node.value
+        for node in tree.body
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None
+        for t in (node.targets if isinstance(node, ast.Assign) else [node.target])
+        if isinstance(t, ast.Name)
+    }
 
     def on_profile(node):
         return isinstance(node, ast.Name) and node.id == "profile"
@@ -131,7 +141,11 @@ def _profile_reads(tree):
             isinstance(n, ast.Subscript) and on_profile(n.value) and isinstance(n.slice, ast.Name)
             for n in ast.walk(node)
         ):
-            reads |= {c.value for c in ast.walk(node.iter) if isinstance(c, ast.Constant) and isinstance(c.value, str)}
+            sources = [node.iter] + [
+                tables[n.id] for n in ast.walk(node.iter) if isinstance(n, ast.Name) and n.id in tables
+            ]
+            for src in sources:
+                reads |= {c.value for c in ast.walk(src) if isinstance(c, ast.Constant) and isinstance(c.value, str)}
     return reads
 
 
@@ -219,25 +233,6 @@ def test_the_tools_engine_calls_pass_arguments_it_accepts():
     assert checked >= 3, (
         f"only {checked} engine calls found in the tool -- the scan is not looking where it thinks it is"
     )
-
-
-def test_the_engine_internals_the_eclipse_photosphere_reads_still_exist():
-    """spectrum.emission_photosphere_bar reads the engine's tau = 2/3 photosphere through private names (it returns only
-    the flux): eclipse_flux_tau bound to _Emission, its _dtau and _g_layers, its lnp_em and opacities fields, and
-    _rt_geometry._photosphere_lnp. A rename must fail here, not inside an eclipse run.
-    """
-    _skip_without_engine()
-    if importlib.util.find_spec("exojax") is None:  # pragma: no cover
-        pytest.skip("RT stack (exojax) not installed")
-    importlib.import_module("vulcan_forward.vulcan_chem")
-    from vulcan_forward import _rt_geometry, exojax_rt
-
-    assert callable(_rt_geometry._photosphere_lnp)
-    emission = exojax_rt._Emission
-    assert callable(emission._dtau) and callable(emission._g_layers) and callable(emission.eclipse_flux_tau)
-    assert {"lnp_em", "opacities"} <= set(emission.__dataclass_fields__)
-    # the g-ordinate weights, read as the engine itself reads them
-    assert "ckd_pack" in exojax_rt._Opacities._fields and "opacities.ckd_pack.gw" in inspect.getsource(exojax_rt)
 
 
 @pytest.mark.parametrize(("dist", "mod_name"), [("vulcan-forward", "vulcan_forward"), ("vulcan3", "vulcan3")])

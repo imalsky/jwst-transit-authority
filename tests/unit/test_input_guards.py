@@ -82,19 +82,65 @@ _WIDGETS = [
     ("ck", "log_kappa_cloud", float, {"cloud_on": True}),
     ("ca", "alpha_cloud", float, {"cloud_on": True}),
     ("rtptop", "rt_ptop_bar", float, {}),
+    ("pref", "p_ref_bar", float, {"rt_ptop_bar": 1.0e-9, "p_btm_bar": 300.0}),  # the widest RT grid
 ]
 
 
 @pytest.mark.parametrize(("widget", "key", "to_key", "extra"), _WIDGETS)
 def test_the_api_accepts_exactly_the_widget_range(widget, key, to_key, extra):
-    """The GUI widget and canonical_params read one range: both ends pass, one percent outside is refused."""
+    """The GUI widget and canonical_params read one range: both ends pass; a value a millionth outside, which the
+    canonical rounding would carry back inside, and one percent outside are both refused."""
     lo, hi = share_config.WIDGET_RANGES[widget][:2]
     pad = 0.01 * (hi - lo)
     for v in (lo, hi):
         forward.canonical_params({**_GUILLOT, **extra, key: to_key(v)})
-    for v in (lo - pad, hi + pad):
+    k_lo, k_hi = to_key(lo), to_key(hi)
+    just_outside = (k_lo - 1.0e-6 * max(abs(k_lo), 1.0), k_hi + 1.0e-6 * max(abs(k_hi), 1.0))
+    for value in (*just_outside, to_key(lo - pad), to_key(hi + pad)):
         with pytest.raises(ValueError, match=key):
-            forward.canonical_params({**_GUILLOT, **extra, key: to_key(v)})
+            forward.canonical_params({**_GUILLOT, **extra, key: value})
+
+
+def test_the_rendered_widgets_offer_exactly_the_shared_ranges():
+    """Each sidebar number input, as Streamlit builds it, carries the WIDGET_RANGES bounds the API test above reads."""
+    from app_helpers import run_app
+
+    at = run_app()
+    at.selectbox(key="n0_planet").set_value("custom").run()
+    at.selectbox(key="n0_custom_tp").set_value("guillot").run()
+    found = {}
+
+    def collect():
+        for w in at.number_input:
+            found.setdefault(w.key.rsplit("_", 1)[-1], (w.min, w.max))
+
+    collect()
+    for mode in ("Pfunc", "JM16"):
+        at.selectbox(key="n0_custom_kzzmode").set_value(mode).run()
+        collect()
+    at.checkbox(key="n0_cloud").check().run()
+    collect()
+    for widget, *_ in _WIDGETS:
+        assert widget in found, f"no rendered widget for {widget}"
+        assert found[widget] == pytest.approx(share_config.WIDGET_RANGES[widget][:2]), widget
+
+
+@pytest.mark.parametrize(
+    ("params", "match"),
+    [
+        (dict(nz=150.9), r"nz=150.9 is not a whole number"),
+        (dict(nz=99.5), r"nz=99.5 is not a whole number"),
+        (dict(rp_rjup=0.09999), "rp_rjup"),
+        (dict(gs_cgs=99.99), "gs_cgs"),
+        (dict(Tirr=799.999), "Tirr"),
+        (dict(log_gamma=0.3001), "log_gamma"),
+        (dict(met_x_solar=100.00001), "met_x_solar"),
+        (dict(cloud_on=True, alpha_cloud=-0.001), "alpha_cloud"),
+    ],
+)
+def test_the_request_value_is_checked_before_rounding(params, match):
+    with pytest.raises(ValueError, match=match):
+        forward.canonical_params({**_GUILLOT, **params})
 
 
 @pytest.mark.parametrize(
@@ -218,3 +264,19 @@ def test_the_sidebar_shows_the_tirr_refusal_in_an_empty_widget_never_a_clipped_n
     for name, back in (("teff", 5485.0), ("rstar", 0.932), ("a", 0.04828)):
         at.number_input(key=f"n0_custom_{name}").set_value(back).run()
     assert at.number_input(key="n0_custom_tirr").value == 1640.0 and not at.sidebar.error
+
+
+def test_a_custom_star_is_checked_wherever_it_is_read():
+    """A custom planet's T_irr and T_int defaults read its star in transit too, so its T_eff is range-checked there."""
+    with pytest.raises(ValueError, match="star_teff=-100"):
+        forward.canonical_params(dict(planet="custom", tp_mode="guillot", Tirr=1500.0, star_teff=-100.0))
+
+
+def test_the_sidebar_shows_the_refusal_of_advection_without_diffusion():
+    """The sidebar sends what the user ticked; canonical_params' sentence stops the Run, never a silent False."""
+    from app_helpers import run_app
+
+    at = run_app()
+    at.checkbox(key="n0_moldiff").uncheck().run()
+    at.checkbox(key="n0_vmmol").check().run()
+    assert any("use_vm_mol=True needs use_moldiff=True" in e.value for e in at.error)

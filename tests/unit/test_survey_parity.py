@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from jwst_tool import planets
+from jwst_tool import planets, run_params
 
 SURVEY = Path(__file__).resolve().parents[3] / "vulcan-retrieval"
 # planner registry key -> (survey spec, survey vulcan3 config)
@@ -33,11 +33,13 @@ def test_registry_matches_the_survey(planet):
     spec = yaml.safe_load((SURVEY / spec_file).read_text())["config"]
     cfg = yaml.safe_load((SURVEY / cfg_file).read_text())
     reg = planets.PLANETS[planet]
-    assert reg["rp_rjup"] * planets.R_JUP_CM == pytest.approx(spec["rp_cm"], rel=REL)
-    assert reg["rstar_rsun"] * planets.R_SUN_CM == pytest.approx(spec["rstar_cm"], rel=REL)
-    assert reg["gs_cgs"] == pytest.approx(spec["tp_gravity_cgs"], rel=REL)
-    assert reg["rstar_rsun"] == pytest.approx(cfg["r_star"], rel=REL)
-    assert reg["orbit_au"] == pytest.approx(cfg["orbit_radius"], rel=REL)
+    # the model's own values: canonical_params keeps enough digits for every registry value
+    cp = run_params.canonical_params({"planet": planet, "science_mode": "emission"})
+    assert cp["rp_rjup"] * planets.R_JUP_CM == pytest.approx(spec["rp_cm"], rel=REL)
+    assert cp["rstar_rsun"] * planets.R_SUN_CM == pytest.approx(spec["rstar_cm"], rel=REL)
+    assert cp["gs_cgs"] == pytest.approx(spec["tp_gravity_cgs"], rel=REL)
+    assert cp["rstar_rsun"] == pytest.approx(cfg["r_star"], rel=REL)
+    assert cp["orbit_au"] == pytest.approx(cfg["orbit_radius"], rel=REL)
     # a relative path is vulcan3's: the working directory first, then its packaged data (the survey runs from its root)
     resolve_data_path = pytest.importorskip("vulcan3.paths").resolve_data_path
     ours = resolve_data_path(planets.sflux_file(reg["sflux"]))

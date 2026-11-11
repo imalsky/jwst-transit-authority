@@ -70,8 +70,12 @@ skill; policy: the project-root `CLAUDE.md`.
   `share_config.WIDGET_RANGES` both read (`test_input_guards` checks both ends). A default outside its range, such as
   the Guillot `Tirr`, is refused, never clipped.
 - A request default has one definition (`model_defs.*_DEFAULT`, `planets.default_tirr` / `default_tint`) that
-  `canonical_params`, the sidebar and `share_config.WIDGET_RANGES` read. A fixed number that changes a result is a named
-  constant with its unit and reason, in `model_defs` or the constant block of the module whose topic it is.
+  `canonical_params`, the sidebar and `share_config.WIDGET_RANGES` read; `jac_method` and the extra molecules still
+  differ between the API and the sidebar, a decision in todo. A fixed number that changes a result is a named constant
+  with its unit, in `model_defs` or the constant block of the module whose topic it is; those with no recorded reason
+  are listed in todo.
+- Checks read the request's own values; `canonical_params` rounds last. A loaded configuration restores every saved
+  value: a widget seeder replaces only the value it wrote itself (its `_auto` key).
 
 ### Composition, C/O and networks
 
@@ -84,7 +88,7 @@ skill; policy: the project-root `CLAUDE.md`.
 - `sncho2025` is the default network (`model_defs.DEFAULT_NETWORK`); `sncho` (the 2021 file) and `ncho` stay selectable.
 - Condensation requires `sncho`. It is detection-only and API-only (the GUI pins it off; `share_config` refuses files
   that enable it), refused with any Jacobian, photolysis off or moldiff off. Settling, escape and boundary fluxes are
-  removed: their four keys stay in the payload pinned off and enabling values are refused.
+  removed: from v63 their four keys are absent from the payload and a request naming one is refused by name.
 
 ### Certificates
 
@@ -97,7 +101,8 @@ skill; policy: the project-root `CLAUDE.md`.
   each AD primal. It averages over the observation's photosphere, the transit band or the eclipse's flux-weighted
   tau = 2/3 range that the baseline sets (`spectrum.emission_photosphere_bar`). Values and basis: notes "Convergence
   certificate and element gate".
-- A gravity anchor whose last pass still moves g by more than `model_defs.ANCHOR_TOL` is refused, never used.
+- A gravity anchor iterates until a pass moves g by at most `model_defs.ANCHOR_TOL`; one still moving after
+  `ANCHOR_MAX_PASSES` is refused, never used.
 - `yconv_min` is canonical and may only tighten below 0.1: cold baseline solves exit on the loose branch, so `yconv_cri`
   alone cannot tighten them.
 

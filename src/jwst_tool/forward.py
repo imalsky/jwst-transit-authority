@@ -559,6 +559,7 @@ def run_model(params: dict, log: Log = print) -> Path:
             log=log,
             picaso_retried=A.retried if pic else [],
             unmodeled_band=unmodeled_band,
+            unmodeled=unmodeled,
         )
         rows = build_jacobian(baseline, depth.shape[0])
     if pic:

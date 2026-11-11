@@ -14,10 +14,13 @@ import jax.numpy as jnp
 import numpy as np
 
 # isort: off
-from vulcan_forward import vulcan_chem  # noqa: F401  # first: it sets jax x64 before exojax
+from vulcan_forward import vulcan_chem  # first: it sets jax x64 before exojax
 from vulcan_forward import exojax_rt
-from jwst_tool.model_defs import RT_PTOP_DEFAULT
+from jwst_tool.model_defs import DEFAULT_NETWORK, NETWORKS, RT_PTOP_DEFAULT
 # isort: on
+
+# _masses reads vulcan3, which freezes a network at its first import: name the tool's default first
+vulcan_chem.select_network(*NETWORKS[DEFAULT_NETWORK])
 
 HERE = Path(__file__).resolve().parent
 DATA = HERE.parent / "data"

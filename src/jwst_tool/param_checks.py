@@ -32,6 +32,7 @@ from jwst_tool.model_defs import (
     MOLECULES,
     NO_EXOMOLOP_TABLE,
     P_REF_DEFAULT_BAR,
+    P_REF_RANGE_BAR,
     PICASO_MET_RANGE,
     RT_PTOP_DEFAULT,
     RT_PTOP_RANGE,
@@ -62,8 +63,11 @@ def check_system(cp: dict) -> None:
     _check_range("rstar_rsun", cp["rstar_rsun"], rng["rstar"], "R_sun")
     _check_range("orbit_au", cp["orbit_au"], rng["a"], "au")
     climate = cp["tp_mode"] == "picaso_climate"
-    if cp["science_mode"] == "emission" or climate:  # Fp/Fs and the climate solve read the star
+    # The star is read by Fp/Fs and the climate solve (all three values), and by a custom planet's T_irr and T_int
+    # defaults (its T_eff), in either mode.
+    if cp["science_mode"] == "emission" or climate or cp["planet"] == "custom":
         _check_range("star_teff", cp["star_teff"], rng["teff"], "K (the PHOENIX grid range exercised)")
+    if cp["science_mode"] == "emission" or climate:
         _check_range("star_logg", cp["star_logg"], rng["logg"], "(log10 cm s^-2)")
         _check_range("star_feh", cp["star_feh"], rng["feh"], "dex")
     if cp["tp_mode"] == "guillot":
@@ -74,10 +78,38 @@ def check_system(cp: dict) -> None:
         _check_range("alpha_cloud", cp["alpha_cloud"], ALPHA_CLOUD_RANGE)
 
 
-def check_tint(cp: dict) -> None:
+def tint_refusal(tint_k: float, derived: bool) -> str | None:
+    """Return the refusal sentence of a T_int outside TINT_RANGE, None inside; the API and the sidebar seeder share it.
+
+    Parameters
+    ----------
+    tint_k : float
+        Interior temperature, K.
+    derived : bool
+        True when ``tint_k`` is the default planets.default_tint computed, not a value the user set.
+
+    Returns
+    -------
+    str or None
+        The sentence, or None when the value is accepted.
+    """
+    lo, hi = TINT_RANGE
+    if lo <= tint_k <= hi:
+        return None
+    if derived:
+        return (
+            f"the default Tint of this star and orbit is {tint_k:g} K (planets.default_tint), outside the supported "
+            f"range [{lo:g}, {hi:g}] K. Set Tint explicitly inside that range."
+        )
+    return f"Tint={tint_k:g} outside [{lo:g}, {hi:g}] K"
+
+
+def check_tint(cp: dict, derived: bool) -> None:
     """Refuse a Guillot or climate T_int outside TINT_RANGE; run after the default is filled from the checked system."""
     if cp["tp_mode"] in ("guillot", "picaso_climate"):
-        _check_range("Tint", cp["Tint"], TINT_RANGE, "K")
+        refusal = tint_refusal(cp["Tint"], derived)
+        if refusal:
+            raise ValueError(refusal)
 
 
 def check_rt_settings(cp: dict) -> None:
@@ -85,6 +117,7 @@ def check_rt_settings(cp: dict) -> None:
     _check_range("sl_angle_deg", cp["sl_angle_deg"], SL_ANGLE_RANGE, "deg")
     _check_range("f_diurnal", cp["f_diurnal"], F_DIURNAL_RANGE)
     _check_range("rt_ptop_bar", cp["rt_ptop_bar"], RT_PTOP_RANGE, f"bar (default {RT_PTOP_DEFAULT:g})")
+    _check_range("p_ref_bar", cp["p_ref_bar"], P_REF_RANGE_BAR, "bar (the widest RT grid)")
     art_pbtm = cp["p_btm_bar"] * ART_PBTM_FRACTION
     if not cp["rt_ptop_bar"] <= cp["p_ref_bar"] <= art_pbtm:
         raise ValueError(

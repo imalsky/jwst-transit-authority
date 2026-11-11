@@ -11,10 +11,12 @@ from jwst_tool.model_defs import (
     _VERSION,
     ALPHA_CLOUD_DEFAULT,
     CHEM_PROVIDERS,
+    CLOUD_ON_DEFAULT,
     CO_DEFAULT,
     DEFAULT_NETWORK,
     F_DIURNAL_DEFAULT,
     FORMER_EXTRA_MOLECULES,
+    JAC_METHOD_DEFAULT,
     KZZ_CONST_DEFAULT,
     KZZ_KDEEP_DEFAULT,
     KZZ_KMAX_DEFAULT,
@@ -33,6 +35,7 @@ from jwst_tool.model_defs import (
     P_REF_DEFAULT_BAR,
     PICASO_NO_SPECIES,
     PICASO_P_BTM_MAX,
+    PICASO_QUENCH_DEFAULT,
     RFACV_DEFAULT,
     RFACV_RANGE,
     RT_INTEGRATION_DEFAULT,
@@ -40,6 +43,11 @@ from jwst_tool.model_defs import (
     T_WINDOW,
     TP_FILE_SHIPPED,
     TP_PARAM_NAMES,
+    USE_CONDENSE_DEFAULT,
+    USE_MOLDIFF_DEFAULT,
+    USE_PHOTO_DEFAULT,
+    USE_RAYLEIGH_DEFAULT,
+    USE_VM_MOL_DEFAULT,
     YCONV_DEFAULT,
     YCONV_MIN_DEFAULT,
     YCONV_MIN_RANGE,
@@ -104,11 +112,9 @@ _PARAM_KEYS_READ = frozenset(
         "Tint",
         "Tirr",
         "alpha_cloud",
-        "bot_flux",
         "chem_provider",
         "cloud_on",
         "co_ratio",
-        "diff_esc",
         "extra_mols",
         "f_diurnal",
         "fisher_params",
@@ -142,7 +148,6 @@ _PARAM_KEYS_READ = frozenset(
         "star_feh",
         "star_logg",
         "star_teff",
-        "top_flux",
         "tp_file",
         "tp_file_path",
         "tp_file_sha1",
@@ -151,7 +156,6 @@ _PARAM_KEYS_READ = frozenset(
         "use_moldiff",
         "use_photo",
         "use_rayleigh",
-        "use_settling",
         "use_vm_mol",
         "wo_mols",
         "yconv_cri",
@@ -181,9 +185,18 @@ _REMOVED_PARAM_KEYS = frozenset(
     {"opacity_mode", "nu_pts", "rt_dit_res", "broadening", "mie_condensate", "mie_log_rg", "mie_sigmag", "mie_log_mmr"}
 )
 
+# Keys of the removed settling, escape and boundary-flux settings, refused by name.
+_REMOVED_TRANSPORT_KEYS = frozenset({"use_settling", "diff_esc", "top_flux", "bot_flux"})
+
 
 def _check_request_keys(params: dict) -> None:
     """Refuse unknown and removed keys by name, and the removed settling, escape and boundary-flux settings."""
+    transport = sorted(set(params) & _REMOVED_TRANSPORT_KEYS)
+    if transport:
+        raise ValueError(
+            f"parameter key(s) {transport} were removed: settling, escape and boundary fluxes are not modelled, and "
+            "from model version 63 a payload no longer carries them. Drop the keys."
+        )
     removed = sorted(set(params) & _REMOVED_PARAM_KEYS)
     if removed:
         raise ValueError(
@@ -201,14 +214,6 @@ def _check_request_keys(params: dict) -> None:
             f"unknown parameter key(s) {unknown}.{hints} An unknown key is "
             "refused, never dropped: the canonical key set is "
             "run_params._KNOWN_PARAM_KEYS."
-        )
-    # The keys stay in the canonical payload, pinned off, so no cached
-    # spectrum's key changes.
-    if params.get("use_settling", False) or params.get("diff_esc") or params.get("top_flux") or params.get("bot_flux"):
-        raise ValueError(
-            "boundary fluxes, escape and settling were removed from this "
-            "tool: leave use_settling False and diff_esc/top_flux/bot_flux "
-            "empty."
         )
 
 
@@ -264,7 +269,7 @@ def _engine_settings(params: dict) -> tuple[str, str, bool, str]:
                 "Kzz (picaso_quench + kzz_const); drop them for "
                 "chem_provider='picaso'."
             )
-        if params.get("jac_method", "fd") == "ad" and params.get("fisher_params"):
+        if params.get("jac_method", JAC_METHOD_DEFAULT) == "ad" and params.get("fisher_params"):
             raise ValueError(
                 "jac_method='ad' is not available with chem_provider='picaso': "
                 "PICASO runs outside JAX, so its Jacobian rows are certified "
@@ -350,7 +355,10 @@ def _planet(params: dict) -> tuple[str, dict]:
 
 def _solver_settings(params: dict, sysd: dict) -> _SolverSettings:
     """Return the grid, the convergence gates and the UV spectrum, refusing out-of-range values."""
-    nz = int(params.get("nz", NZ_DEFAULT))
+    nz_raw = params.get("nz", NZ_DEFAULT)
+    if isinstance(nz_raw, bool) or not float(nz_raw).is_integer():
+        raise ValueError(f"nz={nz_raw!r} is not a whole number of layers: give an integer in {list(NZ_RANGE)}.")
+    nz = int(float(nz_raw))
     if not NZ_RANGE[0] <= nz <= NZ_RANGE[1]:
         raise ValueError(
             f"nz={nz} outside the validated layer-count range {NZ_RANGE} "
@@ -393,26 +401,26 @@ class _Resolved:
 
 
 def _filled_payload(params: dict, r: _Resolved) -> dict:
-    """Return the canonical key set with every default filled and every value rounded."""
+    """Return the canonical key set with every default filled, at the request's own values (_rounded rounds last)."""
     star_ref = planets.PLANETS.get(r.planet, planets.CUSTOM_DEFAULTS)["star"]
     return {
         "planet": r.planet,
         "science_mode": r.column.science_mode,
         # Star identity for the eclipse normalization Fp/Fs: part of the MODEL
         # only in emission (zeroed in transmission, where it is noise-side).
-        "star_teff": round(float(params.get("star_teff", star_ref["teff"])), 1),
-        "star_logg": round(float(params.get("star_logg", star_ref["log_g"])), 2),
-        "star_feh": round(float(params.get("star_feh", star_ref["metallicity"])), 2),
+        "star_teff": float(params.get("star_teff", star_ref["teff"])),
+        "star_logg": float(params.get("star_logg", star_ref["log_g"])),
+        "star_feh": float(params.get("star_feh", star_ref["metallicity"])),
         "nz": r.solver.nz,
-        "yconv_cri": round(r.solver.yconv_cri, 6),
-        "yconv_min": round(r.solver.yconv_min, 6),
-        "rp_rjup": round(float(params.get("rp_rjup", r.sysd["rp_rjup"])), 4),
-        "gs_cgs": round(float(params.get("gs_cgs", r.sysd["gs_cgs"])), 1),
-        "rstar_rsun": round(float(params.get("rstar_rsun", r.sysd["rstar_rsun"])), 4),
-        "orbit_au": round(float(params.get("orbit_au", r.sysd["orbit_au"])), 5),
+        "yconv_cri": r.solver.yconv_cri,
+        "yconv_min": r.solver.yconv_min,
+        "rp_rjup": float(params.get("rp_rjup", r.sysd["rp_rjup"])),
+        "gs_cgs": float(params.get("gs_cgs", r.sysd["gs_cgs"])),
+        "rstar_rsun": float(params.get("rstar_rsun", r.sysd["rstar_rsun"])),
+        "orbit_au": float(params.get("orbit_au", r.sysd["orbit_au"])),
         "sflux": r.solver.sflux,
-        "met_x_solar": round(float(params.get("met_x_solar", MET_DEFAULT)), 4),
-        "co_ratio": round(float(params.get("co_ratio", CO_DEFAULT)), 6),
+        "met_x_solar": float(params.get("met_x_solar", MET_DEFAULT)),
+        "co_ratio": float(params.get("co_ratio", CO_DEFAULT)),
         # Kzz default follows the structure: a tabulated T-P with a Kzz column
         # supplies the mixing profile too, otherwise constant.
         "kzz_mode": str(
@@ -428,56 +436,49 @@ def _filled_payload(params: dict, r: _Resolved) -> dict:
                 else "const",
             )
         ),
-        "kzz_x": round(float(params.get("kzz_x", KZZ_X_DEFAULT)), 4),
-        "kzz_const": round(float(params.get("kzz_const", KZZ_CONST_DEFAULT)), 1),
+        "kzz_x": float(params.get("kzz_x", KZZ_X_DEFAULT)),
+        "kzz_const": float(params.get("kzz_const", KZZ_CONST_DEFAULT)),
         # parametric Kzz profiles: Pfunc (kzz_kmax cm^2/s, kzz_plev bar) and
         # JM16 (kzz_kdeep); param_checks zeroes the unused ones for cache hygiene
-        "kzz_kmax": round(float(params.get("kzz_kmax", KZZ_KMAX_DEFAULT)), 1),
-        "kzz_plev": float(f"{float(params.get('kzz_plev', KZZ_PLEV_DEFAULT_BAR)):.6e}"),
-        "kzz_kdeep": round(float(params.get("kzz_kdeep", KZZ_KDEEP_DEFAULT)), 1),
+        "kzz_kmax": float(params.get("kzz_kmax", KZZ_KMAX_DEFAULT)),
+        "kzz_plev": float(params.get("kzz_plev", KZZ_PLEV_DEFAULT_BAR)),
+        "kzz_kdeep": float(params.get("kzz_kdeep", KZZ_KDEEP_DEFAULT)),
         "tp_mode": r.tp_mode,
         # file-mode identity: source label + content hash, so two tables can
         # never share a cache entry ("" outside file mode)
         "tp_file": r.column.tp_file,
         "tp_file_sha1": r.column.tp_file_sha1,
         # _default_tint and _guillot_tirr fill the defaults from the selected system
-        "Tirr": round(float(params.get("Tirr", 0.0)), 2),
-        "Tint": round(float(params.get("Tint", 0.0)), 2),
-        "log_kappa": round(float(params.get("log_kappa", LOG_KAPPA_DEFAULT)), 3),
-        "log_gamma": round(float(params.get("log_gamma", LOG_GAMMA_DEFAULT)), 3),
+        "Tirr": float(params.get("Tirr", 0.0)),
+        "Tint": float(params.get("Tint", 0.0)),
+        "log_kappa": float(params.get("log_kappa", LOG_KAPPA_DEFAULT)),
+        "log_gamma": float(params.get("log_gamma", LOG_GAMMA_DEFAULT)),
         # physical VULCAN knobs (all flow through cfg_overrides; the defaults
         # are the W39b cfg values)
-        "use_photo": bool(params.get("use_photo", not r.pic)),
-        "sl_angle_deg": round(float(params.get("sl_angle_deg", planets.SL_ANGLE_DEG[r.column.science_mode])), 1),
-        "f_diurnal": round(float(params.get("f_diurnal", F_DIURNAL_DEFAULT)), 3),
-        "use_moldiff": bool(params.get("use_moldiff", not r.pic)),
+        "use_photo": bool(params.get("use_photo", USE_PHOTO_DEFAULT and not r.pic)),
+        "sl_angle_deg": float(params.get("sl_angle_deg", planets.SL_ANGLE_DEG[r.column.science_mode])),
+        "f_diurnal": float(params.get("f_diurnal", F_DIURNAL_DEFAULT)),
+        "use_moldiff": bool(params.get("use_moldiff", USE_MOLDIFF_DEFAULT and not r.pic)),
         # Upwind molecular-diffusion advection: PINNED explicitly, never
-        # inherited from the engine. False is the validated baseline here.
-        "use_vm_mol": bool(params.get("use_vm_mol", False)),
-        # Rayleigh is zero-parameter physics, ON by default (off it biases the
-        # <1.5 um slope); the power-law cloud deck is OFF by default.
-        "use_rayleigh": bool(params.get("use_rayleigh", True)),
+        # inherited from the engine.
+        "use_vm_mol": bool(params.get("use_vm_mol", USE_VM_MOL_DEFAULT)),
+        "use_rayleigh": bool(params.get("use_rayleigh", USE_RAYLEIGH_DEFAULT)),
         # ExoJAX RT knobs. rt_ptop_bar is the MODEL top and the chemistry grid
         # follows it (engine rule), so no RT layer is clamped above the
         # chemistry. rt_integration picks the ArtTransPure chord scheme.
-        "rt_ptop_bar": float(f"{float(params.get('rt_ptop_bar', RT_PTOP_DEFAULT)):.6e}"),
+        "rt_ptop_bar": float(params.get("rt_ptop_bar", RT_PTOP_DEFAULT)),
         "rt_integration": str(params.get("rt_integration", RT_INTEGRATION_DEFAULT)),
         # The pressure rp_rjup and gs_cgs apply at. A catalogue radius is the
         # transit radius near the terminator photosphere, NOT the RT-grid
         # bottom exojax defaults to; anchoring it there inflates every depth.
-        "p_ref_bar": float(f"{float(params.get('p_ref_bar', P_REF_DEFAULT_BAR)):.6e}"),
+        "p_ref_bar": float(params.get("p_ref_bar", P_REF_DEFAULT_BAR)),
         # chemistry + RT column bottom (model_defs.P_BTM_RANGE)
-        "p_btm_bar": round(r.column.p_btm_bar, 4),
-        "cloud_on": bool(params.get("cloud_on", False)),
-        "log_kappa_cloud": round(float(params.get("log_kappa_cloud", LOG_KAPPA_CLOUD_DEFAULT)), 3),
-        "alpha_cloud": round(float(params.get("alpha_cloud", ALPHA_CLOUD_DEFAULT)), 2),
+        "p_btm_bar": r.column.p_btm_bar,
+        "cloud_on": bool(params.get("cloud_on", CLOUD_ON_DEFAULT)),
+        "log_kappa_cloud": float(params.get("log_kappa_cloud", LOG_KAPPA_CLOUD_DEFAULT)),
+        "alpha_cloud": float(params.get("alpha_cloud", ALPHA_CLOUD_DEFAULT)),
         # Detection-only condensation: param_checks refuses ANY derivative
-        "use_condense": bool(params.get("use_condense", False)),
-        # removed and refused above; pinned off so the cache key is unchanged
-        "use_settling": False,
-        "diff_esc": [],
-        "top_flux": [],
-        "bot_flux": [],
+        "use_condense": bool(params.get("use_condense", USE_CONDENSE_DEFAULT)),
         "extra_mols": sorted({str(m) for m in (params.get("extra_mols") or [])} - FORMER_EXTRA_MOLECULES),
         # Leave-one-out spectrum set: None = every RT molecule (the detect
         # default), [] skips the block. param_checks puts it in fold order.
@@ -485,7 +486,7 @@ def _filled_payload(params: dict, r: _Resolved) -> dict:
         "fisher_params": sorted({str(p) for p in (params.get("fisher_params") or [])}),
         # Jacobian method: "fd" (certified FD, the default) or "ad" (one
         # warm-started jvp per chemistry row, photo-on and VULCAN only; docs/forward_model.md).
-        "jac_method": str(params.get("jac_method", "fd")),
+        "jac_method": str(params.get("jac_method", JAC_METHOD_DEFAULT)),
         "chem_provider": r.provider,
         "network": r.network,
         "version": _VERSION,
@@ -498,8 +499,8 @@ def _picaso_fields(cp: dict, params: dict, tp_table: Any, science_mode: str, tp_
     # PICASO-only keys exist only in PICASO payloads, so no VULCAN cache
     # key moves. rfacv is a climate input (inert, 0, for the other
     # profiles); kzz_const keys only a quenched column.
-    cp["rfacv"] = round(float(params.get("rfacv", RFACV_DEFAULT[science_mode])), 3) if climate else 0.0
-    cp["picaso_quench"] = bool(params.get("picaso_quench", False))
+    cp["rfacv"] = float(params.get("rfacv", RFACV_DEFAULT[science_mode])) if climate else 0.0
+    cp["picaso_quench"] = bool(params.get("picaso_quench", PICASO_QUENCH_DEFAULT))
     cp["picaso_stack"] = _pe.PICASO_STACK
     if climate and not RFACV_RANGE[0] <= cp["rfacv"] <= RFACV_RANGE[1]:
         raise ValueError(
@@ -531,7 +532,7 @@ def _default_tint(params: dict, cp: dict, r: _Resolved) -> None:
     """Fill the T_int default from planets.default_tint, the GUI's definition too; zeroed later where inert."""
     if "Tint" not in params:
         custom = r.planet not in planets.PLANETS
-        cp["Tint"] = round(planets.default_tint(r.sysd, system=_system(cp) if custom else None), 2)
+        cp["Tint"] = planets.default_tint(r.sysd, system=_system(cp) if custom else None)
 
 
 def _guillot_tirr(params: dict, cp: dict, r: _Resolved) -> None:
@@ -545,7 +546,7 @@ def _guillot_tirr(params: dict, cp: dict, r: _Resolved) -> None:
     if "Tirr" in params:
         planets.check_tirr(cp["Tirr"], derived=False)
         return
-    cp["Tirr"] = round(default_tirr(r.planet, system=_system(cp), science_mode=r.column.science_mode), 2)
+    cp["Tirr"] = default_tirr(r.planet, system=_system(cp), science_mode=r.column.science_mode)
     planets.check_tirr(cp["Tirr"], derived=True)
 
 
@@ -559,7 +560,7 @@ def _zero_inert_settings(cp: dict, sysd: dict, science_mode: str, tp_mode: str) 
         # identical physics never caches under two keys.
         cp["sflux"] = str(sysd["sflux"])
         if not climate:  # the semi-major axis heats the climate
-            cp["orbit_au"] = round(float(sysd["orbit_au"]), 5)
+            cp["orbit_au"] = float(sysd["orbit_au"])
     if not cp["cloud_on"]:  # cloud knobs are inert when the deck is off
         cp["log_kappa_cloud"] = 0.0
         cp["alpha_cloud"] = 0.0
@@ -578,6 +579,48 @@ def _zero_inert_settings(cp: dict, sysd: dict, science_mode: str, tp_mode: str) 
         cp["Tirr"] = cp["log_kappa"] = cp["log_gamma"] = 0.0
         if not climate:
             cp["Tint"] = 0.0
+
+
+# Decimals a canonical value keeps, enough for every registry value (rp 5, g 2), and those kept to six significant
+# figures. Rounding is the last step: every check reads the request's own value, so a value outside its range is
+# refused even when rounding would carry it inside.
+_DECIMALS = {
+    "star_teff": 1,
+    "star_logg": 2,
+    "star_feh": 2,
+    "yconv_cri": 6,
+    "yconv_min": 6,
+    "rp_rjup": 5,
+    "gs_cgs": 2,
+    "rstar_rsun": 4,
+    "orbit_au": 5,
+    "met_x_solar": 4,
+    "co_ratio": 6,
+    "kzz_x": 4,
+    "kzz_const": 1,
+    "kzz_kmax": 1,
+    "kzz_kdeep": 1,
+    "Tirr": 2,
+    "Tint": 2,
+    "log_kappa": 3,
+    "log_gamma": 3,
+    "sl_angle_deg": 1,
+    "f_diurnal": 3,
+    "p_btm_bar": 4,
+    "log_kappa_cloud": 3,
+    "alpha_cloud": 2,
+    "rfacv": 3,
+}
+_SIGNIFICANT_6 = ("kzz_plev", "rt_ptop_bar", "p_ref_bar")
+
+
+def _rounded(cp: dict) -> None:
+    """Round the checked payload to its canonical precision, so one physics maps to one key."""
+    for key, decimals in _DECIMALS.items():
+        if key in cp:
+            cp[key] = round(cp[key], decimals)
+    for key in _SIGNIFICANT_6:
+        cp[key] = float(f"{cp[key]:.6e}")
 
 
 def canonical_params(params: dict) -> dict:
@@ -610,7 +653,7 @@ def canonical_params(params: dict) -> dict:
     cp = _filled_payload(params, r)
     check_system(cp)
     _default_tint(params, cp, r)
-    check_tint(cp)
+    check_tint(cp, derived="Tint" not in params)
     _guillot_tirr(params, cp, r)
     if pic:
         _picaso_fields(cp, params, column.tp_table, column.science_mode, tp_mode, solver.nz)
@@ -627,6 +670,7 @@ def canonical_params(params: dict) -> dict:
     # It stays out of CHEM_IRRELEVANT_PARAMS on purpose: an extra chemistry
     # miss is cheap and a false hit is not. Unset means omitted, so existing
     # keys are unchanged.
+    _rounded(cp)
     rev = os.environ.get("JWST_TOOL_DATA_REVISION", "").strip()
     if rev:
         cp["data_revision"] = rev
