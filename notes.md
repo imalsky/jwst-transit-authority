@@ -14,9 +14,10 @@ names the code state it was measured on.
   still pins the tool at cd67563, which predates v63, so a redeploy moves it first (todo).
   The running Space was last deployed from the earlier pins (tool b23df79) and is
   unchanged until a redeploy.
-- Cache versions: `model_defs._VERSION` 63, `noise.WORKER_VERSION` 12,
+- Cache versions: `model_defs._VERSION` 64 (its fixtures, validation data and figures are not yet regenerated:
+  todo), `noise.WORKER_VERSION` 12,
   `adjoint_diag._ADJ_VERSION` 4, `picaso_engine.WORKER_VERSION` 4. Default keys:
-  transmission `6142809ab7cffe07` (test-pinned), emission `45d2a4c73f6ef7dc`.
+  transmission `dd3ecebad77ba212` (test-pinned), emission `fc1ce9460f059330`.
 - Fixtures `tests/live/data/w39b_v63_reference.npz` and `w39b_picaso_reference.npz`
   (cold WASP-39 b, both modes; jax 0.6.2, vulcan3 0.18.0, vulcan-forward 0.31.0
   at dc2510b; 11 min, and 110 min for PICASO with 8 jobs sharing 10 cores; 45 min alone at v62).
@@ -256,11 +257,18 @@ names the code state it was measured on.
   mbar, not tuned to the data (7.8% low against the white-light depth; Decision records).
 - Transmission dtau uses inverse-square g(r) (exojax's own profile: -51 ppm at W39b
   against +1.5 ppm); emission takes the same g(r) from v59.
-- Model top `rt_ptop_bar` 1e-7 bar (chemistry and RT; range [1e-9, 1e-6]; upstream 1e-8):
-  1e-7 vs 1e-9 moves the W39b depth 105 ppm at R = 100 (+377 ppm at 14 um), accepted for
-  the published convention. HD 189733 b file mode needs `rt_ptop_bar >= 1e-7` (a 6000 K
-  thermosphere). Above 1e-5 bar the molecular-diffusion advection puts a 2dz oscillation
-  on atomic H that the positivity clip zeroes; numerical, and the default top avoids it.
+- Model top `rt_ptop_bar` (chemistry and RT; range [1e-9, 1e-5]; upstream 1e-8). A Guillot or climate run defaults
+  to 1e-7 bar, the published convention. From v64 a file-mode run defaults to its table's own top, and a table that
+  does not reach the run's top is refused, as its bottom is (before, the top tabulated T and Kzz were held constant
+  above the table). The WASP-39 b default transit moves from 1e-7 bar to its table's 5.349e-6 bar: at R = 100 the depth
+  moves by up to -345 ppm at 4.28 um (-322 to -345 ppm over 4.28-4.37 um, the CO2 core), +183 ppm at 2.28 um, median
+  +5.2 ppm, median |d| 35 ppm; on the old code 1e-9 against 1e-7 bar moved it by up to 122 ppm at 4.28 um, median 0.1
+  [M, cold default transits at f9cc223 and on the change, 10 cores; the 1e-7 run reproduces the v63 reference to 1e-6
+  ppm]. So the 4.3 um CO2 core is still optically thick above 5.3e-6 bar, and the default transit's core depth is set
+  by the table's top [I]. The new default certified at 981 steps. HD 189733 b file mode needs `rt_ptop_bar >= 1e-7`: its
+  table's own top, 1.2e-8 bar, lies in a 6000 K thermosphere and is refused by the T window. Above 1e-5 bar the
+  molecular-diffusion advection puts a 2dz oscillation on atomic H that the positivity clip zeroes; numerical, and the
+  range's top end avoids it.
 - `use_vm_mol` is pinned False (the engine flipped its default; <= 0.01 dex).
 
 ## Opacity and radiative transfer

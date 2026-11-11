@@ -271,6 +271,22 @@ def test_the_sidebar_shows_the_tirr_refusal_in_an_empty_widget_never_a_clipped_n
     assert at.number_input(key="n0_custom_tirr").value == 1640.0 and not at.sidebar.error
 
 
+def test_the_model_top_widget_follows_the_table_top_and_shows_the_api_refusal():
+    """The sidebar seeds the model top from run_params.default_rt_ptop_bar and follows the profile until edited; an
+    edited top above the table is refused beside Run with the API's sentence."""
+    pytest.importorskip("streamlit")
+    from app_helpers import run_app
+
+    at = run_app()
+    assert at.number_input(key="n0_rtptop").value == 5.349e-6
+    at.selectbox(key="n0_wasp39b_tp").set_value("guillot").run()
+    assert at.number_input(key="n0_rtptop").value == 1.0e-7
+    at.number_input(key="n0_rtptop").set_value(1.0e-8).run()
+    at.selectbox(key="n0_wasp39b_tp").set_value("file").run()
+    assert at.number_input(key="n0_rtptop").value == 1.0e-8
+    assert any("top pressure 5.349e-06 bar does not reach the model top 1e-08 bar" in e.value for e in at.error)
+
+
 def test_a_custom_star_is_checked_wherever_it_is_read():
     """A custom planet's T_irr and T_int defaults read its star in transit too, so its T_eff is range-checked there."""
     with pytest.raises(ValueError, match="star_teff=-100"):

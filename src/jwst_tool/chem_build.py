@@ -27,7 +27,7 @@ from jwst_tool.model_defs import (
     chem_p_span_dyn,
     elemental_abundances,
 )
-from jwst_tool.tp_tables import read_tp_table, tp_file_from_cp
+from jwst_tool.tp_tables import tp_file_from_cp
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -237,9 +237,8 @@ def rt_profile_common(cp: dict, config: Any) -> dict:
     return profile
 
 
-def _cfg_overrides(cp: dict, rp_cm: float, log: Log) -> tuple:
-    """Return the chemistry side's config overrides and the T-P table path (None for a parametric profile)."""
-    tp_path = None
+def _cfg_overrides(cp: dict, rp_cm: float, log: Log) -> dict:
+    """Return the chemistry side's config overrides."""
     ovr = {  # chemistry side (applied pre-pre-loop)
         # VULCAN derives g = G*Mp/Rp^2, so convert gs_cgs to a planet mass
         "Mp": cp["gs_cgs"] * rp_cm**2 / planets.G_CGS,
@@ -298,10 +297,10 @@ def _cfg_overrides(cp: dict, rp_cm: float, log: Log) -> tuple:
             f"{cp['nz'] / np.log10(cp['p_btm_bar'] / cp['rt_ptop_bar']):.0f} "
             "layers per decade"
         )
-    return ovr, tp_path
+    return ovr
 
 
-def _check_cfg_constants(cp: dict, config: Any, tp_path: Path | None, log: Log) -> Any:
+def _check_cfg_constants(config: Any) -> Any:
     """Refuse drift between this tool's constants and the loaded cfg; return the cfg."""
     # CFG_ABUNDANCES must equal the loaded cfg's O_H/C_H/N_H/S_H: a wrong set
     # here mislabels every C/O display and every exported abundance.
@@ -327,18 +326,6 @@ def _check_cfg_constants(cp: dict, config: Any, tp_path: Path | None, log: Log) 
             "span validation would gate against the wrong grid. Update the "
             "constant (and bump _VERSION)."
         )
-    if cp["tp_mode"] == "file":
-        # Log the conventional TOP clamp (the bottom is hard-gated at the API)
-        P_tab = read_tp_table(tp_path, span=chem_p_span_dyn(cp))["P_dyn"]  # type: ignore[arg-type]  # set in table mode
-        p_top_run = chem_p_span_dyn(cp)[0]
-        dec = float(np.log10(P_tab.min() / p_top_run))
-        if dec > 0.0:
-            log(
-                f"[fwd] NOTE: T-P table top ({P_tab.min():.3g} dyn/cm^2) "
-                f"sits {dec:.1f} decades below the chemistry-grid top "
-                f"({p_top_run:g}): the topmost tabulated T is held constant "
-                "over that range (the upstream file-mode convention)."
-            )
     return cfg_chk
 
 
@@ -476,9 +463,9 @@ def assemble_chem(cp: dict, log: Log) -> SimpleNamespace:
     profile["dt_max"] = DT_MAX_S
     profile["network"], profile["atom_list"], profile["vulcan_cfg_name"] = net_path, net_atoms, config.W39B_CFG_NAME
     rp_cm = profile["rp_cm"]
-    ovr, tp_path = _cfg_overrides(cp, rp_cm, log)
+    ovr = _cfg_overrides(cp, rp_cm, log)
     profile["cfg_overrides"] = ovr
-    cfg_chk = _check_cfg_constants(cp, config, tp_path, log)
+    cfg_chk = _check_cfg_constants(config)
 
     ovr.update(elemental_abundances(cp["met_x_solar"], cp["co_ratio"]))
     log(

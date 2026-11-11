@@ -16,6 +16,10 @@ from jwst_tool.model_defs import CHEM_P_SPAN_DYN, T_WINDOW, TP_FILE_SHIPPED, TP_
 # over the run's span. No basis recorded.
 T_CHECK_POINTS = 200
 
+# Relative slack of the top-coverage gate: the canonical rt_ptop_bar keeps six significant figures, so a model top
+# set to a table's top can sit up to 5e-6 (relative) above it.
+TOP_RTOL = 1.0e-5
+
 # tp_mode="file" helpers (light path: no vulcan3/jax imports)
 
 
@@ -45,7 +49,7 @@ def shipped_tp_file(planet: str) -> Path:
     name = shipped_tp_table_name(planet)
     if not name:
         entry = planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS)
-        why = entry.get("tp_table_note") or "no table is bundled for it"
+        why = entry.get("tp_table_note") or "no table is bundled for it."
         raise ValueError(
             f"tp_file='shipped' is not available for planet {planet!r}: {why} "
             "Choose tp_mode='guillot', or upload a table "
@@ -107,20 +111,8 @@ def _parse_table(path: Path) -> np.ndarray:
     return tab
 
 
-def read_tp_table(path: Path, span: tuple | None = None) -> dict:
-    """Parse + validate a VULCAN atm table on the LIGHT path.
-
-    ``span`` is the RUN's chemistry span (P_t, P_b) in dyn/cm^2 that the
-    coverage and T-window checks are made against; it defaults to the shipped
-    cfg's own span, and an emission run passes its deeper one.
-
-    Mirrors the engine's read exactly (np.genfromtxt, names=True,
-    skip_header=1: line 1 a units comment, line 2 the column names). Columns
-    'Pressure' (dyne/cm^2) and 'Temp' (K) are required, 'Kzz' (cm^2/s)
-    optional; returns {"P_dyn", "T", "Kzz" or None}. Malformed content raises
-    ValueError at the API, never inside the engine's pre-loop.
-    """
-    span = CHEM_P_SPAN_DYN if span is None else (float(span[0]), float(span[1]))
+def _read_columns(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """Return (P dyn/cm^2, T K, Kzz cm^2/s or None) of a table, refusing a malformed one."""
     tab = _parse_table(path)
     names = list(tab.dtype.names or [])
     if "Pressure" not in names or "Temp" not in names:
@@ -140,6 +132,36 @@ def read_tp_table(path: Path, span: tuple | None = None) -> dict:
     dP = np.diff(P)
     if not (np.all(dP > 0) or np.all(dP < 0)):
         raise ValueError(f"T-P table {path}: Pressure must be strictly monotonic")
+    Kzz = None
+    if "Kzz" in names:
+        Kzz = np.asarray(tab["Kzz"], dtype=np.float64)
+        if not np.all(np.isfinite(Kzz)) or np.any(Kzz <= 0.0):
+            raise ValueError(f"T-P table {path}: Kzz column must be finite and > 0")
+    return P, T, Kzz
+
+
+def table_top_bar(path: Path) -> float:
+    """Return a T-P table's top (least) pressure, bar: the model top of a file-mode run that does not set one."""
+    return float(_read_columns(path)[0].min()) / 1.0e6
+
+
+def read_tp_table(path: Path, span: tuple | None = None) -> dict:
+    """Parse + validate a VULCAN atm table on the LIGHT path.
+
+    ``span`` is the RUN's chemistry span (P_t, P_b) in dyn/cm^2 that the
+    coverage and T-window checks are made against. Without it (an upload,
+    checked before a run's top is known) the T window is checked over the
+    shipped cfg's span and the top is not gated.
+
+    Mirrors the engine's read exactly (np.genfromtxt, names=True,
+    skip_header=1: line 1 a units comment, line 2 the column names). Columns
+    'Pressure' (dyne/cm^2) and 'Temp' (K) are required, 'Kzz' (cm^2/s)
+    optional; returns {"P_dyn", "T", "Kzz" or None}. Malformed content raises
+    ValueError at the API, never inside the engine's pre-loop.
+    """
+    P, T, Kzz = _read_columns(path)
+    run_span = span is not None
+    span = CHEM_P_SPAN_DYN if span is None else (float(span[0]), float(span[1]))
     # Bottom coverage is a HARD requirement: the engine clamp-extends outside
     # the table, so a short table would run the quench region isothermal.
     if P.max() < span[1]:
@@ -152,6 +174,15 @@ def read_tp_table(path: Path, span: tuple | None = None) -> dict:
             "silently biasing quenched abundances. Extend the table to at "
             "least the grid bottom, lower p_btm_bar, or (in emission) use the "
             "Guillot profile, which is defined at every depth."
+        )
+    # Top coverage too, against a run's own top: above the table the engine holds the top tabulated temperature and
+    # Kzz constant.
+    if run_span and P.min() > span[0] * (1.0 + TOP_RTOL):
+        raise ValueError(
+            f"T-P table {path}: top pressure {P.min() / 1e6:.4g} bar does not reach the model top "
+            f"{span[0] / 1e6:.4g} bar (rt_ptop_bar). The engine would hold the top tabulated temperature and Kzz "
+            f"constant above the table. Extend the table to the model top, or set rt_ptop_bar to at least "
+            f"{P.min() / 1e6:.4g} bar; a run that does not set rt_ptop_bar starts at the table's top."
         )
     # The T window applies to what the engine evaluates -- the profile over the
     # chemistry span with the edge clamp, NOT every raw row (raw rows wrongly
@@ -176,13 +207,9 @@ def read_tp_table(path: Path, span: tuple | None = None) -> dict:
             f"profile spans [{T_grid.min():.0f}, {T_grid.max():.0f}] K, which "
             f"leaves the modelable window [{T_WINDOW[0]:.0f}, "
             f"{T_WINDOW[1]:.0f}] K{extra} (the raw k-tables span a wider "
-            "range); out-of-window profiles are rejected, never clipped."
+            "range); out-of-window profiles are rejected, never clipped. Move the model top (rt_ptop_bar) or "
+            "bottom (p_btm_bar) to where the table stays inside the window."
         )
-    Kzz = None
-    if "Kzz" in names:
-        Kzz = np.asarray(tab["Kzz"], dtype=np.float64)
-        if not np.all(np.isfinite(Kzz)) or np.any(Kzz <= 0.0):
-            raise ValueError(f"T-P table {path}: Kzz column must be finite and > 0")
     return {"P_dyn": P, "T": T, "Kzz": Kzz}
 
 

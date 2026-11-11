@@ -252,7 +252,7 @@ def _model_params(t: Target, a: Atmosphere, g: Goal, s: Solver) -> dict:
         use_moldiff=a.photo.use_moldiff,
         use_vm_mol=a.photo.use_vm_mol,
         use_rayleigh=a.clouds.use_rayleigh,
-        rt_ptop_bar=float(a.rt_ptop_bar),
+        rt_ptop_bar=a.rt_ptop_bar,
         rt_integration=s.rt_integration,
         p_ref_bar=float(a.p_ref_bar),
         p_btm_bar=float(a.p_btm_bar),
@@ -268,6 +268,8 @@ def _model_params(t: Target, a: Atmosphere, g: Goal, s: Solver) -> dict:
         extra_mols=a.extra_mols,
         **a.profile.tp_kwargs,
     )
+    if a.rt_ptop_bar is None:  # an empty model-top widget: canonical_params refuses with the sentence shown beside it
+        del params["rt_ptop_bar"]
     if a.pic:
         # VULCAN-JAX settings are omitted, never sent at a neutral value; rfacv
         # rides a.profile.tp_kwargs (climate only)

@@ -102,9 +102,9 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # parameter SET moved with it.
     # The G395H SO2 significance behind this configuration is in notes
     # "Composition, C/O bounds and networks".
-    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b", tp_mode="file"))) == "6142809ab7cffe07"
+    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b", tp_mode="file"))) == "dd3ecebad77ba212"
     # ... and the bare DEFAULT run is that same atmosphere
-    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b"))) == "6142809ab7cffe07"
+    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b"))) == "dd3ecebad77ba212"
     # the sha1 pin is only meaningful re-derived from the file the run
     # actually reads -- this catches the table itself being swapped
     path = tp_tables.shipped_tp_file("wasp39b")

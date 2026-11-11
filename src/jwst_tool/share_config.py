@@ -63,7 +63,8 @@ WIDGET_RANGES: dict[str, tuple[Any, ...]] = {
     "ck": (*model_defs.LOG_KAPPA_CLOUD_RANGE, model_defs.LOG_KAPPA_CLOUD_DEFAULT),
     "ca": (*model_defs.ALPHA_CLOUD_RANGE, model_defs.ALPHA_CLOUD_DEFAULT),
     "cpt": (-6.0, 1.0, -3.0),
-    "rtptop": (*model_defs.RT_PTOP_RANGE, model_defs.RT_PTOP_DEFAULT),
+    # the default follows the T-P table (run_params.default_rt_ptop_bar), so the widget is seeded
+    "rtptop": model_defs.RT_PTOP_RANGE,
     "pref": (*model_defs.P_REF_RANGE_BAR, model_defs.P_REF_DEFAULT_BAR),
     "tsig": (1.0, 10.0),
     "ntr": (1, 10, 1),
@@ -533,7 +534,9 @@ def _restore_rt_state(state: dict, cp: dict, key: KeyFn, cloud_top_bar: float | 
     state.update(
         {
             key("nz"): int(cp["nz"]),
+            # a loaded top is explicit, never re-seeded from the table
             key("rtptop"): float(cp["rt_ptop_bar"]),
+            key("rtptop_auto"): None,
             key("rtint"): str(cp["rt_integration"]),
             key("pref"): float(cp["p_ref_bar"]),
             # per-geometry widget key (the sidebar's key contract); a loaded bottom is explicit, never re-seeded

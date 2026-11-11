@@ -66,7 +66,7 @@ DT_MAX_S = 1.0e13  # chemistry step-size cap (s); prevents the adaptive-dt ballo
 
 # model_cache buster (identity = canonical params + this number, never a content
 # hash); bump on any physics or canonical-key-set change.
-_VERSION = 63
+_VERSION = 64
 
 # The W39b cfg's elemental set (number ratios to H, 10x solar): Lodders 2020
 # Table 8 present-day solar (log eps C 8.47, N 7.85, O 8.73, S 7.15; He is
@@ -150,9 +150,8 @@ def elemental_abundances(met_x_solar: float, co_ratio: float) -> dict:
     }
 
 
-# Model top (chemistry grid AND RT top) when a request does not set it.
-# 1e-7 bar is the usual published choice; 1e-9 bar is inside the allowed
-# range.
+# Model top (chemistry grid AND RT top) of a run with no T-P table that does not set it, bar: the usual published
+# choice. A tp_mode="file" run defaults to its table's own top (run_params.default_rt_ptop_bar).
 RT_PTOP_DEFAULT = 1.0e-7
 
 JAC_METHODS = ("fd", "ad")  # certified-FD default / warm-jvp opt-in
@@ -237,7 +236,10 @@ KZZ_KDEEP_RANGE = (1.0e4, 1.0e11)  # JM16 deep floor
 KZZ_X_RANGE = (0.1, 10.0)  # multiplier on the whole Kzz profile
 SL_ANGLE_RANGE = (0.0, 89.0)  # photolysis zenith angle, deg
 F_DIURNAL_RANGE = (0.1, 1.0)  # diurnal photolysis factor
-RT_PTOP_RANGE = (1.0e-9, 1.0e-6)  # model top, bar: the exercised range
+# Model top, bar. The top end admits the shipped WASP-39 b table's top (5.3e-6 bar); above 1e-5 bar the
+# molecular-diffusion advection puts a 2dz oscillation on atomic H (notes "Structure: T-P, Kzz, gravity anchor, model
+# top").
+RT_PTOP_RANGE = (1.0e-9, 1.0e-5)
 LOG_KAPPA_RANGE = (-4.0, 0.0)  # Guillot log10 kappa_IR, cm^2/g
 LOG_GAMMA_RANGE = (-2.0, 0.3)  # Guillot log10 kappa_vis / kappa_IR
 LOG_KAPPA_CLOUD_RANGE = (-7.0, 2.0)  # cloud deck log10 kappa at 3.5 um, cm^2/g

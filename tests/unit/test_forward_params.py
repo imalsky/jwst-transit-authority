@@ -175,6 +175,31 @@ def test_tp_table_gates_are_grid_scoped_and_require_the_bottom(tmp_path):
     forward.canonical_params(_pf(_table(tmp_path)))
 
 
+def test_a_table_reaches_the_model_top_which_defaults_to_the_tables_own(tmp_path):
+    """Above a table the engine would hold its top temperature and Kzz constant, so a model top above the table is
+    refused; a run that sets no top starts at its table's top, shipped or uploaded, and the rounded value maps back."""
+    cp = forward.canonical_params(dict(planet="wasp39b"))
+    assert cp["rt_ptop_bar"] == 5.349e-6 and forward.canonical_params(cp) == cp
+    with pytest.raises(ValueError, match=r"top pressure 5\.349e-06 bar does not reach the model top 1e-07 bar"):
+        forward.canonical_params(dict(planet="wasp39b", rt_ptop_bar=1.0e-7))
+    assert forward.canonical_params(dict(planet="wasp39b", tp_mode="guillot"))["rt_ptop_bar"] == 1.0e-7
+
+    def table(top_dyn):
+        path = tmp_path / f"top{top_dyn:g}.txt"
+        P = np.logspace(6.9, math.log10(top_dyn), 8)
+        path.write_text("#(dyne/cm2) (K)\nPressure\tTemp\n" + "\n".join(f"{v:.9e}\t1000.0" for v in P) + "\n")
+        return path
+
+    up = table(1.23456789)  # more digits than the canonical six
+    cp = forward.canonical_params(_pf(up))
+    assert cp["rt_ptop_bar"] == pytest.approx(1.23456789e-6, rel=1e-5)
+    assert forward.canonical_params(_pf(up, rt_ptop_bar=cp["rt_ptop_bar"])) == cp
+    with pytest.raises(ValueError, match="does not reach the model top"):
+        forward.canonical_params(_pf(up, rt_ptop_bar=1.0e-6))
+    with pytest.raises(ValueError, match=r"model top defaults to the T-P table's top, 0\.0001 bar"):
+        forward.canonical_params(_pf(table(100.0)))
+
+
 def test_resolution_knobs_defaults_ranges_and_refusals():
     # nz/yconv are explicit and the RT layer count is derived, not
     # cache-keyed; the spectral grid is the k-tables' own (no knob)
@@ -357,7 +382,7 @@ def test_rt_knobs_defaults_validation_and_cache_key():
     assert cp["rt_integration"] == "simpson"
     cp = forward.canonical_params(_p(rt_ptop_bar=1.0e-6, rt_integration="trapezoid"))
     assert (cp["rt_ptop_bar"], cp["rt_integration"]) == (1.0e-6, "trapezoid")
-    for bad in (dict(rt_ptop_bar=1.0e-5), dict(rt_ptop_bar=1.0e-10), dict(rt_integration="euler")):
+    for bad in (dict(rt_ptop_bar=1.0e-4), dict(rt_ptop_bar=1.0e-10), dict(rt_integration="euler")):
         with pytest.raises(ValueError):
             forward.canonical_params(_p(**bad))
     # a LIVE RT knob must change the cache key (different physics)

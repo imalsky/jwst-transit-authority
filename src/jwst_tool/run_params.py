@@ -65,10 +65,12 @@ from jwst_tool.param_checks import (
     check_rt_settings,
     check_system,
     check_tint,
+    rt_ptop_refusal,
 )
-from jwst_tool.tp_tables import read_tp_table, resolve_tp_file, shipped_tp_table_is_default
+from jwst_tool.tp_tables import read_tp_table, resolve_tp_file, shipped_tp_table_is_default, table_top_bar
 
 if TYPE_CHECKING:
+    from pathlib import Path
     from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -81,6 +83,15 @@ def default_p_btm_bar(params: dict) -> float:
     """
     mode = str(params.get("tp_mode", default_tp_mode(params)))
     return P_BTM_FILE_BAR if mode == "file" else P_BTM_PARAMETRIC_BAR
+
+
+def default_rt_ptop_bar(tp_path: Path | None) -> float:
+    """Return the model top (bar) of a run that does not set rt_ptop_bar: its T-P table's own top, else RT_PTOP_DEFAULT.
+
+    One definition for canonical_params and the sidebar's model-top widget. A table never reaches above its own top,
+    and the top tabulated temperature and Kzz are never extended over a part of the column the table does not cover.
+    """
+    return RT_PTOP_DEFAULT if tp_path is None else table_top_bar(tp_path)
 
 
 # Structure default: a MEASURED T-P/Kzz table VERIFIED end-to-end for a planet
@@ -297,6 +308,7 @@ class _ColumnSettings:
 
     science_mode: str
     p_btm_bar: float
+    rt_ptop_bar: float
     tp_file: str
     tp_file_sha1: str
     tp_table: Any
@@ -333,18 +345,25 @@ def _column_settings(params: dict, tp_mode: str, pic: bool) -> _ColumnSettings:
             f"p_btm_bar={p_btm_bar:g} bar is below the PICASO climate and "
             f"quench column, which ends at {PICASO_P_BTM_MAX:g} bar."
         )
-    span = (float(params.get("rt_ptop_bar", RT_PTOP_DEFAULT)) * 1.0e6, p_btm_bar * 1.0e6)
-    tp_file, tp_file_sha1, tp_table = "", "", None
+    tp_file, tp_file_sha1, tp_table, tp_path = "", "", None, None
     if tp_mode == "file":
         tp_path, tp_file_sha1 = resolve_tp_file(params)
-        tp_table = read_tp_table(tp_path, span=span)
         tp_file = str(params.get("tp_file", TP_FILE_SHIPPED))
+    if "rt_ptop_bar" in params:
+        rt_ptop_bar = float(params["rt_ptop_bar"])
+    else:
+        rt_ptop_bar = default_rt_ptop_bar(tp_path)
+        refusal = rt_ptop_refusal(rt_ptop_bar, derived=True)
+        if refusal:
+            raise ValueError(refusal)
+    if tp_path is not None:
+        tp_table = read_tp_table(tp_path, span=(rt_ptop_bar * 1.0e6, p_btm_bar * 1.0e6))
     if science_mode not in ("transmission", "emission"):
         raise ValueError(
             f"unknown science_mode {science_mode!r}: choose 'transmission' "
             "(transit depth) or 'emission' (secondary-eclipse depth)"
         )
-    return _ColumnSettings(science_mode, p_btm_bar, tp_file, tp_file_sha1, tp_table)
+    return _ColumnSettings(science_mode, p_btm_bar, rt_ptop_bar, tp_file, tp_file_sha1, tp_table)
 
 
 def _planet(params: dict) -> tuple[str, dict]:
@@ -471,7 +490,7 @@ def _filled_payload(params: dict, r: _Resolved) -> dict:
         # ExoJAX RT knobs. rt_ptop_bar is the MODEL top and the chemistry grid
         # follows it (engine rule), so no RT layer is clamped above the
         # chemistry. rt_integration picks the ArtTransPure chord scheme.
-        "rt_ptop_bar": float(params.get("rt_ptop_bar", RT_PTOP_DEFAULT)),
+        "rt_ptop_bar": r.column.rt_ptop_bar,
         "rt_integration": str(params.get("rt_integration", RT_INTEGRATION_DEFAULT)),
         # The pressure rp_rjup and gs_cgs apply at. A catalogue radius is the
         # transit radius near the terminator photosphere, NOT the RT-grid

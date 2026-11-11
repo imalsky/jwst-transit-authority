@@ -398,12 +398,11 @@ def test_a_cfg_that_drifted_from_the_constants_is_refused(over, match, monkeypat
     cfg = _cfg_like_the_constants(**over)
     monkeypatch.setattr(vulcan3, "load_config", lambda name: cfg)
     config = SimpleNamespace(W39B_CFG_NAME="W39b")
-    cp = {"tp_mode": "guillot"}
     if match is None:
-        assert chem_build._check_cfg_constants(cp, config, None, _quiet) is cfg
+        assert chem_build._check_cfg_constants(config) is cfg
     else:
         with pytest.raises(RuntimeError, match=match):
-            chem_build._check_cfg_constants(cp, config, None, _quiet)
+            chem_build._check_cfg_constants(config)
 
 
 def test_a_table_that_changed_after_canonicalization_is_refused(tmp_path, monkeypatch):

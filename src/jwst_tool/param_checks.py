@@ -34,7 +34,6 @@ from jwst_tool.model_defs import (
     P_REF_DEFAULT_BAR,
     P_REF_RANGE_BAR,
     PICASO_MET_RANGE,
-    RT_PTOP_DEFAULT,
     RT_PTOP_RANGE,
     S_MOLECULES,
     SL_ANGLE_RANGE,
@@ -112,11 +111,40 @@ def check_tint(cp: dict, derived: bool) -> None:
             raise ValueError(refusal)
 
 
+def rt_ptop_refusal(top_bar: float, derived: bool) -> str | None:
+    """Return the refusal sentence of a model top outside RT_PTOP_RANGE, None inside; the API and the sidebar share it.
+
+    Parameters
+    ----------
+    top_bar : float
+        Model top, bar.
+    derived : bool
+        True when ``top_bar`` is the default run_params.default_rt_ptop_bar returned (a T-P table's own top), not a
+        value the user set.
+
+    Returns
+    -------
+    str or None
+        The sentence, or None when the value is accepted.
+    """
+    lo, hi = RT_PTOP_RANGE
+    if lo <= top_bar <= hi:
+        return None
+    if derived:
+        return (
+            f"the model top defaults to the T-P table's top, {top_bar:.4g} bar, outside the supported range "
+            f"[{lo:g}, {hi:g}] bar. Set rt_ptop_bar inside that range, and extend the table to it."
+        )
+    return f"rt_ptop_bar={top_bar:g} outside [{lo:g}, {hi:g}] bar"
+
+
 def check_rt_settings(cp: dict) -> None:
     """Refuse photolysis geometry, RT top, radius reference and chord scheme outside their ranges."""
     _check_range("sl_angle_deg", cp["sl_angle_deg"], SL_ANGLE_RANGE, "deg")
     _check_range("f_diurnal", cp["f_diurnal"], F_DIURNAL_RANGE)
-    _check_range("rt_ptop_bar", cp["rt_ptop_bar"], RT_PTOP_RANGE, f"bar (default {RT_PTOP_DEFAULT:g})")
+    refusal = rt_ptop_refusal(cp["rt_ptop_bar"], derived=False)
+    if refusal:
+        raise ValueError(refusal)
     _check_range("p_ref_bar", cp["p_ref_bar"], P_REF_RANGE_BAR, "bar (the widest RT grid)")
     art_pbtm = cp["p_btm_bar"] * ART_PBTM_FRACTION
     if not cp["rt_ptop_bar"] <= cp["p_ref_bar"] <= art_pbtm:
