@@ -384,6 +384,21 @@ def test_the_eclipse_band_is_where_the_flux_comes_from():
     assert lo < 1.0 < hi
 
 
+def test_an_eclipse_with_no_positive_flux_weight_is_refused_not_divided_by():
+    from types import SimpleNamespace
+
+    from jwst_tool import spectrum
+
+    emis = SimpleNamespace(
+        eclipse_photosphere=lambda *_a, **_k: (np.array([[1.0e-3]]), np.array([[0.0]])),
+        nu_edges=np.array([1000.0, 1100.0]),
+    )
+    setup = SimpleNamespace(emis=emis, rt=SimpleNamespace(p_art_bar=np.logspace(-6, 1, 50)), cloud_vec=None)
+    column = SimpleNamespace(art_profiles=lambda _y, _th: (None,) * 5)
+    with pytest.raises(RuntimeError, match="eclipse flux weight summed to 0.0"):
+        spectrum.emission_photosphere_bar(setup, column, None, None)
+
+
 def test_the_absorber_gate_reads_the_observations_own_photosphere():
     """An eclipse forms deeper than a transit: a bulk absorber with no k-table only at 0.05 bar is outside the transit
     band and refused over an eclipse band that reaches it."""

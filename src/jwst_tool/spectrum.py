@@ -241,14 +241,26 @@ def emission_photosphere_bar(setup: RtSetup, column: ColumnSpectrum, y: AnyArray
     -------
     tuple of float
         (low, high) pressure, bar.
+
+    Raises
+    ------
+    RuntimeError
+        The engine's flux weights do not sum to a positive finite number.
     """
     vmr, vmr_h2, t_art, mmw_art, vmr_he = column.art_profiles(y, th)
     p_phot, flux = setup.emis.eclipse_photosphere(vmr, vmr_h2, t_art, mmw_art, vmr_he=vmr_he, cloud=setup.cloud_vec)
     band_width = np.abs(np.diff(np.asarray(setup.emis.nu_edges, dtype=np.float64)))  # cm^-1
     weight = (np.asarray(flux, dtype=np.float64) * band_width[None, :]).ravel()
+    total = float(weight.sum())
+    if not (np.isfinite(total) and total > 0.0):
+        raise RuntimeError(
+            f"the eclipse flux weight summed to {total!r}, so the photosphere band is undefined. The engine's "
+            "eclipse_photosphere returned no positive finite flux: check the column and the T-P profile for NaN or "
+            "negative values."
+        )
     p_phot = np.asarray(p_phot, dtype=np.float64).ravel()
     order = np.argsort(p_phot)
-    cum = np.cumsum(weight[order]) / weight.sum()
+    cum = np.cumsum(weight[order]) / total
     lo, hi = (float(p_phot[order][np.searchsorted(cum, q)]) for q in EMIS_PHOTOSPHERE_QUANTILES)
     ln_p = np.sort(np.log(np.asarray(setup.rt.p_art_bar, dtype=np.float64)))
     half = 0.5 * np.diff(ln_p)
