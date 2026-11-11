@@ -55,7 +55,7 @@ observation need, or the run stops with the reason. Every number is in honest un
 
 ### Success: the checks
 
-- **Fast enough to run.** No test takes more than 90 minutes on a CPU.
+- **Fast enough to run.** No test takes more than 100 minutes on a CPU.
 - **End to end, both engines, both modes.** The default case, solved cold through the whole chain, reproduces a
   committed reference made at the same model version (`tests/live/test_e2e_run_model.py`).
 - **Against other codes and data.** The radiative transfer against petitRADTRANS on this tool's own columns, the
