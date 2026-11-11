@@ -8,7 +8,7 @@ import types
 import numpy as np
 import pytest
 
-from jwst_tool import forward, gui_results, jacobian, picaso_engine as pe, share_config
+from jwst_tool import forward, jacobian, picaso_engine as pe, share_config
 
 # Guillot T_irr defaults (K) of every registry planet, transmission and emission: removing the clip moved none.
 _REGISTRY_TIRR = {
@@ -103,6 +103,7 @@ def test_the_api_accepts_exactly_the_widget_range(widget, key, to_key, extra):
 
 def test_the_rendered_widgets_offer_exactly_the_shared_ranges():
     """Each sidebar number input, as Streamlit builds it, carries the WIDGET_RANGES bounds the API test above reads."""
+    pytest.importorskip("streamlit")
     from app_helpers import run_app
 
     at = run_app()
@@ -164,6 +165,9 @@ def test_picaso_refuses_a_vulcan_only_setting_by_name(setting):
 
 
 def test_left_out_absorbers_and_picaso_retries_ride_the_result():
+    pytest.importorskip("pandas")  # the result page's own import; the unit CI lane installs no GUI stack
+    from jwst_tool import gui_results
+
     base = {
         "unmodeled": np.array([], dtype="U32"),
         "photo_escalated": np.array([], dtype="U48"),
@@ -245,6 +249,7 @@ def test_the_result_sums_every_retried_layer(tmp_path, monkeypatch):
 
 
 def test_the_sidebar_shows_the_tirr_refusal_in_an_empty_widget_never_a_clipped_number():
+    pytest.importorskip("streamlit")
     from app_helpers import run_app
 
     at = run_app()
@@ -274,6 +279,7 @@ def test_a_custom_star_is_checked_wherever_it_is_read():
 
 def test_the_sidebar_shows_the_refusal_of_advection_without_diffusion():
     """The sidebar sends what the user ticked; canonical_params' sentence stops the Run, never a silent False."""
+    pytest.importorskip("streamlit")
     from app_helpers import run_app
 
     at = run_app()

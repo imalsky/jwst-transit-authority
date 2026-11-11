@@ -255,6 +255,7 @@ def test_a_default_vulcan_build_follows_a_picaso_assembly_in_one_process():
     import subprocess
 
     pytest.importorskip("vulcan_forward.vulcan_chem")
+    pytest.importorskip("exojax")  # the PICASO gravity anchor builds a Guillot profile through exojax
     env = {k: v for k, v in os.environ.items() if not k.startswith("VULCAN3_")}
     out = subprocess.run(
         [sys.executable, "-c", _AFTER_PICASO], env=env, capture_output=True, text=True, timeout=600, check=False
