@@ -49,7 +49,7 @@ from jwst_tool.model_defs import (
     TP_FILE_UPLOAD,
     active_molecules,
 )
-from jwst_tool.run_params import canonical_params
+from jwst_tool.run_params import canonical_params, tint_caveat
 from jwst_tool.spectrum import (
     ColumnSpectrum,
     EmissionEvidence,
@@ -503,6 +503,9 @@ def run_model(params: dict, log: Log = print) -> Path:
         The written npz; ``model_cache.load_result`` reads it.
     """
     cp = canonical_params(params)
+    tint = tint_caveat(cp)
+    if tint:
+        log(f"[fwd] WARNING: {tint}")
     _archive_uploaded_table(params, cp, log)
     advance, finish = _make_progress(cp, log)
     pic = cp["chem_provider"] == "picaso"

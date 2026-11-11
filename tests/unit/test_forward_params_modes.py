@@ -2,7 +2,7 @@
 
 import numpy as np
 import pytest
-from param_helpers import W39B_REFERENCE, _p, _pf, _table
+from param_helpers import W39B_REFERENCE, _custom, _p, _pf, _table
 
 from jwst_tool import chem_build, fisher, forward, jacobian, model_cache, model_defs, planets, run_params, tp_tables
 
@@ -603,6 +603,8 @@ def test_an_unstated_interior_temperature_runs_at_the_default_and_says_so():
     assert forward.canonical_params(dict(planet="wasp107b", tp_mode="guillot", Tint=120.0))["Tint"] == 120.0
     with pytest.raises(ValueError, match="tint_from_default=True names the default T_int, 300 K, but Tint=250"):
         forward.canonical_params(dict(stated, Tint=250.0, tint_from_default=True))
+    with pytest.raises(ValueError, match="a custom planet has no default T_int"):
+        forward.canonical_params(_custom(tint_from_default=True))
 
 
 def test_the_run_network_is_handed_to_the_engine(monkeypatch):

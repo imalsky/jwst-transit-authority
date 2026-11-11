@@ -192,6 +192,26 @@ def test_left_out_absorbers_an_unstated_tint_and_picaso_retries_ride_the_result(
     assert any("converged 3 layer solves only at a shifted temperature" in c for c in caveats)
 
 
+def test_a_run_that_does_not_state_tint_says_so_in_its_log(monkeypatch):
+    """run_model logs the result's T_int caveat before the solve; a stated T_int logs none."""
+
+    class _Stop(Exception):
+        pass
+
+    def stop(*_a):
+        raise _Stop
+
+    monkeypatch.setattr(forward, "assemble_chem", stop)
+    warning = "[fwd] WARNING: Interior temperature not stated: the run used the default T_int = 300 K."
+    for extra, logged in (({}, True), ({"Tint": 300.0}, False)):
+        lines = []
+        with pytest.raises(_Stop):
+            forward.run_model(
+                dict(planet="wasp39b", tp_mode="guillot", **extra), log=lambda *a: lines.append(" ".join(a))
+            )
+        assert (warning in lines) is logged, lines
+
+
 def test_the_picaso_worker_counts_the_layers_it_re_solves_at_a_shifted_temperature(monkeypatch):
     """picaso's ladder retries a layer at T(1 + eps); every layer that needed it is counted and certified with it."""
     from jwst_tool import picaso_worker as pw

@@ -610,6 +610,24 @@ def _default_tint(params: dict, cp: dict, r: _Resolved) -> None:
     cp["tint_from_default"] = from_default
 
 
+def tint_caveat(cp: dict) -> str | None:
+    """Return the caveat of a run that read T_int without the request stating it; the run log and the result share it.
+
+    Parameters
+    ----------
+    cp : dict
+        Canonical parameters.
+
+    Returns
+    -------
+    str or None
+        The sentence, or None when T_int was stated or is not read.
+    """
+    if cp["tint_from_default"]:
+        return f"Interior temperature not stated: the run used the default T_int = {cp['Tint']:g} K."
+    return None
+
+
 def _guillot_tirr(params: dict, cp: dict, r: _Resolved) -> None:
     """Fill and check the Guillot T_irr: the request's value, else sqrt(2) * T_eq of the selected system.
 

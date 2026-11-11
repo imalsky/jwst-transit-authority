@@ -71,9 +71,9 @@ def _model_caveats(model: dict) -> list:
             "Add them under 'Extra opacity molecules'."
         )
     # A run that read T_int without the request stating it ran at planets.default_tint: say so and which value.
-    cp = json.loads(str(model["params_json"]))
-    if cp["tint_from_default"]:
-        caveats.append(f"Interior temperature not stated: the run used the default T_int = {cp['Tint']:g} K.")
+    tint = run_params.tint_caveat(json.loads(str(model["params_json"])))
+    if tint:
+        caveats.append(tint)
     # Retry honesty: picaso re-solves a layer that does not converge at a
     # temperature shifted by up to 1e-4 of T; the run says how often.
     if str(model["chem_provider"]) == "picaso" and int(model["picaso_retried_layers"][0]):
