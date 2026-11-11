@@ -257,8 +257,11 @@ names the code state it was measured on.
   moves by up to -345 ppm at 4.28 um (-322 to -345 ppm over 4.28-4.37 um, the CO2 core), +183 ppm at 2.28 um, median
   +5.2 ppm, median |d| 35 ppm; on the old code 1e-9 against 1e-7 bar moved it by up to 122 ppm at 4.28 um, median 0.1
   [M, cold default transits at f9cc223 and on the change, 10 cores; the 1e-7 run reproduces the v63 reference to 1e-6
-  ppm]. So the 4.3 um CO2 core is still optically thick above 5.3e-6 bar, and the default transit's core depth is set
-  by the table's top [I]. The new default certified at 981 steps. HD 189733 b file mode needs `rt_ptop_bar >= 1e-7`: its
+  ppm; the sibling vulcan-forward checkout carried uncommitted refusal-only edits, 4 files at the old run and 9 at the
+  new]. Two parts: the 4.3 um CO2 core loses the absorption above 5.3e-6 bar, and the column itself moves near its new
+  top, CH4 +6.0 dex and SO2 +1.2 dex at 5.35e-6 bar, CH4 +2.2 dex at 3.1e-5 bar, CO -0.12 dex, under 0.02 dex below 2e-4
+  bar except CH4 +0.13 there [M, the two cached columns]; the CH4 rise is where the +183 ppm at 2.28 um comes from [I].
+  The new default certified at 981 steps. HD 189733 b file mode needs `rt_ptop_bar >= 1e-7`: its
   table's own top, 1.2e-8 bar, lies in a 6000 K thermosphere and is refused by the T window. Above 1e-5 bar the
   molecular-diffusion advection puts a 2dz oscillation on atomic H that the positivity clip zeroes; numerical, and the
   range's top end avoids it.

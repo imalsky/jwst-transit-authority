@@ -71,3 +71,5 @@ every widget-only number against its widget's range, and raises on anything inva
 applies the whole mapping or nothing. The range check is load-bearing: Streamlit discards an out-of-range session-state
 value silently and the widget falls back to its default, so an unchecked restore would run a different model than the
 file describes. Condensation is API-only and refused on load. Both engines round-trip, each onto its own widget keys.
+A file saved before v64 whose model top lies above its T-P table (the default WASP-39 b transit among them), or whose
+custom planet runs on a shipped table, is refused with the sentence `canonical_params` gives.
