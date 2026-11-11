@@ -25,7 +25,7 @@ TOP_RTOL = 1.0e-5
 
 def shipped_tp_table_name(planet: str) -> str:
     """Filename of the MEASURED structure table bundled for ``planet`` (its "tp_table"), or "" when it has none."""
-    entry = planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS)
+    entry = planets.PLANETS.get(planet, {})
     return entry.get("tp_table") or ""
 
 
@@ -36,7 +36,7 @@ def shipped_tp_table_is_default(planet: str) -> bool:
     end-to-end here. A planet whose table the solver will not certify at default settings stays
     selectable-but-not-default rather than erroring on arrival (planets.PLANETS[...]["tp_table_note"] says why).
     """
-    entry = planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS)
+    entry = planets.PLANETS.get(planet, {})
     return bool(entry.get("tp_table") and entry.get("tp_table_default"))
 
 
@@ -48,7 +48,7 @@ def shipped_tp_file(planet: str) -> Path:
     """
     name = shipped_tp_table_name(planet)
     if not name:
-        entry = planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS)
+        entry = planets.PLANETS.get(planet, {})
         why = entry.get("tp_table_note") or "no table is bundled for it."
         raise ValueError(
             f"tp_file='shipped' is not available for planet {planet!r}: {why} "

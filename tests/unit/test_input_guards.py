@@ -7,6 +7,7 @@ import types
 
 import numpy as np
 import pytest
+from param_helpers import _custom, _table
 
 from jwst_tool import forward, jacobian, picaso_engine as pe, share_config
 
@@ -19,18 +20,19 @@ _REGISTRY_TIRR = {
 }
 
 
-def test_the_tirr_default_is_refused_outside_its_range_never_clipped():
+def test_the_tirr_default_is_refused_outside_its_range_never_clipped(tmp_path):
     for planet, defaults in _REGISTRY_TIRR.items():
         for mode, want in zip(("transmission", "emission"), defaults, strict=True):
             cp = forward.canonical_params(dict(planet=planet, science_mode=mode, tp_mode="guillot"))
             assert cp["Tirr"] == want, (planet, mode)
-    cool = dict(planet="custom", star_teff=3300.0, rstar_rsun=0.30, orbit_au=0.05)  # sqrt(2) T_eq = 560 K
+    cool = _custom(star_teff=3300.0, rstar_rsun=0.30, orbit_au=0.05)  # sqrt(2) T_eq = 560 K
     with pytest.raises(ValueError, match=r"default Tirr .* is 560 K .* \[800, 2500\] K\. Set Tirr explicitly"):
-        forward.canonical_params(dict(cool, tp_mode="guillot"))
+        forward.canonical_params(cool)
     with pytest.raises(ValueError, match="Tirr=2600 K is outside"):
         forward.canonical_params(dict(planet="wasp39b", tp_mode="guillot", Tirr=2600.0))
     # T_irr is inert outside Guillot mode, so the cool system runs on a table
-    assert forward.canonical_params(dict(cool, tp_mode="file"))["Tirr"] == 0.0
+    table = dict(tp_mode="file", tp_file="upload", tp_file_path=str(_table(tmp_path)))
+    assert forward.canonical_params(dict(cool, **table))["Tirr"] == 0.0
 
 
 _GUILLOT = dict(planet="wasp39b", tp_mode="guillot")
@@ -260,9 +262,7 @@ def test_the_sidebar_shows_the_tirr_refusal_in_an_empty_widget_never_a_clipped_n
     assert at.number_input(key="n0_custom_tirr").value is None
     # the API's own sentence, beside the widget
     with pytest.raises(ValueError, match="is 560 K") as refusal:
-        forward.canonical_params(
-            dict(planet="custom", tp_mode="guillot", star_teff=3300.0, rstar_rsun=0.30, orbit_au=0.05)
-        )
+        forward.canonical_params(_custom(star_teff=3300.0, rstar_rsun=0.30, orbit_au=0.05))
     assert [e.value for e in at.sidebar.error] == [str(refusal.value)]
     assert all(b.disabled for b in at.button if "Run" in str(b.label))
     # back in range, the empty widget takes the default again
@@ -288,9 +288,26 @@ def test_the_model_top_widget_follows_the_table_top_and_shows_the_api_refusal():
 
 
 def test_a_custom_star_is_checked_wherever_it_is_read():
-    """A custom planet's T_irr and T_int defaults read its star in transit too, so its T_eff is range-checked there."""
+    """A custom planet's T_irr default reads its star in transit too, so its T_eff is range-checked there; with T_irr
+    stated a transit reads no star and the payload zeroes it, so a saved custom transit loads again."""
     with pytest.raises(ValueError, match="star_teff=-100"):
-        forward.canonical_params(dict(planet="custom", tp_mode="guillot", Tirr=1500.0, star_teff=-100.0))
+        forward.canonical_params(_custom(star_teff=-100.0))
+    cp = forward.canonical_params(_custom(star_teff=5000.0))
+    assert cp["star_teff"] == 0.0 and forward.canonical_params(cp) == cp
+
+
+def test_the_sidebar_sends_a_custom_planets_whole_system():
+    """The custom form sends every key a custom request must state, so the sidebar's run is refused for nothing; it
+    starts on the Guillot profile, since no table of another planet is offered."""
+    pytest.importorskip("streamlit")
+    from app_helpers import run_app
+
+    at = run_app()
+    at.selectbox(key="n0_planet").set_value("custom").run()
+    assert at.selectbox(key="n0_custom_tp").value == "guillot"
+    assert not at.error, [e.value for e in at.error]
+    at.selectbox(key="n0_provider").set_value("picaso").run()
+    assert not at.error, [e.value for e in at.error]
 
 
 def test_the_sidebar_shows_the_refusal_of_advection_without_diffusion():

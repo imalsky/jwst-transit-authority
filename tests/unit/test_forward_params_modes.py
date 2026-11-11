@@ -586,8 +586,8 @@ def test_the_climate_anchor_refusal_names_its_last_pass(monkeypatch):
 def test_tint_default_follows_the_planet():
     """WASP-107 b's Guillot T_int is its published interior temperature
     (Sing+2024, 460 K); every other planet takes the Thorngren, Gao & Fortney
-    (2019) relation at its T_eq inside 700-2800 K, else 100 K, a custom planet
-    at its own star and orbit. An explicit value wins.
+    (2019) relation at its T_eq inside 700-2800 K, else 100 K. A custom planet
+    states its own. An explicit value wins.
     """
 
     def thorngren(teq):  # their equation 3, F = 4 sigma T_eq^4 in 1e9 erg s^-1 cm^-2
@@ -598,14 +598,6 @@ def test_tint_default_follows_the_planet():
         p = planets.PLANETS[planet]
         teq = planets.system_teq(p["star"]["teff"], p["rstar_rsun"], p["orbit_au"])
         assert forward.canonical_params(dict(planet=planet, tp_mode="guillot"))["Tint"] == round(thorngren(teq))
-    hd209 = planets.PLANETS["hd209458b"]
-    hd209_system = dict(star_teff=hd209["star"]["teff"], rstar_rsun=hd209["rstar_rsun"], orbit_au=hd209["orbit_au"])
-    custom = dict(planet="custom", tp_mode="guillot", science_mode="emission", **hd209_system)
-    assert forward.canonical_params(custom)["Tint"] == 570.0
-    # a T_eq below the relation's grid keeps the generic value
-    cool = dict(custom, orbit_au=0.5)
-    assert planets.system_teq(cool["star_teff"], cool["rstar_rsun"], cool["orbit_au"]) < 700.0
-    assert forward.canonical_params(dict(cool, Tirr=900.0))["Tint"] == planets.TINT_DEFAULT_K
     assert forward.canonical_params(dict(planet="wasp107b", Tint=120.0))["Tint"] == 120.0
     # every registry default sits inside the accepted range
     for p in planets.PLANETS.values():

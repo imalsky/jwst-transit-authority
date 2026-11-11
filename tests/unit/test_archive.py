@@ -139,6 +139,7 @@ def test_archive_fill_feeds_canonical_params():
             rp_rjup=values["rp"],
             gs_cgs=values["g"] * 100.0,
             sflux="sflux-HD189_Moses11.txt",
+            Tint=300.0,
         )
     )  # the USER's explicit choice
     # canonical_params quantizes gs_cgs; the mapping must survive the round

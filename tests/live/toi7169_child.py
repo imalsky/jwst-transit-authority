@@ -20,6 +20,9 @@ STAGE = "TOI-7169 b dlnCO +h"
 def main(case_path: str) -> None:
     """Raise unless the point certifies, and certifies through the cadence escalation."""
     cp = json.loads(Path(case_path).read_text())["canonical_params"]
+    # Recorded when a custom planet still took WASP-39 b's shipped table, which a custom request is now refused. The
+    # build reads the planet name only to find that table, so naming WASP-39 b keeps the recorded column.
+    cp["planet"] = "wasp39b"
     assembly = chem_build.assemble_chem(cp, lambda *a: None)
     co_plus_h = cp["co_ratio"] * float(np.exp(model_defs.FD_STEPS["dlnCO"]))
     abun = assembly.abundance_overrides(cp["met_x_solar"], co_plus_h)

@@ -208,7 +208,7 @@ def _target_step() -> Target:
             key=K("planet"),
             format_func=lambda k: planets.PLANETS[k]["label"] if k in planets.PLANETS else "Custom planet …",
         )
-        pdef = planets.PLANETS.get(planet_key, planets.CUSTOM_DEFAULTS)
+        pdef = planets.PLANETS.get(planet_key, planets.CUSTOM_FORM_SEED)
         science_mode = st.radio(
             "Observation type",
             ["transmission", "emission"],

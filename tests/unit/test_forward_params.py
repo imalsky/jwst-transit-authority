@@ -11,7 +11,7 @@ import math
 
 import numpy as np
 import pytest
-from param_helpers import W39B_REFERENCE, _p, _pf, _table
+from param_helpers import W39B_REFERENCE, _custom, _p, _pf, _table
 
 from jwst_tool import forward, model_cache, model_defs, picaso_engine, planets, run_params, tp_tables
 
@@ -126,15 +126,39 @@ def test_guillot_default_tirr_follows_planet_and_custom_system():
     # a custom system takes its own default; a different entered system moves it
     sys_mid = dict(star_teff=5500.0, rstar_rsun=1.0, orbit_au=0.04)
     teq = planets.system_teq(**sys_mid)
-    cp = forward.canonical_params(dict(planet="custom", tp_mode="guillot", **sys_mid))
+    cp = forward.canonical_params(_custom(**sys_mid))
     assert cp["Tirr"] == round(teq * math.sqrt(2.0) / 20.0) * 20.0 != model_defs.default_tirr("wasp39b")
     # a default outside the supported range is refused, never clipped to it
     sys_cool = dict(star_teff=3300.0, rstar_rsun=0.30, orbit_au=0.05)  # T_eq ~390 K
     with pytest.raises(ValueError, match="default Tirr of this star and orbit is 560 K"):
-        forward.canonical_params(dict(planet="custom", tp_mode="guillot", **sys_cool))
+        forward.canonical_params(_custom(**sys_cool))
     # an explicit Tirr always wins over the derived default
-    cp_exp = forward.canonical_params(dict(planet="custom", tp_mode="guillot", Tirr=1234.0, **sys_cool))
+    cp_exp = forward.canonical_params(_custom(Tirr=1234.0, **sys_cool))
     assert cp_exp["Tirr"] == 1234.0
+
+
+def test_a_custom_planet_states_its_own_system_and_takes_nothing_from_wasp39b(tmp_path):
+    """A custom request missing a key of its system is refused in one sentence naming each; PICASO needs no UV
+    spectrum. A custom planet has no shipped table, its payload holds only its own system values (or the zeroed inert
+    ones) in every mode, and the payload maps to itself."""
+    with pytest.raises(ValueError) as refusal:
+        forward.canonical_params(dict(planet="custom"))
+    assert str(list(run_params.CUSTOM_REQUIRED_KEYS)) in str(refusal.value)
+    with pytest.raises(ValueError, match=r"a custom planet states its own system, and \['star_logg', 'Tint'\] are"):
+        forward.canonical_params({k: v for k, v in _custom().items() if k not in ("star_logg", "Tint")})
+    with pytest.raises(ValueError, match="tp_file='shipped' is not available for planet 'custom'"):
+        forward.canonical_params(_custom(tp_mode="file"))
+    picaso = {k: v for k, v in _custom(chem_provider="picaso", tp_mode="picaso_climate").items() if k != "sflux"}
+    upload = _custom(tp_mode="file", tp_file="upload", tp_file_path=str(_table(tmp_path)))
+    system = ("rp_rjup", "gs_cgs", "rstar_rsun", "orbit_au", "star_teff", "star_logg", "star_feh", "sflux")
+    for req in (_custom(), _custom(science_mode="emission"), _custom(use_photo=False), picaso, upload):
+        cp = forward.canonical_params(req)
+        for key in system:
+            assert cp[key] in (req.get(key, ""), 0.0), (key, cp[key], req)
+        if req is not upload:  # an upload re-resolves from the archive run_model writes
+            assert forward.canonical_params(cp) == cp
+    assert forward.canonical_params(picaso)["sflux"] == ""
+    assert forward.canonical_params(upload)["tp_file_sha1"] != W39B_REFERENCE["tp_file_sha1"]
 
 
 def test_tp_table_gates_are_grid_scoped_and_require_the_bottom(tmp_path):
@@ -157,7 +181,7 @@ def test_tp_table_gates_are_grid_scoped_and_require_the_bottom(tmp_path):
     # extends both ways past the grid, in-grid profile is a modelable 900 K
     P = np.array([lo / 100, lo, hi, hi * 100])
     T = np.array([5000.0, 900.0, 900.0, 5000.0])  # out of window only outside
-    assert tp_tables.read_tp_table(_write("ok.txt", T))["T"].size == 4
+    assert tp_tables.read_tp_table(_write("ok.txt", T), span=(lo, hi))["T"].size == 4
     # in-grid profile itself breaches the ceiling -> refused
     T_bad = np.array([5000.0, 2990.0, 900.0, 5000.0])
     with pytest.raises(ValueError):

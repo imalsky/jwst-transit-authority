@@ -32,6 +32,25 @@ def _table(tmp_path, kzz=True, name="prof.txt", tmin=800.0, tmax=1400.0, rows=8,
     return p
 
 
+def _custom(**kw):
+    """A complete custom request whose system differs from WASP-39 b's (the GUI form's seed) in every field."""
+    base = dict(
+        planet="custom",
+        rp_rjup=1.1,
+        gs_cgs=800.0,
+        rstar_rsun=0.8,
+        orbit_au=0.04,
+        star_teff=4800.0,
+        star_logg=4.4,
+        star_feh=0.1,
+        sflux="Gueymard_solar.txt",
+        tp_mode="guillot",
+        Tint=250.0,
+    )
+    base.update(kw)
+    return base
+
+
 def _pf(path, **kw):
     base = dict(
         planet="wasp39b",

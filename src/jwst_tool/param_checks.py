@@ -51,10 +51,11 @@ def _check_range(key: str, value: float, rng: tuple, unit: str = "") -> None:
         raise ValueError(f"{key}={value:g} outside [{rng[0]:g}, {rng[1]:g}]{' ' + unit if unit else ''}")
 
 
-def check_system(cp: dict) -> None:
+def check_system(cp: dict, tirr_derived: bool) -> None:
     """Refuse planet, star, orbit, temperature-profile and cloud values outside the ranges the sidebar offers.
 
     Each is checked only where the run's modes use it, since an inert value is zeroed in the canonical payload.
+    ``tirr_derived``: the Guillot T_irr default is computed from the star and orbit.
     """
     rng = planets.CUSTOM_FIELD_RANGES
     _check_range("rp_rjup", cp["rp_rjup"], rng["rp"], "R_jup")
@@ -62,9 +63,9 @@ def check_system(cp: dict) -> None:
     _check_range("rstar_rsun", cp["rstar_rsun"], rng["rstar"], "R_sun")
     _check_range("orbit_au", cp["orbit_au"], rng["a"], "au")
     climate = cp["tp_mode"] == "picaso_climate"
-    # The star is read by Fp/Fs and the climate solve (all three values), and by a custom planet's T_irr and T_int
-    # defaults (its T_eff), in either mode.
-    if cp["science_mode"] == "emission" or climate or cp["planet"] == "custom":
+    # The star is read by Fp/Fs and the climate solve (all three values), and by a custom planet's T_irr default (its
+    # T_eff), in either mode.
+    if cp["science_mode"] == "emission" or climate or (cp["planet"] == "custom" and tirr_derived):
         _check_range("star_teff", cp["star_teff"], rng["teff"], "K (the PHOENIX grid range exercised)")
     if cp["science_mode"] == "emission" or climate:
         _check_range("star_logg", cp["star_logg"], rng["logg"], "(log10 cm s^-2)")

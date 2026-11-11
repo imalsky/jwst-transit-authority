@@ -826,6 +826,14 @@ Standing maintainer decisions; the measurements sit in the section named.
   list NH3 as an extra still load. Which fixed numbers become settings, and the two defaults
   the GUI and the API still disagree on (`jac_method`, `extra_mols`), wait for the
   maintainer (todo).
+- A custom planet states its own system, UV spectrum (VULCAN only), T-P mode and T_int (v64,
+  `run_params.CUSTOM_REQUIRED_KEYS`), refused in one sentence naming every missing key: nothing comes from WASP-39 b,
+  and a shipped table belongs to its planet only. `planets.CUSTOM_FORM_SEED` seeds the GUI form and nothing else; the
+  form sends every key, its T_int in file mode too. Share files of earlier versions carry the whole canonical key set: a
+  custom Guillot transit or eclipse and a PICASO transit or eclipse load unchanged but for the version (the Guillot
+  transit was refused through v63: its payload's zeroed star was range-checked), and a custom run on WASP-39 b's
+  shipped table is refused with the shipped-table sentence [M, five share files written at f9cc223, loaded on the
+  change].
 - GUI copy is for an exoplanet proposer: precise terms stay, explaining prose goes,
   caveats live in README or notes ("GUI, figures and copy", "Do not retry").
 - Capacity is one Space and its slot limit: no self-scaler, queue or overflow Space

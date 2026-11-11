@@ -203,6 +203,22 @@ _REMOVED_PARAM_KEYS = frozenset(
 _REMOVED_TRANSPORT_KEYS = frozenset({"use_settling", "diff_esc", "top_flux", "bot_flux"})
 
 
+# What a custom request states itself: its system, UV spectrum, T-P mode and interior temperature. Nothing is taken from
+# another planet. A PICASO request reads no UV spectrum, so it may leave sflux out.
+CUSTOM_REQUIRED_KEYS = (
+    "rp_rjup",
+    "gs_cgs",
+    "rstar_rsun",
+    "orbit_au",
+    "star_teff",
+    "star_logg",
+    "star_feh",
+    "sflux",
+    "tp_mode",
+    "Tint",
+)
+
+
 def _check_request_keys(params: dict) -> None:
     """Refuse unknown and removed keys by name, and the removed settling, escape and boundary-flux settings."""
     transport = sorted(set(params) & _REMOVED_TRANSPORT_KEYS)
@@ -245,7 +261,7 @@ PICASO_INERT = {
 }
 
 
-def _engine_settings(params: dict) -> tuple[str, str, bool, str]:
+def _engine_settings(params: dict, sysd: dict) -> tuple[str, str, bool, str]:
     """Return (tp_mode, chem_provider, is PICASO, network), refusing settings of the other engine."""
     tp_mode = str(params.get("tp_mode", default_tp_mode(params)))
     if tp_mode not in TP_PARAM_NAMES:
@@ -273,7 +289,7 @@ def _engine_settings(params: dict) -> tuple[str, str, bool, str]:
             vulcan_only.append("network")
         if str(params.get("kzz_mode", "const")) != "const":
             vulcan_only.append(f"kzz_mode={params.get('kzz_mode')!r}")
-        inert = dict(PICASO_INERT, sflux=_planet(params)[1]["sflux"])
+        inert = dict(PICASO_INERT, sflux=sysd["sflux"])
         vulcan_only += [f"{k}={params[k]!r}" for k, v in inert.items() if k in params and params[k] != v]
         if vulcan_only:
             raise ValueError(
@@ -367,14 +383,35 @@ def _column_settings(params: dict, tp_mode: str, pic: bool) -> _ColumnSettings:
 
 
 def _planet(params: dict) -> tuple[str, dict]:
-    """Return the planet and its registry entry, refusing an unknown name."""
+    """Return the planet and its system: the registry entry, or a custom planet's own, in the registry's shape.
+
+    A custom request missing any of CUSTOM_REQUIRED_KEYS is refused in one sentence naming each. Its sflux under PICASO,
+    inert, is the stated value or "".
+    """
     planet = str(params.get("planet", "wasp39b"))
-    if planet not in planets.PLANETS and planet != "custom":
+    if planet in planets.PLANETS:
+        return planet, planets.PLANETS[planet]
+    if planet != "custom":
         raise ValueError(f"unknown planet {planet!r}")
-    return planet, planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS)
+    pic = str(params.get("chem_provider", "vulcan")) == "picaso"
+    missing = [k for k in CUSTOM_REQUIRED_KEYS if k not in params and not (pic and k == "sflux")]
+    if missing:
+        raise ValueError(
+            f"a custom planet states its own system, and {missing} are missing: give the planet's radius and gravity, "
+            "the star's radius, T_eff, log g and [Fe/H], the orbit, the UV spectrum (VULCAN), the T-P profile (Guillot "
+            "or an uploaded table) and the interior temperature Tint. Nothing is taken from another planet."
+        )
+    return planet, {
+        "rp_rjup": params["rp_rjup"],
+        "gs_cgs": params["gs_cgs"],
+        "rstar_rsun": params["rstar_rsun"],
+        "orbit_au": params["orbit_au"],
+        "sflux": params.get("sflux", ""),
+        "star": {"teff": params["star_teff"], "log_g": params["star_logg"], "metallicity": params["star_feh"]},
+    }
 
 
-def _solver_settings(params: dict, sysd: dict) -> _SolverSettings:
+def _solver_settings(params: dict, sysd: dict, pic: bool) -> _SolverSettings:
     """Return the grid, the convergence gates and the UV spectrum, refusing out-of-range values."""
     nz_raw = params.get("nz", NZ_DEFAULT)
     if isinstance(nz_raw, bool) or not float(nz_raw).is_integer():
@@ -402,7 +439,7 @@ def _solver_settings(params: dict, sysd: dict) -> _SolverSettings:
             "yconv_cri."
         )
     sflux = str(params.get("sflux", sysd["sflux"]))
-    if sflux not in planets.SFLUX_CHOICES:
+    if sflux not in planets.SFLUX_CHOICES and not (pic and sflux == ""):  # "": a custom PICASO run, no UV read
         raise ValueError(f"unknown stellar UV spectrum {sflux!r} (choose from {list(planets.SFLUX_CHOICES)})")
     return _SolverSettings(nz, yconv_cri, yconv_min, sflux)
 
@@ -423,7 +460,7 @@ class _Resolved:
 
 def _filled_payload(params: dict, r: _Resolved) -> dict:
     """Return the canonical key set with every default filled, at the request's own values (_rounded rounds last)."""
-    star_ref = planets.PLANETS.get(r.planet, planets.CUSTOM_DEFAULTS)["star"]
+    star_ref = r.sysd["star"]
     extra_mols = {str(m) for m in (params.get("extra_mols") or [])}
     if extra_mols & FORMER_EXTRA_MOLECULES:
         logger.info("extra_mols %s dropped: always in the RT set now", sorted(extra_mols & FORMER_EXTRA_MOLECULES))
@@ -660,10 +697,10 @@ def canonical_params(params: dict) -> dict:
     by feeding it back in (share_config).
     """
     _check_request_keys(params)
-    tp_mode, provider, pic, network = _engine_settings(params)
-    column = _column_settings(params, tp_mode, pic)
     planet, sysd = _planet(params)
-    solver = _solver_settings(params, sysd)
+    tp_mode, provider, pic, network = _engine_settings(params, sysd)
+    column = _column_settings(params, tp_mode, pic)
+    solver = _solver_settings(params, sysd, pic)
     r = _Resolved(
         tp_mode=tp_mode,
         provider=provider,
@@ -675,7 +712,7 @@ def canonical_params(params: dict) -> dict:
         solver=solver,
     )
     cp = _filled_payload(params, r)
-    check_system(cp)
+    check_system(cp, tirr_derived=tp_mode == "guillot" and "Tirr" not in params)
     _default_tint(params, cp, r)
     check_tint(cp, derived="Tint" not in params)
     _guillot_tirr(params, cp, r)

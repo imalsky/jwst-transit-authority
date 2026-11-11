@@ -200,7 +200,7 @@ def default_tint(planet: dict, system: dict | None = None) -> float:
     Parameters
     ----------
     planet : dict
-        A registry entry (``PLANETS[...]`` or ``CUSTOM_DEFAULTS``).
+        A registry entry (``PLANETS[...]``, or ``CUSTOM_FORM_SEED`` for the GUI's custom form).
     system : dict, optional
         ``star_teff`` (K), ``rstar_rsun`` (R_Sun) and ``orbit_au`` (au) of the custom planet; None for a registry
         planet, whose own star and orbit are used.
@@ -225,8 +225,9 @@ def default_tint(planet: dict, system: dict | None = None) -> float:
     )
 
 
-# The "custom" planet starts from these (WASP-39b) values; everything editable.
-CUSTOM_DEFAULTS = PLANETS["wasp39b"]
+# The seed of the GUI's custom-planet form only (WASP-39 b's values, every field editable). The API never reads it: a
+# custom request states its own system (run_params.CUSTOM_REQUIRED_KEYS).
+CUSTOM_FORM_SEED = PLANETS["wasp39b"]
 
 # Single source of truth for the custom-planet form bounds, in WIDGET units
 # (g in m s^-2 = gs_cgs / 100; everything else as displayed). the sidebar unpacks

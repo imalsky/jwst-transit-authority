@@ -262,6 +262,9 @@ def _tp_section(target: Target, pic: bool, chem_provider: str) -> Profile:
             tp_kwargs = _guillot_boxes(target, tint_refusal)
         elif tp_mode == "file":
             tp_file, tp_file_path, tp_file_ok = _table_source(target)
+            # a table reads no T_int, but a custom request states one (run_params.CUSTOM_REQUIRED_KEYS)
+            if st.session_state.get(k("tint")) is not None:
+                tp_kwargs["Tint"] = st.session_state[k("tint")]
     return Profile(tp_mode, tp_kwargs, tp_file, tp_file_path, tp_file_ok)
 
 

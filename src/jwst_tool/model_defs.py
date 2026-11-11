@@ -288,7 +288,7 @@ def default_tirr(planet: str, system: dict | None = None, science_mode: str = "t
     planet pass ``system`` (star_teff, rstar_rsun, orbit_au).
     """
     return planets.default_tirr(
-        planets.PLANETS.get(planet, planets.CUSTOM_DEFAULTS),
+        planets.PLANETS.get(planet, {}),
         system=(system if planet not in planets.PLANETS else None),
         science_mode=science_mode,
     )
