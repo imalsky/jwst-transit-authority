@@ -6,7 +6,12 @@ import numpy as np
 
 from jwst_tool import planets
 
-MOLECULES = ["H2O", "CO2", "CO", "CH4", "SO2"]  # always-on RT set
+# Always-on RT set. vulcan-forward refuses a band that lacks H2O, CO2, CO, CH4 or NH3 where each absorbs
+# (constants.REQUIRED_MOLECULES), so those five are never optional here; SO2 stays on with them.
+MOLECULES = ["H2O", "CO2", "CO", "CH4", "SO2", "NH3"]
+# Extras of earlier versions that are now always on. `extra_mols` may still name one (an old share file or script):
+# it is dropped from the list, and the run is the model that was asked for.
+FORMER_EXTRA_MOLECULES = frozenset({"NH3"})
 
 # RT additions the network already solves; extra_mols exposes them to the RT.
 EXTRA_MOLECULES = [
@@ -23,7 +28,6 @@ EXTRA_MOLECULES = [
     "HCN",
     "N2O",
     "NH",
-    "NH3",
     "NO",
     "NS",
     "OCS",
@@ -33,7 +37,7 @@ EXTRA_MOLECULES = [
 ]
 
 # GUI preselection: NEVER widen without a measured leave-one-out ppm impact.
-EXTRA_MOLECULES_DEFAULT = ["C2H2", "C2H4", "H2S", "HCN", "NH3", "OCS", "SH", "SO"]
+EXTRA_MOLECULES_DEFAULT = ["C2H2", "C2H4", "H2S", "HCN", "OCS", "SH", "SO"]
 
 # Kinetics networks -> the engine's import-frozen (VULCAN3_NETWORK,
 # VULCAN3_ATOM_LIST) pair. "sncho2025" (93 species) is the default: what
@@ -61,7 +65,7 @@ DT_MAX_S = 1.0e13  # chemistry step-size cap (s); prevents the adaptive-dt ballo
 
 # model_cache buster (identity = canonical params + this number, never a content
 # hash); bump on any physics or canonical-key-set change.
-_VERSION = 61
+_VERSION = 62
 
 # The W39b cfg's elemental set (number ratios to H, 10x solar): Lodders 2020
 # Table 8 present-day solar (log eps C 8.47, N 7.85, O 8.73, S 7.15; He is

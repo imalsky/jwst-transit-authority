@@ -12,6 +12,7 @@ from jwst_tool.model_defs import (
     CHEM_PROVIDERS,
     CO_DEFAULT,
     DEFAULT_NETWORK,
+    FORMER_EXTRA_MOLECULES,
     NETWORKS,
     NZ_DEFAULT,
     NZ_RANGE,
@@ -439,7 +440,7 @@ def _filled_payload(params: dict, r: _Resolved) -> dict:
         # physical VULCAN knobs (all flow through cfg_overrides; the defaults
         # are the W39b cfg values)
         "use_photo": bool(params.get("use_photo", not r.pic)),
-        "sl_angle_deg": round(float(params.get("sl_angle_deg", 83.0)), 1),
+        "sl_angle_deg": round(float(params.get("sl_angle_deg", planets.SL_ANGLE_DEG[r.column.science_mode])), 1),
         "f_diurnal": round(float(params.get("f_diurnal", 1.0)), 3),
         "use_moldiff": bool(params.get("use_moldiff", not r.pic)),
         # Upwind molecular-diffusion advection: PINNED explicitly, never
@@ -469,7 +470,7 @@ def _filled_payload(params: dict, r: _Resolved) -> dict:
         "diff_esc": [],
         "top_flux": [],
         "bot_flux": [],
-        "extra_mols": sorted({str(m) for m in (params.get("extra_mols") or [])}),
+        "extra_mols": sorted({str(m) for m in (params.get("extra_mols") or [])} - FORMER_EXTRA_MOLECULES),
         # Leave-one-out spectrum set: None = every RT molecule (the detect
         # default), [] skips the block. param_checks puts it in fold order.
         "wo_mols": None if params.get("wo_mols") is None else [str(m) for m in params["wo_mols"]],

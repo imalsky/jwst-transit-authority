@@ -74,7 +74,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 # the vendored house figure style the GUI loads at startup + the per-release
 # NASA Exoplanet Archive snapshot behind the custom-planet fill
-jwst_tool = ["science.mplstyle", "exoplanet_archive_pscomppars.csv"]
+jwst_tool = ["science.mplstyle", "exoplanet_archive_pscomppars.csv", "stellar_flux/*.txt"]
 
 [tool.setuptools.dynamic]
 version = { attr = "jwst_tool._version.__version__" }

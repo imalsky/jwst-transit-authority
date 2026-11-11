@@ -16,16 +16,13 @@ from pathlib import Path
 
 import jax.numpy as jnp
 import numpy as np
-from vulcan_forward import (
-    _rt_geometry,
-    constants,
-    exojax_rt,
-    interp_map,
-    vulcan_chem,  # noqa: F401  (env + jax x64; must precede exojax)
-)
 
+# isort: off
+from vulcan_forward import vulcan_chem  # noqa: F401  # first: it sets jax x64 and the frozen network before exojax
+from vulcan_forward import _rt_geometry, constants, exojax_rt, interp_map
 from jwst_tool import chem_build, forward, planets
 from jwst_tool.stellar import phoenix_surface_flux
+# isort: on
 
 OUT = Path(__file__).resolve().parents[2] / "data"
 WL_CMP = (3.03, 5.17)
@@ -98,7 +95,7 @@ else:
     emis = exojax_rt.build_emis_model(rt, profile)
     # eclipse flux: carries the tau = 2/3 photospheric radius per wavelength
     fp = np.asarray(emis.eclipse_flux_tau(vmr_j, J(h2), J(T_art), J(mmw), vmr_he=J(he))[0])
-    fs = phoenix_surface_flux(rt.nu_grid, cp["star_teff"], cp["star_logg"], cp["star_feh"])
+    fs = phoenix_surface_flux(rt.nu_edges, cp["star_teff"], cp["star_logg"], cp["star_feh"])
     r_em = float(emis.emission_radius(J(T_art), J(mmw)))
     out.update(
         wl_um=rt.wl_um,

@@ -6,6 +6,7 @@ Method and contract: docs/forward_model.md, section `planets`.
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Any
 
 # IAU 2015 Resolution B3 nominal values (R_jup equatorial, R_sun, and
@@ -17,16 +18,29 @@ AU_CM = 1.495978707e13  # only converts orbit_au in system_teq
 G_CGS = 6.67430e-8  # gravitational constant (cm^3 g^-1 s^-2); for gs_cgs -> Mp
 M_JUP_G = 1.89813e30  # Jupiter mass (g); for archive mass -> surface gravity
 
-# Shipped stellar UV spectra usable as photochemistry input (VULCAN-JAX
-# atm/stellar_flux/, all same two-column surface-flux format), labeled by type.
+# Stellar UV spectra usable as photochemistry input, all in one two-column surface-flux format, labeled by type. Most
+# ship with vulcan3 (atm/stellar_flux/); OWN_SFLUX ship with this package. vulcan3's sflux-epseri.txt is not offered:
+# it covers 115-283 nm, and vulcan-forward refuses a spectrum shorter than the network's photolysis thresholds.
 SFLUX_CHOICES = {
     "sflux-W39b_Tsai2023.txt": "WASP-39 (G8V, Tsai 2023)",
     "Gueymard_solar.txt": "Sun (G2V, Gueymard 2004)",
+    "sflux-solar_hd209b.txt": "HD 209458 proxy (Sun scaled to 6091 K)",
     "sflux-HD189_Moses11.txt": "HD 189733 (K1.5V, Moses 2011)",
-    "sflux-epseri.txt": "eps Eridani (K2V, StarCAT)",
+    "sflux-HD85512_W107b.txt": "WASP-107 proxy (HD 85512 scaled to 4425 K, MUSCLES)",
     "sflux-GJ436.txt": "GJ 436 (M2.5V, MUSCLES)",
     "sflux-GJ1214.txt": "GJ 1214 (M4.5V, MUSCLES)",
 }
+# The sulfur survey's proxies (vulcan-retrieval data/survey/), shipped here in stellar_flux/ so the planner and the
+# survey read the same file for the same star (tests/unit/test_survey_parity.py compares them).
+OWN_SFLUX = frozenset({"sflux-solar_hd209b.txt", "sflux-HD85512_W107b.txt"})
+
+
+def sflux_file(name: str) -> str:
+    """Return the path vulcan3 reads ``name`` from: this package's file, or its own ``atm/stellar_flux`` entry."""
+    if name in OWN_SFLUX:
+        return str(Path(__file__).resolve().parent / "stellar_flux" / name)
+    return f"atm/stellar_flux/{name}"
+
 
 # Where each shipped spectrum comes from: (data set, DOI, page). Keyed exactly
 # like SFLUX_CHOICES -- a spectrum without a citation cannot be listed in the
@@ -48,13 +62,6 @@ SFLUX_SOURCES = {
         "10.1088/0004-637X/737/1/15",
         "https://doi.org/10.1088/0004-637X/737/1/15",
     ),
-    # upstream VULCAN built this file from the HST/STIS StarCAT UVSum
-    # spectrum of HD 22049 (atm/make_spectra_in_nm.py), not from MUSCLES
-    "sflux-epseri.txt": (
-        "StarCAT (Ayres 2010)",
-        "10.1088/0067-0049/187/1/149",
-        "https://archive.stsci.edu/prepds/starcat/",
-    ),
     "sflux-GJ436.txt": (
         "MUSCLES Treasury Survey",
         "10.3847/0004-637X/820/2/89",
@@ -62,6 +69,8 @@ SFLUX_SOURCES = {
     ),
 }
 SFLUX_SOURCES["sflux-GJ1214.txt"] = SFLUX_SOURCES["sflux-GJ436.txt"]
+SFLUX_SOURCES["sflux-HD85512_W107b.txt"] = SFLUX_SOURCES["sflux-GJ436.txt"]
+SFLUX_SOURCES["sflux-solar_hd209b.txt"] = SFLUX_SOURCES["Gueymard_solar.txt"]
 
 # Per-planet MEASURED structure tables bundled with vulcan3 (atm/).
 #
@@ -113,13 +122,15 @@ PLANETS: dict[str, dict[str, Any]] = {
     ),
     "hd209458b": dict(
         label="HD 209458 b",
-        star=dict(teff=6065.0, log_g=4.4, metallicity=0.0, ks_mag=6.31),
-        rstar_rsun=1.155,
-        rp_rjup=1.359,
-        gs_cgs=930.0,
-        orbit_au=0.0475,
+        # The sulfur survey's system (vulcan-retrieval runs/survey/hd209458b.yaml): the 1 mbar transit radius
+        # 9.986325e9 cm, g = G Mp / rp^2 with Mp 0.73 M_J, and the solar UV spectrum scaled to the host's Teff.
+        star=dict(teff=6091.0, log_g=4.4, metallicity=0.0, ks_mag=6.31),
+        rstar_rsun=1.19,
+        rp_rjup=1.39685,
+        gs_cgs=927.35,
+        orbit_au=0.04707,
         t14_hr=3.07,
-        sflux="Gueymard_solar.txt",
+        sflux="sflux-solar_hd209b.txt",
         tp_table=None,
         tp_table_default=False,
         tp_table_note=(
@@ -129,17 +140,20 @@ PLANETS: dict[str, dict[str, Any]] = {
             "Out-of-window profiles are refused, never clipped, so this planet "
             "keeps the analytic default."
         ),
-        note="The classic inflated hot Jupiter (G0V host; solar UV spectrum, same proxy the VULCAN HD209 config uses).",
+        note="The classic inflated hot Jupiter (G0V host; the solar UV spectrum scaled to its temperature).",
     ),
     "wasp107b": dict(
         label="WASP-107 b",
-        star=dict(teff=4430.0, log_g=4.6, metallicity=0.0, ks_mag=8.64),
-        rstar_rsun=0.67,
-        rp_rjup=0.94,
-        gs_cgs=270.0,
-        orbit_au=0.0553,
+        # The sulfur survey's system (vulcan-retrieval runs/survey/wasp107b.yaml): the 1 mbar transit radius
+        # 6.567906e9 cm, g = G Mp / rp^2 with Mp 0.1039 M_J, and the MUSCLES HD 85512 UV spectrum scaled to the
+        # host's Teff (the proxy of Dyrek et al. 2024).
+        star=dict(teff=4425.0, log_g=4.6, metallicity=0.0, ks_mag=8.64),
+        rstar_rsun=0.657,
+        rp_rjup=0.91869,
+        gs_cgs=305.14,
+        orbit_au=0.055,
         t14_hr=2.74,
-        sflux="sflux-epseri.txt",
+        sflux="sflux-HD85512_W107b.txt",
         tp_table=None,
         tp_table_default=False,
         tp_table_note="vulcan3 bundles no measured T-P/Kzz table for this planet.",
@@ -150,12 +164,16 @@ PLANETS: dict[str, dict[str, Any]] = {
         # place.
         tint_k=460.0,
         note="Warm Neptune-mass super-puff: very low gravity means huge "
-        "spectral features (K6V host; eps Eri UV proxy).",
+        "spectral features (K6V host; HD 85512 UV proxy).",
     ),
 }
 
 # Guillot T_int for a planet without a published interior temperature.
 TINT_DEFAULT_K = 100.0
+
+# Photolysis zenith angle, degrees. A transit sees the terminator: 83 deg is the slant of vulcan3's WASP-39 b config
+# (Tsai et al. 2023). An eclipse sees the dayside: 58 deg is VULCAN's dayside-average angle (Tsai et al. 2021).
+SL_ANGLE_DEG = {"transmission": 83.0, "emission": 58.0}
 
 
 def default_tint(planet: dict) -> float:

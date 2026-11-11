@@ -32,13 +32,16 @@ def _pi_planck_nu(nu_cm: np.ndarray, teff: float) -> np.ndarray:
     return np.pi * 2.0 * _H * _C**2 * nu_cm**3 / np.expm1(x)
 
 
-def phoenix_surface_flux(nu_grid: np.ndarray, teff: float, logg: float, feh: float, log: Log = print) -> np.ndarray:
-    """Return the PHOENIX stellar surface flux density on ``nu_grid``.
+def phoenix_surface_flux(nu_edges: np.ndarray, teff: float, logg: float, feh: float, log: Log = print) -> np.ndarray:
+    """Return the PHOENIX stellar surface flux density averaged over each band of ``nu_edges``.
+
+    The planet flux is a mean over each correlated-k band, so the star's is too: a point sample at a band centre lands
+    on or between the star's lines and moves the eclipse depth of that band with it.
 
     Parameters
     ----------
-    nu_grid : ndarray [n_nu]
-        Wavenumbers, cm^-1, in any order.
+    nu_edges : ndarray [n_nu + 1]
+        Band edges, cm^-1, increasing (the RT model's ``nu_edges``).
     teff : float
         Effective temperature, K.
     logg : float
@@ -51,7 +54,7 @@ def phoenix_surface_flux(nu_grid: np.ndarray, teff: float, logg: float, feh: flo
     Returns
     -------
     ndarray [n_nu]
-        Surface flux density, erg s^-1 cm^-2 / cm^-1.
+        Band-mean surface flux density, erg s^-1 cm^-2 / cm^-1.
 
     Raises
     ------
@@ -59,6 +62,8 @@ def phoenix_surface_flux(nu_grid: np.ndarray, teff: float, logg: float, feh: flo
         The PHOENIX grid is absent (``jwst-tool fetch`` downloads it).
     RuntimeError
         The flux is non-finite or non-positive, or fails the energy-closure check.
+    ValueError
+        ``nu_edges`` is not a one-dimensional increasing array of at least two edges.
     """
     from jwst_tool import instruments as ins
 
@@ -86,10 +91,18 @@ def phoenix_surface_flux(nu_grid: np.ndarray, teff: float, logg: float, feh: flo
     stsynphot.conf.rootdir = ins.PYSYN_CDBS  # config too, not only the env var
 
     spec = stsynphot.grid_to_spec("phoenix", float(teff), float(feh), float(logg))
-    nu = np.asarray(nu_grid, dtype=np.float64)
-    wl_angstrom = 1.0e8 / nu
-    flam = spec(wl_angstrom, flux_unit=syn_units.FLAM).value  # erg s^-1 cm^-2 A^-1
-    fs_nu = flam * 1.0e8 / nu**2  # per cm^-1
+    edges = np.asarray(nu_edges, dtype=np.float64)
+    if edges.ndim != 1 or edges.size < 2 or np.any(np.diff(edges) <= 0.0):
+        raise ValueError(f"nu_edges must be increasing band edges (cm^-1), got shape {edges.shape}")
+    nu = np.sqrt(edges[:-1] * edges[1:])  # the engine's band centres
+    # The mean of F_nu over a band is the integral of F_lambda over its wavelength span, divided by its width in
+    # wavenumber. The integral is a trapezoid on the grid's own samples plus the band edges.
+    wl_edges = 1.0e8 / edges[::-1]  # Angstrom, increasing
+    native = np.asarray(spec.waveset.to_value("angstrom"), dtype=np.float64)
+    wl = np.union1d(wl_edges, native[(native > wl_edges[0]) & (native < wl_edges[-1])])
+    flam = spec(wl, flux_unit=syn_units.FLAM).value  # erg s^-1 cm^-2 A^-1
+    cumulative = np.concatenate([[0.0], np.cumsum(0.5 * (flam[1:] + flam[:-1]) * np.diff(wl))])
+    fs_nu = np.diff(cumulative[np.searchsorted(wl, wl_edges)])[::-1] / np.diff(edges)  # per cm^-1
     if not np.all(np.isfinite(fs_nu)) or np.any(fs_nu <= 0.0):
         raise RuntimeError(
             f"PHOENIX surface flux non-finite/non-positive on the RT grid "

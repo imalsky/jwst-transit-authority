@@ -280,6 +280,7 @@ _ECHOED = {
     "rt_integration": "simpson",
     "p_ref_bar": 1.0,
     "opacity_mode": "exomolop",
+    "omit_core_molecules": [],
 }
 
 
@@ -291,7 +292,7 @@ def test_an_engine_that_does_not_echo_a_setting_is_refused(wrong, monkeypatch):
     echo = dict(_ECHOED)
     if wrong is not None:
         echo[wrong] = "not honored"
-    rt = SimpleNamespace(p_art_bar=np.array([1.0, 0.1]), **echo)
+    rt = SimpleNamespace(p_art_bar=np.array([1.0, 0.1]), unlisted_core_molecules=[], **echo)
     fake = SimpleNamespace(build_rt_model=lambda profile: rt)
     monkeypatch.setitem(sys.modules, "vulcan_forward.exojax_rt", fake)
     monkeypatch.setattr(vulcan_forward, "exojax_rt", fake, raising=False)
@@ -303,7 +304,7 @@ def test_an_engine_that_does_not_echo_a_setting_is_refused(wrong, monkeypatch):
         "science_mode": "transmission",
         "cloud_on": False,
     }
-    profile = {"art_pbtm_bar": 7.0, "opacity_mode": "exomolop"}
+    profile = {"art_pbtm_bar": 7.0, "opacity_mode": "exomolop", "omit_core_molecules": []}
     tp_eval = object()  # parametric: no tabulated column to map
     if wrong is None:
         setup = spectrum.build_rt_setup(cp, profile, tp_eval, None, None, lambda: None, _quiet)

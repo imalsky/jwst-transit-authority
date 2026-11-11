@@ -218,6 +218,8 @@ def rt_profile_common(cp: dict, config: Any) -> dict:
     # opacity path; set explicitly so the echo check can verify it.
     profile["opacity_mode"] = "exomolop"
     profile["molecules"] = active_molecules(cp)
+    # The sulfur-free network cannot carry them, so they are named as left out, not reported as an oversight.
+    profile["omit_core_molecules"] = ["H2S", "SO2"] if cp["network"] == "ncho" else []
     profile["use_photo"] = cp["use_photo"]  # build_chem_model reads this key
     profile["use_rayleigh"] = cp["use_rayleigh"]  # exojax_rt reads this flag
     # Planet identity
@@ -243,7 +245,7 @@ def _cfg_overrides(cp: dict, rp_cm: float, net_path: str, net_atoms: str, log: L
         "Rp": rp_cm,
         "r_star": cp["rstar_rsun"],
         "orbit_radius": cp["orbit_au"],
-        "sflux_file": f"atm/stellar_flux/{cp['sflux']}",
+        "sflux_file": planets.sflux_file(cp["sflux"]),
         "use_moldiff": cp["use_moldiff"],
         # pin the vm_mol scheme EXPLICITLY, never inherit the upstream YAML
         # default; the two flags travel together (hybrid is how vm_mol runs)

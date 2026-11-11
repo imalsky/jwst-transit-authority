@@ -318,7 +318,7 @@ def _kzz_section(k: KeyFn, pic: bool, tp_mode: str) -> Mixing:
     return Mixing(picaso_quench, kzz_mode, kzz_x, kzz_const, kzz_kmax, kzz_plev, kzz_kdeep)
 
 
-def _photochemistry_section(pic: bool) -> Photochemistry:
+def _photochemistry_section(pic: bool, science_mode: str) -> Photochemistry:
     if pic:  # VULCAN-JAX settings; none of them is sent under PICASO
         network, use_photo, use_moldiff, use_vm_mol = "", False, False, False
         sl_angle_deg, f_diurnal = 0.0, 1.0
@@ -341,10 +341,18 @@ def _photochemistry_section(pic: bool) -> Photochemistry:
             # the Run block shows its sentence, rather than the widget
             # silently reverting.
             use_photo = st.checkbox("Photochemistry (UV photolysis)", key=K("photo"))
-            # default 83 deg = the zenith angle of vulcan3's WASP-39 b
-            # config (configs/W39b.yaml); upstream's dayside average is 58 deg
+            # The default follows the science mode (planets.SL_ANGLE_DEG, shared with canonical_params): the
+            # terminator's slant for a transit, the dayside average for an eclipse. On a mode switch a widget still
+            # holding the other mode's default moves to this mode's; an explicit choice survives.
+            sza_default = planets.SL_ANGLE_DEG[science_mode]
+            sza_other = set(planets.SL_ANGLE_DEG.values()) - {sza_default}
+            if K("sza") not in st.session_state or (
+                st.session_state.get(K("sza_scimode_seen")) != science_mode and st.session_state[K("sza")] in sza_other
+            ):
+                st.session_state[K("sza")] = sza_default
+            st.session_state[K("sza_scimode_seen")] = science_mode
             sl_angle_deg = st.number_input(
-                "Photolysis zenith angle (degrees)", *_W["sza"], 1.0, key=K("sza"), disabled=not use_photo
+                "Photolysis zenith angle (degrees)", *_W["sza"][:2], step=1.0, key=K("sza"), disabled=not use_photo
             )
             f_diurnal = st.number_input(
                 "Diurnal photolysis factor", *_W["fdiur"], 0.05, key=K("fdiur"), disabled=not use_photo
@@ -458,7 +466,7 @@ def atmosphere_step(target: Target, ksrc: dict, ksrc_err: str | None) -> Atmosph
     rt_ptop_bar, p_ref_bar, p_btm_bar = _pressure_section(target.science_mode, profile.tp_mode)
     met, co_ratio = _composition_section()
     mixing = _kzz_section(target.k, pic, profile.tp_mode)
-    photo = _photochemistry_section(pic)
+    photo = _photochemistry_section(pic, target.science_mode)
     base_set, extra_set, extra_mols = _opacity_section(pic, photo.network, ksrc, ksrc_err)
     clouds = _cloud_section(target)
     return Atmosphere(

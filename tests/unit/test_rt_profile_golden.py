@@ -30,7 +30,8 @@ def test_rt_profile_common_golden_default():
     assert prof["art_ptop_bar"] == 1.0e-7
     assert prof["rt_integration"] == "simpson"
     assert prof["opacity_mode"] == "exomolop"
-    assert prof["molecules"] == ["H2O", "CO2", "CO", "CH4", "SO2"]
+    assert prof["molecules"] == ["H2O", "CO2", "CO", "CH4", "SO2", "NH3"]
+    assert prof["omit_core_molecules"] == []
     assert prof["use_photo"] is True
     assert prof["use_rayleigh"] is True
     assert prof["rp_cm"] == pytest.approx(1.279 * 7.1492e9, rel=1e-6)

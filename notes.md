@@ -13,15 +13,18 @@ names the code state it was measured on.
   the Dockerfile pin vulcan3 2441e6c and vulcan-forward 0accd36; the Dockerfile pins the
   tool at cd67563. The running Space was last deployed from the earlier pins (tool
   b23df79) and is unchanged until a redeploy.
-- Cache versions: `model_defs._VERSION` 61, `noise.WORKER_VERSION` 12,
+- Cache versions: `model_defs._VERSION` 62, `noise.WORKER_VERSION` 12,
   `adjoint_diag._ADJ_VERSION` 4, `picaso_engine.WORKER_VERSION` 3. Default keys:
-  transmission `58d1754cf09089de` (test-pinned), emission `8fea31aae9546b2a`.
-- Fixtures `tests/live/data/w39b_v61_reference.npz` and `w39b_picaso_reference.npz`
-  (cold WASP-39 b, both modes; jax 0.6.2, vulcan3 0.18.0, vulcan-forward 0.30.0; 10 and
-  42 min on daw).
+  transmission `87afcd45da73bb56` (test-pinned), emission `40c16cece4cd0dea`.
+- Fixtures `tests/live/data/w39b_v62_reference.npz` and `w39b_picaso_reference.npz`
+  (cold WASP-39 b, both modes; jax 0.6.2, vulcan3 0.18.0, vulcan-forward 0.30.0 plus its
+  uncommitted guards; 10 and 45 min on daw). The slow tier has not run at v62 (todo).
+- v62 needs a vulcan-forward that has `REQUIRED_MOLECULES`, `nu_edges` on the RT result,
+  `omit_core_molecules` and the stellar-span check: newer than the 0.30.0 floor and the
+  `deploy/pins.env` pin, which move with its release (todo).
 - Tests. Normal suite `python -m pytest tests -q -n 6`; `tests/conftest.py` defaults
   `JAX_PLATFORMS=cpu` and points an unset `JWST_TOOL_OUTPUT_DIR` at a throwaway
-  directory. `tests` on daw (6 pinned cores): 482 passed, 18 skipped in 52 s [M]. CI
+  directory. `tests` on daw (6 pinned cores): 506 passed, 18 skipped in 52 s [M]. CI
   runs the unit suite on Python 3.10-3.12 plus a GUI-smoke job; `full-stack-smoke.yml`
   runs by hand. Slow tier (`JWST_TOOL_RUN_SLOW=1`), parallel on 15 CPUs, one thread per
   worker: `pytest tests -q -n 14 --dist worksteal` (CLAUDE.md), 511 passed, 2 skipped in
@@ -206,6 +209,23 @@ names the code state it was measured on.
 
 ## Opacity and radiative transfer
 
+- NH3 is in the always-on set (`model_defs.MOLECULES`) from v62: vulcan-forward refuses a
+  band that lacks H2O, CO2, CO, CH4 or NH3 where each absorbs, and warns for HCN, H2S and
+  SO2 (its notes "Opacity: correlated-k on ExoMolOP"). Through v61 a run with no
+  `extra_mols` radiated five molecules. `extra_mols` may still name NH3
+  (`FORMER_EXTRA_MOLECULES`): it is dropped, and an old share file loads. The warned names
+  are logged at the RT build (`unlisted_core_molecules`); the sulfur-free network names H2S
+  and SO2 as left out. Default WASP-39 b transmission, v61 to v62: at most 44.7 ppm at
+  2.28 um, median 1.6 ppm [M, the fixtures].
+- UV spectra: vulcan-forward refuses one that does not cover the network's photolysis
+  thresholds (to 655.5 nm), which removes `sflux-epseri.txt` (115-283 nm) from the menu.
+  WASP-107 b and HD 209458 b take the sulfur survey's proxies, shipped in
+  `src/jwst_tool/stellar_flux/`, and its system values (WASP-107 b: g 305.14 against 270,
+  R* 0.657 against 0.67, 0.055 au; HD 209458 b: R* 1.19 against 1.155, 0.04707 au, the solar
+  spectrum scaled by (6091/5772)^4, default T_irr 2080 K against 2040);
+  `tests/unit/test_survey_parity.py` compares them when vulcan-retrieval is beside this
+  repo. WASP-39 b keeps the production WASP-39b case's values (R* 0.932, g 422), not the
+  survey's (0.939, 390.58); HD 189733 b is not compared.
 - Correlated-k over the published ExoMolOP k-tables is the only path: R = 1000, 5115
   bands, 16 g-points, T 100-3400 K, P 1e-5-100 bar, 25 principal-isotopologue tables on
   one grid. RT knobs are echoed by the engine and refused on mismatch (they bite at
@@ -219,10 +239,12 @@ names the code state it was measured on.
   Decision records).
 - Against petitRADTRANS 3.4.0 on the same k-tables: engine fixtures rms 0.0013% /
   0.096% / 0.021% (isothermal H2O radius, W39b depth, H2O emission flux). The six
-  `validation/data/atmos_*.npz` (v61, sncho2025, cadence 5), fitted offset at R = 100:
-  transmission residual std WASP-39 b 17.65 ppm, HD 189733 b 4.23, WASP-107 b 49.02, HD
-  209458 b 4.75; emission relative RMS 0.306% / 0.249% (on sncho, v60: 17.46, 4.31,
-  48.39, 4.72; 0.307% / 0.256%). An isothermal column emits
+  `validation/data/atmos_*.npz` (v62, sncho2025, cadence 5), fitted offset at R = 100:
+  transmission residual std WASP-39 b 17.37 ppm, HD 189733 b 4.25, WASP-107 b 45.84, HD
+  209458 b 4.69; emission relative RMS 0.304% / 0.250% (v61: 17.65, 4.23, 49.02, 4.75;
+  0.306% / 0.249%). The 14 solves take 17 min in parallel, then the pRT references and
+  the figures 8 min [M, daw]. The Tsai and ERS columns (`inputs/chem_cases.py`) and their
+  RT (`rtcase.py`) run at the shipped model top from v62; before, 1e-9 and 1e-8 bar. An isothermal column emits
   pi*B(T) to 6.7e-16. The figure script refuses mixed cadences and a stale pRT reference.
   After a `_VERSION` bump that moves a spectrum, regenerate the npz (`atmos_cases.py` x 6,
   ~15 min), `prt_reference.py` and the figures (`make_figures.py`); nothing tests that.
@@ -250,6 +272,18 @@ names the code state it was measured on.
 
 ## Emission
 
+- The stellar flux of the eclipse depth is a band mean (`stellar.phoenix_surface_flux` on
+  the engine's `nu_edges`), as the planet flux is. Point-sampled at the band centres it was
+  off from the band mean by rms 5.4 / 5.5 / 2.1 % per R = 1000 band at 1-2 / 3-5 / 5-12 um
+  for 4400 K and 4.4 / 3.7 / 1.5 % for 5500 K (max 41 %) [M, the installed PHOENIX grid;
+  an independent measurement gives the same numbers, and rms 0.4-1.6 %, max 2.8-6.7 %, at
+  R = 100].
+- Photolysis sees the dayside in emission: `planets.SL_ANGLE_DEG`, 58 deg (VULCAN's
+  dayside average) against the terminator's 83 deg in transmission; the default was 83 in
+  both modes through v61, with the dayside T-P. On the default WASP-39 b eclipse both
+  changes and NH3 together move the R = 100 depth by at most 90.8 ppm (6.5 %, at 4.41 um,
+  the star's CO band), median 0.9 ppm; under PICASO, which has no photolysis, 71.2 ppm at
+  the same bin [M, v61 against v62 fixtures].
 - Solver `ibased_linsap`, never `ibased` (it drops the bottom boundary, 12-52% of the
   flux). `p_btm_bar` is canonical: 7.6 bar in file mode, 10 bar for parametric profiles.
 - The thin-bottom gate is FLUX-WEIGHTED (`thin_flux_fraction`, `EMIS_THIN_FLUX_FRAC` 1%):
@@ -263,8 +297,8 @@ names the code state it was measured on.
   (`eclipse_flux_tau`): W39b depth ratio photospheric/single median 1.070; a single
   radius reads the CO2 feature contrast 9% low. `emission_radius` stays the
   (R_em/R_star)^2 factor.
-- HD 189733 b MIRI LRS vs Inglis et al. 2024 (v61): chi2/N 67.7, 26.87 with a fitted
-  -132 ppm offset, under the dayside f = 1/2 Guillot default (v60, sncho: 67.6, 26.85).
+- HD 189733 b MIRI LRS vs Inglis et al. 2024 (v62): chi2/N 67.66, 27.04 with a fitted
+  -131 ppm offset (v61: 67.7, 26.87 at -132), under the dayside f = 1/2 Guillot default (v60, sncho: 67.6, 26.85).
 - lnR0 (a radius change at fixed planet mass in both modes, v60; Decision records):
   default W39b eclipse AD and FD lnR0 rows agree to corr 0.99999997. Emission lnR0 FD
   points are tau-gated.
@@ -710,8 +744,9 @@ None changes a shipped number.
   hand-bumped versions; the worker ramp is transit-independent; stellar contamination,
   reflected light, scattering emission, H-minus and atomic lists are not modeled.
 - The count-majority segment label at R = 25; UV data inherited from upstream as-is
-  (eps Eri 115-283 nm coverage; GJ 1214's 464 zero-flux FUV rows); the upstream
-  two-stream pole below 60 deg zenith (default 83, no clamp).
+  (GJ 1214's 464 zero-flux FUV rows); the upstream two-stream pole below 60 deg zenith,
+  where the emission default of 58 deg sits (transmission 83; no clamp; VULCAN3 notes
+  "Known bugs, all repos": 0.1-0.5 % of cells, diffuse flux only).
 - PICASO engine: one-way coupled (Na, K, TiO, VO, FeH heat the climate and are absent
   from the spectrum RT); local condensation with no rainout; the quench approximation
   (picaso's kinetic CO2 included); a quenched run's T is the equilibrium climate's; the

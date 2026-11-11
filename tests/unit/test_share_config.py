@@ -27,7 +27,7 @@ def test_round_trip_restores_a_constrain_run():
         co_ratio=0.6,
         kzz_mode="const",
         kzz_const=1.0e9,
-        extra_mols=["HCN", "NH3"],
+        extra_mols=["HCN", "OH"],
         cloud_on=True,
         log_kappa_cloud=-2.0,
         alpha_cloud=1.0,
@@ -77,7 +77,7 @@ def test_round_trip_restores_a_constrain_run():
     assert state["n0_wasp39b_tirr"] == canon["Tirr"]
     assert state["n0_met"] == 7.0 and state["n0_co"] == 0.6
     assert state["n0_wasp39b_kzz"] == pytest.approx(9.0)  # log10(kzz_const)
-    assert state["n0_xmols_vulcan_sncho2025"] == ["HCN", "NH3"]  # the default network
+    assert state["n0_xmols_vulcan_sncho2025"] == ["HCN", "OH"]  # the default network
     assert state["n0_cloud"] is True and state["n0_ck"] == -2.0
     # science goal (dynamic widget-key suffixes)
     assert state["n0_goal"] == "constrain"
@@ -175,7 +175,7 @@ def test_a_non_default_network_round_trips_on_its_own_widget_keys(network):
     unsuffixed. The suffixed branch is a shipped widget-KEY contract.
     """
     co = 2.0 if model_defs.CO_MAX[network] > 1.0 else 0.6
-    canon = _canon(network=network, co_ratio=co, extra_mols=["HCN", "NH3"])
+    canon = _canon(network=network, co_ratio=co, extra_mols=["HCN", "OH"])
     share = share_config.build_share(
         canon,
         goal=dict(goal="detect", target_mol="H2O", do_fisher=False, jac_method="fd"),
@@ -200,7 +200,7 @@ def test_a_non_default_network_round_trips_on_its_own_widget_keys(network):
     state = share_config.widget_state(share, _key)
     assert state["n0_network"] == network and state["n0_co"] == co
     sfx = f"_{network}"
-    assert state[f"n0_xmols_vulcan{sfx}"] == ["HCN", "NH3"]
+    assert state[f"n0_xmols_vulcan{sfx}"] == ["HCN", "OH"]
     assert "n0_xmols_vulcan" not in state  # the sncho keys stay clean
     assert any(k.startswith(f"n0_mol_vulcan{sfx}_") for k in state)
 
@@ -229,7 +229,7 @@ def test_a_non_default_network_round_trips_on_its_own_widget_keys(network):
             ),
         ),
         (
-            dict(tp_mode="guillot", extra_mols=["HCN", "NH3"], fisher_params=["lnZ", "Tirr"]),
+            dict(tp_mode="guillot", extra_mols=["HCN", "OH"], fisher_params=["lnZ", "Tirr"]),
             dict(
                 goal="detect",
                 target_mol="H2O",
@@ -281,7 +281,7 @@ def test_a_picaso_config_round_trips_on_its_own_widget_keys(kw, goal):
         assert state["n0_fx_picaso_picaso_climate_0"] == ["lnZ"]
     else:
         assert "n0_wasp39b_kzz" not in state  # equilibrium: no Kzz
-        assert state["n0_mol_picaso_HCN_NH3"] == "H2O"
+        assert state["n0_mol_picaso_HCN_OH"] == "H2O"
         assert state["n0_fp_picaso_guillot_0"] == ["lnZ", "Tirr"]
 
 

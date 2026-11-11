@@ -308,7 +308,7 @@ def test_engine_switch_keeps_each_engines_settings(monkeypatch):
     assert jm.disabled and jm.options == ["Finite differences"]
     assert at.selectbox(key="n0_wasp39b_sflux").disabled
     assert "N2O" not in at.multiselect(key="n0_xmols_picaso").options
-    assert at.selectbox(key="n0_mol_picaso_C2H2_C2H4_H2S_HCN_NH3_OCS_SH_SO").value == "H2O"
+    assert at.selectbox(key="n0_mol_picaso_C2H2_C2H4_H2S_HCN_OCS_SH_SO").value == "H2O"
     assert _pic_error(at) and "PICASO python" not in _pic_error(at)[0]
     assert next(b for b in at.button if b.label == "Run").proto.disabled
     assert not [w for w in at.number_input if w.key == "n0_wasp39b_kzz"]
@@ -380,3 +380,17 @@ def test_no_figure_goes_through_st_pyplot():
         if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "pyplot"
     ]
     assert not calls, calls
+
+
+def test_the_photolysis_angle_follows_the_science_mode_until_it_is_edited():
+    """83 deg for a transit, 58 deg for an eclipse (planets.SL_ANGLE_DEG); an edited angle survives a mode switch."""
+    at = run_app()
+    assert not at.exception, at.exception
+    assert at.number_input(key="n0_sza").value == 83.0
+    at.radio(key="n0_scimode").set_value("emission").run()
+    assert at.number_input(key="n0_sza").value == 58.0
+    at.radio(key="n0_scimode").set_value("transmission").run()
+    assert at.number_input(key="n0_sza").value == 83.0
+    at.number_input(key="n0_sza").set_value(70.0).run()
+    at.radio(key="n0_scimode").set_value("emission").run()
+    assert at.number_input(key="n0_sza").value == 70.0

@@ -87,6 +87,7 @@ def build_rt_setup(
         "rt_integration": cp["rt_integration"],
         "p_ref_bar": cp["p_ref_bar"],
         "opacity_mode": profile["opacity_mode"],
+        "omit_core_molecules": profile["omit_core_molecules"],
     }
     for k, want in echo.items():
         got = getattr(rt, k, None)
@@ -96,6 +97,11 @@ def build_rt_setup(
                 "installed vulcan-forward engine does not read this profile "
                 "key. Upgrade vulcan-forward."
             )
+    if rt.unlisted_core_molecules:
+        log(
+            f"[fwd] WARNING: {', '.join(rt.unlisted_core_molecules)} absorb in this band and are not in the RT: "
+            "their features are missing from this spectrum (add them under 'Extra opacity molecules')"
+        )
 
     emis, fs_j = None, None
     # 1 / R_star^2 only: the PLANET radius for the eclipse prefactor comes from
@@ -109,7 +115,7 @@ def build_rt_setup(
         from jwst_tool import stellar as stellar_mod
 
         fs_j = jnp.asarray(
-            stellar_mod.phoenix_surface_flux(rt.nu_grid, cp["star_teff"], cp["star_logg"], cp["star_feh"], log=log)
+            stellar_mod.phoenix_surface_flux(rt.nu_edges, cp["star_teff"], cp["star_logg"], cp["star_feh"], log=log)
         )
 
     p_art_j = jnp.asarray(rt.p_art_bar)

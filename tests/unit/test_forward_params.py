@@ -120,7 +120,9 @@ def test_guillot_default_tirr_follows_planet_and_custom_system():
         assert cp["Tirr"] == expect, key
     # per-planet values, pinned explicitly
     assert model_defs.default_tirr("wasp39b") == 1640.0
-    assert model_defs.default_tirr("hd209458b") == 2040.0
+    assert (
+        model_defs.default_tirr("hd209458b") == 2080.0
+    )  # the survey's star and orbit (6091 K, 1.19 R_sun, 0.04707 au)
     sys_cool = dict(star_teff=3300.0, rstar_rsun=0.30, orbit_au=0.05)
     teq = planets.system_teq(**sys_cool)  # ~350 K
     expect = min(max(round(teq * math.sqrt(2.0) / 20.0) * 20.0, 800.0), 2500.0)
@@ -595,3 +597,28 @@ def test_a_t_p_table_that_cannot_be_read_is_a_value_error_and_a_defect_is_not(tm
 def test_the_molecule_set_needs_the_network_named():
     with pytest.raises(KeyError, match="network"):
         model_defs.active_molecules({"extra_mols": []})
+
+
+def test_nh3_is_always_on_and_an_old_extras_list_naming_it_still_loads():
+    """NH3 moved from the extras to the always-on set; a script or share file that still lists it gets that model."""
+    cp = forward.canonical_params(_p(extra_mols=["HCN", "NH3"]))
+    assert cp["extra_mols"] == ["HCN"]
+    assert model_defs.active_molecules(cp) == [*model_defs.MOLECULES, "HCN"]
+    assert "NH3" in model_defs.MOLECULES
+    assert "NH3" not in model_defs.EXTRA_MOLECULES
+
+
+def test_the_photolysis_angle_defaults_to_the_side_of_the_planet_the_observation_sees():
+    """A transit sees the terminator and an eclipse the dayside; an explicit angle is kept in both."""
+    assert forward.canonical_params(_p())["sl_angle_deg"] == 83.0
+    assert forward.canonical_params(_p(science_mode="emission"))["sl_angle_deg"] == 58.0
+    assert forward.canonical_params(_p(science_mode="emission", sl_angle_deg=70.0))["sl_angle_deg"] == 70.0
+
+
+def test_every_offered_uv_spectrum_resolves_to_a_file():
+    """The survey's proxies ship in this package and the rest in vulcan3; none is offered without its file."""
+    from jwst_tool import datacheck
+
+    assert all(datacheck.uv_spectra_status().values())
+    assert set(planets.SFLUX_CHOICES) >= planets.OWN_SFLUX
+    assert all(planets.PLANETS[k]["sflux"] in planets.SFLUX_CHOICES for k in planets.PLANETS)

@@ -15,7 +15,9 @@ Layout, Figures, Branches, Behind main and Tests are in the project-root `CLAUDE
 
 ## Docs
 
-Four root docs: `README.md` (the maintainer's; never edit it unasked), `notes.md` (the results and reasons behind the
+Five root docs: `oracle.md` (the maintainer's goal for this repo and what success and failure are: read it before
+planning work and compare a result with it before calling work done; never edit it unasked), `README.md` (the
+maintainer's; never edit it unasked), `notes.md` (the results and reasons behind the
 rules below, by topic section, never a dated history: put a number under the topic it justifies), `todo.md` (open work:
 read it first; open or close items in the same pass) and this file (directions only). Any other hand-written `.md` file
 goes in `docs/`; two generated or required elsewhere stay where they are (`validation/parity/outputs/REPORT.md`, the

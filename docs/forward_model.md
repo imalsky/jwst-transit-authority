@@ -96,9 +96,13 @@ reaction network to differentiate.
 
 Stellar surface flux for eclipse depths (emission mode).
 
-``phoenix_surface_flux(nu_grid, teff, logg, feh)`` returns the stellar
-SURFACE flux density per wavenumber (erg s^-1 cm^-2 / cm^-1) on the native RT
-grid, from the same minimal-CDBS PHOENIX grid the Pandeia noise side uses.
+``phoenix_surface_flux(nu_edges, teff, logg, feh)`` returns the stellar
+SURFACE flux density per wavenumber (erg s^-1 cm^-2 / cm^-1), averaged over
+each RT band, from the same minimal-CDBS PHOENIX grid the Pandeia noise side
+uses. The planet flux is a mean over each correlated-k band, so the star's is
+the integral of $F_\lambda$ between the band's edges (a trapezoid on the
+grid's own samples) divided by the band's width in wavenumber; a point sample
+at the band centre lands on or between the star's lines.
 
 Units contract: the CDBS PHOENIX models are emergent SURFACE flux densities
 and ExoJAX ``ArtEmisPure`` returns the planet's in the same convention, so
@@ -122,7 +126,11 @@ Every planet runs on the same W39b-validated machinery (a network from `model_de
 the 10x-solar equilibrium baseline), with the planet identity injected through the existing hooks:
 
 - chemistry: cfg_overrides `{Mp, Rp, r_star, orbit_radius, sflux_file, ...}`. VULCAN derives $g = G M_p / R_p^2$;
-  `gs_cgs` is converted to `Mp` at the boundary in `chem_build._cfg_overrides`.
+  `gs_cgs` is converted to `Mp` at the boundary in `chem_build._cfg_overrides`. The UV spectrum is a vulcan3 file or
+  one of this package's own (`planets.OWN_SFLUX`, in `stellar_flux/`: the sulfur survey's proxies), resolved by
+  `planets.sflux_file`; the engine refuses a spectrum that does not cover the network's photolysis thresholds. The
+  photolysis zenith angle defaults by science mode (`planets.SL_ANGLE_DEG`): the terminator's slant for a transit,
+  the dayside average for an eclipse.
 - RT: profile `{rp_cm, gs_cgs, rstar_cm}`.
 - noise: star dict to the Pandeia PHOENIX SED and Ks normalization.
 - timing: `t14_hr` to the in- and out-of-transit integration split.

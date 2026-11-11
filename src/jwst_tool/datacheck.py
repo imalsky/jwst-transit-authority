@@ -257,7 +257,8 @@ def vulcan_atm_dir() -> Path | None:
 def uv_spectra_status() -> dict[str, bool]:
     """{sflux filename: present} for every registry stellar UV spectrum."""
     atm = vulcan_atm_dir()
-    return {f: (atm is not None and (atm / "stellar_flux" / f).is_file()) for f in planets.SFLUX_CHOICES}
+    own = {f: Path(planets.sflux_file(f)).is_file() for f in planets.OWN_SFLUX}
+    return {f: own.get(f, atm is not None and (atm / "stellar_flux" / f).is_file()) for f in planets.SFLUX_CHOICES}
 
 
 def check_stellar_uv() -> list[Item]:
@@ -276,7 +277,8 @@ def check_stellar_uv() -> list[Item]:
         ]
     items = []
     for fname, label in planets.SFLUX_CHOICES.items():
-        p = atm / "stellar_flux" / fname
+        own = fname in planets.OWN_SFLUX
+        p = Path(planets.sflux_file(fname)) if own else atm / "stellar_flux" / fname
         items.append(
             Item(
                 key=f"uv:{fname}",
@@ -286,9 +288,9 @@ def check_stellar_uv() -> list[Item]:
                 detail=_found(p) if p.is_file() else f"absent: {p}",
                 remedy=""
                 if p.is_file()
-                else "Ships inside the vulcan3 package (atm/stellar_flux/); "
-                "a missing file means a broken/partial install -- "
-                "reinstall vulcan3.",
+                else "Ships inside the vulcan3 package (atm/stellar_flux/) or this one "
+                "(stellar_flux/); a missing file means a broken/partial install -- "
+                "reinstall it.",
             )
         )
     return items
