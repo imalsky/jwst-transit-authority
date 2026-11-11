@@ -223,8 +223,13 @@ def system_teq(star_teff: float, rstar_rsun: float, orbit_au: float) -> float:
 DAYSIDE_TEQ_FACTOR = 2.0**0.25
 
 
+# Guillot T_irr the tool accepts (K), from the API and the sidebar widget alike. No physical basis is recorded for the
+# ends; the profile built from it is then held to model_defs.T_WINDOW. A value outside is refused, never clipped.
+TIRR_RANGE = (800.0, 2500.0)
+
+
 def default_tirr(planet: dict, system: dict | None = None, science_mode: str = "transmission") -> float:
-    """Guillot T_irr default: sqrt(2) * T_eq, on the GUI's 20 K step grid and clipped to the widget range.
+    """Guillot T_irr default: sqrt(2) * T_eq on the GUI's 20 K step grid, never clipped (check_tirr refuses it).
 
     T_eq is always DERIVED from the star and orbit, never stored: for registry
     entries from their own ``star["teff"]``/``rstar_rsun``/``orbit_au``, for
@@ -244,7 +249,33 @@ def default_tirr(planet: dict, system: dict | None = None, science_mode: str = "
     )
     if str(science_mode) == "emission":
         teq *= DAYSIDE_TEQ_FACTOR
-    return min(max(round(teq * math.sqrt(2.0) / 20.0) * 20.0, 800.0), 2500.0)
+    return round(teq * math.sqrt(2.0) / 20.0) * 20.0
+
+
+def check_tirr(tirr_k: float, derived: bool) -> None:
+    """Refuse a Guillot T_irr outside TIRR_RANGE.
+
+    Parameters
+    ----------
+    tirr_k : float
+        Irradiation temperature, K.
+    derived : bool
+        True when ``tirr_k`` is the default computed from the star and orbit (default_tirr), not a value the user set.
+
+    Raises
+    ------
+    ValueError
+        ``tirr_k`` is outside TIRR_RANGE or not finite.
+    """
+    lo, hi = TIRR_RANGE
+    if lo <= tirr_k <= hi:
+        return
+    if derived:
+        raise ValueError(
+            f"the default Tirr of this star and orbit is {tirr_k:g} K (sqrt(2) x T_eq), outside the supported Guillot "
+            f"range [{lo:g}, {hi:g}] K. Set Tirr explicitly inside that range."
+        )
+    raise ValueError(f"Tirr={tirr_k:g} K is outside the supported Guillot range [{lo:g}, {hi:g}] K.")
 
 
 # Gray cloud: opacity <-> the pressure it blocks down to.

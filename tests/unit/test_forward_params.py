@@ -115,7 +115,7 @@ def test_guillot_default_tirr_follows_planet_and_custom_system():
     """
     for key, p in planets.PLANETS.items():
         teq = planets.system_teq(p["star"]["teff"], p["rstar_rsun"], p["orbit_au"])
-        expect = min(max(round(teq * math.sqrt(2.0) / 20.0) * 20.0, 800.0), 2500.0)
+        expect = round(teq * math.sqrt(2.0) / 20.0) * 20.0
         cp = forward.canonical_params(dict(planet=key, tp_mode="guillot"))
         assert cp["Tirr"] == expect, key
     # per-planet values, pinned explicitly
@@ -123,16 +123,15 @@ def test_guillot_default_tirr_follows_planet_and_custom_system():
     assert (
         model_defs.default_tirr("hd209458b") == 2080.0
     )  # the survey's star and orbit (6091 K, 1.19 R_sun, 0.04707 au)
-    sys_cool = dict(star_teff=3300.0, rstar_rsun=0.30, orbit_au=0.05)
-    teq = planets.system_teq(**sys_cool)  # ~350 K
-    expect = min(max(round(teq * math.sqrt(2.0) / 20.0) * 20.0, 800.0), 2500.0)
-    cp = forward.canonical_params(dict(planet="custom", tp_mode="guillot", **sys_cool))
-    assert cp["Tirr"] == expect
-    # a different entered system must move the default
-    cp_hot = forward.canonical_params(
-        dict(planet="custom", tp_mode="guillot", star_teff=6100.0, rstar_rsun=1.2, orbit_au=0.03)
-    )
-    assert cp_hot["Tirr"] != cp["Tirr"]
+    # a custom system takes its own default; a different entered system moves it
+    sys_mid = dict(star_teff=5500.0, rstar_rsun=1.0, orbit_au=0.04)
+    teq = planets.system_teq(**sys_mid)
+    cp = forward.canonical_params(dict(planet="custom", tp_mode="guillot", **sys_mid))
+    assert cp["Tirr"] == round(teq * math.sqrt(2.0) / 20.0) * 20.0 != model_defs.default_tirr("wasp39b")
+    # a default outside the supported range is refused, never clipped to it
+    sys_cool = dict(star_teff=3300.0, rstar_rsun=0.30, orbit_au=0.05)  # T_eq ~390 K
+    with pytest.raises(ValueError, match="default Tirr of this star and orbit is 560 K"):
+        forward.canonical_params(dict(planet="custom", tp_mode="guillot", **sys_cool))
     # an explicit Tirr always wins over the derived default
     cp_exp = forward.canonical_params(dict(planet="custom", tp_mode="guillot", Tirr=1234.0, **sys_cool))
     assert cp_exp["Tirr"] == 1234.0

@@ -18,17 +18,19 @@ names the code state it was measured on.
   transmission `87afcd45da73bb56` (test-pinned), emission `40c16cece4cd0dea`.
 - Fixtures `tests/live/data/w39b_v62_reference.npz` and `w39b_picaso_reference.npz`
   (cold WASP-39 b, both modes; jax 0.6.2, vulcan3 0.18.0, vulcan-forward 0.30.0 plus its
-  uncommitted guards; 10 and 45 min on daw). The slow tier has not run at v62 (todo).
+  uncommitted guards; 10 and 45 min on daw).
 - v62 needs a vulcan-forward that has `REQUIRED_MOLECULES`, `nu_edges` on the RT result,
   `omit_core_molecules` and the stellar-span check: newer than the 0.30.0 floor and the
   `deploy/pins.env` pin, which move with its release (todo).
 - Tests. Normal suite `python -m pytest tests -q -n 6`; `tests/conftest.py` defaults
   `JAX_PLATFORMS=cpu` and points an unset `JWST_TOOL_OUTPUT_DIR` at a throwaway
-  directory. `tests` on daw (6 pinned cores): 506 passed, 18 skipped in 52 s [M]. CI
+  directory. `tests` on daw (8 pinned cores): 555 run, 18 skipped, in 49 s [M]. CI
   runs the unit suite on Python 3.10-3.12 plus a GUI-smoke job; `full-stack-smoke.yml`
   runs by hand. Slow tier (`JWST_TOOL_RUN_SLOW=1`), parallel on 15 CPUs, one thread per
-  worker: `pytest tests -q -n 14 --dist worksteal` (CLAUDE.md), 511 passed, 2 skipped in
-  79 min under load [M, tool 0f6392d, vulcan-forward b1ec05a, vulcan3 0db0361]; nothing
+  worker: `pytest tests -q -n 14 --dist worksteal` (CLAUDE.md). At v62 on the uncommitted
+  engine: 524 passed in 1:06:34 (reported by the run; owed again once the engine's pending
+  interface change lands, todo). The earlier run, whose times follow: 511 passed, 2 skipped
+  in 79 min under load [M, tool 0f6392d, vulcan-forward b1ec05a, vulcan3 0db0361]; nothing
   requires serial. Longest: emission closure 3635 s (config cadence) / 2602 s (cadence
   1), TOI-7169 b escalation 2473 s, transmission closure 1693 / 1097 s, PICASO e2e 1403 /
   1283 s, VULCAN e2e 373 / 240 s. A worker's next test cannot be stolen, so two neighbours
@@ -488,6 +490,10 @@ gate 0.25.
 - `_PARAM_KEYS_ECHOED` holds the keys `canonical_params` emits but never reads (`version`,
   `data_revision`, `picaso_stack`); without `data_revision` in it the function refused its
   own output wherever the variable was set (0.66.1, on the Space).
+- Result records added without a key bump: `unlisted_core` and `picaso_retried_layers` (model_cache) and the
+  worker's `chem_retry` (picaso_cache). A `picaso_engine.WORKER_VERSION` bump would move every PICASO `params_key`
+  through `picaso_stack`, and with it the PICASO e2e fixture's recorded keys. No spectrum moves: an entry without the
+  record is logged and treated as a miss, so it is solved again.
 - Cached results carry a `producer` stamp ("repo=sha12", `+dirty` when dirty, empty on a
   non-checkout install); not a key. A chem-cache column has none; exports then show the
   installed commits marked "installed now".
@@ -802,6 +808,8 @@ Real, small, and out of todo.md by decision; nothing here changes a shipped numb
   Fisher"); the own-vs-frozen check was never run on an eclipse case.
 - The README forecast figure (`assets/w39b_so2_forecast.png`) carries the model caveats
   as text under the panels; moving them out is an app change (`summary_figure`).
+- Every planet inherits the chemistry solver settings of the WASP-39 b vulcan3 config; this is by the maintainer's
+  decision.
 - The scripts and remaining logs behind the C/O survey records are kept outside the
   repo, on the maintainer's laptop (32 MB); the survey's raw outputs are deleted. The
   numbers in these notes are the record.

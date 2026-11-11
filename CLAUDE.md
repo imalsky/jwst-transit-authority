@@ -64,6 +64,9 @@ skill; policy: the project-root `CLAUDE.md`.
 - `canonical_params` rejects unknown keys; `_PARAM_KEYS_READ` is pinned by an AST-walking test. Public noise APIs
   validate their inputs and raise.
 - Never auto-select a proxy value ("nearest X"); the archive fill never writes the UV-spectrum menu.
+- A range a sidebar widget also offers has one definition (`model_defs`, `planets`) that `canonical_params` and
+  `share_config.WIDGET_RANGES` both read (`test_input_guards` checks both ends). A default outside its range, such as
+  the Guillot `Tirr`, is refused, never clipped.
 
 ### Composition, C/O and networks
 

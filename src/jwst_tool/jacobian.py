@@ -99,10 +99,12 @@ def fd_row(name: str, j1: np.ndarray, j2: np.ndarray, h: float) -> tuple[np.ndar
         raise RuntimeError(
             f"FD Jacobian for {name} FAILED the step-size consistency "
             f"check: max|J(h) - J(2h)| / max|J(h)| = {err:.3f} > "
-            f"{FD_CONSISTENCY_TOL} (h = {h:g}). The row is dominated "
-            "by solver convergence noise or curvature -- lower yconv_min "
-            "(and yconv_cri with it), raise nz, or adjust model_defs.FD_STEPS. "
-            "An uncertified derivative is never reported."
+            f"{FD_CONSISTENCY_TOL} (h = {h:g}), so the row is dominated by "
+            "solver convergence noise or curvature, and an uncertified "
+            f"derivative is never reported. Drop {name} from the Fisher "
+            "parameters, or move its value away from a range edge; on the "
+            "VULCAN-JAX engine a tighter convergence (lower yconv_min, with "
+            "yconv_cri) or a larger nz can also certify it."
         )
     return (4.0 * j1 - j2) / 3.0, err  # Richardson: O(h^4) central, O(h^3) one-sided
 
@@ -129,6 +131,9 @@ class Baseline:
     bz_build: float
     advance: Callable[[], None]
     log: Log
+    # PICASO only: (stage, layer solves retried at a shifted T) of every column the run solves; the T-P stencil
+    # points' own assemblies add theirs here
+    picaso_retried: list = field(default_factory=list)
 
 
 @dataclass
@@ -343,6 +348,8 @@ def _stencil_points(b: Baseline, name: str, offs: tuple[int, ...], h: float, frq
             cp_s = dict(b.cp, **{name: b.cp[name] + s * h})
             A_s = b.assemble(cp_s, b.log)
             chem_s = A_s.build_chem(tag=f"FD {name} {s:+d}h", photo_frq=frq)
+            if b.pic:
+                b.picaso_retried.extend((f"FD {name} {s:+d}h {stage}", n) for stage, n in A_s.retried)
             check_t_window(A_s.tp_eval, A_s.theta, chem_s.p_bar, b.log, T_base=chem_s.T_base)
             pts[s] = _certified_depth(b, chem_s, A_s.theta, f"FD {name} {s:+d}h", A_s.tp_eval)
             continue

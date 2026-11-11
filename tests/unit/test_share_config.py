@@ -565,8 +565,10 @@ def test_out_of_range_values_refuse_loudly():
     for over, needle in cases:
         with pytest.raises(ValueError, match=needle):
             share_config.widget_state(_share(**over), _key)
-    with pytest.raises(ValueError, match="tirr"):
-        share_config.widget_state(share_config.build_share(_canon(Tirr=5000.0), {}, {}), _key)
+    # an out-of-range T_irr is refused by canonical_params itself, before the widget check
+    hot = dict(_canon(), Tirr=5000.0)
+    with pytest.raises(ValueError, match="Tirr=5000 K is outside"):
+        share_config.widget_state(share_config.build_share(hot, {}, {}), _key)
 
 
 def test_noise_star_round_trips_and_legacy_files_get_a_note():

@@ -430,6 +430,9 @@ def _write_result(params: dict, cp: dict, A: Any, setup: RtSetup, col: _Column, 
         # empty on the normal path. See certified_solve.
         # auto-sized U dtype: a fixed width truncates the longest label
         photo_escalated=np.array(col.escalated),
+        # Core absorbers of the band the RT leaves out without naming them
+        # (HCN, H2S or SO2): their features are missing from the spectrum.
+        unlisted_core=np.array(list(setup.rt.unlisted_core_molecules), dtype="U8"),
     )
     if col.solved_here:
         # what SOLVED this column; exports read it, the cache key does not.
@@ -439,6 +442,10 @@ def _write_result(params: dict, cp: dict, A: Any, setup: RtSetup, col: _Column, 
             _prov.producer_commits() + ([f"{k}={v}" for k, v in sorted(col.chem.versions.items())] if pic else [])
         )
     if pic:
+        # layer solves that converged only at picaso's shifted temperatures,
+        # summed over every column the run solved: assemble's columns and the
+        # T-P stencil assemblies the Jacobian adds (run_model logs each stage)
+        arrays["picaso_retried_layers"] = np.array([sum(n for _, n in A.retried)], dtype=np.int64)
         arrays["picaso_cert"] = np.array(
             json.dumps({"cert": col.chem.cert, "quench_bar": col.chem.quench, "g_anchor_cgs": A.g_anchor})
         )
@@ -545,8 +552,15 @@ def run_model(params: dict, log: Log = print) -> Path:
             bz_build=bz_build,
             advance=advance,
             log=log,
+            picaso_retried=A.retried if pic else [],
         )
         rows = build_jacobian(baseline, depth.shape[0])
+    if pic:
+        retried = [f"{stage} {n}" for stage, n in A.retried if n]
+        log(
+            f"[fwd] PICASO: {sum(n for _, n in A.retried)} layer solves converged only at a shifted temperature "
+            "(picaso's retry ladder, at most 1e-4 of T)" + (f": {', '.join(retried)}" if retried else "")
+        )
     res = _RunResult(T_check, depth, depth_wo, evidence, rows, unmodeled, rate_ex, bz_build, wo_list)
     out = _write_result(params, cp, A, setup, col, res)
     finish()

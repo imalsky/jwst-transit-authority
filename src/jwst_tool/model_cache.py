@@ -100,8 +100,10 @@ def load_result(params: dict) -> dict | None:
     science_mode, chem_provider, unmodeled (network species with no k-table,
     "<species>|<vmr>"), rate_rows_outside / rate_rows_total (the rate-law
     T-range advisory), co_bz_margin (the AD dlnCO margins, NaN when unused)
-    and photo_escalated (stages that needed photolysis cadence 1). Under
-    PICASO also picaso_cert (certificate, quench levels, gravity anchor). With
+    photo_escalated (stages that needed photolysis cadence 1) and
+    unlisted_core (core absorbers of the band left out of the RT unnamed). Under
+    PICASO also picaso_cert (certificate, quench levels, gravity anchor) and
+    picaso_retried_layers (layer solves converged only at a shifted T). With
     Fisher requested:
     jac (n_par, n_nu), jac_names, jac_row_method, fd_h, fd_err. In emission,
     the thin-bottom evidence detect REQUIRES and refuses without: fp_flux,
@@ -112,5 +114,17 @@ def load_result(params: dict) -> dict | None:
     (provenance.producer_commits; empty when no checkout could be read; under
     PICASO followed by the worker's stack versions), absent when the column
     came from the chem cache.
+
+    An entry written before unlisted_core or picaso_retried_layers existed is
+    logged and treated as a miss, so no result is shown without them.
     """
-    return load_cached_npz(cache_path(params))
+    p = cache_path(params)
+    res = load_cached_npz(p)
+    if res is None:
+        return None
+    need = ["unlisted_core"] + (["picaso_retried_layers"] if str(res["chem_provider"]) == "picaso" else [])
+    missing = [k for k in need if k not in res]
+    if missing:
+        logging.getLogger(__name__).warning("[cache] %s predates %s; treating it as a cache miss", p.name, missing)
+        return None
+    return res

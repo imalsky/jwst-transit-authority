@@ -25,6 +25,11 @@ jvp ("ad-jvp").
 A "removed" spectrum zeroes that molecule's VMR in the RT only, keeping the
 structure (T, mmw): the standard nested-model comparison.
 
+What a run leaves out travels with its result, so a cache hit shows it too: ``unlisted_core`` names the core absorbers
+of the band (HCN, H2S, SO2) the RT omits without naming them, and a PICASO result carries ``picaso_retried_layers``,
+the layer solves that converged only at a shifted temperature. The GUI shows both as run caveats. A cache entry written
+before either record existed is logged and treated as a miss.
+
 ## The stages
 
 `forward` runs the stages below, then `jacobian` builds the rows. It re-exports, in `__all__`, the names the deploy scripts
@@ -32,7 +37,11 @@ and the research note's scripts read.
 
 - `run_params`, `param_checks`: `canonical_params` fills every default, rounds, zeroes settings inert for the chosen
   modes so one physics maps to one key, and refuses unknown keys, out-of-range values and conflicts. A refusal costs no
-  solve. The output maps to itself, so a saved payload validates by feeding it back in.
+  solve. The output maps to itself, so a saved payload validates by feeding it back in. Each range a sidebar widget also
+  offers has one definition (`model_defs`, `planets.CUSTOM_FIELD_RANGES`, `planets.TIRR_RANGE`) that both read, so the
+  API and the GUI refuse the same values. A Guillot T_irr default outside `TIRR_RANGE` is refused, never clipped: the
+  run needs an explicit `Tirr`. Under PICASO a VULCAN-only setting is refused unless it holds the value a PICASO payload
+  carries.
 - `model_defs`: what the model offers, the FD steps and stencil, `_VERSION`.
 - `model_cache`, `tp_tables`: keys and cache reads, with no JAX; T-P tables, shipped or content-addressed uploads.
 - `chem_build`: assembles the VULCAN chemistry build and refuses a cfg that drifted from the constants here.

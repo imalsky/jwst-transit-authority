@@ -53,6 +53,14 @@ def _guillot_boxes(target: Target) -> dict:
         system=(dict(star_teff=teff, rstar_rsun=rstar, orbit_au=orbit_au) if planet_key == "custom" else None),
         science_mode=science_mode,
     )
+    # A default outside the supported range leaves the widget empty with the
+    # API's refusal beside it, never a clipped number.
+    seed: float | None = tirr0
+    tirr_error = None
+    try:
+        planets.check_tirr(tirr0, derived=True)
+    except ValueError as e:
+        seed, tirr_error = None, str(e)
     if planet_key == "custom":
         # follow-until-overridden: while T_irr still equals the last
         # derived default, keep it tracking the star/orbit fields;
@@ -60,12 +68,18 @@ def _guillot_boxes(target: Target) -> dict:
         # freezes at the first-render seed).
         prev_auto = st.session_state.get(k("tirr_auto"))
         if prev_auto is not None and st.session_state.get(k("tirr")) == prev_auto:
-            st.session_state[k("tirr")] = tirr0
-        st.session_state[k("tirr_auto")] = tirr0
-    # key always seeded, so no value= default
-    if k("tirr") not in st.session_state:
-        st.session_state[k("tirr")] = tirr0
-    tp_kwargs["Tirr"] = st.number_input("T_irr (K)", *_W["tirr"], step=20.0, key=k("tirr"))
+            st.session_state[k("tirr")] = seed
+        st.session_state[k("tirr_auto")] = seed
+    # key always seeded (an empty widget refills once the default is valid),
+    # so no value= default
+    if st.session_state.get(k("tirr")) is None:
+        st.session_state[k("tirr")] = seed
+    tirr = st.number_input("T_irr (K)", *_W["tirr"], step=20.0, key=k("tirr"))
+    if tirr is None:
+        # no Tirr in the request: canonical_params refuses with the same sentence
+        st.error(tirr_error)
+    else:
+        tp_kwargs["Tirr"] = tirr
     tp_kwargs["Tint"] = st.number_input("T_int (K)", *_W["tint"], step=25.0, key=k("tint"))
     # default 0.01 cm^2/g, Guillot (2010)'s canonical thermal opacity
     tp_kwargs["log_kappa"] = st.number_input("log10 kappa_IR (cm^2/g)", *_W["lk"], step=0.1, key=k("lk"))

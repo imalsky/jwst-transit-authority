@@ -70,6 +70,7 @@ def _solver_class() -> Any:
             self.metallicity = float(metallicity)
             self.calls = 0
             self.fail_layers = 0
+            self.retried_layers = 0  # converged only at a shifted T (_EPS)
 
         def solve_column(self, p_bar: np.ndarray, T: np.ndarray) -> tuple:
             n = len(p_bar)
@@ -81,6 +82,7 @@ def _solver_class() -> Any:
                 for eps in _EPS:
                     conv[i] = self.solve(p_bar[i] * 1e6, T[i] + T[i] * eps, molfracs_atoms=self.target)
                     if conv[i]:
+                        self.retried_layers += eps != 0.0
                         break
                 vmr[i] = self.molfracs_species_gas
                 atoms[i] = self.molfracs_atoms
@@ -243,6 +245,7 @@ def _run(jdi: Any, u: Any, job: dict, req: dict) -> dict:
         atoms=atoms,
         converged=conv,
         chem_fail=np.array(solver.fail_layers),
+        chem_retry=np.array(solver.retried_layers),
         gas_names=np.array(solver.gas_names),
         gas_mass=np.asarray(solver.gas_mass, float),
         atoms_names=np.array(solver.atoms_names),

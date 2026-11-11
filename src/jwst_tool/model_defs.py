@@ -135,7 +135,7 @@ RFACV_RANGE = (0.05, 1.0)
 
 RFACV_DEFAULT = {"transmission": 0.5, "emission": 1.0}
 
-# Climate T_int range: the GUI's T_int widget (picaso refuses T_int = 0).
+# T_int range (K), Guillot and climate alike: the GUI's T_int widget (picaso refuses T_int = 0).
 TINT_RANGE = (50.0, 500.0)
 
 # The climate grid and the quench search end at 100 bar (picaso_engine).
@@ -173,6 +173,21 @@ CLOUD_FISHER_PARAMS = ("log_kappa_cloud", "alpha_cloud")
 # Kzz profile modes. "file" requires tp_mode="file" with a Kzz column
 # (the upstream constraint: the tabulated Kzz lives in the atm table).
 KZZ_MODES = ("const", "Pfunc", "JM16", "file")
+
+# Accepted ranges, inclusive. canonical_params and the sidebar widgets (share_config.WIDGET_RANGES) both read these,
+# so the API and the GUI refuse the same values. Kzz in cm^2/s.
+KZZ_CONST_RANGE = (1.0e6, 1.0e12)
+KZZ_KMAX_RANGE = (1.0e4, 1.0e11)  # Pfunc deep Kzz
+KZZ_PLEV_RANGE = (1.0e-5, 1.0e2)  # Pfunc transition pressure, bar
+KZZ_KDEEP_RANGE = (1.0e4, 1.0e11)  # JM16 deep floor
+KZZ_X_RANGE = (0.1, 10.0)  # multiplier on the whole Kzz profile
+SL_ANGLE_RANGE = (0.0, 89.0)  # photolysis zenith angle, deg
+F_DIURNAL_RANGE = (0.1, 1.0)  # diurnal photolysis factor
+RT_PTOP_RANGE = (1.0e-9, 1.0e-6)  # model top, bar: the exercised range
+LOG_KAPPA_RANGE = (-4.0, 0.0)  # Guillot log10 kappa_IR, cm^2/g
+LOG_GAMMA_RANGE = (-2.0, 0.3)  # Guillot log10 kappa_vis / kappa_IR
+LOG_KAPPA_CLOUD_RANGE = (-7.0, 2.0)  # cloud deck log10 kappa at 3.5 um, cm^2/g
+ALPHA_CLOUD_RANGE = (0.0, 4.0)  # cloud deck power-law slope
 
 # tp_mode="file" profile sources.
 TP_FILE_SHIPPED = "shipped"  # the vulcan3 table bundled for the planet

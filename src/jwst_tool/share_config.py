@@ -29,9 +29,14 @@ def reserved_combo_names() -> set:
     return {ALL_USABLE} | {m["label"] for m in ins.MODES.values()}
 
 
+def _log10_range(rng: tuple[float, float]) -> tuple[float, float]:
+    return math.log10(rng[0]), math.log10(rng[1])
+
+
 # Every number-input widget's range, keyed by its widget-key suffix: the
 # sidebar widgets and the restore check below both read it, so they cannot
-# drift. An entry is (min, max, default) where the widget is given a fixed
+# drift. A range canonical_params also enforces points at its one definition
+# (log10 of it for a log-scale widget). An entry is (min, max, default) where the widget is given a fixed
 # default, else (min, max): its default is computed, or its key is always
 # pre-set in session state and takes none. Per-planet widgets (Target.k) and
 # session-global ones (gui_common.K) share it; a name is only ever written under one
@@ -41,23 +46,23 @@ def reserved_combo_names() -> set:
 WIDGET_RANGES: dict[str, tuple[Any, ...]] = {
     **planets.CUSTOM_FIELD_RANGES,
     "tbase": (0.5, 20.0),
-    "tirr": (800.0, 2500.0),
+    "tirr": planets.TIRR_RANGE,
     "tint": model_defs.TINT_RANGE,
-    "lk": (-4.0, 0.0),
-    "lg": (-2.0, 0.3),
-    "kzz": (6.0, 12.0),
-    "kzkmax": (4.0, 11.0, 5.0),
-    "kzplev": (-5.0, 2.0, -1.0),
-    "kzkdeep": (4.0, 11.0, 5.0),
-    "kzzx": (-1.0, 1.0, 0.0),
-    "sza": (0.0, 89.0, 83.0),
-    "fdiur": (0.1, 1.0, 1.0),
+    "lk": model_defs.LOG_KAPPA_RANGE,
+    "lg": model_defs.LOG_GAMMA_RANGE,
+    "kzz": _log10_range(model_defs.KZZ_CONST_RANGE),
+    "kzkmax": (*_log10_range(model_defs.KZZ_KMAX_RANGE), 5.0),
+    "kzplev": (*_log10_range(model_defs.KZZ_PLEV_RANGE), -1.0),
+    "kzkdeep": (*_log10_range(model_defs.KZZ_KDEEP_RANGE), 5.0),
+    "kzzx": (*_log10_range(model_defs.KZZ_X_RANGE), 0.0),
+    "sza": (*model_defs.SL_ANGLE_RANGE, 83.0),
+    "fdiur": (*model_defs.F_DIURNAL_RANGE, 1.0),
     "yconv": (*model_defs.YCONV_RANGE, model_defs.YCONV_DEFAULT),
     "yconvmin": (*model_defs.YCONV_MIN_RANGE, model_defs.YCONV_MIN_DEFAULT),
-    "ck": (-7.0, 2.0, -1.0),
-    "ca": (0.0, 4.0, 0.0),
+    "ck": (*model_defs.LOG_KAPPA_CLOUD_RANGE, -1.0),
+    "ca": (*model_defs.ALPHA_CLOUD_RANGE, 0.0),
     "cpt": (-6.0, 1.0, -3.0),
-    "rtptop": (1.0e-9, 1.0e-6, model_defs.RT_PTOP_DEFAULT),
+    "rtptop": (*model_defs.RT_PTOP_RANGE, model_defs.RT_PTOP_DEFAULT),
     "pref": (1.0e-6, 7.0, 1.0e-3),
     "tsig": (1.0, 10.0),
     "ntr": (1, 10, 1),

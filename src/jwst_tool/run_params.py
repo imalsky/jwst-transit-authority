@@ -25,7 +25,6 @@ from jwst_tool.model_defs import (
     RFACV_RANGE,
     RT_PTOP_DEFAULT,
     T_WINDOW,
-    TINT_RANGE,
     TP_FILE_SHIPPED,
     TP_PARAM_NAMES,
     YCONV_DEFAULT,
@@ -41,6 +40,7 @@ from jwst_tool.param_checks import (
     check_kzz,
     check_molecules,
     check_rt_settings,
+    check_system,
 )
 from jwst_tool.tp_tables import read_tp_table, resolve_tp_file, shipped_tp_table_is_default
 
@@ -197,6 +197,20 @@ def _check_request_keys(params: dict) -> None:
         )
 
 
+# The values the VULCAN-only settings take in a PICASO payload: the solver gates are pinned to their defaults, the
+# photolysis settings are zeroed with photolysis off, and the unused Kzz profiles are zeroed (sflux comes per planet).
+_PICASO_INERT = {
+    "yconv_cri": YCONV_DEFAULT,
+    "yconv_min": YCONV_MIN_DEFAULT,
+    "sl_angle_deg": 0.0,
+    "f_diurnal": 1.0,
+    "kzz_x": 1.0,
+    "kzz_kmax": 0.0,
+    "kzz_plev": 0.0,
+    "kzz_kdeep": 0.0,
+}
+
+
 def _engine_settings(params: dict) -> tuple[str, str, bool, str]:
     """Return (tp_mode, chem_provider, is PICASO, network), refusing settings of the other engine."""
     tp_mode = str(params.get("tp_mode", default_tp_mode(params)))
@@ -218,14 +232,16 @@ def _engine_settings(params: dict) -> tuple[str, str, bool, str]:
         raise ValueError("tp_mode='picaso_climate' is PICASO's climate solver: it needs chem_provider='picaso'.")
     if pic:
         # VULCAN-JAX physics has no PICASO counterpart: refused, never
-        # silently dropped
+        # silently dropped. A value equal to the one a PICASO payload carries
+        # passes, so canonical_params still maps its own output to itself.
         vulcan_only = [k for k in ("use_photo", "use_moldiff", "use_vm_mol", "use_condense") if params.get(k)]
         if params.get("network") not in (None, ""):
             vulcan_only.append("network")
         if str(params.get("kzz_mode", "const")) != "const":
             vulcan_only.append(f"kzz_mode={params.get('kzz_mode')!r}")
-        if float(params.get("kzz_x", 1.0)) != 1.0:
-            vulcan_only.append("kzz_x")
+        sysd = planets.PLANETS.get(str(params.get("planet", "wasp39b")), planets.CUSTOM_DEFAULTS)
+        inert = dict(_PICASO_INERT, sflux=sysd["sflux"])
+        vulcan_only += [f"{k}={params[k]!r}" for k, v in inert.items() if k in params and params[k] != v]
         if vulcan_only:
             raise ValueError(
                 f"{vulcan_only} are VULCAN-JAX settings. The PICASO engine is "
@@ -364,17 +380,12 @@ class _Resolved:
 def _filled_payload(params: dict, r: _Resolved) -> dict:
     """Return the canonical key set with every default filled and every value rounded."""
     star_ref = planets.PLANETS.get(r.planet, planets.CUSTOM_DEFAULTS)["star"]
-    # before the literal: the custom planet's Tirr default derives from these
-    # three (planets.system_teq)
-    teff = round(float(params.get("star_teff", star_ref["teff"])), 1)
-    rstar = round(float(params.get("rstar_rsun", r.sysd["rstar_rsun"])), 4)
-    orbit = round(float(params.get("orbit_au", r.sysd["orbit_au"])), 5)
     return {
         "planet": r.planet,
         "science_mode": r.column.science_mode,
         # Star identity for the eclipse normalization Fp/Fs: part of the MODEL
         # only in emission (zeroed in transmission, where it is noise-side).
-        "star_teff": teff,
+        "star_teff": round(float(params.get("star_teff", star_ref["teff"])), 1),
         "star_logg": round(float(params.get("star_logg", star_ref["log_g"])), 2),
         "star_feh": round(float(params.get("star_feh", star_ref["metallicity"])), 2),
         "nz": r.solver.nz,
@@ -382,8 +393,8 @@ def _filled_payload(params: dict, r: _Resolved) -> dict:
         "yconv_min": round(r.solver.yconv_min, 6),
         "rp_rjup": round(float(params.get("rp_rjup", r.sysd["rp_rjup"])), 4),
         "gs_cgs": round(float(params.get("gs_cgs", r.sysd["gs_cgs"])), 1),
-        "rstar_rsun": rstar,
-        "orbit_au": orbit,
+        "rstar_rsun": round(float(params.get("rstar_rsun", r.sysd["rstar_rsun"])), 4),
+        "orbit_au": round(float(params.get("orbit_au", r.sysd["orbit_au"])), 5),
         "sflux": r.solver.sflux,
         "met_x_solar": round(float(params.get("met_x_solar", 10.0)), 4),
         "co_ratio": round(float(params.get("co_ratio", CO_DEFAULT)), 6),
@@ -414,21 +425,8 @@ def _filled_payload(params: dict, r: _Resolved) -> dict:
         # never share a cache entry ("" outside file mode)
         "tp_file": r.column.tp_file,
         "tp_file_sha1": r.column.tp_file_sha1,
-        # sqrt(2) * T_eq of the SELECTED planet (the DAYSIDE T_eq in
-        # emission), via planets.default_tirr so API and GUI cannot diverge
-        "Tirr": round(
-            float(
-                params.get(
-                    "Tirr",
-                    default_tirr(
-                        r.planet,
-                        system=dict(star_teff=teff, rstar_rsun=rstar, orbit_au=orbit),
-                        science_mode=r.column.science_mode,
-                    ),
-                )
-            ),
-            2,
-        ),
+        # _guillot_tirr fills the default once the system values are checked
+        "Tirr": round(float(params.get("Tirr", 0.0)), 2),
         # the planet's published interior temperature where the registry
         # carries one (WASP-107 b), via planets.default_tint like Tirr
         "Tint": round(
@@ -498,10 +496,6 @@ def _picaso_fields(cp: dict, params: dict, tp_table: Any, science_mode: str, tp_
             f"rfacv={cp['rfacv']:g} outside {list(RFACV_RANGE)} (climate "
             "heat redistribution: 0.5 planet average, 1.0 dayside)"
         )
-    if climate and not TINT_RANGE[0] <= cp["Tint"] <= TINT_RANGE[1]:
-        raise ValueError(
-            f"Tint={cp['Tint']:g} K outside {list(TINT_RANGE)} K (the climate solve's interior temperature)"
-        )
     # VULCAN solver and photolysis knobs are inert under PICASO
     cp["yconv_cri"], cp["yconv_min"] = YCONV_DEFAULT, YCONV_MIN_DEFAULT
     if tp_mode == "file" and cp["picaso_quench"]:
@@ -517,6 +511,22 @@ def _picaso_fields(cp: dict, params: dict, tp_table: Any, science_mode: str, tp_
         raise ValueError(
             f"extra_mols {no_sp} are not in PICASO's equilibrium species list; drop them for chem_provider='picaso'."
         )
+
+
+def _guillot_tirr(params: dict, cp: dict, r: _Resolved) -> None:
+    """Fill and check the Guillot T_irr: the request's value, else sqrt(2) * T_eq of the selected system.
+
+    The default is the DAYSIDE T_eq in emission and comes from planets.default_tirr, so the API and the GUI cannot
+    diverge. Outside Guillot mode T_irr is inert and zeroed later.
+    """
+    if r.tp_mode != "guillot":
+        return
+    if "Tirr" in params:
+        planets.check_tirr(cp["Tirr"], derived=False)
+        return
+    system = dict(star_teff=cp["star_teff"], rstar_rsun=cp["rstar_rsun"], orbit_au=cp["orbit_au"])
+    cp["Tirr"] = round(default_tirr(r.planet, system=system, science_mode=r.column.science_mode), 2)
+    planets.check_tirr(cp["Tirr"], derived=True)
 
 
 def _zero_inert_settings(cp: dict, sysd: dict, science_mode: str, tp_mode: str) -> None:
@@ -537,16 +547,6 @@ def _zero_inert_settings(cp: dict, sysd: dict, science_mode: str, tp_mode: str) 
         cp["log_kappa_cloud"] = 0.0
         cp["alpha_cloud"] = 0.0
     # Science-mode hygiene + gating
-    if science_mode == "emission" or climate:  # the climate solve heats with the star
-        if not 3000.0 <= cp["star_teff"] <= 7000.0:
-            raise ValueError(
-                f"star_teff={cp['star_teff']:g} outside [3000, 7000] K (the "
-                "range exercised against the PHOENIX grid for Fp/Fs)"
-            )
-        if not 3.0 <= cp["star_logg"] <= 5.5:
-            raise ValueError(f"star_logg={cp['star_logg']:g} outside [3.0, 5.5]")
-        if not -2.5 <= cp["star_feh"] <= 0.5:
-            raise ValueError(f"star_feh={cp['star_feh']:g} outside [-2.5, 0.5]")
     if science_mode == "emission":
         # Rayleigh is transmission-only physics (the pure-absorption emission
         # solver must not read scattering as thermal absorption) and the chord
@@ -591,6 +591,8 @@ def canonical_params(params: dict) -> dict:
         solver=solver,
     )
     cp = _filled_payload(params, r)
+    check_system(cp)
+    _guillot_tirr(params, cp, r)
     if pic:
         _picaso_fields(cp, params, column.tp_table, column.science_mode, tp_mode, solver.nz)
     check_rt_settings(cp)

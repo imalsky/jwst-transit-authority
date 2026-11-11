@@ -20,6 +20,11 @@ the worker's requests, caches and certifies its results, and hands
 (``p_bar`` bottom to top, ``sidx``, ``species_masses``, ``T_base``) plus the
 solved column ``y``.
 
+Retries: picaso re-solves a layer that does not converge at a temperature shifted by up to 1e-4 of T. The certificate
+records the count of each request (`retried_layers`), the log names it per stage, and the result's
+`picaso_retried_layers` sums it over every column the run solved, probe and stencil points included. A cached worker
+result without the count is logged and solved again.
+
 Gravity: one constant g per run for the climate solve, the quench scale height and the Guillot profile, at the tool's
 chemistry anchor (the grid interface nearest 1 bar), as on the VULCAN path. A climate baseline iterates g with its own T
 and mean molecular weight to `ANCHOR_TOL`; the composition stencil points of a run reuse that g.
@@ -53,7 +58,8 @@ job.json:
 out.npz: the evaluation column ("T", "gas_names", "gas_mass", "vmr" (n_p,
 n_gas), "converged", "atoms_names", "atoms" (n_p, n_atoms; all phases),
 "target", "quench_json", "chem_fail" (every failed layer solve of the
-request)) plus, for a climate request, the solve record ("clim_p", "clim_T",
+request), "chem_retry" (every layer solve that converged only at a temperature
+shifted along picaso's own ladder, at most 1e-4 of T)) plus, for a climate request, the solve record ("clim_p", "clim_T",
 "cvz", "conv_flag", "flux_net", "tidal", "chem_calls", "wall_s");
 "versions_json" names the stack that ran. A failure exits with a traceback
 and writes nothing. The host certifies; this file only computes.

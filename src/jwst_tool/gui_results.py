@@ -62,6 +62,22 @@ def _model_caveats(model: dict) -> list:
             "either direction."
         )
 
+    # Core absorbers of the band the RT leaves out (HCN, H2S, SO2): their
+    # features are missing, which a cache hit must say too.
+    unlisted = [str(m) for m in np.atleast_1d(model["unlisted_core"])]
+    if unlisted:
+        caveats.append(
+            f"{', '.join(unlisted)} absorb in this band and are not in the spectrum: their features are missing. "
+            "Add them under 'Extra opacity molecules'."
+        )
+    # Retry honesty: picaso re-solves a layer that does not converge at a
+    # temperature shifted by up to 1e-4 of T; the run says how often.
+    if str(model["chem_provider"]) == "picaso" and int(model["picaso_retried_layers"][0]):
+        caveats.append(
+            f"PICASO's equilibrium chemistry converged {int(model['picaso_retried_layers'][0])} layer solves only at "
+            "a shifted temperature: at most 1e-4 of T, its own retry ladder."
+        )
+
     # Derivative honesty: a stage that needed the photolysis-cadence escalation
     # (certify.certified_solve) solved on a different photolysis cadence than the
     # configuration asked for, so the run says which stages did. Read from the

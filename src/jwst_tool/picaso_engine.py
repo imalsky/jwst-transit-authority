@@ -11,6 +11,7 @@ import fcntl
 import functools
 import hashlib
 import json
+import logging
 import os
 import subprocess
 import tempfile
@@ -162,7 +163,9 @@ def certify(req: dict, res: dict, stage: str) -> dict:
     atoms = np.asarray(res["atoms"], float)
     tgt = np.asarray(res["target"], float)
     err = np.abs((atoms[:, ix] / atoms[:, [i_h]]) / (tgt[ix] / tgt[i_h]) - 1.0)
-    cert: dict[str, Any] = {"element_err": float(err.max())}
+    # layer solves that converged only at picaso's shifted temperatures (the
+    # worker's _EPS ladder): allowed, and recorded with every result
+    cert: dict[str, Any] = {"element_err": float(err.max()), "retried_layers": int(res["chem_retry"])}
     if not err.max() <= ELEMENT_TOL:  # NaN refuses too
         worst = np.unravel_index(int(np.argmax(err)), err.shape)
         raise RuntimeError(
@@ -229,6 +232,11 @@ def _load(path: Path, req: dict, stage: str) -> dict | None:
 
     res = load_cached_npz(path)
     if res is None:
+        return None
+    if "chem_retry" not in res:
+        logging.getLogger(__name__).warning(
+            "[cache] %s predates the retried-layer count; treating it as a cache miss", path.name
+        )
         return None
     # a cache file under the same WORKER_VERSION may carry an always-empty
     # "error" array; it is not a result field
@@ -339,7 +347,7 @@ def solve(req: dict, stage: str, log: Log) -> dict:
     path = PICASO_CACHE / f"{key}.npz"
     hit = _load(path, req, stage)
     if hit is not None:
-        log(f"[fwd] PICASO {stage}: cached ({key})")
+        log(f"[fwd] PICASO {stage}: cached ({key}, {hit['cert']['retried_layers']} layer solves retried at shifted T)")
         return hit
     with _locked(key, log):
         hit = _load(path, req, stage)
@@ -493,10 +501,12 @@ def assemble(cp: dict, log: Log) -> SimpleNamespace:
         return cp["gs_cgs"] * (rp_cm / r) ** 2
 
     request = functools.partial(_request, cp, p_eval)
+    retried: list[tuple[str, int]] = []  # (stage, layer solves retried at a shifted T), for the result record
 
     def run(req: dict, stage: str) -> SimpleNamespace:
         res = solve(req, stage, log)
         res["p_eval"] = np.asarray(req["p_bar"])
+        retried.append((stage, res["cert"]["retried_layers"]))
         return column(res, nz)
 
     tp_eval, theta_tp, names_tp = None, [0.0], ["dT"]
@@ -546,4 +556,5 @@ def assemble(cp: dict, log: Log) -> SimpleNamespace:
         abundance_overrides=_abundance_overrides,
         config=config,
         g_anchor=g,
+        retried=retried,
     )

@@ -221,7 +221,8 @@ def test_the_stored_entry_holds_gas_mixing_ratios_and_the_flux_its_depth_implies
     y = np.array([[0.5, 0.25, 0.25], [0.5, 0.25, 0.25]])
     col = forward._Column(y, y, chem, None, ["H2", "H2O", "H2O_l_s"], [], None, False)
     fs = np.array([2.0, 4.0])
-    setup = SimpleNamespace(rt=SimpleNamespace(wl_um=np.array([1.0, 2.0])), emis=object(), fs_j=fs)
+    rt = SimpleNamespace(wl_um=np.array([1.0, 2.0]), unlisted_core_molecules=["HCN", "H2S"])
+    setup = SimpleNamespace(rt=rt, emis=object(), fs_j=fs)
     evidence = SimpleNamespace(
         depth_norm=0.5, tau_bottom=np.ones(2), tau_bottom_wo=np.ones((0, 2)), thin_flux_frac_wo=np.ones(0)
     )
@@ -247,6 +248,8 @@ def test_the_stored_entry_holds_gas_mixing_ratios_and_the_flux_its_depth_implies
     np.testing.assert_allclose(out["fp_flux"], depth * fs / 0.5)
     assert json.loads(str(out["params_json"])) == cp
     assert list(out["unmodeled"]) == ["CS2|1.000e-05"]
+    # the core absorbers left out travel with the result, not only the log
+    assert list(out["unlisted_core"]) == ["HCN", "H2S"]
 
 
 def test_an_eclipse_depth_carries_the_emission_radius_and_a_transit_refuses_tau():

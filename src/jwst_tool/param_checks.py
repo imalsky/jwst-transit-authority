@@ -8,21 +8,35 @@ from __future__ import annotations
 
 import numpy as np
 
+from jwst_tool import planets
 from jwst_tool.model_defs import (
+    ALPHA_CLOUD_RANGE,
     ART_PBTM_FRACTION,
     CHEM_PARAM_NAMES,
     CLOUD_FISHER_PARAMS,
     CO_MAX,
     CO_MAX_PHOTO_OFF,
     EXTRA_MOLECULES,
+    F_DIURNAL_RANGE,
     JAC_METHODS,
+    KZZ_CONST_RANGE,
+    KZZ_KDEEP_RANGE,
+    KZZ_KMAX_RANGE,
     KZZ_MODES,
+    KZZ_PLEV_RANGE,
+    KZZ_X_RANGE,
+    LOG_GAMMA_RANGE,
+    LOG_KAPPA_CLOUD_RANGE,
+    LOG_KAPPA_RANGE,
     MET_RANGE,
     MOLECULES,
     NO_EXOMOLOP_TABLE,
     PICASO_MET_RANGE,
     RT_PTOP_DEFAULT,
+    RT_PTOP_RANGE,
     S_MOLECULES,
+    SL_ANGLE_RANGE,
+    TINT_RANGE,
     TP_PARAM_NAMES,
     active_molecules,
     co_bounds,
@@ -30,17 +44,42 @@ from jwst_tool.model_defs import (
 )
 
 
+def _check_range(key: str, value: float, rng: tuple, unit: str = "") -> None:
+    """Refuse ``value`` outside the inclusive ``rng``; NaN refuses too."""
+    if not rng[0] <= value <= rng[1]:
+        raise ValueError(f"{key}={value:g} outside [{rng[0]:g}, {rng[1]:g}]{' ' + unit if unit else ''}")
+
+
+def check_system(cp: dict) -> None:
+    """Refuse planet, star, orbit, temperature-profile and cloud values outside the ranges the sidebar offers.
+
+    Each is checked only where the run's modes use it, since an inert value is zeroed in the canonical payload.
+    """
+    rng = planets.CUSTOM_FIELD_RANGES
+    _check_range("rp_rjup", cp["rp_rjup"], rng["rp"], "R_jup")
+    _check_range("gs_cgs", cp["gs_cgs"], (100.0 * rng["g"][0], 100.0 * rng["g"][1]), "cm s^-2")
+    _check_range("rstar_rsun", cp["rstar_rsun"], rng["rstar"], "R_sun")
+    _check_range("orbit_au", cp["orbit_au"], rng["a"], "au")
+    climate = cp["tp_mode"] == "picaso_climate"
+    if cp["science_mode"] == "emission" or climate:  # Fp/Fs and the climate solve read the star
+        _check_range("star_teff", cp["star_teff"], rng["teff"], "K (the PHOENIX grid range exercised)")
+        _check_range("star_logg", cp["star_logg"], rng["logg"], "(log10 cm s^-2)")
+        _check_range("star_feh", cp["star_feh"], rng["feh"], "dex")
+    if cp["tp_mode"] == "guillot" or climate:
+        _check_range("Tint", cp["Tint"], TINT_RANGE, "K")
+    if cp["tp_mode"] == "guillot":
+        _check_range("log_kappa", cp["log_kappa"], LOG_KAPPA_RANGE, "(log10 cm^2/g)")
+        _check_range("log_gamma", cp["log_gamma"], LOG_GAMMA_RANGE)
+    if cp["cloud_on"]:
+        _check_range("log_kappa_cloud", cp["log_kappa_cloud"], LOG_KAPPA_CLOUD_RANGE, "(log10 cm^2/g)")
+        _check_range("alpha_cloud", cp["alpha_cloud"], ALPHA_CLOUD_RANGE)
+
+
 def check_rt_settings(cp: dict) -> None:
     """Refuse photolysis geometry, RT top, radius reference and chord scheme outside their ranges."""
-    if not 0.0 <= cp["sl_angle_deg"] <= 89.0:
-        raise ValueError(f"sl_angle_deg={cp['sl_angle_deg']} outside [0, 89] deg")
-    if not 0.0 < cp["f_diurnal"] <= 1.0:
-        raise ValueError(f"f_diurnal={cp['f_diurnal']} outside (0, 1]")
-    if not 1.0e-9 <= cp["rt_ptop_bar"] <= 1.0e-6:
-        raise ValueError(
-            f"rt_ptop_bar={cp['rt_ptop_bar']:g} outside [1e-9, 1e-6] bar (the "
-            f"exercised RT-top range; {RT_PTOP_DEFAULT:g} is the default)"
-        )
+    _check_range("sl_angle_deg", cp["sl_angle_deg"], SL_ANGLE_RANGE, "deg")
+    _check_range("f_diurnal", cp["f_diurnal"], F_DIURNAL_RANGE)
+    _check_range("rt_ptop_bar", cp["rt_ptop_bar"], RT_PTOP_RANGE, f"bar (default {RT_PTOP_DEFAULT:g})")
     art_pbtm = cp["p_btm_bar"] * ART_PBTM_FRACTION
     if not cp["rt_ptop_bar"] <= cp["p_ref_bar"] <= art_pbtm:
         raise ValueError(
@@ -108,6 +147,8 @@ def check_molecules(cp: dict, network: str) -> None:
 def check_composition(cp: dict, network: str, pic: bool) -> tuple:
     """Refuse a composition outside its range; return (C/O bounds, metallicity range)."""
     co_lo, co_hi = co_bounds(network, cp["use_photo"])  # photo off under PICASO
+    if not np.isfinite(cp["co_ratio"]):
+        raise ValueError(f"co_ratio={cp['co_ratio']!r} is not finite: give a C/O inside [{co_lo:g}, {co_hi:g}].")
     if cp["co_ratio"] < co_lo:
         raise ValueError(f"C/O {cp['co_ratio']:g} is below the modelled minimum {co_lo:g}.")
     if cp["co_ratio"] > co_hi:
@@ -288,23 +329,16 @@ def check_kzz(cp: dict, tp_mode: str, tp_table: dict | None, pic: bool) -> None:
             f"{list(KZZ_MODES)}. Kzz profiles are explicit -- the GCM-scaled "
             "'scale' mode was removed."
         )
-    if not 0.01 <= cp["kzz_x"] <= 100.0:
-        raise ValueError(
-            f"kzz_x={cp['kzz_x']} outside [0.01, 100] (multiplicative scale applied on-graph to the whole Kzz profile)"
-        )
+    _check_range("kzz_x", cp["kzz_x"], KZZ_X_RANGE, "(multiplier on the whole Kzz profile)")
     if pic and not cp["picaso_quench"]:  # equilibrium: no transport anywhere
         cp["kzz_const"] = 0.0
     elif cp["kzz_mode"] == "const":
-        if not 1.0e3 <= cp["kzz_const"] <= 1.0e13:
-            raise ValueError(f"kzz_const={cp['kzz_const']:g} outside [1e3, 1e13] cm^2/s")
+        _check_range("kzz_const", cp["kzz_const"], KZZ_CONST_RANGE, "cm^2/s")
     elif cp["kzz_mode"] == "Pfunc":
-        if not 1.0e3 <= cp["kzz_kmax"] <= 1.0e12:
-            raise ValueError(f"kzz_kmax={cp['kzz_kmax']:g} outside [1e3, 1e12] cm^2/s (Pfunc deep Kzz)")
-        if not 1.0e-6 <= cp["kzz_plev"] <= 1.0e3:
-            raise ValueError(f"kzz_plev={cp['kzz_plev']:g} outside [1e-6, 1e3] bar (Pfunc transition pressure)")
+        _check_range("kzz_kmax", cp["kzz_kmax"], KZZ_KMAX_RANGE, "cm^2/s (Pfunc deep Kzz)")
+        _check_range("kzz_plev", cp["kzz_plev"], KZZ_PLEV_RANGE, "bar (Pfunc transition pressure)")
     elif cp["kzz_mode"] == "JM16":
-        if not 1.0e3 <= cp["kzz_kdeep"] <= 1.0e12:
-            raise ValueError(f"kzz_kdeep={cp['kzz_kdeep']:g} outside [1e3, 1e12] cm^2/s (JM16 deep floor)")
+        _check_range("kzz_kdeep", cp["kzz_kdeep"], KZZ_KDEEP_RANGE, "cm^2/s (JM16 deep floor)")
     elif cp["kzz_mode"] == "file":
         if tp_mode != "file":
             raise ValueError(

@@ -32,6 +32,7 @@ def _result(n=4, climate=True):
         "atoms": np.tile(target, (n, 1)),
         "target": target,
         "chem_fail": np.array(0),
+        "chem_retry": np.array(0),
         "vmr": np.full((n, 2), 0.5),
         "T": np.full(n, 1000.0),
     }
@@ -54,7 +55,7 @@ def _req(n=4, climate=True):
 
 def test_certificate_passes_and_refuses_each_gate():
     assert "flux_toa" in pe.certify(_req(), _result(), "t")
-    assert set(pe.certify(_req(climate=False), _result(climate=False), "t")) == {"element_err"}
+    assert set(pe.certify(_req(climate=False), _result(climate=False), "t")) == {"element_err", "retried_layers"}
 
     def bad(**kw):
         r = _result()
@@ -121,7 +122,7 @@ _FAKE_WORKER = textwrap.dedent("""
              atoms_names=np.array(["H", "He", "C", "N", "O", "S"]),
              vmr=np.ones((n, 2)), gas_names=np.array(["H2", "He"]),
              gas_mass=np.array([2.0, 4.0]), T=np.full(n, 900.0),
-             quench_json=np.array("{}"), chem_fail=np.array(0))
+             quench_json=np.array("{}"), chem_fail=np.array(0), chem_retry=np.array(0))
 """)
 
 

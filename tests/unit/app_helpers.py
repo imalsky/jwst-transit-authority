@@ -53,6 +53,8 @@ def synthetic_out(science_mode="transmission", saturated=False, sigma_detect=0.0
         "photo_escalated": np.array([], dtype="U48"),
         "rate_rows_outside": np.array([0]),
         "rate_rows_total": np.array([0]),
+        "unlisted_core": np.array([], dtype="U8"),
+        "chem_provider": np.array("vulcan", dtype="U16"),
     }
     nb = 12
     rng = np.random.default_rng(0)
