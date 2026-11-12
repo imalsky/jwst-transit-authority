@@ -46,17 +46,18 @@ from jwst_tool.model_defs import (
 )
 
 
-def _check_range(key: str, value: float, rng: tuple, unit: str = "") -> None:
+def _check_range(key: str, value: float, rng: tuple, unit: str = "", remedy: str = "") -> None:
     """Refuse ``value`` outside the inclusive ``rng``; NaN refuses too."""
     if not rng[0] <= value <= rng[1]:
-        raise ValueError(f"{key}={value:g} outside [{rng[0]:g}, {rng[1]:g}]{' ' + unit if unit else ''}")
+        fix = f": {remedy}" if remedy else ""
+        raise ValueError(f"{key}={value:g} outside [{rng[0]:g}, {rng[1]:g}]{' ' + unit if unit else ''}{fix}")
 
 
-def check_system(cp: dict, tirr_derived: bool) -> None:
+def check_system(cp: dict, custom_star: bool) -> None:
     """Refuse planet, star, orbit, temperature-profile and cloud values outside the ranges the sidebar offers.
 
     Each is checked only where the run's modes use it, since an inert value is zeroed in the canonical payload.
-    ``tirr_derived``: the Guillot T_irr default is computed from the star and orbit.
+    ``custom_star``: the request states a custom planet's star, checked in every mode.
     """
     rng = planets.CUSTOM_FIELD_RANGES
     _check_range("rp_rjup", cp["rp_rjup"], rng["rp"], "R_jup")
@@ -64,13 +65,12 @@ def check_system(cp: dict, tirr_derived: bool) -> None:
     _check_range("rstar_rsun", cp["rstar_rsun"], rng["rstar"], "R_sun")
     _check_range("orbit_au", cp["orbit_au"], rng["a"], "au")
     climate = cp["tp_mode"] == "picaso_climate"
-    # The star is read by Fp/Fs and the climate solve (all three values), and by a custom planet's T_irr default (its
-    # T_eff), in either mode.
-    if cp["science_mode"] == "emission" or climate or (cp["planet"] == "custom" and tirr_derived):
-        _check_range("star_teff", cp["star_teff"], rng["teff"], "K (the PHOENIX grid range exercised)")
-    if cp["science_mode"] == "emission" or climate:
-        _check_range("star_logg", cp["star_logg"], rng["logg"], "(log10 cm s^-2)")
-        _check_range("star_feh", cp["star_feh"], rng["feh"], "dex")
+    # Fp/Fs and the climate solve read the star; a custom planet's stated star is its own system, checked in any mode.
+    if cp["science_mode"] == "emission" or climate or custom_star:
+        fix = "give the star's value inside this range"
+        _check_range("star_teff", cp["star_teff"], rng["teff"], "K (the PHOENIX grid range exercised)", fix)
+        _check_range("star_logg", cp["star_logg"], rng["logg"], "(log10 cm s^-2)", fix)
+        _check_range("star_feh", cp["star_feh"], rng["feh"], "dex", fix)
     if cp["tp_mode"] == "guillot":
         _check_range("log_kappa", cp["log_kappa"], LOG_KAPPA_RANGE, "(log10 cm^2/g)")
         _check_range("log_gamma", cp["log_gamma"], LOG_GAMMA_RANGE)

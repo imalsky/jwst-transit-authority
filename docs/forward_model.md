@@ -44,9 +44,10 @@ and the research note's scripts read.
   API and the GUI refuse the same values; `p_ref_bar` must also lie inside the run's own RT grid. A custom planet
   states its own system, UV spectrum, T-P mode and `Tint` (`run_params.CUSTOM_REQUIRED_KEYS`; under PICASO no UV
   spectrum), refused in one error naming every missing key: nothing is taken from another planet, and it has no
-  shipped table. Its stellar T_eff is checked where its T_irr default reads it. A Guillot T_irr default outside
-  `TIRR_RANGE` is refused, never clipped: the run needs an explicit `Tirr`. A T-P table that does not reach the run's
-  model top (`RT_PTOP_DEFAULT` unless set) or bottom is refused, unless its registry entry declares the flat extension
+  shipped table. Its stated star (T_eff, log g, [Fe/H]) is range-checked in every mode, before a transit's payload
+  zeroes it; a canonical payload fed back in (it carries `version`) is not judged for that zeroed star. A Guillot
+  T_irr default outside `TIRR_RANGE` is refused, never clipped: the run needs an explicit `Tirr`. A T-P table that
+  does not reach the run's model top (`RT_PTOP_DEFAULT` unless set) or bottom is refused, unless its registry entry declares the flat extension
   above its top (`tp_table_extends_top`, WASP-39 b's shipped table), which the result and the run log then state. Under PICASO a VULCAN-only setting is refused unless
   it holds the value a PICASO payload carries.
 - `model_defs`: what the model offers, the request defaults (one definition each, read by `canonical_params`, the

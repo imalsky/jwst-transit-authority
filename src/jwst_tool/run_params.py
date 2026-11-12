@@ -161,6 +161,7 @@ _PARAM_KEYS_READ = frozenset(
         "use_photo",
         "use_rayleigh",
         "use_vm_mol",
+        "version",  # read only as the mark of a canonical payload fed back in, never inherited
         "wo_mols",
         "yconv_cri",
         "yconv_min",
@@ -172,7 +173,7 @@ _PARAM_KEYS_READ = frozenset(
 # payload by feeding it back in, so echo fields must not read as unknown.
 # "data_revision" is appended from the environment below and re-derived on
 # every call (never inherited), so canonical_params must accept its own output.
-_PARAM_KEYS_ECHOED = frozenset({"version", "data_revision", "picaso_stack"})
+_PARAM_KEYS_ECHOED = frozenset({"data_revision", "picaso_stack"})
 
 
 _KNOWN_PARAM_KEYS = _PARAM_KEYS_READ | _PARAM_KEYS_ECHOED
@@ -729,7 +730,10 @@ def canonical_params(params: dict) -> dict:
         solver=solver,
     )
     cp = _filled_payload(params, r)
-    check_system(cp, tirr_derived=tp_mode == "guillot" and "Tirr" not in params)
+    # A canonical payload fed back in (a share file, the GUI worker's parameters) carries its version and, in a
+    # transit, the star zeroed by design: those three zeros are not a stated star.
+    zeroed_star = "version" in params and all(cp[k] == 0.0 for k in ("star_teff", "star_logg", "star_feh"))
+    check_system(cp, custom_star=planet == "custom" and not zeroed_star)
     _default_tint(params, cp, r)
     check_tint(cp)
     _guillot_tirr(params, cp, r)

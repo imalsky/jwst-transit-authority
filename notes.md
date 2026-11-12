@@ -28,18 +28,12 @@ names the code state it was measured on.
   runs by hand. Slow tier (`JWST_TOOL_RUN_SLOW=1`), one thread per worker:
   `pytest tests -q -n 14 --dist worksteal` (CLAUDE.md). At v64 (tool fd79bed) on the pinned engines, 14 workers on 18 cores: 607
   passed in 2919 s (0:48:39) [M]; longest PICASO e2e eclipse 2652 s and transit 2631 s, TOI-7169 b 2446 s, emission AD
-  closure at cadence 1 2271 s. A run of the same tier an hour earlier, under more load, took 4011 s.
-  At v63 (vulcan-forward 07f936d, vulcan3 362d642, 9 workers on 10 cores): 603 passed in 3576 s;
-  VULCAN e2e 356 s. On those engines a cold rerun of the VULCAN reference is bitwise equal
+  closure at cadence 1 2271 s.
+  At v63 (vulcan-forward 07f936d, vulcan3 362d642) a cold rerun of the VULCAN reference is bitwise equal
   to it on the reference's own CPU affinity (10 cores; transit 1127 steps, eclipse 1942), and
   not on 5 cores (eclipse 3140 steps, 0.011 ppm at R = 100; transit 1.5e-7 ppm) [M]: the
   solver's step sequence depends on the core count, so a bitwise check uses the same
-  affinity. The earlier run, whose times follow: 511 passed, 2 skipped
-  in 79 min under load [M, tool 0f6392d, vulcan-forward b1ec05a, vulcan3 0db0361]; nothing
-  requires serial. Longest: emission closure 3635 s (config cadence) / 2602 s (cadence
-  1), TOI-7169 b escalation 2473 s, transmission closure 1693 / 1097 s, PICASO e2e 1403 /
-  1283 s, VULCAN e2e 373 / 240 s. A worker's next test cannot be stolen, so two neighbours
-  add: this run's time is the transmission cadence-1 closure then the emission closure.
+  affinity. A worker's next test cannot be stolen, so two neighbours add.
   With the two emission closures as neighbours one worker ran both for over 90 min, near the 100 min cap, so
   they sit apart in `test_closure.py`. Alone, on one core: cadence-1 emission 2514 s.
 - Space, at the last Hub API read: `imalsky/jwst-transit-authority` RUNNING on cpu-basic
@@ -56,49 +50,40 @@ names the code state it was measured on.
 
 ## Composition, C/O bounds and networks
 
-- Convention: metallicity scales O, C, N, S together with He/H fixed (Moses et al.
-  2011); C/O moves carbon at fixed metallicity-scaled oxygen (Tsai et al. 2017). Codes
-  that anchor on carbon (petitRADTRANS chemistry, ATMO, Goyal et al. 2018) differ first
-  order in ln(C/O): at C/O 0.7 both C and O differ by ~28%. Abundances are Lodders 2020
-  Table 8 present-day (log eps C 8.47, N 7.85, O 8.73, S 7.15, He 10.924), what upstream
-  calls "Lodders 2019". The cfg's C_H/O_H is 0.549; `CO_DEFAULT` 0.55.
-- `co_bounds(network, use_photo)`: photolysis on, `CO_MAX` = sncho 0.99, sncho2025 10,
-  ncho 10; photolysis off, 10 for all three. `CO_MIN` 0.1 was measured on the three
-  photolysis-on rows; the photolysis-off floor is carried over. The permissive bounds are
-  the highest value SAMPLED, not a measured ceiling.
-- The sncho photolysis-on ceiling is set by the DERIVATIVE (Decision records). Default
-  W39b, FD `dlnCO`, `CO_MAX` patched: the column certifies at 0.99-1.02 (loose, element
-  budget within 0.01%) and at 1.03 only after escalation. The one-sided row (h 0.05)
-  against its 0.25 h-vs-2h gate: 0.032 at 0.55, 0.210 at 0.95, 0.269 at 0.97 (first
-  FAIL), 0.414 at 1.03. The AD margin (gate 0.1) is 0.0476 at 0.95: AD is refused from
-  ~0.90. The band-median depth turns over near C/O 1.00.
-- CLI survey (92 rows; nz 100, cadence 5, cap 5000; the raw outputs are deleted, these
-  numbers are the record): every ceiling is a LOWER bound. sncho converges <= 1.02 and
-  fails 1.03-4 (also at 30k steps). sncho2025 fails at 1.03 only, a notch that moves with
-  temperature and nz. ncho converges 1.03-10. Photolysis off, every network reaches 10
-  in 121-229 steps. 54 of 58 converged rows exit loose (median longdy 0.0988). No
-  published VULCAN WASP-39 b run reaches C/O >= 1 photolysis-on; upstream
-  exoclime@80f75b9 fails C/O 1.087 at its cap.
-- sncho2025 converges where sncho does not because of its H2CS/CS2 sulfur block (alone it
-  converges at C/O 1.087 in 2448 steps); the C3 species hold 2.5e-7 of the carbon:
-  network-sensitive numerics. At C/O 1.03 its failure is a localized sulfur-cell
-  instability (layers 37-39), neither a limit cycle nor a slow approach.
+- Convention: metallicity scales O, C, N, S together with He/H fixed (Moses et al. 2011); C/O moves carbon at fixed
+  metallicity-scaled oxygen (Tsai et al. 2017). Codes that anchor on carbon (petitRADTRANS chemistry, ATMO, Goyal et al.
+  2018) differ first order in ln(C/O): at C/O 0.7 both C and O differ by ~28%. Abundances are Lodders 2020 Table 8
+  present-day (log eps C 8.47, N 7.85, O 8.73, S 7.15, He 10.924), what upstream calls "Lodders 2019". The cfg's C_H/O_H
+  is 0.549; `CO_DEFAULT` 0.55.
+- `co_bounds(network, use_photo)`: photolysis on, `CO_MAX` = sncho 0.99, sncho2025 10, ncho 10; photolysis off, 10 for
+  all three. `CO_MIN` 0.1 was measured on the three photolysis-on rows; the photolysis-off floor is carried over. The
+  permissive bounds are the highest value SAMPLED, not a measured ceiling.
+- The sncho photolysis-on ceiling is set by the DERIVATIVE (Decision records). Default W39b, FD `dlnCO`, `CO_MAX`
+  patched: the column certifies at 0.99-1.02 (loose, element budget within 0.01%) and at 1.03 only after escalation. The
+  one-sided row (h 0.05) against its 0.25 h-vs-2h gate: 0.032 at 0.55, 0.210 at 0.95, 0.269 at 0.97 (first FAIL), 0.414
+  at 1.03. The AD margin (gate 0.1) is 0.0476 at 0.95: AD is refused from ~0.90. The band-median depth turns over near
+  C/O 1.00.
+- CLI survey (92 rows; nz 100, cadence 5, cap 5000; the raw outputs are deleted, these numbers are the record): every
+  ceiling is a LOWER bound. sncho converges <= 1.02 and fails 1.03-4 (also at 30k steps). sncho2025 fails at 1.03 only,
+  a notch that moves with temperature and nz. ncho converges 1.03-10. Photolysis off, every network reaches 10 in
+  121-229 steps. 54 of 58 converged rows exit loose (median longdy 0.0988). No published VULCAN WASP-39 b run reaches
+  C/O >= 1 photolysis-on; upstream exoclime@80f75b9 fails C/O 1.087 at its cap.
+- sncho2025 converges where sncho does not because of its H2CS/CS2 sulfur block (alone it converges at C/O 1.087 in 2448
+  steps); the C3 species hold 2.5e-7 of the carbon: network-sensitive numerics. At C/O 1.03 its failure is a localized
+  sulfur-cell instability (layers 37-39), neither a limit cycle nor a slow approach.
 - Temperature and Kzz are NOT gate axes: +400 K, +800 K and -200 K all rescue C/O 1.087,
   and Kzz 1e10 and 5e10 do where 1e9 does not. vulcan3 forces `atm_type="file"` whenever
   Kzz is tabulated, so the survey's synthetic T-P tables kept the shipped Kzz.
-- `MET_RANGE` (0.1, 100) (Decision records). Cold `certified_solve`, sncho, photolysis
-  on, C/O 0.55, cap 30000 (vulcan3 0.11.0): W39b default certifies every point 40x-300x
-  (100x 7808 steps; steps climb because the loose slope gate scales with dt). W39b
-  Guillot at Tirr 1640: 30x FAILS (a top-of-column photolysis stall), 50x certifies,
-  100x fails. HD 209458 b: 50x and 150x fail at both cadences (photolysis off certifies
-  50x in 452 steps). Cool planets show no ceiling to 1000x. The lnZ stencil solves at
-  met x exp(+-0.2), so the range check caps a lnZ FD centre at 81.87x; 100x keeps every
-  stencil point under the certified 150x. The run-time certificate, not the range,
-  refuses an uncertified column. Cost: ~3.5x the default's steps at 100x.
-- Between 81.87x and 100x the lnZ row is AD-only. On an external user's case (LP 714-47
-  b custom: Guillot 1020 K, const Kzz 1e9, 100x) the AD lnZ tangent certifies at 20900
-  steps at both cadences; the 6000-step cap reads 0.105. Central FD with the range lifted
-  certifies its four columns and fails h-vs-2h at 0.463. Basis of `AD_RETRY_COUNT_MAX`.
+- `MET_RANGE` (0.1, 100) (Decision records). Cold `certified_solve`, sncho, photolysis on, C/O 0.55, cap 30000 (vulcan3
+  0.11.0): W39b default certifies every point 40x-300x (100x 7808 steps; steps climb because the loose slope gate scales
+  with dt). W39b Guillot at Tirr 1640: 30x FAILS (a top-of-column photolysis stall), 50x certifies, 100x fails. HD
+  209458 b: 50x and 150x fail at both cadences (photolysis off certifies 50x in 452 steps). Cool planets show no ceiling
+  to 1000x. The lnZ stencil solves at met x exp(+-0.2), so the range check caps a lnZ FD centre at 81.87x; 100x keeps
+  every stencil point under the certified 150x. The run-time certificate, not the range, refuses an uncertified column.
+  Cost: ~3.5x the default's steps at 100x.
+- Between 81.87x and 100x the lnZ row is AD-only. On an external user's case (LP 714-47 b custom: Guillot 1020 K, const
+  Kzz 1e9, 100x) the AD lnZ tangent certifies at 20900 steps at both cadences; the 6000-step cap reads 0.105. Central FD
+  with the range lifted certifies its four columns and fails h-vs-2h at 0.463. Basis of `AD_RETRY_COUNT_MAX`.
 - The solved column runs C/O short of the request (10 -> 9.877): upstream's 4-decimal
   rounding and one-way species map. Every surface reports the REQUESTED value. Measured
   on the FastChem seed (`_VERSION` <= 58), not re-measured on the ExoGibbs seed.
@@ -116,49 +101,39 @@ names the code state it was measured on.
 
   Benzene, the fifth carrier at C/O 10, has no k-table anywhere (ExoMol publishes no
   C6H6 line list) and is not photochemical (3.3e-3 off, 3.6e-3 on).
-- Photolysis on, mean photosphere C6H6 on sncho2025: 3.0e-22 at C/O 1.0, 6.8e-5 at 1.2,
-  1.40e-4 at 1.4, 4.58e-4 at 4, 1.15e-3 at 7, 3.62e-3 at 10. The 1e-4 warning floor is
-  crossed between 1.2 and 1.4, the 1e-3 refusal between 4 and 7.
-- Leave-one-out at C/O 10: CH4 1449 ppm, C2H4 1087, C2H2 504, CO 64. C2H2 at 1.6e-4 is
-  worth 504 ppm, so a table-less absorber in the 1e-4..1e-3 band can be worth hundreds of
-  ppm: a warning, not a licence.
-- Gates set from this ladder (0.68.0): `ELEMENT_TOL` 1.5%, so the C/O 10 column (drift
-  1.30%) passes; `UNMODELED_VMR_REFUSE` 1e-3, refusing an absorber with no table after the
-  baseline solve (a 1e-4 refusal cuts the path off near C/O 1.3, too restrictive; 1e-3
-  keeps sncho2025 to about C/O 5); `UNMODELED_VMR_WARN` 1e-4. The shipped default warns
-  about nothing (HSO at 3.0e-5).
-- C2H4: the table spans 100-3400 K and 0.3-50 um, but ExoMol's `.def.json` gives 700 K
-  and 1.408 um and its kcoeff is zero shortward of 1.427 um: interpolation, not
-  completeness.
-- Network-swap parity against pinned upstream vulcan2_ncho 80f75b9: matched-step ymix
-  mismatch 1e-15 at 5 steps to 9e-9 at 50; free photolysis-off runs agree CH4 1.6%,
-  worst 19.8% (C4H2), inside the ~10% per-step slack of a loose exit.
+- Photolysis on, mean photosphere C6H6 on sncho2025: 3.0e-22 at C/O 1.0, 6.8e-5 at 1.2, 1.40e-4 at 1.4, 4.58e-4 at 4,
+  1.15e-3 at 7, 3.62e-3 at 10. The 1e-4 warning floor is crossed between 1.2 and 1.4, the 1e-3 refusal between 4 and 7.
+- Leave-one-out at C/O 10: CH4 1449 ppm, C2H4 1087, C2H2 504, CO 64. C2H2 at 1.6e-4 is worth 504 ppm, so a table-less
+  absorber in the 1e-4..1e-3 band can be worth hundreds of ppm: a warning, not a licence.
+- Gates set from this ladder (0.68.0): `ELEMENT_TOL` 1.5%, so the C/O 10 column (drift 1.30%) passes;
+  `UNMODELED_VMR_REFUSE` 1e-3, refusing an absorber with no table after the baseline solve (a 1e-4 refusal cuts the path
+  off near C/O 1.3, too restrictive; 1e-3 keeps sncho2025 to about C/O 5); `UNMODELED_VMR_WARN` 1e-4. The shipped
+  default warns about nothing (HSO at 3.0e-5).
+- C2H4: the table spans 100-3400 K and 0.3-50 um, but ExoMol's `.def.json` gives 700 K and 1.408 um and its kcoeff is
+  zero shortward of 1.427 um: interpolation, not completeness.
+- Network-swap parity against pinned upstream vulcan2_ncho 80f75b9: matched-step ymix mismatch 1e-15 at 5 steps to 9e-9
+  at 50; free photolysis-off runs agree CH4 1.6%, worst 19.8% (C4H2), inside the ~10% per-step slack of a loose exit.
 - Rate-law T-range exposure depends on the T profile, not C/O: on the W39b grid SNCHO has
   194 of 513 thermal rows outside their range in >= 1 layer, SNCHO_2025 200 of 532, NCHO
   130 of 390. `run_model` stores the counts and the app states them.
-- `chem_build._select_network` hands every network, the default included, to the engine's
-  `select_network`: skipping the default would let a sncho request after a sncho2025 run in
-  one process be served by sncho2025. One process runs one network: PICASO selects the default
-  (its radius anchor reads vulcan3), so PICASO then a non-default VULCAN network, a
-  non-default network then PICASO, or two VULCAN networks, are refused by the engine; PICASO
-  then the default VULCAN network works (`test_a_default_vulcan_build_follows_a_picaso_assembly_in_one_process`).
+- `chem_build._select_network` hands every network, the default included, to the engine's `select_network`: skipping the
+  default would let a sncho request after a sncho2025 run in one process be served by sncho2025. One process runs one
+  network: PICASO selects the default (its radius anchor reads vulcan3), so PICASO then a non-default VULCAN network, a
+  non-default network then PICASO, or two VULCAN networks, are refused by the engine; PICASO then the default VULCAN
+  network works (`test_a_default_vulcan_build_follows_a_picaso_assembly_in_one_process`).
 - Default WASP-39 b SO2, one transit, calibration + R0 projected (v61) [M]: PRISM 2.64,
   G395H 4.23, MIRI LRS 3.11 sigma on sncho2025 and on sncho alike (to 0.01 sigma); the
   published G395H detections (Alderson et al. 2023, Tsai et al. 2023) are 4.5-4.8 sigma.
-- Networks: sncho2025 (default, `model_defs.DEFAULT_NETWORK`) is upstream's 93-species
-  file at a68d715, hash-pinned in VULCAN-JAX `tests/science_sources.yaml`; sncho is the
-  Tsai et al. 2023 89-species file with post-publication rate updates (never "exactly
-  the published network"), kept for condensation; ncho 69 species (sulfur refused,
-  never dropped). The network says COS where the opacity side says OCS.
-- `CO_BZ_MIN_AD` 0.1 (TOI-7169 b-like case): AD dlnCO vs one-sided FD at margin 0.12
-  corr 0.9904, scale 1.022; at margin 0.05 scale 1.116, a uniform 11-12% AD excess. Two
-  points, one planet.
-- Condensation: `CONDEN_CFG` (S8, whole-column pin, `mtol_conv` 1e-15, sulfur-allotrope
-  `conver_ignore`, `trun_min = stop_conden_time`) was tuned on the 89-species network,
-  each knob measured necessary. The pinned reservoir's jvp-vs-FD error is 91%, hence
-  detection-only. Default W39b with `use_condense` (vulcan3 0.10.1): 2344 steps, longdy
-  0.0998 (0.2% inside the gate), +72% steps; nothing condenses (S8 at 1.4e-47 of
-  saturation).
+- Networks: sncho2025 (default, `model_defs.DEFAULT_NETWORK`) is upstream's 93-species file at a68d715, hash-pinned in
+  VULCAN-JAX `tests/science_sources.yaml`; sncho is the Tsai et al. 2023 89-species file with post-publication rate
+  updates (never "exactly the published network"), kept for condensation; ncho 69 species (sulfur refused, never
+  dropped). The network says COS where the opacity side says OCS.
+- `CO_BZ_MIN_AD` 0.1 (TOI-7169 b-like case): AD dlnCO vs one-sided FD at margin 0.12 corr 0.9904, scale 1.022; at margin
+  0.05 scale 1.116, a uniform 11-12% AD excess. Two points, one planet.
+- Condensation: `CONDEN_CFG` (S8, whole-column pin, `mtol_conv` 1e-15, sulfur-allotrope `conver_ignore`, `trun_min =
+  stop_conden_time`) was tuned on the 89-species network, each knob measured necessary. The pinned reservoir's jvp-vs-FD
+  error is 91%, hence detection-only. Default W39b with `use_condense` (vulcan3 0.10.1): 2344 steps, longdy 0.0998 (0.2%
+  inside the gate), +72% steps; nothing condenses (S8 at 1.4e-47 of saturation).
 
 ## Convergence certificate and element gate
 
@@ -326,37 +301,30 @@ names the code state it was measured on.
 
 ## Emission
 
-- The stellar flux of the eclipse depth is a band mean (`stellar.phoenix_surface_flux` on
-  the engine's `nu_edges`), as the planet flux is. Point-sampled at the band centres it was
-  off from the band mean by rms 5.4 / 5.5 / 2.1 % per R = 1000 band at 1-2 / 3-5 / 5-12 um
-  for 4400 K and 4.4 / 3.7 / 1.5 % for 5500 K (max 41 %) [M, the installed PHOENIX grid;
-  an independent measurement gives the same numbers, and rms 0.4-1.6 %, max 2.8-6.7 %, at
-  R = 100].
-- Photolysis sees the dayside in emission: `planets.SL_ANGLE_DEG`, 58 deg (VULCAN's
-  dayside average) against the terminator's 83 deg in transmission; the default was 83 in
-  both modes through v61, with the dayside T-P. On the default WASP-39 b eclipse both
-  changes and NH3 together move the R = 100 depth by at most 90.8 ppm (6.5 %, at 4.41 um,
-  the star's CO band), median 0.9 ppm; under PICASO, which has no photolysis, 71.2 ppm at
-  the same bin [M, v61 against v62 fixtures].
+- The stellar flux of the eclipse depth is a band mean (`stellar.phoenix_surface_flux` on the engine's `nu_edges`), as
+  the planet flux is. Point-sampled at the band centres it was off from the band mean by rms 5.4 / 5.5 / 2.1 % per R =
+  1000 band at 1-2 / 3-5 / 5-12 um for 4400 K and 4.4 / 3.7 / 1.5 % for 5500 K (max 41 %) [M, the installed PHOENIX
+  grid; an independent measurement gives the same numbers, and rms 0.4-1.6 %, max 2.8-6.7 %, at R = 100].
+- Photolysis sees the dayside in emission: `planets.SL_ANGLE_DEG`, 58 deg (VULCAN's dayside average) against the
+  terminator's 83 deg in transmission; the default was 83 in both modes through v61, with the dayside T-P. On the
+  default WASP-39 b eclipse both changes and NH3 together move the R = 100 depth by at most 90.8 ppm (6.5 %, at 4.41 um,
+  the star's CO band), median 0.9 ppm; under PICASO, which has no photolysis, 71.2 ppm at the same bin [M, v61 against
+  v62 fixtures].
 - Solver `ibased_linsap`, never `ibased` (it drops the bottom boundary, 12-52% of the
   flux). `p_btm_bar` is canonical: 7.6 bar in file mode, 10 bar for parametric profiles.
-- The thin-bottom gate is FLUX-WEIGHTED (`thin_flux_fraction`, `EMIS_THIN_FLUX_FRAC` 1%):
-  a min() over the band lets a 60 nm notch veto HD 189733 b, and an unweighted sum
-  under-reports the short-edge share 2.9x. It gates every FD stencil point and AD primal,
-  and runs per mode (`detect._certify_emission_band`). On the e2e emission reference the
-  minimum bottom tau is 73.6 against tau = 3, and stencil points move tau <= 26%.
-  Removed-H2O on W39b sits at 1.73% band-global and is refused. Re-measure before
-  shipping a shallower `p_btm_bar`.
-- Eclipse depths use the tau = 2/3 photospheric radius per k-ordinate
-  (`eclipse_flux_tau`): W39b depth ratio photospheric/single median 1.070; a single
-  radius reads the CO2 feature contrast 9% low. `emission_radius` stays the
+- The thin-bottom gate is FLUX-WEIGHTED (`thin_flux_fraction`, `EMIS_THIN_FLUX_FRAC` 1%): a min() over the band lets a
+  60 nm notch veto HD 189733 b, and an unweighted sum under-reports the short-edge share 2.9x. It gates every FD stencil
+  point and AD primal, and runs per mode (`detect._certify_emission_band`). On the e2e emission reference the minimum
+  bottom tau is 73.6 against tau = 3, and stencil points move tau <= 26%. Removed-H2O on W39b sits at 1.73% band-global
+  and is refused. Re-measure before shipping a shallower `p_btm_bar`.
+- Eclipse depths use the tau = 2/3 photospheric radius per k-ordinate (`eclipse_flux_tau`): W39b depth ratio
+  photospheric/single median 1.070; a single radius reads the CO2 feature contrast 9% low. `emission_radius` stays the
   (R_em/R_star)^2 factor.
 - HD 189733 b MIRI LRS vs Inglis et al. 2024 (v64): chi2/N 90.41, 27.46 with a fitted
   -163 ppm offset (v63: 93.80, 27.51 at -168; v62: 67.66, 27.04 at -131), under the dayside f = 1/2 Guillot default;
   v63 moved its system values, v64 its T_int (376 -> 300 K).
-- lnR0 (a radius change at fixed planet mass in both modes, v60; Decision records):
-  default W39b eclipse AD and FD lnR0 rows agree to corr 0.99999997. Emission lnR0 FD
-  points are tau-gated.
+- lnR0 (a radius change at fixed planet mass in both modes, v60; Decision records): default W39b eclipse AD and FD lnR0
+  rows agree to corr 0.99999997. Emission lnR0 FD points are tau-gated.
 
 ## Measurement operator, LSF, noise, ramps, registry
 
@@ -396,59 +364,48 @@ names the code state it was measured on.
 
 ## Jacobians and Fisher
 
-The closure gate is corr > 0.99 and scale within 15%; the FD self-check is the h-vs-2h
-gate 0.25.
+The closure gate is corr > 0.99 and scale within 15%; the FD self-check is the h-vs-2h gate 0.25.
 
-- Basis of the 0.25 gate (`FD_CONSISTENCY_TOL`): measured, not derived. Certified rows on
-  record read 0.024-0.210 (v63 WASP-39 b eclipse lnZ 0.024, dlnCO 0.050, transit Guillot
-  Tirr 0.092 [M, slow tier]; one-sided dlnCO 0.032 at C/O 0.55, 0.060 at 0.89, 0.210 at
-  0.95; TOI-7169 b dlnCO 0.084, lnZ 0.034; Guillot ncho Tirr 0.184), refused ones 0.258-0.699
-  (central dlnCO h = 0.05 at 0.89: 0.258; one-sided at 0.97: 0.269, 1.03: 0.414; ncho lnKzz
-  0.699). For an O(h^2) central row, J_h - J_true is about (J_2h - J_h)/3, so the gate
-  bounds the uncorrected row's leading error at about 8 % of its peak before Richardson
-  removes it. No error budget picks 0.25 over a neighbour (todo).
+- Basis of the 0.25 gate (`FD_CONSISTENCY_TOL`): measured, not derived. Certified rows on record read 0.024-0.210 (v63
+  WASP-39 b eclipse lnZ 0.024, dlnCO 0.050, transit Guillot Tirr 0.092 [M, slow tier]; one-sided dlnCO 0.032 at C/O
+  0.55, 0.060 at 0.89, 0.210 at 0.95; TOI-7169 b dlnCO 0.084, lnZ 0.034; Guillot ncho Tirr 0.184), refused ones
+  0.258-0.699 (central dlnCO h = 0.05 at 0.89: 0.258; one-sided at 0.97: 0.269, 1.03: 0.414; ncho lnKzz 0.699). For an
+  O(h^2) central row, J_h - J_true is about (J_2h - J_h)/3, so the gate bounds the uncorrected row's leading error at
+  about 8 % of its peak before Richardson removes it. No error budget picks 0.25 over a neighbour (todo).
 
 - A non-finite Fisher matrix or nuisance row is refused: a NaN radius-nuisance row once
   gave a finite sigma (the positive-diagonal mask dropped it).
-- FD rows: central (Richardson) or one-sided (-h, -2h, -4h at h/2, third order) when the
-  +2h dlnCO point would leave `CO_MAX[network]`. At C/O 0.89 on W39b the one-sided gate
-  is 0.060; central h = 0.05 FAILS at 0.258.
-- Composition FD holds the geometry anchor FIXED by design: lnZ/dlnCO stencil points
-  reuse the baseline's `mu_col`, chemistry radius/gravity anchor (`ovr["Rp"]`) and
-  Guillot `tp_eval`, while T-P stencil points and a fresh `run_model` re-assemble them.
-  The h-vs-2h gate cannot see this; measurement settles it: the Fisher marginalizes
-  `lnR0` and segment offsets, absorbing an anchor shift to leading order, and
-  re-anchored independent references agree to corr 0.9991 / 0.9996. W39b Guillot Tirr
-  1560 at 10x (own vs frozen anchor): corr 0.999997, scale 1.000693, median 0.10% over
-  the top-decile bins; ~0.5% at the top of the range. Measured before v60; the mode was
-  not recorded (the TOI-7169 b reference is transmission), and no eclipse case, where
-  lnR0 moves gravity, is measured ("Known and deliberately untracked").
-- T-P rows are FD only (an AD Jacobian cache with a T-P row held a frozen-anchor
-  derivative) and rebuild chemistry and T-P at each stencil point. The transmission Tirr
-  FD/FD closure passes escalated: corr 0.996898 / scale 1.00571 against an independent 2
-  K central difference, the noisiest usable step (per-solve error grows as 1/h^2).
-- Eclipse AD rows need the step cap. Uncapped, the warm map never certifies within 6000
-  steps (the tangent reaches 1e9-1e31); every certified column there is a snapshot of a
-  photolysis sawtooth. A plain `jax.jvp` read at the column's certificate closes at corr
-  0.3319. The timestep stop-gradient closes (0.997647) but breaks the independent Kzz
-  derivative. Capping `dt_max` on the AD build alone closes the rows (lnZ corr 0.997635,
-  dlnCO 0.998119), the same over a 300x range of caps.
-- Shipped (v57): `AD_BUILD_OVERRIDES = {"count_max": 6000, "dt_max": 1e5}` on DERIVATIVE
-  builds only; cold solves and FD stencil points keep `DT_MAX_S` 1e13, so no shipped
-  spectrum moves (a global cap moves it ~6 ppm). W39b transmission AD rows close at corr
-  0.99989 / scale 0.9977.
-- `AD_RETRY_COUNT_MAX` 30000: the first attempt keeps the 6000 cap (a genuine stall is
-  detected there at that price; on TOI-7169 b the warm re-converge stops improving by
-  step ~900); only the cadence-1 retry gets the cold budget. On the LP 714-47 b case the
-  retry certifies lnZ at 20936 steps, matching a both-attempts-30000 run (corr 0.999981).
+- FD rows: central (Richardson) or one-sided (-h, -2h, -4h at h/2, third order) when the +2h dlnCO point would leave
+  `CO_MAX[network]`. At C/O 0.89 on W39b the one-sided gate is 0.060; central h = 0.05 FAILS at 0.258.
+- Composition FD holds the geometry anchor FIXED by design: lnZ/dlnCO stencil points reuse the baseline's `mu_col`,
+  chemistry radius/gravity anchor (`ovr["Rp"]`) and Guillot `tp_eval`, while T-P stencil points and a fresh `run_model`
+  re-assemble them. The h-vs-2h gate cannot see this; measurement settles it: the Fisher marginalizes `lnR0` and segment
+  offsets, absorbing an anchor shift to leading order, and re-anchored independent references agree to corr 0.9991 /
+  0.9996. W39b Guillot Tirr 1560 at 10x (own vs frozen anchor): corr 0.999997, scale 1.000693, median 0.10% over the
+  top-decile bins; ~0.5% at the top of the range. Measured before v60; the mode was not recorded (the TOI-7169 b
+  reference is transmission), and no eclipse case, where lnR0 moves gravity, is measured ("Known and deliberately
+  untracked").
+- T-P rows are FD only (an AD Jacobian cache with a T-P row held a frozen-anchor derivative) and rebuild chemistry and
+  T-P at each stencil point. The transmission Tirr FD/FD closure passes escalated: corr 0.996898 / scale 1.00571 against
+  an independent 2 K central difference, the noisiest usable step (per-solve error grows as 1/h^2).
+- Eclipse AD rows need the step cap. Uncapped, the warm map never certifies within 6000 steps (the tangent reaches
+  1e9-1e31); every certified column there is a snapshot of a photolysis sawtooth. A plain `jax.jvp` read at the column's
+  certificate closes at corr 0.3319. The timestep stop-gradient closes (0.997647) but breaks the independent Kzz
+  derivative. Capping `dt_max` on the AD build alone closes the rows (lnZ corr 0.997635, dlnCO 0.998119), the same over
+  a 300x range of caps.
+- Shipped (v57): `AD_BUILD_OVERRIDES = {"count_max": 6000, "dt_max": 1e5}` on DERIVATIVE builds only; cold solves and FD
+  stencil points keep `DT_MAX_S` 1e13, so no shipped spectrum moves (a global cap moves it ~6 ppm). W39b transmission AD
+  rows close at corr 0.99989 / scale 0.9977.
+- `AD_RETRY_COUNT_MAX` 30000: the first attempt keeps the 6000 cap (a genuine stall is detected there at that price; on
+  TOI-7169 b the warm re-converge stops improving by step ~900); only the cadence-1 retry gets the cold budget. On the
+  LP 714-47 b case the retry certifies lnZ at 20936 steps, matching a both-attempts-30000 run (corr 0.999981).
 - AD rows: one warm `jax.jvp` per row, never a vmap over tangent directions (NaN through
   VULCAN-JAX <= 0.3.4 on columns with exact zeros; 3% per bin off after the fix).
-- Photolysis-cadence escalation (`certified_solve`): a column that does not certify is
-  re-solved once at cadence 1. The unit is the FD ROW, never the stencil point: the
-  cadence moves a spectrum 0.01-2.4 ppm, and in a mixed row that offset divides by h
-  (~0.25% of the dlnCO row, invisible to the gate). Only `NotCertified` triggers it; a
-  backend fault, the element gate, the emission gate and the T window propagate. A
-  chem-cache hit of an escalated column rebuilds at cadence 1.
+- Photolysis-cadence escalation (`certified_solve`): a column that does not certify is re-solved once at cadence 1. The
+  unit is the FD ROW, never the stencil point: the cadence moves a spectrum 0.01-2.4 ppm, and in a mixed row that offset
+  divides by h (~0.25% of the dlnCO row, invisible to the gate). Only `NotCertified` triggers it; a backend fault, the
+  element gate, the emission gate and the T window propagate. A chem-cache hit of an escalated column rebuilds at
+  cadence 1.
 - What relies on it, measured on every case below at nz 100, cadence 5, cap 30000, vulcan3 b8e3cef: 0 of 56 finished
   requests escalate [M]. Eight presets (four planets, both modes) baseline and with AD lnZ + dlnCO rows; WASP-39 b FD
   rows, transmission lnZ, dlnCO, lnKzz and emission lnZ, dlnCO; C/O ladders 0.1-0.99 on sncho and 0.1-10 on sncho2025 and
@@ -457,34 +414,26 @@ gate 0.25.
   34 min at cadence 5 and was still in its cadence-1 solve at the 55 min limit. Known to depend on it: the TOI-7169 b +h
   point below, and the LP 714-47 b AD lnZ row ("Composition, C/O bounds and networks"), which needs the retry's 30000
   steps rather than its cadence. The cadence survey's raw outputs are deleted and its record does not count escalations.
-- Escalated FD rows end to end (TOI-7169 b CO case,
-  `tests/live/data/toi7169_co_case.json`: C/O 0.55, 10x, FD dlnCO + lnZ; 72 min cold,
-  ~52 of them in the two failing cadence-5 solves): h-vs-2h dlnCO 0.084, lnZ 0.034;
-  against independent re-anchored references (Richardson, cadence 1) dlnCO corr 0.999063
-  / scale 1.0065, lnZ 0.999574 / 1.0002. Forecast (Ks 10.81, one transit, R = 100):
-  log10(C/O) -0.260 +/- 0.039.
-- Three routes to the same TOI-7169 b rows: sigma(dlnCO) FD escalated 0.089252, AD
-  escalated 0.083839, AD capped at config cadence 0.085336. The method spread on the C/O
-  width is about 6%: quote 0.037 +- 0.002 across methods or FD's 0.039 as the
-  conservative number; never present an AD figure as agreeing with FD better than that.
-- No tighter reference certifies (yconv 1e-3, rtol 0.02, 30000 steps), so none bounds
-  the cadence-1 reference error.
-- Photolysis off, every FD chemistry row on the shipped W39b column misses its gate by
-  23-400x (dlnCO 6.9, lnZ 5.7, lnKzz 99.9) because neighbouring compositions stop at
-  non-comparable states (145 vs 17074 steps). An FD row self-checks and an AD row cannot,
-  so AD chemistry rows are refused photolysis-off. RT-only rows (deck, lnR0) stay; their
-  values still ride the photolysis-off column.
-- No width cut on C/O: every finite width is reported in log10(C/O); inf comes only from
-  the `fisher.NULL_LOAD_TOL` null-direction test; "unconstrained" prints only above
-  `gui_forecast._UNCONSTRAINED_ABOVE` (1e4). `ln_gaussian_curve` clips its grid to the solvable
-  C/O range (exp(+-5 sigma) overflows at sigma_ln 142). Mock recovery is the linearized
+- Escalated FD rows end to end (TOI-7169 b CO case, `tests/live/data/toi7169_co_case.json`: C/O 0.55, 10x, FD dlnCO +
+  lnZ; 72 min cold, ~52 of them in the two failing cadence-5 solves): h-vs-2h dlnCO 0.084, lnZ 0.034; against
+  independent re-anchored references (Richardson, cadence 1) dlnCO corr 0.999063 / scale 1.0065, lnZ 0.999574 / 1.0002.
+  Forecast (Ks 10.81, one transit, R = 100): log10(C/O) -0.260 +/- 0.039.
+- Three routes to the same TOI-7169 b rows: sigma(dlnCO) FD escalated 0.089252, AD escalated 0.083839, AD capped at
+  config cadence 0.085336. The method spread on the C/O width is about 6%: quote 0.037 +- 0.002 across methods or FD's
+  0.039 as the conservative number; never present an AD figure as agreeing with FD better than that.
+- No tighter reference certifies (yconv 1e-3, rtol 0.02, 30000 steps), so none bounds the cadence-1 reference error.
+- Photolysis off, every FD chemistry row on the shipped W39b column misses its gate by 23-400x (dlnCO 6.9, lnZ 5.7,
+  lnKzz 99.9) because neighbouring compositions stop at non-comparable states (145 vs 17074 steps). An FD row
+  self-checks and an AD row cannot, so AD chemistry rows are refused photolysis-off. RT-only rows (deck, lnR0) stay;
+  their values still ride the photolysis-off column.
+- No width cut on C/O: every finite width is reported in log10(C/O); inf comes only from the `fisher.NULL_LOAD_TOL`
+  null-direction test; "unconstrained" prints only above `gui_forecast._UNCONSTRAINED_ABOVE` (1e4). `ln_gaussian_curve`
+  clips its grid to the solvable C/O range (exp(+-5 sigma) overflows at sigma_ln 142). Mock recovery is the linearized
   identity delta = F^+ J^T Sigma^-1 n, labelled "not a retrieval result".
-- README figure (`fig_readme_example.py`, v61, GUI defaults): PRISM S/N 2.6, G395H 4.2,
-  MIRI LRS 3.1 sigma; log10(C/O) all modes -0.279 +/- 0.028 (v46: -0.278). The published G395H
-  detections are 4.5-4.8 sigma.
-- The slow closure tests pass cold: 5 passed in 57 min on 4 cores. No test exercises the
-  cadence-1 AD retry: every measured column certifies at the config cadence under the
-  cap; the retry is measured end to end on TOI-7169 b only.
+- README figure (`fig_readme_example.py`, v61, GUI defaults): PRISM S/N 2.6, G395H 4.2, MIRI LRS 3.1 sigma; log10(C/O)
+  all modes -0.279 +/- 0.028 (v46: -0.278). The published G395H detections are 4.5-4.8 sigma.
+- The slow closure tests pass cold: 5 passed in 57 min on 4 cores. No test exercises the cadence-1 AD retry: every
+  measured column certifies at the config cadence under the cap; the retry is measured end to end on TOI-7169 b only.
 
 ## Statistics: what is forecast and what is refused
 
@@ -823,7 +772,10 @@ Standing maintainer decisions; the measurements sit in the section named.
   custom Guillot transit or eclipse and a PICASO transit or eclipse load unchanged but for the version (the Guillot
   transit was refused through v63: its payload's zeroed star was range-checked), and a custom run on WASP-39 b's
   shipped table is refused with the shipped-table sentence [M, five share files written at f9cc223, loaded on the
-  change].
+  change]. A custom planet's stated star (T_eff, log g, [Fe/H]) is range-checked in every mode, on the request's values
+  before a transit's payload zeroes them. A canonical payload fed back in (a share file, the GUI worker's params file)
+  carries `version`, and its all-zero transit star is not judged as a stated star: the worker and the cache paths
+  re-canonicalize too, so a flag on the loader alone would refuse every custom transit run.
 - GUI copy is for an exoplanet proposer: precise terms stay, explaining prose goes,
   caveats live in README or notes ("GUI, figures and copy", "Do not retry").
 - Capacity is one Space and its slot limit: no self-scaler, queue or overflow Space

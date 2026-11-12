@@ -331,13 +331,21 @@ def test_the_sidebar_opens_wasp39b_on_its_table_and_refuses_an_undeclared_short_
     assert any(str(refusal.value) in e.value for e in at.error), [e.value for e in at.error]
 
 
-def test_a_custom_star_is_checked_wherever_it_is_read():
-    """A custom planet's T_irr default reads its star in transit too, so its T_eff is range-checked there; with T_irr
-    stated a transit reads no star and the payload zeroes it, so a saved custom transit loads again."""
-    with pytest.raises(ValueError, match="star_teff=-100"):
-        forward.canonical_params(_custom(star_teff=-100.0))
-    cp = forward.canonical_params(_custom(star_teff=5000.0))
+def test_a_custom_star_is_checked_in_every_mode():
+    """A custom planet's stated star is range-checked in transit too, T_irr stated or not, before the payload zeroes it.
+    The canonical payload fed back in (a share file, the GUI worker) maps to itself; its zeroed star without the
+    version it carries, or with one value out of range, reads as a stated star and is refused."""
+    for bad in (dict(star_teff=0.0), dict(star_teff=20000.0), dict(star_logg=6.0), dict(star_feh=1.0)):
+        ((key, value),) = bad.items()
+        with pytest.raises(ValueError, match=rf"{key}={value:g} outside .*: give the star's value inside this range"):
+            forward.canonical_params(_custom(Tirr=1500.0, **bad))
+    cp = forward.canonical_params(_custom(Tirr=1500.0))
     assert cp["star_teff"] == 0.0 and forward.canonical_params(cp) == cp
+    state = share_config.widget_state(share_config.build_share(cp, {}, {}), lambda s: f"n0_{s}")
+    assert state["n0_custom_tirr"] == 1500.0
+    for edited in ({k: v for k, v in cp.items() if k != "version"}, dict(cp, star_teff=20000.0)):
+        with pytest.raises(ValueError, match="star_teff=.* outside"):
+            forward.canonical_params(edited)
 
 
 def test_the_sidebar_sends_a_custom_planets_whole_system():
