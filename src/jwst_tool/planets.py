@@ -78,6 +78,8 @@ SFLUX_SOURCES["sflux-solar_hd209b.txt"] = SFLUX_SOURCES["Gueymard_solar.txt"]
 # TWO SEPARATE FACTS, deliberately not conflated:
 #   tp_table          the table exists and is SELECTABLE for this planet
 #   tp_table_default  a default run on it has been VERIFIED end-to-end here
+# and one declaration: tp_table_extends_top, the table may end below the model top, its top T and Kzz held constant
+# above it (tp_tables.read_tp_table refuses every other table that does not reach the model top).
 #
 # Shipping a table is not evidence the tool converges on it (HD 189733 b's
 # bundled profile stall-exits at the default settings, so it is offered, not
@@ -99,11 +101,12 @@ PLANETS: dict[str, dict[str, Any]] = {
         t14_hr=2.80,
         sflux="sflux-W39b_Tsai2023.txt",
         tp_table="atm_W39b_evening_TP_Kzz.txt",
-        tp_table_default=False,
+        tp_table_default=True,
+        # The table ends at 5.3e-6 bar, below every model top the tool offers; the published model ran it so.
+        tp_table_extends_top=True,
         tp_table_note=(
-            "Selectable, not the default: the table ends at 5.3e-6 bar, below the deepest model top the tool supports "
-            "(1e-6 bar), and a table must reach the model top, so a run on it is refused. Extend the table upward to "
-            "use it."
+            "Above the table's top (5.3e-6 bar) its temperature and Kzz are held constant to the model top: the "
+            "upstream VULCAN file-mode convention, as the published model was run."
         ),
         note="Inflated ~Saturn-mass planet (Ks = 10.2, G8V host); a well-observed "
         "warm transmission-spectroscopy target.",

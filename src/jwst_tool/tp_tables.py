@@ -40,6 +40,11 @@ def shipped_tp_table_is_default(planet: str) -> bool:
     return bool(entry.get("tp_table") and entry.get("tp_table_default"))
 
 
+def declares_top_extension(planet: str) -> bool:
+    """Whether ``planet``'s registry entry declares that its shipped table is held constant above its top."""
+    return bool(planets.PLANETS.get(planet, {}).get("tp_table_extends_top"))
+
+
 def shipped_tp_file(planet: str) -> Path:
     """Return the path of the shipped T-P/Kzz table for ``planet``, without importing vulcan3.
 
@@ -140,13 +145,15 @@ def _read_columns(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray | None
     return P, T, Kzz
 
 
-def read_tp_table(path: Path, span: tuple | None = None) -> dict:
+def read_tp_table(path: Path, span: tuple | None = None, extends_top: bool = False) -> dict:
     """Parse + validate a VULCAN atm table on the LIGHT path.
 
     ``span`` is the RUN's chemistry span (P_t, P_b) in dyn/cm^2 that the
     coverage and T-window checks are made against. Without it (an upload,
     checked before a run's top is known) the T window is checked over the
-    shipped cfg's span and the top is not gated.
+    shipped cfg's span and the top is not gated. ``extends_top``: the table's
+    registry entry declares that it is held constant above its top, so the
+    top is not gated (top_extension_caveat says so with the result).
 
     Mirrors the engine's read exactly (np.genfromtxt, names=True,
     skip_header=1: line 1 a units comment, line 2 the column names). Columns
@@ -172,7 +179,7 @@ def read_tp_table(path: Path, span: tuple | None = None) -> dict:
         )
     # Top coverage too, against a run's own top: above the table the engine holds the top tabulated temperature and
     # Kzz constant.
-    if run_span and P.min() > span[0] * (1.0 + TOP_RTOL):
+    if run_span and not extends_top and P.min() > span[0] * (1.0 + TOP_RTOL):
         top_bar = P.min() / 1e6
         remedy = (
             f"Extend the table to the model top, or set rt_ptop_bar to at least {top_bar:.4g} bar."
@@ -212,6 +219,33 @@ def read_tp_table(path: Path, span: tuple | None = None) -> dict:
             "bottom (p_btm_bar) to where the table stays inside the window."
         )
     return {"P_dyn": P, "T": T, "Kzz": Kzz}
+
+
+def top_extension_caveat(cp: dict) -> str | None:
+    """Return the caveat of a run whose declared shipped table ends below the model top, else None.
+
+    One sentence for the run log and the result page. It reads the shipped table only for a planet whose registry
+    entry declares the extension.
+
+    Parameters
+    ----------
+    cp : dict
+        Canonical parameters.
+
+    Returns
+    -------
+    str or None
+        The sentence, naming the table's top and the model top in bar.
+    """
+    if cp["tp_mode"] != "file" or cp["tp_file"] != TP_FILE_SHIPPED or not declares_top_extension(cp["planet"]):
+        return None
+    top_bar = float(_read_columns(shipped_tp_file(cp["planet"]))[0].min()) / 1.0e6
+    if top_bar <= cp["rt_ptop_bar"] * (1.0 + TOP_RTOL):
+        return None
+    return (
+        f"Structure held constant above the T-P table's top: from {top_bar:.3g} bar to the model top "
+        f"{cp['rt_ptop_bar']:.3g} bar, T and Kzz keep the table's top values (VULCAN's file-mode convention)."
+    )
 
 
 def resolve_tp_file(params: dict) -> tuple[Path, str]:

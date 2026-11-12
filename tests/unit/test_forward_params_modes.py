@@ -2,7 +2,7 @@
 
 import numpy as np
 import pytest
-from param_helpers import _custom, _p, _pf, _table
+from param_helpers import W39B_REFERENCE, _custom, _p, _pf, _table
 
 from jwst_tool import chem_build, fisher, forward, jacobian, model_cache, model_defs, planets, run_params, tp_tables
 
@@ -94,11 +94,26 @@ def test_consumers_index_removed_spectra_by_wo_mols():
             )
 
 
-def test_wasp39b_default_cache_key_is_stable():
+def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # The key hashes every canonical parameter: if ANY default feeding the
-    # default run changes, this trips. Re-pinning it follows a _VERSION bump
-    # (the version is a canonical key): record what moved the spectrum.
-    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b"))) == "36eda8aab768a154"
+    # reference run changes, this trips even when the pins above still pass.
+    # Re-pinning it follows a _VERSION bump (the version is a canonical key):
+    # record what moved the spectrum, and whether the canonical
+    # parameter SET moved with it.
+    # The G395H SO2 significance behind this configuration is in notes
+    # "Composition, C/O bounds and networks".
+    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b", tp_mode="file"))) == "e6740cd97004d730"
+    # ... and the bare DEFAULT run is that same atmosphere
+    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b"))) == "e6740cd97004d730"
+    # the sha1 pin is only meaningful re-derived from the file the run
+    # actually reads -- this catches the table itself being swapped
+    path = tp_tables.shipped_tp_file("wasp39b")
+    assert path.name == "atm_W39b_evening_TP_Kzz.txt"
+    tab = tp_tables.read_tp_table(path)
+    assert tab["Kzz"] is not None, "the reference table must carry its Kzz column"
+    import hashlib
+
+    assert hashlib.sha1(path.read_bytes()).hexdigest()[:16] == W39B_REFERENCE["tp_file_sha1"]
 
 
 # --- tp_mode="file" ---------------------------------------------------------
@@ -584,8 +599,7 @@ def test_an_unstated_interior_temperature_runs_at_the_default_and_says_so():
     assert forward.canonical_params(stated)["tint_from_default"] is False
     assert forward.params_key(stated) != forward.params_key(unstated)
     assert model_cache.chem_key(stated) == model_cache.chem_key(unstated)
-    table = dict(planet="hd189733b", tp_mode="file", rt_ptop_bar=1.0e-7)
-    assert forward.canonical_params(table)["tint_from_default"] is False  # a table reads no T_int
+    assert forward.canonical_params(dict(planet="wasp39b"))["tint_from_default"] is False  # a table reads no T_int
     assert forward.canonical_params(dict(planet="wasp107b", tp_mode="guillot", Tint=120.0))["Tint"] == 120.0
     with pytest.raises(ValueError, match="tint_from_default=True names the default T_int, 300 K, but Tint=250"):
         forward.canonical_params(dict(stated, Tint=250.0, tint_from_default=True))

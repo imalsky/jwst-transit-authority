@@ -66,7 +66,7 @@ from jwst_tool.param_checks import (
     check_system,
     check_tint,
 )
-from jwst_tool.tp_tables import read_tp_table, resolve_tp_file, shipped_tp_table_is_default
+from jwst_tool.tp_tables import declares_top_extension, read_tp_table, resolve_tp_file, shipped_tp_table_is_default
 
 if TYPE_CHECKING:
     from typing import Any
@@ -355,8 +355,10 @@ def _column_settings(params: dict, tp_mode: str, pic: bool) -> _ColumnSettings:
     tp_file, tp_file_sha1, tp_table = "", "", None
     if tp_mode == "file":
         tp_path, tp_file_sha1 = resolve_tp_file(params)
-        tp_table = read_tp_table(tp_path, span=(rt_ptop_bar * 1.0e6, p_btm_bar * 1.0e6))
         tp_file = str(params.get("tp_file", TP_FILE_SHIPPED))
+        # only a shipped table whose registry entry declares it may end below the model top
+        extends = tp_file == TP_FILE_SHIPPED and declares_top_extension(str(params.get("planet", "wasp39b")))
+        tp_table = read_tp_table(tp_path, span=(rt_ptop_bar * 1.0e6, p_btm_bar * 1.0e6), extends_top=extends)
     if science_mode not in ("transmission", "emission"):
         raise ValueError(
             f"unknown science_mode {science_mode!r}: choose 'transmission' "

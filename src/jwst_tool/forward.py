@@ -60,7 +60,7 @@ from jwst_tool.spectrum import (
     gas_mask,
     transmission_spectra,
 )
-from jwst_tool.tp_tables import resolve_tp_file, stage_upload, uploads_dir
+from jwst_tool.tp_tables import resolve_tp_file, stage_upload, top_extension_caveat, uploads_dir
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -503,9 +503,9 @@ def run_model(params: dict, log: Log = print) -> Path:
         The written npz; ``model_cache.load_result`` reads it.
     """
     cp = canonical_params(params)
-    tint = tint_caveat(cp)
-    if tint:
-        log(f"[fwd] WARNING: {tint}")
+    for caveat in (tint_caveat(cp), top_extension_caveat(cp)):
+        if caveat:
+            log(f"[fwd] WARNING: {caveat}")
     _archive_uploaded_table(params, cp, log)
     advance, finish = _make_progress(cp, log)
     pic = cp["chem_provider"] == "picaso"

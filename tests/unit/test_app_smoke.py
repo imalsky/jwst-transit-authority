@@ -152,8 +152,9 @@ def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
     """One fresh boot, three gating behaviors.
 
     1. Each geometry keeps its OWN column-bottom box (shipped key contract),
-       and the DEFAULT is structure-aware: a measured table's own bottom,
-       the round parametric default on Guillot.
+       and the DEFAULT is structure-aware: W39b transmission defaults
+       to its measured table's own bottom, emission (Guillot everywhere)
+       to the round parametric default.
     2. Photochemistry is always settable: forcing it ON whenever a Jacobian
        is requested makes the photolysis-off carbon-rich path unreachable
        from the shipped defaults. AD with it off is refused at the Run block
@@ -167,15 +168,12 @@ def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
     at = run_app()
     assert not at.exception, at.exception
     # 1. per-geometry column bottoms, structure-aware defaults
-    assert at.number_input(key="n0_pbtm_transmission").value == model_defs.P_BTM_PARAMETRIC_BAR
-    at.selectbox(key="n0_wasp39b_tp").set_value("file").run()
     assert at.number_input(key="n0_pbtm_transmission").value == model_defs.P_BTM_FILE_BAR
-    at.selectbox(key="n0_wasp39b_tp").set_value("guillot").run()
     at.radio(key="n0_scimode").set_value("emission").run()
     assert not at.exception, at.exception
     assert at.number_input(key="n0_pbtm_emission").value == model_defs.P_BTM_PARAMETRIC_BAR
     at.radio(key="n0_scimode").set_value("transmission").run()
-    assert at.number_input(key="n0_pbtm_transmission").value == model_defs.P_BTM_PARAMETRIC_BAR
+    assert at.number_input(key="n0_pbtm_transmission").value == model_defs.P_BTM_FILE_BAR
 
     # 2. photochemistry stays settable, and AD photo-off is refused loudly
     at.radio(key="n0_goal").set_value("constrain").run()
@@ -202,7 +200,7 @@ def test_sidebar_gating_geometry_boxes_ad_lock_and_floor():
     # message would pass while some other error blocked the Run.
     at.checkbox(key="n0_cloud").set_value(True).run()
     at.checkbox(key="n0_marg").set_value(False).run()
-    at.selectbox(key="n0_gp_vulcan_guillot_1").set_value("log_kappa_cloud").run()
+    at.selectbox(key="n0_gp_vulcan_file_1").set_value("log_kappa_cloud").run()
     assert not at.exception, at.exception
     assert {e.value for e in at.error} == allowed_errors, [e.value for e in at.error]
     at.checkbox(key="n0_cloud").set_value(False).run()

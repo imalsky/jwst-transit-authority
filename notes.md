@@ -16,11 +16,9 @@ names the code state it was measured on.
   unchanged until a redeploy.
 - Cache versions: `model_defs._VERSION` 64, `noise.WORKER_VERSION` 12,
   `adjoint_diag._ADJ_VERSION` 4, `picaso_engine.WORKER_VERSION` 4. Default keys:
-  transmission `36eda8aab768a154` (test-pinned), emission `b482928cce0eeca8`.
-- Fixtures `tests/live/data/w39b_v64_reference.npz` and `w39b_picaso_reference.npz` (cold WASP-39 b, both modes, on
-  the pinned engines; 11 min, and 87 min for PICASO with 16 jobs on 18 cores; 45 min alone at v62). Against v63 at
-  R = 100: VULCAN transit +396 ppm at 4.50 um, median +191 (Guillot, not the table), eclipse -2.2 ppm (T_int); PICASO
-  transit -1.0, eclipse -3.2 ppm [M]. Validation data, pRT references and figures regenerated with them.
+  transmission `e6740cd97004d730` (test-pinned), emission `b482928cce0eeca8`.
+- Fixtures `w39b_v64_reference.npz`, `w39b_picaso_reference.npz` (pinned engines; 11 min, PICASO 87 min). Against v63 at
+  R = 100: VULCAN transit 9.1e-7 ppm, eclipse -2.2 (T_int); PICASO transit -1.0, eclipse -3.2 ppm [M].
 - v63 needs vulcan-forward 0.31.0 (the caller names the network, config and RT geometry;
   `select_network`, `eclipse_photosphere`). The installed editable metadata reads vulcan-forward 0.31.1.
 - Tests. Normal suite `python -m pytest tests -q -n 6`; `tests/conftest.py` defaults
@@ -209,11 +207,12 @@ names the code state it was measured on.
 
 ## Structure: T-P, Kzz, gravity anchor, model top
 
-- Default structure is Guillot + constant Kzz on every planet from v64. The shipped tables stay selectable: WASP-39 b's
-  ends at 5.3e-6 bar, below the deepest model top (1e-6 bar), so a run on it is refused; HD 189733 b's does not
-  certify at defaults; HD 209458 b's is refused (2997 K, above the 2980 K opacity ceiling). Against its table, Guillot +
-  const Kzz runs WASP-39 b ~100 K hot through the SO2 zone with Kzz 3.8-48x low above 1 mbar, and read SO2 at 2.1
-  sigma against the published 4.5-4.8.
+- Default structure is the verified measured table where one ships (exactly WASP-39 b,
+  `atm_W39b_evening_TP_Kzz.txt`), Guillot + constant Kzz elsewhere; emission defaults to
+  Guillot (the tables are terminator profiles). On WASP-39 b, Guillot + const Kzz runs
+  ~100 K hot through the SO2 zone with Kzz 3.8-48x low above 1 mbar and reads SO2 at 2.1
+  sigma against the published 4.5-4.8. HD 189733 b's table does not certify at defaults;
+  HD 209458 b's is refused (2997 K, above the 2980 K opacity ceiling).
 - Guillot `kappa_IR` -2.0; `T_irr` defaults per planet from the registry's star and
   orbit; emission uses the DAYSIDE T_irr (x 2^0.25): planet-average T_irr puts the HD
   189733 b eclipse 28-49% low (chi2/N 934 -> 31 against Inglis et al. 2024).
@@ -237,18 +236,20 @@ names the code state it was measured on.
   Guillot pass at the v63 defaults: WASP-39 b eclipse 3.4e-5, HD 189733 b 1.1e-7 / 1.8e-7 (transit / eclipse), HD
   209458 b transit 2.4e-6, WASP-107 b 5.6e-5 / 7.2e-5 [M, build only]; a tabulated profile does not read g, so its
   passes 2 and 3 move nothing.
-- Through v63 the WASP-39 b default transit ran the evening table (Tsai et al. 2023, built for R* 0.932, g 422), its top
-  T and Kzz held from 5.3e-6 to 1e-7 bar. The v64 default (Guillot) against the v63 reference at R = 100: largest
-  +396 ppm at 4.50 um, median +191 ppm, 288 ppm with the median removed [M, cold run; certified at 1502 steps on the
-  loose branch]. Handing VULCAN the catalogue pair puts the radius ~7% high and every gravity ~13% low. `p_ref_bar` is 1
+- The WASP-39 b default transit runs vulcan3's `atm_W39b_evening_TP_Kzz.txt` (Tsai et al. 2023's evening terminator,
+  built for R* 0.932 and g 422) under the survey's R* 0.939 and g 390.58 from v63. The table is in pressure, so the
+  new gravity moves only the heights; whether it still describes the planet is open (todo). Guillot there moved it
+  +191 ppm median at v64 ("Do not retry"). Handing VULCAN the catalogue pair puts R ~7% high and every g ~13% low. `p_ref_bar` is 1
   mbar, not tuned to the data (7.8% low against the white-light depth; Decision records).
 - Transmission dtau uses inverse-square g(r) (exojax's own profile: -51 ppm at W39b
   against +1.5 ppm); emission takes the same g(r) from v59.
 - Model top `rt_ptop_bar` 1e-7 bar in every mode (chemistry and RT; range [1e-9, 1e-6]; upstream 1e-8); 1e-9 moves the
   v63 WASP-39 b transit up to 122 ppm at 4.28 um. From v64 a table that does not reach the run's top is refused, as
-  its bottom is (before, its top T and Kzz were held constant above it). Starting the WASP-39 b table run at its own
-  5.349e-6 bar top was measured and rejected: -345 ppm at the 4.28 um CO2 core, and the column moves near the top (CH4
-  +6.0 dex at 5.35e-6 bar) [M, f9cc223 against the change]. HD 189733 b file mode needs `rt_ptop_bar >= 1e-7` (its
+  its bottom is, unless its registry entry declares the flat extension (`tp_table_extends_top`: only WASP-39 b's, which
+  ends at 5.3e-6 bar). Above a declared table's top T and Kzz keep the top values, the upstream file-mode convention the
+  published model ran, and the result and the run log say so (`tp_tables.top_extension_caveat`). Starting it at its own
+  5.349e-6 bar top instead was measured and rejected: -345 ppm at the 4.28 um CO2 core, and the column moves near the
+  top (CH4 +6.0 dex at 5.35e-6 bar) [M, f9cc223 against the change]. HD 189733 b file mode needs `rt_ptop_bar >= 1e-7` (its
   1.2e-8 bar top is a 6000 K thermosphere, refused by the T window). Above 1e-5 bar the molecular-diffusion advection
   puts a 2dz oscillation on atomic H that the positivity clip zeroes; numerical, and the range avoids it.
 - `use_vm_mol` is pinned False (the engine flipped its default; <= 0.01 dex).
@@ -535,7 +536,7 @@ gate 0.25.
   10 ppm, all in 3.3-3.6 um), SO2 band 3.95-4.15 um -0.8 ppm, emission max |d| 0.48 ppm;
   v62 `87afcd45da73bb56` / `40c16cece4cd0dea`; v63 (vulcan-forward 0.31.0 interface, survey
   values for WASP-39 b and HD 189733 b, the Thorngren T_int default) `6142809ab7cffe07` / `45d2a4c73f6ef7dc`; v64
-  (a table must reach the model top, WASP-39 b on Guillot, custom planets state their system, T_int 300 K and
+  (a table must reach the model top unless declared, custom planets state their system, T_int 300 K and
   `tint_from_default`) the current keys ("Current state"; the move: "Structure: T-P, Kzz, gravity anchor, model top").
 - The review pass of v63 (keys `6142809ab7cffe07` / `45d2a4c73f6ef7dc`: the four dead transport keys left the payload,
   and gs_cgs keeps two decimals, so WASP-39 b runs g 390.58, not 390.6) moved the references by at most 0.361 ppm
@@ -779,8 +780,8 @@ Standing maintainer decisions; the measurements sit in the section named.
   off); carbon-rich columns and WASP-107 b are uncovered, a user adds CH3/CS per run
   ("Opacity and radiative transfer").
 - `p_ref_bar` 1 mbar is not tuned to the data; `rt_ptop_bar` 1e-7 bar keeps the
-  published convention; a table must reach it, so WASP-39 b runs Guillot (v64; "Structure: T-P, Kzz, gravity anchor,
-  model top").
+  published convention; a table must reach it unless its registry entry declares the flat extension, as WASP-39 b's
+  does (v64; "Structure: T-P, Kzz, gravity anchor, model top").
 - The T_int default is 300 K where the registry has no published value (v64; same section).
 - lnR0 is a radius change at fixed planet mass in both modes, as in vulcan-forward
   0.29.0 ("Emission", "Superseded designs").
@@ -971,7 +972,6 @@ Real, small, and out of todo.md by decision; nothing here changes a shipped numb
   ~0.8 GB more RSS and children that survive a cancelled run.
 - An in-app Space self-scaler (a new instance never serves the visitor who triggered it)
   and a run queue (it holds a session open for tens of minutes).
-- Extending WASP-39 b's evening table upward to the model top so it can run again (v64 runs Guillot).
 
 ## Do not retry
 

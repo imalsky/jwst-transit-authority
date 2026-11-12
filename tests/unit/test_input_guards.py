@@ -186,6 +186,15 @@ def test_left_out_absorbers_an_unstated_tint_and_picaso_retries_ride_the_result(
     unstated = forward.canonical_params(dict(planet="wasp39b", tp_mode="guillot"))
     caveats = gui_results._model_caveats(dict(vulcan, params_json=np.array(json.dumps(unstated))))
     assert "Interior temperature not stated: the run used the default T_int = 300 K." in caveats
+    # the declared table's flat extension rides the default transit, never a run whose table reaches the top
+    top = "Structure held constant above the T-P table's top: from 5.35e-06 bar to the model top 1e-07 bar"
+    assert not any(top in c for c in caveats)
+    for request, shown in (
+        (dict(planet="wasp39b"), True),
+        (dict(planet="hd189733b", tp_mode="file", rt_ptop_bar=1e-7), False),
+    ):
+        cp = json.dumps(forward.canonical_params(request))
+        assert any(top in c for c in gui_results._model_caveats(dict(vulcan, params_json=np.array(cp)))) is shown
     no_core = np.array([], dtype="U8")
     picaso = dict(base, chem_provider=np.array("picaso"), unlisted_core=no_core, picaso_retried_layers=np.array([3]))
     caveats = gui_results._model_caveats(picaso)
@@ -193,7 +202,7 @@ def test_left_out_absorbers_an_unstated_tint_and_picaso_retries_ride_the_result(
 
 
 def test_a_run_that_does_not_state_tint_says_so_in_its_log(monkeypatch):
-    """run_model logs the result's T_int caveat before the solve; a stated T_int logs none."""
+    """run_model logs the result's T_int and table-top caveats before the solve; a stated T_int logs none."""
 
     class _Stop(Exception):
         pass
@@ -210,6 +219,10 @@ def test_a_run_that_does_not_state_tint_says_so_in_its_log(monkeypatch):
                 dict(planet="wasp39b", tp_mode="guillot", **extra), log=lambda *a: lines.append(" ".join(a))
             )
         assert (warning in lines) is logged, lines
+    lines = []
+    with pytest.raises(_Stop):
+        forward.run_model(dict(planet="wasp39b"), log=lambda *a: lines.append(" ".join(a)))
+    assert any(line.startswith("[fwd] WARNING: Structure held constant above the T-P table's top") for line in lines)
 
 
 def test_the_picaso_worker_counts_the_layers_it_re_solves_at_a_shifted_temperature(monkeypatch):
@@ -298,20 +311,23 @@ def test_the_sidebar_shows_the_tirr_refusal_in_an_empty_widget_never_a_clipped_n
     assert at.number_input(key="n0_custom_tirr").value == 1640.0 and not at.sidebar.error
 
 
-def test_the_sidebar_opens_wasp39b_on_guillot_and_refuses_its_table_beside_run():
-    """WASP-39 b opens on Guillot at the default model top with nothing refused; its shipped table, which ends below
-    every supported model top, is refused beside Run with the API's sentence."""
+def test_the_sidebar_opens_wasp39b_on_its_table_and_refuses_an_undeclared_short_one_beside_run(monkeypatch):
+    """WASP-39 b opens on its declared table at the default model top with nothing refused; the same table without the
+    declaration is refused beside Run with the API's sentence."""
     pytest.importorskip("streamlit")
     from app_helpers import run_app
+
+    from jwst_tool import planets
 
     at = run_app()
     # a lane without the RT stack shows its required-data banner as an error too, so only refusals count
     refused = [e.value for e in at.error if e.value.startswith("Cannot run with the current settings")]
-    assert at.selectbox(key="n0_wasp39b_tp").value == "guillot" and not refused, refused
+    assert at.selectbox(key="n0_wasp39b_tp").value == "file" and not refused, refused
     assert at.number_input(key="n0_rtptop").value == 1.0e-7
-    with pytest.raises(ValueError, match="cannot be used") as refusal:
-        forward.canonical_params(dict(planet="wasp39b", tp_mode="file"))
-    at.selectbox(key="n0_wasp39b_tp").set_value("file").run()
+    monkeypatch.setitem(planets.PLANETS["wasp39b"], "tp_table_extends_top", False)
+    with pytest.raises(ValueError, match="does not reach the model top") as refusal:
+        forward.canonical_params(dict(planet="wasp39b"))
+    at.run()
     assert any(str(refusal.value) in e.value for e in at.error), [e.value for e in at.error]
 
 

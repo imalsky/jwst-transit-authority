@@ -11,7 +11,7 @@ import math
 
 import numpy as np
 import pytest
-from param_helpers import _custom, _p, _pf, _table
+from param_helpers import W39B_REFERENCE, _custom, _p, _pf, _table
 
 from jwst_tool import forward, model_cache, model_defs, picaso_engine, planets, run_params, tp_tables
 
@@ -62,9 +62,10 @@ def test_shipped_tables_gate_defaults_and_are_never_substituted():
             with pytest.raises(ValueError):
                 forward.canonical_params(dict(planet=key, tp_mode="file"))
     assert len(set(seen.values())) == len(seen)  # no shared table
-    # no shipped table is a default: WASP-39 b's ends below the model top, and HD 189733 b's does not certify at
-    # defaults, so both stay selectable-but-not-default -- choosing HD 189733 b's explicitly still resolves
-    assert [k for k in planets.PLANETS if tp_tables.shipped_tp_table_is_default(k)] == []
+    # the verified set is exactly WASP-39 b; HD 189733 b ships a good
+    # profile the solver does NOT certify at defaults, so it must stay
+    # selectable-but-not-default -- choosing it explicitly still resolves
+    assert [k for k in planets.PLANETS if tp_tables.shipped_tp_table_is_default(k)] == ["wasp39b"]
     assert tp_tables.shipped_tp_table_name("hd189733b")
     # its table carries a 6000 K thermosphere above 0.1 dyn/cm^2, outside the
     # modelable window, so file mode needs a model top at or below 1e-7 bar
@@ -72,7 +73,7 @@ def test_shipped_tables_gate_defaults_and_are_never_substituted():
     assert cp["tp_mode"] == "file" and cp["kzz_mode"] == "file"
     with pytest.raises(ValueError):
         forward.canonical_params(dict(planet="hd189733b", tp_mode="file", rt_ptop_bar=1.0e-8))
-    assert run_params.default_tp_mode(dict(planet="wasp39b")) == "guillot"
+    assert run_params.default_tp_mode(dict(planet="wasp39b")) == "file"
     # a retired (GCM) mode refuses, never substitutes a profile
     with pytest.raises(ValueError):
         forward.canonical_params(dict(planet="wasp39b", tp_mode="baseline"))
@@ -157,6 +158,7 @@ def test_a_custom_planet_states_its_own_system_and_takes_nothing_from_wasp39b(tm
         if req is not upload:  # an upload re-resolves from the archive run_model writes
             assert forward.canonical_params(cp) == cp
     assert forward.canonical_params(picaso)["sflux"] == ""
+    assert forward.canonical_params(upload)["tp_file_sha1"] != W39B_REFERENCE["tp_file_sha1"]
 
 
 def test_tp_table_gates_are_grid_scoped_and_require_the_bottom(tmp_path):
@@ -197,15 +199,18 @@ def test_tp_table_gates_are_grid_scoped_and_require_the_bottom(tmp_path):
     forward.canonical_params(_pf(_table(tmp_path)))
 
 
-def test_a_table_must_reach_the_model_top(tmp_path):
-    """Above a table the engine would hold its top temperature and Kzz constant, so a model top above the table is
-    refused, naming a top that works; a table ending below the deepest supported top cannot be used at all, which is
-    WASP-39 b's, so WASP-39 b defaults to Guillot at the default top."""
+def test_only_a_declared_table_may_end_below_the_model_top(tmp_path, monkeypatch):
+    """Above a table the engine would hold its top temperature and Kzz constant. WASP-39 b's registry entry declares
+    that for its shipped table, which runs at the default top; the same table without the declaration, and an upload
+    that stops below the model top, are refused with the table's top, the model top and a remedy that works."""
     cp = forward.canonical_params(dict(planet="wasp39b"))
-    assert (cp["tp_mode"], cp["rt_ptop_bar"]) == ("guillot", 1.0e-7)
-    for top in ({}, {"rt_ptop_bar": 1.0e-6}):
-        with pytest.raises(ValueError, match=r"top pressure 5\.349e-06 bar does not reach .* cannot be used"):
-            forward.canonical_params(dict(planet="wasp39b", tp_mode="file", **top))
+    assert (cp["tp_mode"], cp["tp_file"], cp["rt_ptop_bar"]) == ("file", "shipped", 1.0e-7)
+    monkeypatch.setitem(planets.PLANETS["wasp39b"], "tp_table_extends_top", False)
+    with pytest.raises(
+        ValueError, match=r"top pressure 5\.349e-06 bar does not reach the model top 1e-07 bar .* cannot"
+    ):
+        forward.canonical_params(dict(planet="wasp39b"))
+    monkeypatch.undo()
 
     path = tmp_path / "top.txt"
     P = np.logspace(6.9, math.log10(0.123456789), 8)  # top 1.23e-7 bar, more digits than the canonical six
@@ -343,7 +348,7 @@ _PIC = dict(planet="wasp39b", chem_provider="picaso")
         dict(science_mode="emission", fisher_params=["lnZ", "dlnCO"]),
         dict(tp_mode="guillot", fisher_params=["Tirr"]),
         dict(tp_mode="guillot", picaso_quench=True, kzz_const=1.0e10),
-        dict(planet="hd189733b", tp_mode="file"),
+        dict(tp_mode="file"),
     ],
 )
 def test_picaso_payloads_are_idempotent_and_carry_their_own_keys(kw):
@@ -383,16 +388,12 @@ def test_picaso_lnz_stencil_turns_one_sided_at_the_metallicity_cap():
         (dict(chem_provider="vulcan", rfacv=0.5), "PICASO settings"),
         (dict(chem_provider="exo"), "unknown chem_provider"),
         (dict(met_x_solar=20.0), "PICASO engine's range"),
+        (dict(tp_mode="file", picaso_quench=True), "quench search needs it"),
     ],
 )
 def test_picaso_refusals(kw, msg):
     with pytest.raises(ValueError, match=msg):
         forward.canonical_params({**_PIC, **kw})
-
-
-def test_picaso_quench_refuses_a_table_short_of_its_search(tmp_path):
-    with pytest.raises(ValueError, match="quench search needs it"):
-        forward.canonical_params(_pf(_table(tmp_path), chem_provider="picaso", picaso_quench=True))
 
 
 def test_rt_knobs_defaults_validation_and_cache_key():
@@ -477,7 +478,20 @@ def test_data_revision_keys_the_cache_without_moving_the_unset_keys(monkeypatch)
 
     share = share_config.build_share(cp, goal={}, observation={})
     assert share["canonical_params"]["data_revision"] == "a" * 40
-    assert share_config.widget_state(share, "n0_{}".format)["n0_planet"] == cp["planet"]
+    assert share_config.widget_state(share, "n0_{}".format)["n0_planet"] == "wasp39b"
+
+
+def test_wasp39b_reference_state_is_the_literature_validated_one():
+    # tp_mode="file" is the ONLY explicit key: everything else must still
+    # default to the validated values, or the reference run has drifted.
+    cp = forward.canonical_params(dict(planet="wasp39b", tp_mode="file"))
+    for key, want in W39B_REFERENCE.items():
+        assert cp[key] == want, (
+            f"WASP-39 b reference {key}: {cp[key]!r} != {want!r}. This "
+            "changes the atmosphere behind the published-detection agreement "
+            "-- re-measure G395H SO2 against Alderson+2023 / Tsai+2023 "
+            "before updating W39B_REFERENCE."
+        )
 
 
 def test_network_semantics():

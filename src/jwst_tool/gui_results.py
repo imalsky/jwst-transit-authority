@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from jwst_tool import detect, fisher as fisher_mod, instruments as ins, model_cache, plotting, run_params
+from jwst_tool import detect, fisher as fisher_mod, instruments as ins, model_cache, plotting, run_params, tp_tables
 from jwst_tool.gui_common import K, csv_bytes, fig_bytes, show_fig, slug
 
 if TYPE_CHECKING:
@@ -70,10 +70,10 @@ def _model_caveats(model: dict) -> list:
             f"{', '.join(unlisted)} absorb in this band and are not in the spectrum: their features are missing. "
             "Add them under 'Extra opacity molecules'."
         )
-    # A run that read T_int without the request stating it ran at planets.default_tint: say so and which value.
-    tint = run_params.tint_caveat(json.loads(str(model["params_json"])))
-    if tint:
-        caveats.append(tint)
+    # A run that read T_int without the request stating it ran at planets.default_tint, and a declared table held
+    # constant above its top: say so, with the values.
+    cp = json.loads(str(model["params_json"]))
+    caveats += [c for c in (run_params.tint_caveat(cp), tp_tables.top_extension_caveat(cp)) if c]
     # Retry honesty: picaso re-solves a layer that does not converge at a
     # temperature shifted by up to 1e-4 of T; the run says how often.
     if str(model["chem_provider"]) == "picaso" and int(model["picaso_retried_layers"][0]):
