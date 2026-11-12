@@ -23,13 +23,13 @@ names the code state it was measured on.
   `select_network`, `eclipse_photosphere`). The installed editable metadata reads vulcan-forward 0.31.1.
 - Tests. Normal suite `python -m pytest tests -q -n 6`; `tests/conftest.py` defaults
   `JAX_PLATFORMS=cpu` and points an unset `JWST_TOOL_OUTPUT_DIR` at a throwaway
-  directory. `tests` at v64 on daw (6 workers): 588 passed, 18 skipped, in 44 s [M]. CI
+  directory. `tests` at v64 on daw (6 workers): 589 passed, 18 skipped, in 43 s [M]. CI
   runs the unit suite on Python 3.10-3.12 plus a GUI-smoke job; `full-stack-smoke.yml`
   runs by hand. Slow tier (`JWST_TOOL_RUN_SLOW=1`), one thread per worker:
-  `pytest tests -q -n 14 --dist worksteal` (CLAUDE.md). At v64 on the pinned engines, 14 workers on 18 cores: 606
-  passed in 4011 s (1:06:50) [M]; longest emission AD closure 2856 s, PICASO e2e eclipse 2686 s and transit 2677 s,
-  TOI-7169 b 2417 s, emission AD closure at cadence 1 2265 s, transmission closures 1737 / 1298 s, VULCAN e2e 358 /
-  319 s. At v63 (vulcan-forward 07f936d, vulcan3 362d642, 9 workers on 10 cores): 603 passed in 3576 s;
+  `pytest tests -q -n 14 --dist worksteal` (CLAUDE.md). At v64 (tool fd79bed) on the pinned engines, 14 workers on 18 cores: 607
+  passed in 2919 s (0:48:39) [M]; longest PICASO e2e eclipse 2652 s and transit 2631 s, TOI-7169 b 2446 s, emission AD
+  closure at cadence 1 2271 s. A run of the same tier an hour earlier, under more load, took 4011 s.
+  At v63 (vulcan-forward 07f936d, vulcan3 362d642, 9 workers on 10 cores): 603 passed in 3576 s;
   VULCAN e2e 356 s. On those engines a cold rerun of the VULCAN reference is bitwise equal
   to it on the reference's own CPU affinity (10 cores; transit 1127 steps, eclipse 1942), and
   not on 5 cores (eclipse 3140 steps, 0.011 ppm at R = 100; transit 1.5e-7 ppm) [M]: the
