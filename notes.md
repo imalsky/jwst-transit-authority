@@ -764,8 +764,10 @@ Standing maintainer decisions; the measurements sit in the section named.
   settling, escape and boundary-flux keys left the payload at v63 (a request naming one is
   refused). `FORMER_EXTRA_MOLECULES` stays on the maintainer's request: old share files that
   list NH3 as an extra still load. No fixed number becomes a setting (the maintainer's decision). The two defaults
-  the GUI and the API still disagree on (`jac_method`, `extra_mols`) wait for the
-  maintainer (todo). The fixed numbers with no recorded basis keep their values, each commented "no basis recorded"
+  the GUI and the API disagree on stay two (the maintainer's decision). `jac_method`: the API's "fd" runs in every mode
+  and checks itself (h against 2h); "ad" is refused with PICASO and for chemistry rows with photolysis off, so as the
+  API default it would refuse requests that run today, and the sidebar keeps it for speed. `extra_mols`: the API runs
+  none unless asked, the sidebar preselects `EXTRA_MOLECULES_DEFAULT`; the API's default spectrum stays as shipped. The fixed numbers with no recorded basis keep their values, each commented "no basis recorded"
   (maintainer's decision, v64): `KZZ_CONST_DEFAULT`, `KZZ_KDEEP_DEFAULT`, `LOG_GAMMA_DEFAULT`, `LOG_KAPPA_CLOUD_DEFAULT`,
   the Guillot kappa, gamma and cloud FD steps, `binning.LSF_R_FLOOR`, `certify.EMIS_TAU_WARN`,
   `tp_tables.T_CHECK_POINTS`, `planets.TIRR_RANGE` and `jacobian.FD_CONSISTENCY_TOL` 0.25 ("Jacobians and Fisher").

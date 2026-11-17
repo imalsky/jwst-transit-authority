@@ -110,8 +110,8 @@ USE_RAYLEIGH_DEFAULT = True
 CLOUD_ON_DEFAULT = False
 USE_CONDENSE_DEFAULT = False
 PICASO_QUENCH_DEFAULT = False
-# The API's Jacobian method: certified finite differences. The sidebar starts from "ad" (faster); the maintainer
-# decides whether the two become one (todo).
+# The API's Jacobian method: certified finite differences, which run in every mode and check themselves. The sidebar
+# starts from "ad" (faster, VULCAN with photolysis only): two defaults by decision (notes "Decision records").
 JAC_METHOD_DEFAULT = "fd"
 
 # Fraction of Pandeia's per-mode saturation_fullwell a ramp may reach: PandExo's default saturation level, 80 % (docs/
