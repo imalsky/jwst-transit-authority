@@ -102,9 +102,9 @@ def test_wasp39b_reference_cache_key_and_table_bytes_are_stable():
     # parameter SET moved with it.
     # The G395H SO2 significance behind this configuration is in notes
     # "Composition, C/O bounds and networks".
-    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b", tp_mode="file"))) == "e6740cd97004d730"
+    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b", tp_mode="file"))) == "7f7f56ec2ef7cdba"
     # ... and the bare DEFAULT run is that same atmosphere
-    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b"))) == "e6740cd97004d730"
+    assert forward.params_key(forward.canonical_params(dict(planet="wasp39b"))) == "7f7f56ec2ef7cdba"
     # the sha1 pin is only meaningful re-derived from the file the run
     # actually reads -- this catches the table itself being swapped
     path = tp_tables.shipped_tp_file("wasp39b")
@@ -346,9 +346,10 @@ def test_emission_defaults_to_the_dayside_temperature():
     for key in planets.PLANETS:
         t = forward.canonical_params(dict(planet=key, tp_mode="guillot"))["Tirr"]
         e = forward.canonical_params(dict(planet=key, tp_mode="guillot", science_mode="emission"))["Tirr"]
-        # 2**0.25 in temperature, on the 10 K rounding grid the widget uses
+        # 2**0.25 in temperature. Both defaults sit on the widget's 20 K grid, so each is up to 10 K from its
+        # unrounded value and the two can be 10 (1 + 2**0.25) = 21.9 K apart.
         assert e > t, key
-        assert e == pytest.approx(t * 2**0.25, abs=10.0), (key, t, e)
+        assert e == pytest.approx(t * 2**0.25, abs=22.0), (key, t, e)
     # an explicit T_irr still wins in both geometries
     for mode in ("transmission", "emission"):
         cp = forward.canonical_params(dict(planet="wasp39b", tp_mode="guillot", science_mode=mode, Tirr=1234.0))

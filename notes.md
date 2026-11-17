@@ -10,20 +10,22 @@ names the code state it was measured on.
 
 - Tool 0.72.0 on main. VULCAN is the default chemistry engine, PICASO the second.
 - Floors `vulcan-forward>=0.31.0`, `vulcan3>=0.18.0` (pyproject). `deploy/pins.env` and
-  the Dockerfile pin vulcan3 ae21fef (0.18.0) and vulcan-forward 2fdf5a2 (0.31.1); the Dockerfile
-  pins the tool at 2efb096 (v64, CI green); nothing was deployed from it.
+  the Dockerfile pin vulcan3 6698920 (0.18.0) and vulcan-forward f7fc352 (0.31.1); the Dockerfile
+  still pins the tool at 2efb096 (v64): a redeploy moves that pin to a v65 commit first.
   The running Space was last deployed from the earlier pins (tool b23df79) and is
   unchanged until a redeploy.
-- Cache versions: `model_defs._VERSION` 64, `noise.WORKER_VERSION` 12,
+- Cache versions: `model_defs._VERSION` 65, `noise.WORKER_VERSION` 12,
   `adjoint_diag._ADJ_VERSION` 4, `picaso_engine.WORKER_VERSION` 4. Default keys:
-  transmission `e6740cd97004d730` (test-pinned), emission `b482928cce0eeca8`.
-- Fixtures `w39b_v64_reference.npz`, `w39b_picaso_reference.npz` (pinned engines; 11 min, PICASO 87 min). Against v63 at
-  R = 100: VULCAN transit 9.1e-7 ppm, eclipse -2.2 (T_int); PICASO transit -1.0, eclipse -3.2 ppm [M].
+  transmission `7f7f56ec2ef7cdba` (test-pinned), emission `0d0739f861cf8435`.
+- Fixtures `w39b_v65_reference.npz`, `w39b_picaso_reference.npz` (pinned engines, daw, 10 CPUs each; 13 min, PICASO 64
+  min). Against v64 at R = 100: VULCAN transit +25.2 ppm median (max 26.5 at 2.90 um, SO2 band +22.6), eclipse -13.2
+  ppm median (-3.7%, max 41.9 at 5.13 um); PICASO transit +7.4 median (max 48.4 at 3.34 um), eclipse -25.6 (-6.3%,
+  max 67.2 at 4.83 um) [M].
 - v63 needs vulcan-forward 0.31.0 (the caller names the network, config and RT geometry;
   `select_network`, `eclipse_photosphere`). The installed editable metadata reads vulcan-forward 0.31.1.
 - Tests. Normal suite `python -m pytest tests -q -n 6`; `tests/conftest.py` defaults
   `JAX_PLATFORMS=cpu` and points an unset `JWST_TOOL_OUTPUT_DIR` at a throwaway
-  directory. `tests` at v64 on daw (6 workers): 589 passed, 18 skipped, in 43 s [M]. CI
+  directory. `tests` at v65 on the laptop (6 workers): 588 passed, 13 skipped [M]. CI
   runs the unit suite on Python 3.10-3.12 plus a GUI-smoke job; `full-stack-smoke.yml`
   runs by hand. Slow tier (`JWST_TOOL_RUN_SLOW=1`), one thread per worker:
   `pytest tests -q -n 14 --dist worksteal` (CLAUDE.md). At v64 (tool fd79bed) on the pinned engines, 14 workers on 18 cores: 607
@@ -212,7 +214,7 @@ names the code state it was measured on.
   209458 b transit 2.4e-6, WASP-107 b 5.6e-5 / 7.2e-5 [M, build only]; a tabulated profile does not read g, so its
   passes 2 and 3 move nothing.
 - The WASP-39 b default transit runs vulcan3's `atm_W39b_evening_TP_Kzz.txt` (Tsai et al. 2023's evening terminator,
-  built for R* 0.932 and g 422) under the survey's R* 0.939 and g 390.58 from v63. It stays the default (the
+  built for R* 0.932 and g 422) under the survey's R* 0.939 and g 390.58 from v63 (390.12 from v65). It stays the default (the
   maintainer's decision): it is the published profile of this planet, it is in pressure, and the 0.75% larger star
   and 7.4% lower gravity move only the hydrostatic heights. Guillot there moved it
   +191 ppm median at v64 ("Do not retry"). Handing VULCAN the catalogue pair puts R ~7% high and every g ~13% low. `p_ref_bar` is 1
@@ -242,15 +244,17 @@ names the code state it was measured on.
   2.28 um, median 1.6 ppm [M, the fixtures].
 - UV spectra: vulcan-forward refuses one that does not cover the network's photolysis
   thresholds (to 655.5 nm), which removes `sflux-epseri.txt` (115-283 nm) from the menu.
-  WASP-107 b and HD 209458 b take the sulfur survey's proxies, shipped in
-  `src/jwst_tool/stellar_flux/`, and its system values (WASP-107 b: g 305.14 against 270,
-  R* 0.657 against 0.67, 0.055 au; HD 209458 b: R* 1.19 against 1.155, 0.04707 au, the solar
-  spectrum scaled by (6091/5772)^4, default T_irr 2080 K against 2040). From v63 WASP-39 b
-  and HD 189733 b take the survey's values too (vulcan-retrieval `runs/survey/<planet>.yaml`
-  and `data/survey/<case>/<Case>.yaml`), with the UV files they already shared: WASP-39 b
-  rp 9.546962e9 cm (was 9.143827e9, the production WASP-39b case's 1.279 R_J), R* 0.939
-  (0.932), g 390.58 (422), 0.04828 au; HD 189733 b rp 8.105826e9 (8.135790e9), R* 0.75
-  (0.756), g 2178.79 (2190), 0.03126 au (0.0313). `tests/unit/test_survey_parity.py` compares
+  The four planets shared with the sulfur survey take its system values and UV files (vulcan-retrieval
+  `runs/survey/<planet>.yaml` and `data/survey/<case>/<Case>.yaml`); from v65 those of its second campaign: R*, Mp and
+  Teff from one published solution per planet and a/R* from the JWST data paper. WASP-39 b rp 9.552527e9 cm (v63-v64
+  9.546962e9), g 390.12 (390.58), 0.04974 au (0.04828); HD 189733 b rp 8.113814e9 (8.105826e9), g 2174.50 (2178.79),
+  0.03097 au (0.03126); HD 209458 b rp 9.994883e9 (9.986325e9), g 925.76 (927.35), 0.04892 au (0.04707), default
+  T_irr 2040 K (2080); WASP-107 b rp 6.701177e9 (6.567906e9), R* 0.67 (0.657), g 270.83 (305.14), Mp 0.096 M_J
+  (0.1039), 0.05637 au (0.055). UV: WASP-39 and HD 189733 read the published files scaled by (R*_paper / R*)^2, so
+  the flux at the planet is the published one (`sflux-Tsai2023_w39b.txt`, `sflux-Moses11_hd189b.txt`, shipped in
+  `src/jwst_tool/stellar_flux/` with the WASP-107 proxy); HD 209458 reads the plain solar file, upstream VULCAN's
+  recipe (through v64 the solar file scaled by (6091/5772)^4, still selectable). `tests/unit/test_survey_parity.py`
+  compares
   all four when vulcan-retrieval is beside this repo, resolving a relative UV path as
   vulcan3 does. Not compared: the survey's HD 189733 config header gives Teff 5052 K, the
   registry 5040 K (a comment there, not a key). The Tsai and ERS validation scripts
@@ -490,7 +494,9 @@ The closure gate is corr > 0.99 and scale within 15%; the FD self-check is the h
   v62 `87afcd45da73bb56` / `40c16cece4cd0dea`; v63 (vulcan-forward 0.31.0 interface, survey
   values for WASP-39 b and HD 189733 b, the Thorngren T_int default) `6142809ab7cffe07` / `45d2a4c73f6ef7dc`; v64
   (a table must reach the model top unless declared, custom planets state their system, T_int 300 K and
-  `tint_from_default`) the current keys ("Current state"; the move: "Structure: T-P, Kzz, gravity anchor, model top").
+  `tint_from_default`) `e6740cd97004d730` / `b482928cce0eeca8`; v65 (the second survey campaign's system values and UV
+  files for the four shared planets, engine pins at vulcan3 6698920 and vulcan-forward f7fc352) the current keys
+  ("Current state"; the values: "Structure: T-P, Kzz, gravity anchor, model top").
 - The review pass of v63 (keys `6142809ab7cffe07` / `45d2a4c73f6ef7dc`: the four dead transport keys left the payload,
   and gs_cgs keeps two decimals, so WASP-39 b runs g 390.58, not 390.6) moved the references by at most 0.361 ppm
   (VULCAN transit, at 1.06 um, median -0.315), 0.030 (VULCAN eclipse), 0.368 / 0.035 (PICASO transit / eclipse) at

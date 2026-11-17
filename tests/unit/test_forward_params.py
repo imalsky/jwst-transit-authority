@@ -119,10 +119,10 @@ def test_guillot_default_tirr_follows_planet_and_custom_system():
         cp = forward.canonical_params(dict(planet=key, tp_mode="guillot"))
         assert cp["Tirr"] == expect, key
     # per-planet values, pinned explicitly
-    assert model_defs.default_tirr("wasp39b") == 1640.0
+    assert model_defs.default_tirr("wasp39b") == 1620.0
     assert (
-        model_defs.default_tirr("hd209458b") == 2080.0
-    )  # the survey's star and orbit (6091 K, 1.19 R_sun, 0.04707 au)
+        model_defs.default_tirr("hd209458b") == 2040.0
+    )  # the survey's star and orbit (6091 K, 1.19 R_sun, 0.04892 au)
     # a custom system takes its own default; a different entered system moves it
     sys_mid = dict(star_teff=5500.0, rstar_rsun=1.0, orbit_au=0.04)
     teq = planets.system_teq(**sys_mid)

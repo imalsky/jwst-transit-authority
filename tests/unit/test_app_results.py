@@ -221,7 +221,7 @@ def test_custom_archive_fill_and_uv_menu_never_moves():
     assert not at.exception, at.exception
     at.number_input(key="n0_custom_teff").set_value(3100.0).run()
     assert not at.exception, at.exception
-    assert at.selectbox(key="n0_custom_sflux").value == "sflux-W39b_Tsai2023.txt"
+    assert at.selectbox(key="n0_custom_sflux").value == "sflux-Tsai2023_w39b.txt"
 
     at.selectbox(key="n0_custom_arch_name").set_value("HD 189733 b").run()
     at.button(key="n0_custom_arch_fill").click().run()
@@ -232,7 +232,7 @@ def test_custom_archive_fill_and_uv_menu_never_moves():
     assert at.number_input(key="n0_custom_teff").value == values["teff"]
     assert at.number_input(key="n0_custom_g").value == pytest.approx(values["g"])
     # the UV menu is NEVER written by the fill
-    assert at.selectbox(key="n0_custom_sflux").value == "sflux-W39b_Tsai2023.txt"
+    assert at.selectbox(key="n0_custom_sflux").value == "sflux-Tsai2023_w39b.txt"
 
 
 def test_combo_builder_fisher_table_naming_and_reset():

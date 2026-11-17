@@ -23,17 +23,23 @@ CM_PER_M = 100.0  # exact; surface gravity m s^-2 <-> cm s^-2
 # ship with vulcan3 (atm/stellar_flux/); OWN_SFLUX ship with this package. vulcan3's sflux-epseri.txt is not offered:
 # it covers 115-283 nm, and vulcan-forward refuses a spectrum shorter than the network's photolysis thresholds.
 SFLUX_CHOICES = {
+    "sflux-Tsai2023_w39b.txt": "WASP-39 (G8V, Tsai 2023, for R* 0.939)",
     "sflux-W39b_Tsai2023.txt": "WASP-39 (G8V, Tsai 2023)",
     "Gueymard_solar.txt": "Sun (G2V, Gueymard 2004)",
     "sflux-solar_hd209b.txt": "HD 209458 proxy (Sun scaled to 6091 K)",
+    "sflux-Moses11_hd189b.txt": "HD 189733 (K1.5V, Moses 2011, for R* 0.75)",
     "sflux-HD189_Moses11.txt": "HD 189733 (K1.5V, Moses 2011)",
     "sflux-HD85512_W107b.txt": "WASP-107 proxy (HD 85512 scaled to 4425 K, MUSCLES)",
     "sflux-GJ436.txt": "GJ 436 (M2.5V, MUSCLES)",
     "sflux-GJ1214.txt": "GJ 1214 (M4.5V, MUSCLES)",
 }
-# The sulfur survey's proxies (vulcan-retrieval data/survey/), shipped here in stellar_flux/ so the planner and the
-# survey read the same file for the same star (tests/unit/test_survey_parity.py compares them).
-OWN_SFLUX = frozenset({"sflux-solar_hd209b.txt", "sflux-HD85512_W107b.txt"})
+# The sulfur survey's files (vulcan-retrieval data/survey/), shipped here in stellar_flux/ so the planner and the
+# survey read the same file for the same star (tests/unit/test_survey_parity.py compares them): the WASP-39 and
+# HD 189733 spectra scaled by (R*_paper / R*_survey)^2, so the flux at the planet is the published one, and the
+# WASP-107 proxy. sflux-solar_hd209b.txt is the first survey's HD 209458 proxy, kept selectable.
+OWN_SFLUX = frozenset(
+    {"sflux-Tsai2023_w39b.txt", "sflux-Moses11_hd189b.txt", "sflux-solar_hd209b.txt", "sflux-HD85512_W107b.txt"}
+)
 
 
 def sflux_file(name: str) -> str:
@@ -72,6 +78,8 @@ SFLUX_SOURCES = {
 SFLUX_SOURCES["sflux-GJ1214.txt"] = SFLUX_SOURCES["sflux-GJ436.txt"]
 SFLUX_SOURCES["sflux-HD85512_W107b.txt"] = SFLUX_SOURCES["sflux-GJ436.txt"]
 SFLUX_SOURCES["sflux-solar_hd209b.txt"] = SFLUX_SOURCES["Gueymard_solar.txt"]
+SFLUX_SOURCES["sflux-Tsai2023_w39b.txt"] = SFLUX_SOURCES["sflux-W39b_Tsai2023.txt"]
+SFLUX_SOURCES["sflux-Moses11_hd189b.txt"] = SFLUX_SOURCES["sflux-HD189_Moses11.txt"]
 
 # Per-planet MEASURED structure tables bundled with vulcan3 (atm/).
 #
@@ -92,14 +100,15 @@ PLANETS: dict[str, dict[str, Any]] = {
     "wasp39b": dict(
         label="WASP-39 b",
         # The sulfur survey's system (vulcan-retrieval runs/survey/wasp39b.yaml): the 1 mbar transit radius
-        # 9.546962e9 cm, g = G Mp / rp^2 with Mp 0.281 M_J, R* 0.939 R_Sun.
+        # 9.552527e9 cm, g = G Mp / rp^2 with Mp 0.281 M_J, R* 0.939 R_Sun (Mancini et al. 2018), a = 11.39 R*
+        # (Carter & May et al. 2024).
         star=dict(teff=5485.0, log_g=4.5, metallicity=0.0, ks_mag=10.20),
         rstar_rsun=0.939,
-        rp_rjup=1.33539,
-        gs_cgs=390.58,
-        orbit_au=0.04828,
+        rp_rjup=1.33617,
+        gs_cgs=390.12,
+        orbit_au=0.04974,
         t14_hr=2.80,
-        sflux="sflux-W39b_Tsai2023.txt",
+        sflux="sflux-Tsai2023_w39b.txt",
         tp_table="atm_W39b_evening_TP_Kzz.txt",
         tp_table_default=True,
         # The table ends at 5.3e-6 bar, below every model top the tool offers; the published model ran it so.
@@ -114,14 +123,15 @@ PLANETS: dict[str, dict[str, Any]] = {
     "hd189733b": dict(
         label="HD 189733 b",
         # The sulfur survey's system (vulcan-retrieval runs/survey/hd189733b.yaml): the 1 mbar transit radius
-        # 8.105826e9 cm, g = G Mp / rp^2 with Mp 1.13 M_J, R* 0.75 R_Sun.
+        # 8.113814e9 cm, g = G Mp / rp^2 with Mp 1.13 M_J, R* 0.75 R_Sun (Stassun et al. 2017), a = 8.88 R*
+        # (Fu et al. 2024).
         star=dict(teff=5040.0, log_g=4.5, metallicity=0.0, ks_mag=5.54),
         rstar_rsun=0.75,
-        rp_rjup=1.13381,
-        gs_cgs=2178.79,
-        orbit_au=0.03126,
+        rp_rjup=1.13493,
+        gs_cgs=2174.50,
+        orbit_au=0.03097,
         t14_hr=1.80,
-        sflux="sflux-HD189_Moses11.txt",
+        sflux="sflux-Moses11_hd189b.txt",
         tp_table="atm_HD189_Kzz.txt",
         tp_table_default=False,
         tp_table_note=(
@@ -135,14 +145,15 @@ PLANETS: dict[str, dict[str, Any]] = {
     "hd209458b": dict(
         label="HD 209458 b",
         # The sulfur survey's system (vulcan-retrieval runs/survey/hd209458b.yaml): the 1 mbar transit radius
-        # 9.986325e9 cm, g = G Mp / rp^2 with Mp 0.73 M_J, and the solar UV spectrum scaled to the host's Teff.
+        # 9.994883e9 cm, g = G Mp / rp^2 with Mp 0.73 M_J, R* 1.19 R_Sun (Stassun et al. 2017), a = 8.84 R*
+        # (Xue et al. 2024), and the solar UV spectrum on the star's surface (upstream VULCAN's recipe).
         star=dict(teff=6091.0, log_g=4.4, metallicity=0.0, ks_mag=6.31),
         rstar_rsun=1.19,
-        rp_rjup=1.39685,
-        gs_cgs=927.35,
-        orbit_au=0.04707,
+        rp_rjup=1.39804,
+        gs_cgs=925.76,
+        orbit_au=0.04892,
         t14_hr=3.07,
-        sflux="sflux-solar_hd209b.txt",
+        sflux="Gueymard_solar.txt",
         tp_table=None,
         tp_table_default=False,
         tp_table_note=(
@@ -152,18 +163,19 @@ PLANETS: dict[str, dict[str, Any]] = {
             "Out-of-window profiles are refused, never clipped, so this planet "
             "keeps the analytic default."
         ),
-        note="The classic inflated hot Jupiter (G0V host; the solar UV spectrum scaled to its temperature).",
+        note="The classic inflated hot Jupiter (G0V host; the solar UV spectrum).",
     ),
     "wasp107b": dict(
         label="WASP-107 b",
         # The sulfur survey's system (vulcan-retrieval runs/survey/wasp107b.yaml): the 1 mbar transit radius
-        # 6.567906e9 cm, g = G Mp / rp^2 with Mp 0.1039 M_J, and the MUSCLES HD 85512 UV spectrum scaled to the
-        # host's Teff (the proxy of Dyrek et al. 2024).
+        # 6.701177e9 cm, g = G Mp / rp^2 with Mp 0.096 M_J, R* 0.67 R_Sun (Piaulet et al. 2021), a = 18.0923 R*
+        # (Sing et al. 2024), and the MUSCLES HD 85512 UV spectrum scaled to the host's Teff (the proxy of Dyrek et
+        # al. 2024).
         star=dict(teff=4425.0, log_g=4.6, metallicity=0.0, ks_mag=8.64),
-        rstar_rsun=0.657,
-        rp_rjup=0.91869,
-        gs_cgs=305.14,
-        orbit_au=0.055,
+        rstar_rsun=0.67,
+        rp_rjup=0.93733,
+        gs_cgs=270.83,
+        orbit_au=0.05637,
         t14_hr=2.74,
         sflux="sflux-HD85512_W107b.txt",
         tp_table=None,

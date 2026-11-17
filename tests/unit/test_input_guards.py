@@ -14,9 +14,9 @@ from jwst_tool import forward, jacobian, picaso_engine as pe, share_config
 
 # Guillot T_irr defaults (K) of every registry planet, transmission and emission: removing the clip moved none.
 _REGISTRY_TIRR = {
-    "wasp39b": (1640.0, 1960.0),
-    "hd189733b": (1680.0, 2000.0),
-    "hd209458b": (2080.0, 2480.0),
+    "wasp39b": (1620.0, 1940.0),
+    "hd189733b": (1700.0, 2020.0),
+    "hd209458b": (2040.0, 2440.0),
     "wasp107b": (1040.0, 1240.0),
 }
 
