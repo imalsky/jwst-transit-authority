@@ -28,9 +28,9 @@ names the code state it was measured on.
   directory. `tests` at v65 on the laptop (6 workers): 588 passed, 13 skipped [M]. CI
   runs the unit suite on Python 3.10-3.12 plus a GUI-smoke job; `full-stack-smoke.yml`
   runs by hand. Slow tier (`JWST_TOOL_RUN_SLOW=1`), one thread per worker:
-  `pytest tests -q -n 14 --dist worksteal` (CLAUDE.md). At v64 (tool fd79bed) on the pinned engines, 14 workers on 18 cores: 607
-  passed in 2919 s (0:48:39) [M]; longest PICASO e2e eclipse 2652 s and transit 2631 s, TOI-7169 b 2446 s, emission AD
-  closure at cadence 1 2271 s.
+  `pytest tests -q -n 14 --dist worksteal` (CLAUDE.md). At v65 (tool 38dde8b) on the pinned engines, 14 workers on 15 CPUs: 608
+  passed in 4522 s (1:15:22) [M]; longest the emission AD closure 3014 s and at cadence 1 2544 s, TOI-7169 b 2480 s,
+  PICASO e2e eclipse 2050 s and transit 1986 s (at v64 on 18 cores the tier took 2919 s).
   At v63 (vulcan-forward 07f936d, vulcan3 362d642) a cold rerun of the VULCAN reference is bitwise equal
   to it on the reference's own CPU affinity (10 cores; transit 1127 steps, eclipse 1942), and
   not on 5 cores (eclipse 3140 steps, 0.011 ppm at R = 100; transit 1.5e-7 ppm) [M]: the
