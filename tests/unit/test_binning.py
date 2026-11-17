@@ -435,3 +435,29 @@ def test_smooth_validates_the_native_r_table():
     bad[7] = np.nan
     with pytest.raises(ValueError, match="r_curve"):
         binning.smooth_to_native_r(wl, y, wl_r2, bad, 5.2, 11.8)
+
+
+def test_smooth_refuses_what_it_used_to_substitute():
+    """A native R below the kernel floor, and a star dark across a whole LSF window, are refused.
+
+    Neither is repaired: raising the R would blur with a kernel the table does not state, and a flat weight where
+    the star has no flux would report a depth no count ratio measures.
+    """
+    wl = np.geomspace(5.0, 12.0, 4000)
+    y = 0.01 + 1e-3 * np.sin(40 * wl)
+    wl_r = np.geomspace(5.0, 12.0, 50)
+    low = np.full(50, 100.0)
+    low[20] = 0.5 * binning.LSF_R_FLOOR
+    with pytest.raises(ValueError, match="smallest resolving power"):
+        binning.smooth_to_native_r(wl, y, wl_r, low, 5.2, 11.8)
+    r = np.full(50, 80.0)
+    dark = np.where((wl > 7.0) & (wl < 9.0), 0.0, 1.0)  # 2 um of no flux: many kernel widths at R = 80
+    with pytest.raises(ValueError, match="zero across the whole LSF window"):
+        binning.smooth_to_native_r(wl, y, wl_r, r, 5.2, 11.8, weight=dark)
+    with pytest.raises(ValueError, match="zero across the whole LSF window"):
+        binning.smooth_to_native_r(wl, y, wl_r, r, 5.2, 11.8, weight=np.zeros(wl.size))
+    # one dark model point between lit ones leaves every window lit: the count ratio is defined, so it runs
+    notch = np.ones(wl.size)
+    notch[2000] = 0.0
+    out = binning.smooth_to_native_r(wl, y, wl_r, r, 5.2, 11.8, weight=notch)
+    assert np.all(np.isfinite(out))

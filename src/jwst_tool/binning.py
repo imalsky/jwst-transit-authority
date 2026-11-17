@@ -26,7 +26,7 @@ DEGENERATE_WL_FRAC = 0.02
 # The LSF blur's numerics (smooth_to_native_r). Gaussian FWHM per sigma, 2 sqrt(2 ln 2) to five figures: the per-mode
 # instruments.LSF_WIDTH fits were made with this value.
 FWHM_PER_SIGMA = 2.3548
-# Smallest resolving power a kernel is built for: a native-R entry below it is raised to it. No basis recorded.
+# Smallest resolving power a kernel is built for: a native-R table with an entry below it is refused. No basis recorded.
 LSF_R_FLOOR = 5.0
 # The working grid reaches this many widest-kernel sigmas past each band edge, so the edge blur sees model content.
 LSF_PAD_SIGMAS = 5.0
@@ -34,8 +34,6 @@ LSF_PAD_SIGMAS = 5.0
 LSF_SAMPLES_PER_SIGMA = 6.0
 # Kernel half-width in widest-kernel sigmas: the weight beyond it is below exp(-8), 3e-4.
 LSF_HALF_WIDTH_SIGMAS = 4.0
-# Relative floor on the cell-averaged stellar-flux weight, so a window of zero flux does not divide by zero.
-LSF_WEIGHT_FLOOR = 1.0e-12
 
 
 def _validate_wl(wl: np.ndarray, name: str) -> np.ndarray:
@@ -148,6 +146,11 @@ def _validate_native_r(
             f"finite and > 0 -- got {int((~np.isfinite(r_v)).sum())} "
             f"non-finite / {int((r_v <= 0.0).sum())} non-positive value(s)"
         )
+    if np.any(r_v < LSF_R_FLOOR):
+        raise ValueError(
+            f"smooth_to_native_r: r_curve has {int((r_v < LSF_R_FLOOR).sum())} value(s) below {LSF_R_FLOOR:g}, the "
+            f"smallest resolving power a kernel is built for (lowest {float(r_v.min()):g}). Fix the native-R table."
+        )
     if wl_r_v.size > 1 and np.any(np.diff(wl_r_v) <= 0.0):
         _bad = int(np.argmax(np.diff(wl_r_v) <= 0.0))
         raise ValueError(
@@ -242,7 +245,8 @@ def smooth_to_native_r(
     Raises
     ------
     ValueError
-        A grid, table or weight is invalid, or no native-R sample lies inside the band.
+        A grid, table or weight is invalid, no native-R sample lies inside the band, a native R is below
+        ``LSF_R_FLOOR``, or the weight is zero across a whole LSF window.
     """
     wl, yv = _validate_model(wl_model, y, "smooth_to_native_r")
     wl_r_v, r_v = _validate_native_r(wl, wl_r, r_curve, weight)
@@ -252,8 +256,7 @@ def smooth_to_native_r(
     if not in_band.any():
         raise ValueError(f"smooth_to_native_r: no native-R sample inside the band [{band_lo:g}, {band_hi:g}] um")
     r_band = r_v[in_band]
-    r_min = max(LSF_R_FLOOR, float(np.min(r_band)))
-    r_max = max(r_min, float(np.max(r_band)))
+    r_min, r_max = float(np.min(r_band)), float(np.max(r_band))
     s_max = 1.0 / (FWHM_PER_SIGMA * r_min)  # widest kernel sigma, in ln-lambda
     s_min = 1.0 / (FWHM_PER_SIGMA * r_max)
 
@@ -296,8 +299,7 @@ def smooth_to_native_r(
         yg[_valid[-1] + 1 :] = yg[_valid[-1]]
 
     # Stellar-flux weight cell-averaged the same way, so the convolution forms
-    # L[F d]/L[F], not the flat L[d]. A tiny positive floor keeps an all-zero-
-    # flux window from dividing by zero (falls back to flat weighting there).
+    # L[F d]/L[F], not the flat L[d].
     if weight is None:
         f_grid = np.ones_like(yg)
     else:
@@ -309,18 +311,24 @@ def smooth_to_native_r(
             f_grid[: _valid[0]] = f_grid[_valid[0]]
         if _valid[-1] < f_grid.size - 1:
             f_grid[_valid[-1] + 1 :] = f_grid[_valid[-1]]
-        fmax = float(f_grid.max()) if f_grid.size else 0.0
-        f_grid = np.maximum(f_grid, LSF_WEIGHT_FLOOR * fmax) if fmax > 0.0 else np.ones_like(yg)
 
     k = int(np.ceil(LSF_HALF_WIDTH_SIGMAS * s_max / dl))
     pad = np.concatenate([np.full(k, yg[0]), yg, np.full(k, yg[-1])])
     pad_f = np.concatenate([np.full(k, f_grid[0]), f_grid, np.full(k, f_grid[-1])])
     win = np.lib.stride_tricks.sliding_window_view(pad, 2 * k + 1)
     win_f = np.lib.stride_tricks.sliding_window_view(pad_f, 2 * k + 1)
-    sig = 1.0 / (FWHM_PER_SIGMA * np.maximum(np.interp(np.exp(grid), wl_r_v, r_v), LSF_R_FLOOR))
+    sig = 1.0 / (FWHM_PER_SIGMA * np.interp(np.exp(grid), wl_r_v, r_v))
     off = dl * (np.arange(2 * k + 1) - k)
     w = np.exp(-0.5 * (off[None, :] / sig[:, None]) ** 2) * win_f  # flux-weighted
-    smoothed = (w * win).sum(axis=1) / w.sum(axis=1)
+    norm = w.sum(axis=1)
+    if np.any(norm <= 0.0):
+        dark = np.exp(grid[norm <= 0.0])
+        raise ValueError(
+            f"smooth_to_native_r: weight (stellar flux) is zero across the whole LSF window at {dark.size} point(s), "
+            f"{dark[0]:g} to {dark[-1]:g} um, so the count-weighted depth L[F d]/L[F] is undefined there. Narrow the "
+            "band to where the star has flux, or pass weight=None for the flat blur."
+        )
+    smoothed = (w * win).sum(axis=1) / norm
 
     out = yv.copy()
     out[sel] = np.interp(lnw[sel], grid, smoothed)
