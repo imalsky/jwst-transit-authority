@@ -212,8 +212,9 @@ names the code state it was measured on.
   209458 b transit 2.4e-6, WASP-107 b 5.6e-5 / 7.2e-5 [M, build only]; a tabulated profile does not read g, so its
   passes 2 and 3 move nothing.
 - The WASP-39 b default transit runs vulcan3's `atm_W39b_evening_TP_Kzz.txt` (Tsai et al. 2023's evening terminator,
-  built for R* 0.932 and g 422) under the survey's R* 0.939 and g 390.58 from v63. The table is in pressure, so the
-  new gravity moves only the heights; whether it still describes the planet is open (todo). Guillot there moved it
+  built for R* 0.932 and g 422) under the survey's R* 0.939 and g 390.58 from v63. It stays the default (the
+  maintainer's decision): it is the published profile of this planet, it is in pressure, and the 0.75% larger star
+  and 7.4% lower gravity move only the hydrostatic heights. Guillot there moved it
   +191 ppm median at v64 ("Do not retry"). Handing VULCAN the catalogue pair puts R ~7% high and every g ~13% low. `p_ref_bar` is 1
   mbar, not tuned to the data (7.8% low against the white-light depth; Decision records).
 - Transmission dtau uses inverse-square g(r) (exojax's own profile: -51 ppm at W39b
@@ -341,7 +342,10 @@ names the code state it was measured on.
   interpolates back onto the input grid: 25-150% spurious flux) and a half-maximum
   estimator on 2-3-pixel profiles. The blur is a no-op on the gratings and NIRCam grisms.
   MIRI LRS pixels arrive DESCENDING and `np.interp` does not raise on unsorted xp (binned
-  depth off up to 328 ppm); `smooth_to_native_r` validates.
+  depth off up to 328 ppm); `smooth_to_native_r` validates. It refuses a native R below `LSF_R_FLOOR` and a weight
+  that is zero across a whole LSF window (through v64 it raised the R and weighted the window flat): on the cached
+  Pandeia results of all 11 modes the blur is bitwise unchanged, over 240 cases with a lowest native R of 26.4 and no
+  zero-weight model point [M].
 - Noise: the star is normalized by band-integrated 2MASS Ks (the monochromatic shortcut
   is up to 3.1% off). Pandeia's extracted noise includes the quantum-yield excess.
   Fisher inversion whitens to correlation form (a pure rescaling flipped rank 1 -> 2).
@@ -759,8 +763,8 @@ Standing maintainer decisions; the measurements sit in the section named.
   belongs (`nz`, a share file's n_transits, r_bin, seed) is refused, never truncated. The
   settling, escape and boundary-flux keys left the payload at v63 (a request naming one is
   refused). `FORMER_EXTRA_MOLECULES` stays on the maintainer's request: old share files that
-  list NH3 as an extra still load. Which fixed numbers become settings, and the two defaults
-  the GUI and the API still disagree on (`jac_method`, `extra_mols`), wait for the
+  list NH3 as an extra still load. No fixed number becomes a setting (the maintainer's decision). The two defaults
+  the GUI and the API still disagree on (`jac_method`, `extra_mols`) wait for the
   maintainer (todo). The fixed numbers with no recorded basis keep their values, each commented "no basis recorded"
   (maintainer's decision, v64): `KZZ_CONST_DEFAULT`, `KZZ_KDEEP_DEFAULT`, `LOG_GAMMA_DEFAULT`, `LOG_KAPPA_CLOUD_DEFAULT`,
   the Guillot kappa, gamma and cloud FD steps, `binning.LSF_R_FLOOR`, `certify.EMIS_TAU_WARN`,
