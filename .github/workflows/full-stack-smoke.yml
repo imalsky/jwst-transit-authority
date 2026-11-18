@@ -96,8 +96,8 @@ jobs:
         env:
           # The directory CONTAINING the checkouts: vulcan-retrieval's
           # forward/config.py finds its data tree (the tracked
-          # data/cm24_wasp39b marker) under it. SNCHO is the engine's default
-          # network (vulcan_forward.constants.DEFAULT_NETWORK).
+          # data/cm24_wasp39b marker) under it. The engine has no default
+          # network: the test names its own.
           VULCAN_PROJECT_ROOT: ${{ github.workspace }}
           JAX_PLATFORM_NAME: cpu
         run: |
@@ -107,3 +107,13 @@ jobs:
           # pytest exits 0 when every test SKIPS (e.g. the stack failed to import),
           # which would be a false green. Require at least one real pass.
           grep -Eq "[1-9][0-9]* passed" smoke.log || { echo "::error::condensation smoke ran no tests (all skipped) -- the full stack did not build a condensation model"; exit 1; }
+
+      - name: The planner and the survey describe each shared planet alike
+        working-directory: jwst-transit-authority
+        env:
+          JAX_PLATFORM_NAME: cpu
+        run: |
+          set -o pipefail
+          python -m pytest tests/unit/test_survey_parity.py -q -rs -o addopts="" -p no:cacheprovider | tee parity.log
+          # every case skips when the sibling checkout is missing: require real passes
+          grep -Eq "[1-9][0-9]* passed" parity.log || { echo "::error::survey parity ran no tests"; exit 1; }
