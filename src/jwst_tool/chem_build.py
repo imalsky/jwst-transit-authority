@@ -459,7 +459,6 @@ def assemble_chem(cp: dict, log: Log) -> SimpleNamespace:
     profile = rt_profile_common(cp, config)
     profile["yconv_cri"] = cp["yconv_cri"]
     profile["yconv_min"] = cp["yconv_min"]
-    profile["co_mode"] = "fixed_O"
     profile["dt_max"] = DT_MAX_S
     profile["network"], profile["atom_list"], profile["vulcan_cfg_name"] = net_path, net_atoms, config.W39B_CFG_NAME
     rp_cm = profile["rp_cm"]

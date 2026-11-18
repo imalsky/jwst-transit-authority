@@ -183,7 +183,7 @@ def test_the_profile_keys_the_tool_sets_are_ones_the_engine_reads():
     # run time)
     chem_tree = _engine_tree("vulcan_forward.vulcan_chem")
     reads = _profile_reads(chem_tree)
-    for key in ("yconv_cri", "yconv_min", "dt_max", "co_mode", "network", "atom_list", "vulcan_cfg_name"):
+    for key in ("yconv_cri", "yconv_min", "dt_max", "network", "atom_list", "vulcan_cfg_name"):
         assert key in reads, f"the engine never reads profile[{key!r}]"
     returned = _returned_fields(chem_tree, "build_chem_model")
     for attr in ("co_bz_bound", "co_bz_margin"):
