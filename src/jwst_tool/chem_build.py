@@ -137,6 +137,8 @@ CONDEN_CFG = {
     "use_settling": False,
     "fix_species": ["S8", "S8_l_s"],
     "fix_species_from_coldtrap_lev": False,
+    # The pin opens the column, so vulcan3's closed-column element budget cannot hold; it refuses a finite tolerance.
+    "element_budget_tol": float("inf"),
     "start_conden_time": 0.0,
     "stop_conden_time": 1.0e6,
     # At the 1e-20 default, glacial trace species gate longdy forever on cold
