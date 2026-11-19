@@ -47,9 +47,11 @@ dependencies = [
     # Direct imports: load_config (the CFG_ABUNDANCES drift check),
     # atm_setup, network and runtime_validation (forward), and chem_funs,
     # steady_state_grad, rates_jax, gibbs and phy_const (adjoint_diag). The
-    # floor carries the public names the engine imports and the open-column
-    # refusal that CONDEN_CFG's element_budget_tol answers.
-    "vulcan3>=0.19.0",
+    # floor refuses removed config keys and seeds with the ExoGibbs
+    # Gibbs-equilibrium solve. It stays at the deploy pin's version (the
+    # contract test checks the pinned engine against it); the redeploy that
+    # moves the pins to 0.19.0 raises it.
+    "vulcan3>=0.18.0",
 ]
 
 [project.urls]

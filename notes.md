@@ -9,7 +9,7 @@ names the code state it was measured on.
 ## Current state
 
 - Tool 0.73.0 on main. VULCAN is the default chemistry engine, PICASO the second.
-- Floors `vulcan-forward>=0.31.0`, `vulcan3>=0.19.0` (pyproject; the pins below are older until the redeploy). `deploy/pins.env` and
+- Floors `vulcan-forward>=0.31.0`, `vulcan3>=0.18.0` (pyproject; the pins' versions, raised with them at the redeploy). `deploy/pins.env` and
   the Dockerfile pin vulcan3 6698920 (0.18.0) and vulcan-forward f7fc352 (0.31.1); the Dockerfile
   still pins the tool at 2efb096 (v64): a redeploy moves that pin to a v65 commit first.
   The running Space was last deployed from the earlier pins (tool b23df79) and is
