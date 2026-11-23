@@ -43,7 +43,7 @@ RUN conda create -y -n app python=3.12 \
 # BUILD_INFO records the enforced pins.
 ARG VULCAN3_SHA=5cf70931bb350f14994f34c5d0a3f1e570f6dbab
 ARG VULCAN_FORWARD_SHA=afa6f9822e3f0c2b025f24658fbb29dc8ce91642
-ARG JWST_TOOL_SHA=2efb096aca457c320475b7361f267efd3bedf750
+ARG JWST_TOOL_SHA=b12dc961a8e9b5d61da7f9d6eae63475dc7116db
 RUN set -e; \
     for spec in \
       "VULCAN-JAX https://github.com/imalsky/VULCAN3.git ${VULCAN3_SHA}" \
