@@ -26,15 +26,15 @@ names the code state it was measured on.
   ppm median (-3.7%, max 41.9 at 5.13 um); PICASO transit +7.4 median (max 48.4 at 3.34 um), eclipse -25.6 (-6.3%,
   max 67.2 at 4.83 um) [M].
 - v63 needs vulcan-forward 0.31.0 (the caller names the network, config and RT geometry;
-  `select_network`, `eclipse_photosphere`). The installed editable metadata reads vulcan-forward 0.31.1.
+  `select_network`, `eclipse_photosphere`). The installed editable metadata reads vulcan-forward 0.33.0.
 - Tests. Normal suite `python -m pytest tests -q -n 6`; `tests/conftest.py` defaults
   `JAX_PLATFORMS=cpu` and points an unset `JWST_TOOL_OUTPUT_DIR` at a throwaway
   directory. `tests` at v65 on the laptop (6 workers): 588 passed, 13 skipped [M]. CI
   runs the unit suite on Python 3.10-3.12 plus a GUI-smoke job; `full-stack-smoke.yml`
   runs by hand. Slow tier (`JWST_TOOL_RUN_SLOW=1`), one thread per worker:
-  `pytest tests -q -n 14 --dist worksteal` (CLAUDE.md). At v65 (tool 38dde8b) on the pinned engines, 14 workers on 15 CPUs: 608
-  passed in 4522 s (1:15:22) [M]; longest the emission AD closure 3014 s and at cadence 1 2544 s, TOI-7169 b 2480 s,
-  PICASO e2e eclipse 2050 s and transit 1986 s (at v64 on 18 cores the tier took 2919 s).
+  `pytest tests -q -n 14 --dist worksteal` (CLAUDE.md). At v66 (tool b12dc96) on the pinned engines, 14 workers on 15 CPUs: 608
+  passed in 4736 s (1:18:56) [M]; longest the emission AD closure 3348 s and at cadence 1 2733 s, TOI-7169 b 2449 s,
+  PICASO e2e eclipse 2052 s and transit 1991 s (at v65 4522 s; at v64 on 18 cores 2919 s).
   At v63 (vulcan-forward 07f936d, vulcan3 362d642) a cold rerun of the VULCAN reference is bitwise equal
   to it on the reference's own CPU affinity (10 cores; transit 1127 steps, eclipse 1942), and
   not on 5 cores (eclipse 3140 steps, 0.011 ppm at R = 100; transit 1.5e-7 ppm) [M]: the
@@ -850,6 +850,9 @@ None changes a shipped number.
 
 Real, small, and out of todo.md by decision; nothing here changes a shipped number.
 
+- `validation/scripts/inputs/atmos_cases.py` shares the tool's certified solve and element gate but not its two
+  spectrum refusals (`certify.check_unmodeled`, the eclipse tau-bottom gate): a validation column could be written
+  where the tool refuses. The six shipped cases are the tool's own defaults, which it serves.
 - The constrain verdict (`gui_results._constrain_verdict`) prints `fisher.display_sigma`'s dlnCO value with no unit,
   while the table on the same page is in dex. Display only.
 - Saturated channels the worker drops can open a gap `segment_ids` reads as a detector
