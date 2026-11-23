@@ -2,9 +2,9 @@
 
 One (planet, science_mode) case at JWST Transit Authority's defaults (GUI molecule set) -- solve the chemistry, map the
 column onto the RT grid, and save what both RT codes need (P, T, mean molecular weight, VMRs, geometry) plus the tool's
-own wide-band observable and a lines-only 3.03-5.17 um spectrum for the petitRADTRANS comparison, and the photolysis
-cadence that solved the column, so a file's provenance is readable from the file. Needs the engine data root and this
-repo's jax environment:
+own wide-band observable and a lines-only 3.03-5.17 um spectrum for the petitRADTRANS comparison. The chemistry is
+solved as the tool's baseline is (`certify.certified_solve`: the config photolysis cadence, then one recorded retry at
+cadence 1), and the file records the cadence that solved it. Needs the engine data root and this repo's jax environment:
 
     JAX_PLATFORM_NAME=cpu python validation/scripts/inputs/atmos_cases.py wasp39b transmission
 """
@@ -20,7 +20,7 @@ import numpy as np
 # isort: off
 from vulcan_forward import vulcan_chem  # noqa: F401  # first: it sets jax x64 before exojax
 from vulcan_forward import _rt_geometry, constants, exojax_rt, interp_map
-from jwst_tool import chem_build, forward, planets
+from jwst_tool import certify, chem_build, forward, planets
 from jwst_tool.stellar import phoenix_surface_flux
 # isort: on
 
@@ -31,24 +31,23 @@ t0 = time.time()
 
 cp = forward.canonical_params({"planet": planet, "science_mode": mode, "extra_mols": forward.EXTRA_MOLECULES_DEFAULT})
 A = chem_build.assemble_chem(cp, print)
-chem = A.build_chem()
-cfg = chem._integ.config  # the cfg the solver ran; only place the cadence lives
 theta = jnp.asarray(A.theta)
-y, diag = chem.converged_y(theta, return_conv_diag=True)
-assert bool(diag.conv_normal) and float(diag.longdy) < chem.yconv_min, (
-    f"{planet} {mode}: chemistry not certified (longdy {float(diag.longdy):.3g})"
+y, chem, cert, escalated = certify.certified_solve(
+    A.build_chem(),
+    theta,
+    "baseline solve",
+    rebuild=lambda: A.build_chem(tag="baseline [photo cadence 1]", photo_frq=1),
 )
+cfg = chem._integ.config  # the cfg the solver ran; only place the cadence lives
 y = np.asarray(y, dtype=np.float64)
+certify.check_elements(y, chem, "baseline solve", print)
 gas = np.ones(y.shape[1])
 for s, i in chem.sidx.items():
     if s.endswith(("_l_s", "_l", "_s")):
         gas[int(i)] = 0.0
 ymix = y * gas / (y * gas).sum(axis=1, keepdims=True)
 mmw_chem = ymix @ np.asarray(chem.species_masses)
-print(
-    f"[{planet} {mode}] chemistry certified: {int(diag.accept_count)} steps, "
-    f"longdy {float(diag.longdy):.3g}, {time.time() - t0:.0f} s"
-)
+print(f"[{planet} {mode}] chemistry certified: {cert[1]} steps, longdy {cert[2]:.3g}, {time.time() - t0:.0f} s")
 
 profile = dict(A.profile)
 rt = exojax_rt.build_rt_model(profile)  # the tool's wide band
@@ -81,9 +80,7 @@ out = dict(
     p_ref_bar=float(rt.p_ref_bar),
     label=planets.PLANETS[planet]["label"],
     params_json=json.dumps(cp),
-    # Provenance: one solve at the config cadence, no cadence-1 retry here
-    # (the assert above is the whole escalation policy of this script).
-    photo_escalated=False,
+    photo_escalated=bool(escalated),
     ini_update_photo_frq=int(cfg.ini_update_photo_frq),
     final_update_photo_frq=int(cfg.final_update_photo_frq),
     **{f"vmr_{m}": v for m, v in vmr.items()},

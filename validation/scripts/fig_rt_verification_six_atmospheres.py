@@ -64,14 +64,15 @@ def binned(wl, values):
 # Validate every pair before constructing or saving the comparison.
 PAIRS = {(p, m): load_pair(p, m) for m, planets in CASES.items() for p in planets}
 
-# All six columns must come from ONE photolysis cadence: mixing a cadence-1 input
-# with a config-cadence one moves a spectrum by up to 3.8 ppm and is invisible in
-# the residuals. atmos_cases.py writes the cadence keys into every file.
+# Each column is the one the tool serves: solved at the config photolysis cadence, or, when that does not certify,
+# by the tool's recorded retry at cadence 1 (labelled in the legend). Any other mix is refused: a cadence moves a
+# spectrum by up to 3.8 ppm and is invisible in the residuals. atmos_cases.py writes the cadence keys into every file.
 CADENCE_KEYS = ("ini_update_photo_frq", "final_update_photo_frq", "photo_escalated")
 CADENCES = {
     f"{planet} {mode}": tuple(atmos[k].item() for k in CADENCE_KEYS) for (planet, mode), (atmos, _) in PAIRS.items()
 }
-if len(set(CADENCES.values())) > 1:
+CONFIG_CADENCES = {c[:2] for c in CADENCES.values() if not c[2]}
+if len(CONFIG_CADENCES) > 1 or any(c[2] and c[:2] != (1, 1) for c in CADENCES.values()):
     raise ValueError(
         f"atmos_*.npz mix photolysis cadences {CADENCE_KEYS} = {CADENCES}; "
         "regenerate them on one tree with inputs/atmos_cases.py"
@@ -86,6 +87,8 @@ for ax, (mode, plist) in zip(axes, CASES.items()):
         wl, ours = wl[o], ours[o]
         m = (wl > 3.03 * 1.01) & (wl < 5.17 * 0.99)
         label = f"{a['label']}, $g$ = {float(a['gs_cgs']):.0f} cm s$^{{-2}}$"
+        if a["photo_escalated"]:
+            label += ", photolysis cadence 1"
         if mode == "transmission":
             diff = binned(wl, ours) - binned(b["wl_um"], b[PKEY[mode]])
             residual = diff - diff.mean()

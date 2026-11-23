@@ -88,12 +88,22 @@ def test_six_atmosphere_references_are_paired_and_a_bad_input_is_refused(tmp_pat
     def run():
         runpy.run_path(str(VAL / "scripts" / "fig_rt_verification_six_atmospheres.py"), run_name="__main__")
 
-    # Columns solved at different photolysis cadences are not comparable.
+    # The tool's recorded cadence-1 retry is the one admitted cadence change: an unrecorded change, and a
+    # retry flag on a column that is not at cadence 1, are both refused.
     frq = dict(photo_escalated=False, ini_update_photo_frq=5, final_update_photo_frq=5)
-    restamp(tmp_path / "atmos_wasp39b_transmission.npz", **frq)
-    restamp(tmp_path / "atmos_hd189733b_transmission.npz", **{**frq, "final_update_photo_frq": 1})
-    with pytest.raises(ValueError, match="(?i)cadence"):
-        run()
+    for atmosphere in sorted(tmp_path.glob("atmos_*.npz")):
+        restamp(atmosphere, **frq)
+    unrecorded = {**frq, "ini_update_photo_frq": 1, "final_update_photo_frq": 1}
+    for bad in (unrecorded, {**frq, "final_update_photo_frq": 1}, {**frq, "photo_escalated": True}):
+        restamp(tmp_path / "atmos_hd189733b_transmission.npz", **bad)
+        with pytest.raises(ValueError, match="(?i)cadence"):
+            run()
+    restamp(tmp_path / "atmos_hd189733b_transmission.npz", **{**unrecorded, "photo_escalated": True})
+    saved = []
+    monkeypatch.setattr(figstyle, "save", lambda fig, name: saved.append(name))
+    run()
+    assert saved == ["rt_verification_six_atmospheres.png"]
+    monkeypatch.setattr(figstyle, "save", no_figure)
 
     altered = tmp_path / "atmos_wasp39b_transmission.npz"
     with np.load(altered) as data:
