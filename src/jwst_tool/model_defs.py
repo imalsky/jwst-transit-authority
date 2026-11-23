@@ -66,7 +66,7 @@ DT_MAX_S = 1.0e13  # chemistry step-size cap (s); prevents the adaptive-dt ballo
 
 # model_cache buster (identity = canonical params + this number, never a content
 # hash); bump on any physics or canonical-key-set change.
-_VERSION = 65
+_VERSION = 66
 
 # The W39b cfg's elemental set (number ratios to H, 10x solar): Lodders 2020
 # Table 8 present-day solar (log eps C 8.47, N 7.85, O 8.73, S 7.15; He is
