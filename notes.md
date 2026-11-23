@@ -9,16 +9,20 @@ names the code state it was measured on.
 ## Current state
 
 - Tool 0.73.0 on main. VULCAN is the default chemistry engine, PICASO the second.
-- Floors `vulcan-forward>=0.31.0`, `vulcan3>=0.18.0` (pyproject; the pins' versions, raised with them at the redeploy). `deploy/pins.env` and
-  the Dockerfile pin vulcan3 6698920 (0.18.0) and vulcan-forward f7fc352 (0.31.1); the Dockerfile
-  still pins the tool at 2efb096 (v64): a redeploy moves that pin to a v65 commit first.
+- Floors `vulcan-forward>=0.33.0`, `vulcan3>=0.19.0` (pyproject; the pins' versions). `deploy/pins.env` and
+  the Dockerfile pin vulcan3 5cf7093 (0.19.0) and vulcan-forward afa6f98 (0.33.0), and the Dockerfile pins the
+  tool at a v66 commit. `deploy/requirements-app-lock.txt` is on jax 0.6.2 (the two jax lines changed by hand, the
+  rest as generated; installed `--no-deps` in a fresh env on daw it imports the stack, and its `pip check`
+  findings name no jax, numpy or scipy pin [M]). The root env has drifted from the lock (30 other pins differ and
+  10 are absent, huggingface_hub and pooch among them), so `make_app_lock.py` cannot regenerate it there.
   The running Space was last deployed from the earlier pins (tool b23df79) and is
   unchanged until a redeploy.
-- Cache versions: `model_defs._VERSION` 65, `noise.WORKER_VERSION` 12,
+- Cache versions: `model_defs._VERSION` 66, `noise.WORKER_VERSION` 12,
   `adjoint_diag._ADJ_VERSION` 4, `picaso_engine.WORKER_VERSION` 4. Default keys:
-  transmission `7f7f56ec2ef7cdba` (test-pinned), emission `0d0739f861cf8435`.
-- Fixtures `w39b_v65_reference.npz`, `w39b_picaso_reference.npz` (pinned engines, daw, 10 CPUs each; 13 min, PICASO 64
-  min). Against v64 at R = 100: VULCAN transit +25.2 ppm median (max 26.5 at 2.90 um, SO2 band +22.6), eclipse -13.2
+  transmission `1270fd3a8d128342` (test-pinned), emission `388e3f50ccac54c4`.
+- Fixtures `w39b_v66_reference.npz`, `w39b_picaso_reference.npz` (pinned engines, daw, 10 CPUs each; 13 min, PICASO 64
+  min). The v66 VULCAN reference equals the v65 one to 0.0000 ppm in both modes [M]: v66 is the pin move alone.
+  v65 against v64 at R = 100: VULCAN transit +25.2 ppm median (max 26.5 at 2.90 um, SO2 band +22.6), eclipse -13.2
   ppm median (-3.7%, max 41.9 at 5.13 um); PICASO transit +7.4 median (max 48.4 at 3.34 um), eclipse -25.6 (-6.3%,
   max 67.2 at 4.83 um) [M].
 - v63 needs vulcan-forward 0.31.0 (the caller names the network, config and RT geometry;
@@ -273,15 +277,18 @@ names the code state it was measured on.
   Decision records).
 - Against petitRADTRANS 3.4.0 on the same k-tables: engine fixtures rms 0.0013% /
   0.096% / 0.021% (isothermal H2O radius, W39b depth, H2O emission flux). The six
-  `validation/data/atmos_*.npz` (v63, sncho2025, cadence 5), fitted offset at R = 100:
-  transmission residual std WASP-39 b 19.45 ppm, HD 189733 b 4.31, WASP-107 b 45.83, HD
-  209458 b 4.75; emission relative RMS 0.309% / 0.249% (v62: 17.37, 4.25, 45.84, 4.69;
-  0.304% / 0.250%). The 14 solves take 4-23 min each, single-threaded, then the pRT
-  references 1 min and the figures 6 min [M, daw]. The Tsai and ERS columns (`inputs/chem_cases.py`) and their
+  `validation/data/atmos_*.npz` (v66, sncho2025), fitted offset at R = 100:
+  transmission residual std WASP-39 b 19.41 ppm, HD 189733 b 4.25, WASP-107 b 51.43, HD
+  209458 b 4.63; emission relative RMS 0.314% / 0.241% (v63: 19.45, 4.31, 45.83, 4.75;
+  0.309% / 0.249%). `atmos_cases.py` solves each column as the tool's baseline does
+  (`certify.certified_solve`): five certify at the config cadence in 1095-5352 steps (223-472 s on 2 CPUs), and
+  WASP-107 b stops at longdy 0.285 there and certifies on the recorded cadence-1 retry (2190 steps, longdy 0.066;
+  2212 s), as the tool's default run does. Then the pRT references take 1 min and the figures 7 min [M, daw]. The Tsai and ERS columns (`inputs/chem_cases.py`) and their
   RT (`rtcase.py`) run at the shipped model top from v62; before, 1e-9 and 1e-8 bar. An isothermal column emits
-  pi*B(T) to 6.7e-16. The figure script refuses mixed cadences and a stale pRT reference.
+  pi*B(T) to 6.7e-16. The figure script refuses a stale pRT reference and any cadence mix but one: a column that
+  records the tool's cadence-1 retry (`photo_escalated`, at cadence 1) is admitted and labelled in the legend.
   After a `_VERSION` bump that moves a spectrum, regenerate the npz (`atmos_cases.py` x 6,
-  ~15 min), `prt_reference.py` and the figures (`make_figures.py`); nothing tests that.
+  ~40 min, WASP-107 b the longest), `prt_reference.py` and the figures (`make_figures.py`); nothing tests that.
 - pRT on daw: `VULCAN_Project/.prt-env` (plus the `mpich` wheel);
   `VULCAN_Project/.prt-data/input_data` holds ONLY symlinks to
   `$VULCAN_FORWARD_DATA/exomolop/<m>.ktable.h5` under pRT's names. pRT downloads a
@@ -438,8 +445,8 @@ The closure gate is corr > 0.99 and scale within 15%; the FD self-check is the h
   null-direction test; "unconstrained" prints only above `gui_forecast._UNCONSTRAINED_ABOVE` (1e4). `ln_gaussian_curve`
   clips its grid to the solvable C/O range (exp(+-5 sigma) overflows at sigma_ln 142). Mock recovery is the linearized
   identity delta = F^+ J^T Sigma^-1 n, labelled "not a retrieval result".
-- README figure (`fig_readme_example.py`, v61, GUI defaults): PRISM S/N 2.6, G395H 4.2, MIRI LRS 3.1 sigma; log10(C/O)
-  all modes -0.279 +/- 0.028 (v46: -0.278). The published G395H detections are 4.5-4.8 sigma.
+- README figure (`fig_readme_example.py`, v66, GUI defaults): PRISM S/N 3.0, G395H 4.8, MIRI LRS 3.4 sigma; log10(C/O)
+  all modes -0.279 +/- 0.025 (v61: 2.6, 4.2, 3.1; -0.279 +/- 0.028). The published G395H detections are 4.5-4.8 sigma.
 - The slow closure tests pass cold: 5 passed in 57 min on 4 cores. No test exercises the cadence-1 AD retry: every
   measured column certifies at the config cadence under the cap; the retry is measured end to end on TOI-7169 b only.
 
@@ -495,8 +502,9 @@ The closure gate is corr > 0.99 and scale within 15%; the FD self-check is the h
   values for WASP-39 b and HD 189733 b, the Thorngren T_int default) `6142809ab7cffe07` / `45d2a4c73f6ef7dc`; v64
   (a table must reach the model top unless declared, custom planets state their system, T_int 300 K and
   `tint_from_default`) `e6740cd97004d730` / `b482928cce0eeca8`; v65 (the second survey campaign's system values and UV
-  files for the four shared planets, engine pins at vulcan3 6698920 and vulcan-forward f7fc352) the current keys
-  ("Current state"; the values: "Structure: T-P, Kzz, gravity anchor, model top").
+  files for the four shared planets, engine pins at vulcan3 6698920 and vulcan-forward f7fc352) `7f7f56ec2ef7cdba` /
+  `0d0739f861cf8435` (the values: "Structure: T-P, Kzz, gravity anchor, model top"); v66 (engine pins at vulcan3
+  5cf7093 and vulcan-forward afa6f98, no spectrum moved) the current keys ("Current state").
 - The review pass of v63 (keys `6142809ab7cffe07` / `45d2a4c73f6ef7dc`: the four dead transport keys left the payload,
   and gs_cgs keeps two decimals, so WASP-39 b runs g 390.58, not 390.6) moved the references by at most 0.361 ppm
   (VULCAN transit, at 1.06 um, median -0.315), 0.030 (VULCAN eclipse), 0.368 / 0.035 (PICASO transit / eclipse) at
