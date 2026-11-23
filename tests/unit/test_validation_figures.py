@@ -94,11 +94,26 @@ def test_six_atmosphere_references_are_paired_and_a_bad_input_is_refused(tmp_pat
     for atmosphere in sorted(tmp_path.glob("atmos_*.npz")):
         restamp(atmosphere, **frq)
     unrecorded = {**frq, "ini_update_photo_frq": 1, "final_update_photo_frq": 1}
-    for bad in (unrecorded, {**frq, "final_update_photo_frq": 1}, {**frq, "photo_escalated": True}):
+    retry = {**unrecorded, "photo_escalated": True}
+    for bad in (
+        unrecorded,
+        {**frq, "final_update_photo_frq": 1},
+        {**frq, "photo_escalated": True},
+        {**unrecorded, "photo_escalated": "False"},
+    ):
         restamp(tmp_path / "atmos_hd189733b_transmission.npz", **bad)
         with pytest.raises(ValueError, match="(?i)cadence"):
             run()
-    restamp(tmp_path / "atmos_hd189733b_transmission.npz", **{**unrecorded, "photo_escalated": True})
+    # Every other column moved to cadence 1 with no record, beside one recorded retry: a retry cannot start there.
+    restamp(tmp_path / "atmos_hd189733b_transmission.npz", **retry)
+    for atmosphere in sorted(tmp_path.glob("atmos_*.npz")):
+        if atmosphere.name != "atmos_hd189733b_transmission.npz":
+            restamp(atmosphere, **unrecorded)
+    with pytest.raises(ValueError, match="(?i)cadence"):
+        run()
+    for atmosphere in sorted(tmp_path.glob("atmos_*.npz")):
+        if atmosphere.name != "atmos_hd189733b_transmission.npz":
+            restamp(atmosphere, **frq)
     saved = []
     monkeypatch.setattr(figstyle, "save", lambda fig, name: saved.append(name))
     run()

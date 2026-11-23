@@ -71,8 +71,14 @@ CADENCE_KEYS = ("ini_update_photo_frq", "final_update_photo_frq", "photo_escalat
 CADENCES = {
     f"{planet} {mode}": tuple(atmos[k].item() for k in CADENCE_KEYS) for (planet, mode), (atmos, _) in PAIRS.items()
 }
-CONFIG_CADENCES = {c[:2] for c in CADENCES.values() if not c[2]}
-if len(CONFIG_CADENCES) > 1 or any(c[2] and c[:2] != (1, 1) for c in CADENCES.values()):
+CONFIG_CADENCES = {c[:2] for c in CADENCES.values() if c[2] is False}
+RETRIES = [c for c in CADENCES.values() if c[2] is True]
+if (
+    len(CONFIG_CADENCES) > 1
+    or len(RETRIES) + sum(c[2] is False for c in CADENCES.values()) != len(CADENCES)  # the flag is a bool
+    or any(c[:2] != (1, 1) for c in RETRIES)
+    or (RETRIES and (1, 1) in CONFIG_CADENCES)  # a retry at cadence 1 means the config cadence is not 1
+):
     raise ValueError(
         f"atmos_*.npz mix photolysis cadences {CADENCE_KEYS} = {CADENCES}; "
         "regenerate them on one tree with inputs/atmos_cases.py"

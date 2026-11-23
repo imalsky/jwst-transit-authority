@@ -40,6 +40,8 @@ y, chem, cert, escalated = certify.certified_solve(
 )
 cfg = chem._integ.config  # the cfg the solver ran; only place the cadence lives
 y = np.asarray(y, dtype=np.float64)
+if not np.all(np.isfinite(y)):  # as forward._solve_cold: check_elements does not refuse a NaN
+    raise RuntimeError(f"{planet} {mode}: the chemistry solve returned non-finite abundances")
 certify.check_elements(y, chem, "baseline solve", print)
 gas = np.ones(y.shape[1])
 for s, i in chem.sidx.items():
