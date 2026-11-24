@@ -15,8 +15,9 @@ names the code state it was measured on.
   rest as generated; installed `--no-deps` in a fresh env on daw it imports the stack, and its `pip check`
   findings name no jax, numpy or scipy pin [M]). The root env has drifted from the lock (30 other pins differ and
   10 are absent, huggingface_hub and pooch among them), so `make_app_lock.py` cannot regenerate it there.
-  The running Space was last deployed from the earlier pins (tool b23df79) and is
-  unchanged until a redeploy.
+  The running Space is deployed from these pins (Space commit 045e4f8): stage RUNNING on that commit, the build
+  log's three BUILD_INFO lines name the pinned commits, and `/_stcore/health` answers ok [M]. Before it the Space
+  ran tool b23df79 (0.72.0). All 71 files the boot markers name were on the dataset repo at the deploy [M].
 - Cache versions: `model_defs._VERSION` 66, `noise.WORKER_VERSION` 12,
   `adjoint_diag._ADJ_VERSION` 4, `picaso_engine.WORKER_VERSION` 4. Default keys:
   transmission `1270fd3a8d128342` (test-pinned), emission `388e3f50ccac54c4`.
