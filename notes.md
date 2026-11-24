@@ -44,9 +44,11 @@ names the code state it was measured on.
   With the two emission closures as neighbours one worker ran both for over 90 min, near the 100 min cap, so
   they sit apart in `test_closure.py`. Alone, on one core: cadence-1 emission 2514 s.
 - Space, at the last Hub API read: `imalsky/jwst-transit-authority` RUNNING on cpu-basic
-  (2 vCPU / 16 GB), sleep 48 h. The four live checks (cold transmission run, cold
-  emission run, configuration export and reload, out-of-range metallicity refusal with
-  its alert mail) last ran on the 0.67.0 deploy.
+  (2 vCPU / 16 GB), sleep 48 h. On the v66 deploy the cold default transmission run and the cold default
+  emission run both finish in the browser [M]; the transmission result reads PRISM 3.0, G395H 4.8, MIRI LRS 3.4 sigma
+  and log10(C/O) -0.279 +/- 0.025, as on daw. The other two live checks (configuration export and reload, the
+  out-of-range metallicity refusal with its alert mail) last ran on the 0.67.0 deploy. A page left idle drops its
+  session and the run it was showing.
 - daw environment: the root uv env `VULCAN_Project/.venv` also carries pandeia.engine
   2026.7, so `JWST_TOOL_PANDEIA_PYTHON` is that interpreter. Rebuild the editable
   metadata after a version bump (`uv pip install --no-deps -e vulcan-jwst-tool`):
